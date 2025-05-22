@@ -31,9 +31,9 @@ export function interruptPlan(state: GraphState): Command {
   })[0];
 
   if (interruptRes.type === "accept") {
-    // Plan was accepted, route to the generate action node.
+    // Plan was accepted, route to the initialize node.
     return new Command({
-      goto: "generate-action",
+      goto: "initialize",
       update: {
         plan: proposedPlan.map((p) => ({
           id: uuidv4(),
@@ -45,12 +45,12 @@ export function interruptPlan(state: GraphState): Command {
   }
 
   if (interruptRes.type === "edit") {
-    // Plan was edited, route to the generate action node.
+    // Plan was edited, route to the initialize node.
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(":::")
       .map((step: string) => step.trim());
     return new Command({
-      goto: "generate-action",
+      goto: "initialize",
       update: {
         plan: editedPlan.map((p: string) => ({
           id: uuidv4(),
