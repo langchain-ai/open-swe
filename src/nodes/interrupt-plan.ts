@@ -1,5 +1,5 @@
-import { interrupt } from "@langchain/langgraph";
-import { GraphState, GraphUpdate } from "../types.js";
+import { Command, END, interrupt } from "@langchain/langgraph";
+import { GraphState } from "../types.js";
 import {
   ActionRequest,
   HumanInterrupt,
@@ -7,7 +7,7 @@ import {
 } from "@langchain/langgraph/prebuilt";
 import { v4 as uuidv4 } from "uuid";
 
-export function interruptPlan(state: GraphState): GraphUpdate {
+export function interruptPlan(state: GraphState): Command {
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
@@ -31,39 +31,51 @@ export function interruptPlan(state: GraphState): GraphUpdate {
   })[0];
 
   if (interruptRes.type === "accept") {
-    // Plan was accepted, return it as is.
-    return {
-      plan: proposedPlan.map((p) => ({
-        id: uuidv4(),
-        plan: p,
-        completed: false,
-      })),
-    };
+    // Plan was accepted, route to the generate action node.
+    return new Command({
+      goto: "generate-action",
+      update: {
+        plan: proposedPlan.map((p) => ({
+          id: uuidv4(),
+          plan: p,
+          completed: false,
+        })),
+      },
+    });
   }
 
   if (interruptRes.type === "edit") {
-    // Plan was edited, return the edited plan.
+    // Plan was edited, route to the generate action node.
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(":::")
       .map((step: string) => step.trim());
-    return {
-      plan: editedPlan.map((p: string) => ({
-        id: uuidv4(),
-        plan: p,
-        completed: false,
-      })),
-    };
+    return new Command({
+      goto: "generate-action",
+      update: {
+        plan: editedPlan.map((p: string) => ({
+          id: uuidv4(),
+          plan: p,
+          completed: false,
+        })),
+      },
+    });
   }
 
   if (interruptRes.type === "response") {
-    // Plan was responded to, return the user's response as a new message.
-    return {
-      messages: { role: "user", content: interruptRes.args as string },
-    };
+    // Plan was responded to, route to the rewrite plan node.
+    return new Command({
+      goto: "rewrite-plan",
+      update: {
+        planChangeRequest: interruptRes.args as string,
+      },
+    });
   }
 
   if (interruptRes.type === "ignore") {
-    throw new Error("Plan was ignored. Session will end.");
+    // Plan was ignored, end the process.
+    return new Command({
+      goto: END,
+    });
   }
 
   throw new Error("Unknown interrupt type." + interruptRes.type);
