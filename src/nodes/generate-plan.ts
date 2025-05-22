@@ -1,9 +1,6 @@
-import { interrupt } from "@langchain/langgraph";
 import { sessionPlanTool } from "../tools/index.js";
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import { loadModel } from "../utils/load-model.js";
-import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
-import { z } from "zod";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
