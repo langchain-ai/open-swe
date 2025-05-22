@@ -96,6 +96,14 @@ const MODEL_OPTIONS = [
     label: "GPT 4.1",
     value: "openai:gpt-4.1",
   },
+  {
+    label: "Gemini 2.5 Pro Preview",
+    value: "google-genai:gemini-2.5-pro-preview-05-06",
+  },
+  {
+    label: "Gemini 2.5 Flash Preview",
+    value: "google-genai:gemini-2.5-flash-preview-05-20",
+  },
 ];
 
 export const GraphConfiguration = z.object({
