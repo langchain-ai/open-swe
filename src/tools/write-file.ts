@@ -1,0 +1,47 @@
+import { tool } from "@langchain/core/tools";
+import { z } from "zod";
+import { applyPatch } from "diff";
+import { GraphConfig } from "../types.js";
+import { Sandbox } from "@e2b/code-interpreter";
+import { readFile, writeFile } from "../utils/read-write.js";
+
+const writeFileToolSchema = z.object({
+  diff: z.string().describe("The diff to apply"),
+  file_path: z.string().describe("The file path to apply the diff to"),
+});
+
+export const writeFileTool = tool(
+  async (input, config: GraphConfig) => {
+    const { diff, file_path } = input;
+    const sessionId = config.configurable?.sandbox_session_id;
+    if (!sessionId) {
+      return "FAILED TO RUN COMMAND: No sandbox session ID provided";
+    }
+
+    const sandbox = await Sandbox.connect(sessionId);
+
+    const { success: readFileSuccess, output: readFileOutput } = await readFile(sandbox, file_path);
+    if (!readFileSuccess) {
+      return readFileOutput;
+    }
+
+    const patchedContent = applyPatch(readFileOutput, diff);
+
+    if (patchedContent === false) {
+      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0,100)}...`;
+    }
+
+    // TODO: Should we be committing every time we apply a diff?
+    const { success: writeFileSuccess, output: writeFileOutput } = await writeFile(sandbox, file_path, patchedContent);
+    if (!writeFileSuccess) {
+      return writeFileOutput;
+    }
+
+    return `Successfully applied diff to \`${file_path}\` and saved changes.`;
+  },
+  {
+    name: "write_file",
+    description: "Writes a file given a file path and diff content. Can be used to create or update files.",
+    schema: writeFileToolSchema,
+  },
+);
