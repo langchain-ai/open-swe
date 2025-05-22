@@ -83,20 +83,19 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initialize)
   .addNode("generate-plan", generatePlan)
   .addNode("rewrite-plan", rewritePlan)
-  .addNode("interrupt-plan", interruptPlan)
+  .addNode("interrupt-plan", interruptPlan, {
+    // TODO: Hookup `Command` in interruptPlan node so this actually works.
+    ends: [END, "rewrite-plan", "generate-action"],
+  })
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-plan")
   // TODO: Update routing to work w/ new interrupt node.
-  .addConditionalEdges("generate-plan", routeAfterPlan, [
-    "generate-action",
-    "rewrite-plan",
-    END,
-  ])
+  .addConditionalEdges("generate-plan", routeAfterPlan, ["interrupt-plan", END])
   .addConditionalEdges("rewrite-plan", routeAfterRewritingPlan, [
     "generate-action",
-    "rewrite-plan",
+    "interrupt-plan",
   ])
   .addEdge("generate-plan", "generate-action")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
