@@ -60,7 +60,6 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   // Always interrupt after rewriting the plan.
   .addEdge("rewrite-plan", "interrupt-plan")
   .addEdge("initialize", "generate-action")
-  .addEdge("generate-plan", "generate-action")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
   .addEdge("take-action", "generate-action");
 
