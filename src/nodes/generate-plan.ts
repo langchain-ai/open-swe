@@ -1,6 +1,6 @@
 import { sessionPlanTool } from "../tools/index.js";
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
-import { loadModel } from "../utils/load-model.js";
+import { loadModel, Task } from "../utils/load-model.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -19,7 +19,7 @@ export async function generatePlan(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config);
+  const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: "auto",
   });

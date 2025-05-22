@@ -1,5 +1,5 @@
 import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
-import { loadModel } from "../utils/load-model.js";
+import { loadModel, Task } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 
@@ -58,7 +58,7 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config);
+  const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [shellTool, applyPatchTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 

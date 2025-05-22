@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
-import { loadModel } from "../utils/load-model.js";
+import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
@@ -35,7 +35,7 @@ export async function progressPlanStep(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config);
+  const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
   const modelWithTools = model.bindTools([confirmTaskCompletionTool], {
     tool_choice: confirmTaskCompletionTool.name,
   });

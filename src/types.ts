@@ -47,16 +47,56 @@ export const GraphAnnotation = Annotation.Root({
 export type GraphState = typeof GraphAnnotation.State;
 export type GraphUpdate = typeof GraphAnnotation.Update;
 
-export const MCPConfig = z.object({
-  /**
-   * The MCP server URL.
-   */
-  url: z.string(),
-  /**
-   * The list of tools to provide to the LLM.
-   */
-  tools: z.array(z.string()),
-});
+const MODEL_OPTIONS = [
+  {
+    label: "Claude Sonnet 4 (Extended Thinking)",
+    value: "anthropic:extended-thinking:claude-sonnet-4-0",
+  },
+  {
+    label: "Claude Opus 4 (Extended Thinking)",
+    value: "anthropic:extended-thinking:claude-opus-4-0",
+  },
+  {
+    label: "Claude Sonnet 4",
+    value: "anthropic:claude-sonnet-4-0",
+  },
+  {
+    label: "Claude Opus 4",
+    value: "anthropic:claude-opus-4-0",
+  },
+  {
+    label: "Claude 3.7 Sonnet",
+    value: "anthropic:claude-3-7-sonnet-latest",
+  },
+  {
+    label: "Claude 3.5 Sonnet",
+    value: "anthropic:claude-3-5-sonnet-latest",
+  },
+  {
+    label: "o4",
+    value: "openai:o4",
+  },
+  {
+    label: "o4 mini",
+    value: "openai:o4-mini",
+  },
+  {
+    label: "o3",
+    value: "openai:o3",
+  },
+  {
+    label: "o3 mini",
+    value: "openai:o3-mini",
+  },
+  {
+    label: "GPT 4o",
+    value: "openai:gpt-4o",
+  },
+  {
+    label: "GPT 4.1",
+    value: "openai:gpt-4.1",
+  },
+];
 
 export const GraphConfiguration = z.object({
   /**
@@ -85,55 +125,28 @@ export const GraphConfiguration = z.object({
    */
   sandbox_language: z.enum(["js", "python"]).optional().langgraph.metadata({}),
   /**
-   * The model ID to use for the reflection generation.
-   * Should be in the format `provider:model_name`.
-   * Defaults to `anthropic:claude-3-7-sonnet-latest`.
+   * The model ID to use for the planning step.
+   * This includes initial planning, and rewriting.
+   * @default "anthropic:extended-thinking:claude-sonnet-4-0"
    */
-  modelName: z
+  plannerModelName: z
     .string()
     .optional()
     .langgraph.metadata({
       x_lg_ui_config: {
         type: "select",
-        default: "anthropic:claude-3-7-sonnet-latest",
-        description: "The model to use in all generations",
-        options: [
-          {
-            label: "Claude 3.7 Sonnet",
-            value: "anthropic:claude-3-7-sonnet-latest",
-          },
-          {
-            label: "Claude 3.5 Sonnet",
-            value: "anthropic:claude-3-5-sonnet-latest",
-          },
-          {
-            label: "GPT 4o",
-            value: "openai:gpt-4o",
-          },
-          {
-            label: "GPT 4.1",
-            value: "openai:gpt-4.1",
-          },
-          {
-            label: "o3",
-            value: "openai:o3",
-          },
-          {
-            label: "o3 mini",
-            value: "openai:o3-mini",
-          },
-          {
-            label: "o4",
-            value: "openai:o4",
-          },
-        ],
+        default: "anthropic:extended-thinking:claude-sonnet-4-0",
+        description: "The model to use for planning",
+        options: MODEL_OPTIONS,
       },
     }),
   /**
-   * The temperature to use for the reflection generation.
-   * Defaults to `0.7`.
+   * The temperature to use for the planning step.
+   * This includes initial planning, and rewriting.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
    */
-  temperature: z
+  plannerTemperature: z
     .number()
     .optional()
     .langgraph.metadata({
@@ -146,18 +159,72 @@ export const GraphConfiguration = z.object({
         description: "Controls randomness (0 = deterministic, 2 = creative)",
       },
     }),
+
   /**
-   * The maximum number of tokens to generate.
-   * Defaults to `1000`.
+   * The model ID to use for action generation.
+   * @default "anthropic:claude-sonnet-4-0"
    */
-  maxTokens: z
+  actionGeneratorModelName: z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_lg_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description: "The model to use for action generation",
+        options: MODEL_OPTIONS,
+      },
+    }),
+  /**
+   * The temperature to use for action generation.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
+   */
+  actionGeneratorTemperature: z
     .number()
     .optional()
     .langgraph.metadata({
       x_lg_ui_config: {
-        type: "number",
-        min: 1,
-        description: "The maximum number of tokens to generate",
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
+    }),
+
+  /**
+   * The model ID to use for progress plan checking.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
+  progressPlanCheckerModelName: z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_lg_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description: "The model to use for progress plan checking",
+        options: MODEL_OPTIONS,
+      },
+    }),
+  /**
+   * The temperature to use for progress plan checking.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
+   */
+  progressPlanCheckerTemperature: z
+    .number()
+    .optional()
+    .langgraph.metadata({
+      x_lg_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
       },
     }),
 });
