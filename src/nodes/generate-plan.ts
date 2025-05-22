@@ -41,7 +41,7 @@ export async function generatePlan(
 
   // No tool calls generated, instead we should just return the messages.
   return {
-    messages: response,
+    messages: [response],
     proposedPlan: [],
     plan: [],
   };

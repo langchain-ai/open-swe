@@ -1,10 +1,11 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
 import {
-  Annotation,
+  addMessages,
   LangGraphRunnableConfig,
-  MessagesAnnotation,
+  Messages,
 } from "@langchain/langgraph";
+import { BaseMessage } from "@langchain/core/messages";
 
 export type PlanItem = {
   /**
@@ -28,24 +29,28 @@ export type TargetRepository = {
   branch?: string;
 };
 
-export const GraphAnnotation = Annotation.Root({
-  messages: MessagesAnnotation.spec.messages,
-  proposedPlan: Annotation<string[]>({
-    reducer: (_state, update) => update,
-    default: () => [],
-  }),
-  plan: Annotation<PlanItem[]>({
-    reducer: (_state, update) => update,
-    default: () => [],
-  }),
-  planChangeRequest: Annotation<string | undefined>({
-    reducer: (_state, update) => update,
-    default: () => undefined,
-  }),
+export const GraphAnnotation = z.object({
+  messages: z
+    .custom<BaseMessage[]>()
+    .default(() => [])
+    .langgraph.reducer<Messages>((state, update) => addMessages(state, update)),
+  proposedPlan: z
+    .array(z.string())
+    .default(() => [])
+    .langgraph.reducer((_state, update) => update),
+  plan: z
+    .custom<PlanItem[]>()
+    .default(() => [])
+    .langgraph.reducer<PlanItem[]>((_state, update) => update),
+  planChangeRequest: z
+    .string()
+    .nullable()
+    .default(() => null)
+    .langgraph.reducer((_state, update) => update),
 });
 
-export type GraphState = typeof GraphAnnotation.State;
-export type GraphUpdate = typeof GraphAnnotation.Update;
+export type GraphState = z.infer<typeof GraphAnnotation>;
+export type GraphUpdate = Partial<GraphState>;
 
 const MODEL_OPTIONS = [
   {

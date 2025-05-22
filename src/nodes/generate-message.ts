@@ -71,6 +71,6 @@ export async function generateAction(
   ]);
 
   return {
-    messages: response,
+    messages: [response],
   };
 }
