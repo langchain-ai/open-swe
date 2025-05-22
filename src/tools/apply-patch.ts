@@ -5,12 +5,12 @@ import { GraphConfig } from "../types.js";
 import { Sandbox } from "@e2b/code-interpreter";
 import { readFile, writeFile } from "../utils/read-write.js";
 
-const writeFileToolSchema = z.object({
-  diff: z.string().describe("The diff to apply"),
-  file_path: z.string().describe("The file path to apply the diff to"),
+const applyPatchToolSchema = z.object({
+  diff: z.string().describe("The diff to apply. Use a standard diff format."),
+  file_path: z.string().describe("The file path to apply the diff to."),
 });
 
-export const writeFileTool = tool(
+export const applyPatchTool = tool(
   async (input, config: GraphConfig) => {
     const { diff, file_path } = input;
     const sessionId = config.configurable?.sandbox_session_id;
@@ -44,9 +44,8 @@ export const writeFileTool = tool(
     return `Successfully applied diff to \`${file_path}\` and saved changes.`;
   },
   {
-    name: "write_file",
-    description:
-      "Writes a file given a file path and diff content. Can be used to create or update files.",
-    schema: writeFileToolSchema,
+    name: "apply_patch",
+    description: "Applies a diff to a file given a file path and diff content.",
+    schema: applyPatchToolSchema,
   },
 );
