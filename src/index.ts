@@ -45,21 +45,21 @@ function takeActionOrEnd(state: GraphState): typeof END | "take-action" {
 }
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
-  .addNode("initialize", initialize)
   .addNode("generate-plan", generatePlan)
   .addNode("rewrite-plan", rewritePlan)
   .addNode("interrupt-plan", interruptPlan, {
     // TODO: Hookup `Command` in interruptPlan node so this actually works.
-    ends: [END, "rewrite-plan", "generate-action"],
+    ends: [END, "rewrite-plan", "initialize"],
   })
+  .addNode("initialize", initialize)
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction)
-  .addEdge(START, "initialize")
-  .addEdge("initialize", "generate-plan")
+  .addEdge(START, "generate-plan")
   // TODO: Update routing to work w/ new interrupt node.
   .addConditionalEdges("generate-plan", routeAfterPlan, ["interrupt-plan", END])
   // Always interrupt after rewriting the plan.
   .addEdge("rewrite-plan", "interrupt-plan")
+  .addEdge("initialize", "generate-action")
   .addEdge("generate-plan", "generate-action")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
   .addEdge("take-action", "generate-action");

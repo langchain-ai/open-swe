@@ -46,8 +46,14 @@ export async function initialize(
   const { sandbox_session_id, target_repository, sandbox_language } =
     config.configurable;
   if (sandbox_session_id) {
-    // Session already initialized. Return early.
-    return {};
+    try {
+      // Resume the sandbox if the session ID is in the config.
+      await Sandbox.resume(sandbox_session_id, TIMEOUT_EXTENSION_OPT);
+      return {};
+    } catch (e) {
+      // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
+      console.error("Failed to get sandbox session.", e);
+    }
   }
 
   if (!sandbox_language || !target_repository) {
@@ -57,23 +63,16 @@ export async function initialize(
   }
 
   if (sandbox_language === "js") {
-    const sandbox = await Sandbox.create(JS_SANDBOX_TEMPLATE_ID);
+    const sandbox = await Sandbox.create(
+      JS_SANDBOX_TEMPLATE_ID,
+      TIMEOUT_EXTENSION_OPT,
+    );
     config.configurable.sandbox_session_id = sandbox.sandboxId;
 
     const res = await cloneRepo(sandbox, target_repository);
     if (res.error) {
-      let errorMessage = "Failed to clone repository.";
-      if (res.error) {
-        // Basic redaction attempt for the token in the URL if present in the error
-        errorMessage +=
-          ": " + res.error.replace(/:\/\/[^@]+@/, "://<REDACTED_TOKEN>@");
-      } else if (typeof res.error === "string") {
-        errorMessage +=
-          ": " + res.error.replace(/:\/\/[^@]+@/, "://<REDACTED_TOKEN>@");
-      } else {
-        errorMessage += " An unknown error occurred.";
-      }
-      throw new Error(errorMessage);
+      // TODO: This should probably be an interrupt.
+      throw new Error(`Failed to clone repository.\n${res.error}`);
     }
     return {};
   }
