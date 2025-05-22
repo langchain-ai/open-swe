@@ -11,7 +11,6 @@ export const applyDiffTool = tool(
   (input) => {
     const { diff, file_path } = input;
     const res = applyPatch(file_path, diff);
-    console.log("res", res);
     return `Successfully applied diff to \`${file_path}\``;
   },
   {
