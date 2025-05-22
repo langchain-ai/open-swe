@@ -12,6 +12,7 @@ import {
   takeAction,
   rewritePlan,
   interruptPlan,
+  progressPlanStep,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { pauseSandbox } from "./utils/sandbox.js";
@@ -69,6 +70,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initialize)
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction)
+  .addNode("progress-plan-step", progressPlanStep)
   .addEdge(START, "generate-plan")
   // TODO: Update routing to work w/ new interrupt node.
   .addConditionalEdges("generate-plan", routeAfterPlan, ["interrupt-plan", END])
@@ -76,7 +78,8 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("rewrite-plan", "interrupt-plan")
   .addEdge("initialize", "generate-action")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
-  .addEdge("take-action", "generate-action");
+  .addEdge("take-action", "progress-plan-step")
+  .addEdge("progress-plan-step", "take-action");
 
 export const graph = workflow.compile();
 graph.name = "LangGraph ReAct MCP";

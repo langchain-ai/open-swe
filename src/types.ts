@@ -6,9 +6,19 @@ import {
   MessagesAnnotation,
 } from "@langchain/langgraph";
 
-type PlanItem = {
-  id: string;
+export type PlanItem = {
+  /**
+   * The index of the plan item. This is the order in which
+   * it should be executed.
+   */
+  index: number;
+  /**
+   * The actual task to perform.
+   */
   plan: string;
+  /**
+   * Whether or not the plan item has been completed.
+   */
   completed: boolean;
 };
 

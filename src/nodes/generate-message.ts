@@ -1,16 +1,9 @@
-import { spawnSync } from "node:child_process";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
+import { formatPlanPrompt } from "../utils/plan-prompt.js";
 
-const dynamicLines: Array<string> = [];
-if (spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0) {
-  dynamicLines.push(
-    "- Always use rg instead of grep/ls -R because it is much faster and respects gitignore",
-  );
-}
-const dynamicPrefix = dynamicLines.join("\n");
-const prefix = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
 You can:
 - Receive user prompts, project context, and files.
@@ -18,15 +11,9 @@ You can:
 - Apply patches, run commands, and manage user approvals based on policy.
 - Work inside a sandboxed, git-backed workspace with rollback support.
 
-You work based on a plan which was generated in a previous step.
-The following tasks have already been completed:
-{COMPLETED_TASKS}
+You work based on a plan which was generated in a previous step. The plan items are as follows:
 
-The following tasks remain to be completed:
-{PENDING_TASKS}
-
-You are currently working on the following task:
-{CURRENT_TASK}
+{PLAN_PROMPT}
 
 You are an agent - please keep going until the user's query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. If you are not sure about file content or codebase structure pertaining to the user's request, use your tools to read files and gather the relevant information: do NOT guess or make up an answer.
 
@@ -61,8 +48,11 @@ You MUST adhere to the following criteria when executing the task:
 - When your task involves writing or modifying files:
     - Do NOT tell the user to "save the file" or "copy the code into a file" if you already created or modified the file using \`apply_patch\`. Instead, reference the file as already saved.
     - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
+- Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.`;
 
-${dynamicPrefix}`;
+const formatPrompt = (plan: PlanItem[]): string => {
+  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan));
+};
 
 export async function generateAction(
   state: GraphState,
@@ -75,7 +65,7 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: prefix,
+      content: formatPrompt(state.plan),
     },
     ...state.messages,
   ]);
