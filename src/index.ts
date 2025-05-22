@@ -6,15 +6,25 @@ import {
   generateAction,
   takeAction,
   rewritePlan,
+  interruptPlan,
 } from "./nodes/index.js";
 import { isAIMessage, isToolMessage } from "@langchain/core/messages";
 
 /**
- * After generating a plan, ensure there is an approved tool message.
- * If there is, route to the generate-action node. Otherwise, route to the rewrite-plan node.
+ * Determines the next step after a plan has been potentially rewritten.
+ * It checks if the latest plan was approved.
+ * If an approved "session_plan" tool message exists, it routes to "generate-action".
+ * Otherwise, it routes to "rewrite-plan" to revise the plan.
+ *
+ * @param {GraphState} state - The current graph state.
+ * @returns {"generate-action" | "rewrite-plan"} The next node to execute.
  */
-function routeAfterPlan(state: GraphState): "generate-action" | "rewrite-plan" {
+function routeAfterRewritingPlan(
+  state: GraphState,
+): "generate-action" | "rewrite-plan" {
   const { messages } = state;
+
+  // TODO: THIS WILL CAUSE ISSUES IF WE ALLOW FOR FOLLOWUP REQUESTS
   // Search for a tool message responding to the "session_plan" tool call where the content is "approved"
   const planApprovedMessage = messages.find(
     (m) =>
@@ -28,8 +38,35 @@ function routeAfterPlan(state: GraphState): "generate-action" | "rewrite-plan" {
 }
 
 /**
- * After taking action, ensure there is an AI message with tool calls.
- * If there is, route to the take-action node. Otherwise, end the graph.
+ * Routes to the next appropriate node after a plan has been generated or attempted.
+ * If the last message is an AI message without tool calls (indicating a follow-up question or direct answer),
+ * the process ends.
+ * Otherwise, it delegates to `routeAfterRewritingPlan` to check for plan approval and decide
+ * whether to generate an action or rewrite the plan.
+ *
+ * @param {GraphState} state - The current graph state.
+ * @returns {"generate-action" | "rewrite-plan" | typeof END} The next node to execute, or END if the process should stop.
+ */
+function routeAfterPlan(
+  state: GraphState,
+): "generate-action" | "rewrite-plan" | typeof END {
+  const { messages } = state;
+  const lastMessage = messages[messages.length - 1];
+  if (isAIMessage(lastMessage) && !lastMessage.tool_calls) {
+    // The last message is an AI message without tool calls. This indicates the LLM generated followup questions.
+    return END;
+  }
+
+  return routeAfterRewritingPlan(state);
+}
+
+/**
+ * Routes to the next appropriate node after taking action.
+ * If the last message is an AI message with tool calls, it routes to "take-action".
+ * Otherwise, it ends the process.
+ *
+ * @param {GraphState} state - The current graph state.
+ * @returns {typeof END | "take-action"} The next node to execute, or END if the process should stop.
  */
 function takeActionOrEnd(state: GraphState): typeof END | "take-action" {
   const { messages } = state;
@@ -46,15 +83,18 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initialize)
   .addNode("generate-plan", generatePlan)
   .addNode("rewrite-plan", rewritePlan)
+  .addNode("interrupt-plan", interruptPlan)
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-plan")
+  // TODO: Update routing to work w/ new interrupt node.
   .addConditionalEdges("generate-plan", routeAfterPlan, [
     "generate-action",
     "rewrite-plan",
+    END,
   ])
-  .addConditionalEdges("rewrite-plan", routeAfterPlan, [
+  .addConditionalEdges("rewrite-plan", routeAfterRewritingPlan, [
     "generate-action",
     "rewrite-plan",
   ])
