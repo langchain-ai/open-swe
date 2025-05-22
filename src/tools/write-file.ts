@@ -20,7 +20,10 @@ export const writeFileTool = tool(
 
     const sandbox = await Sandbox.connect(sessionId);
 
-    const { success: readFileSuccess, output: readFileOutput } = await readFile(sandbox, file_path);
+    const { success: readFileSuccess, output: readFileOutput } = await readFile(
+      sandbox,
+      file_path,
+    );
     if (!readFileSuccess) {
       return readFileOutput;
     }
@@ -28,11 +31,12 @@ export const writeFileTool = tool(
     const patchedContent = applyPatch(readFileOutput, diff);
 
     if (patchedContent === false) {
-      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0,100)}...`;
+      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`;
     }
 
     // TODO: Should we be committing every time we apply a diff?
-    const { success: writeFileSuccess, output: writeFileOutput } = await writeFile(sandbox, file_path, patchedContent);
+    const { success: writeFileSuccess, output: writeFileOutput } =
+      await writeFile(sandbox, file_path, patchedContent);
     if (!writeFileSuccess) {
       return writeFileOutput;
     }
@@ -41,7 +45,8 @@ export const writeFileTool = tool(
   },
   {
     name: "write_file",
-    description: "Writes a file given a file path and diff content. Can be used to create or update files.",
+    description:
+      "Writes a file given a file path and diff content. Can be used to create or update files.",
     schema: writeFileToolSchema,
   },
 );
