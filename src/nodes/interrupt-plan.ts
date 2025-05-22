@@ -13,7 +13,6 @@ export function interruptPlan(state: GraphState): GraphUpdate {
     throw new Error("No proposed plan found.");
   }
 
-  // PLAN GENERATED!
   const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
     action_request: {
       action: "Approve/Edit Plan",

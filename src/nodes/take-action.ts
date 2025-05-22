@@ -2,10 +2,6 @@ import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { applyPatchTool, shellTool } from "../tools/index.js";
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 
-/**
- * Initializes the session. This ensures there's an active VM session, and that
- * the proper credentials are provided for taking actions on GitHub.
- */
 export async function takeAction(
   state: GraphState,
   _config: GraphConfig,

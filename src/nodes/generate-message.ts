@@ -64,10 +64,6 @@ You MUST adhere to the following criteria when executing the task:
 
 ${dynamicPrefix}`;
 
-/**
- * Initializes the session. This ensures there's an active VM session, and that
- * the proper credentials are provided for taking actions on GitHub.
- */
 export async function generateAction(
   state: GraphState,
   config: GraphConfig,

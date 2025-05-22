@@ -28,6 +28,10 @@ export const GraphAnnotation = Annotation.Root({
     reducer: (_state, update) => update,
     default: () => [],
   }),
+  planChangeRequest: Annotation<string | undefined>({
+    reducer: (_state, update) => update,
+    default: () => undefined,
+  }),
 });
 
 export type GraphState = typeof GraphAnnotation.State;
