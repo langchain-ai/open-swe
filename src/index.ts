@@ -79,7 +79,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("initialize", "generate-action")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
   .addEdge("take-action", "progress-plan-step")
-  .addEdge("progress-plan-step", "take-action");
+  .addEdge("progress-plan-step", "generate-action");
 
 // Zod types are messed up
 export const graph = workflow.compile() as any;
