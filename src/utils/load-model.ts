@@ -47,6 +47,9 @@ export async function loadModel(config: GraphConfig, task: Task) {
   const model = await initChatModel(modelName, {
     modelProvider,
     temperature: thinkingModel ? undefined : temperature,
+    ...(thinkingModel && modelProvider === "anthropic"
+      ? { thinking: { budgetTokens: 5000, type: "enabled" } }
+      : {}),
   });
 
   return model;
