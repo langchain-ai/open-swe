@@ -1,12 +1,12 @@
-import js from "@eslint/js";
+import eslint from '@eslint/js';
 import globals from "globals";
 import tseslint from "typescript-eslint";
 import eslintImport from "eslint-plugin-import";
 import eslintNoInstanceof from "eslint-plugin-no-instanceof";
 
 export default tseslint.config(
+  eslint.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
-  js.configs.recommended,
   { ignores: ["dist", "eslint.config.js"] },
   {
     files: ["**/*.ts"],
