@@ -81,5 +81,6 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("take-action", "progress-plan-step")
   .addEdge("progress-plan-step", "take-action");
 
-export const graph = workflow.compile();
+// Zod types are messed up
+export const graph = workflow.compile() as any;
 graph.name = "LangGraph ReAct MCP";
