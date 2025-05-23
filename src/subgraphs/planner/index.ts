@@ -8,7 +8,12 @@
 import { END, Send, START, StateGraph } from "@langchain/langgraph";
 import { PlannerGraphState, PlannerGraphStateObj } from "./types.js";
 import { GraphConfiguration } from "../../types.js";
-import { generateAction, generatePlan, takeAction } from "./nodes/index.js";
+import {
+  generateAction,
+  generatePlan,
+  summarizer,
+  takeAction,
+} from "./nodes/index.js";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 
 function takeActionOrGeneratePlan(
@@ -52,6 +57,7 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addNode("generate-plan-context-action", generateAction)
   .addNode("take-plan-action", takeAction)
   .addNode("generate-plan", generatePlan)
+  .addNode("summarizer", summarizer)
   .addEdge(START, "generate-plan-context-action")
   .addConditionalEdges(
     "generate-plan-context-action",
@@ -59,7 +65,8 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
     ["take-plan-action", "generate-plan"],
   )
   .addEdge("take-plan-action", "generate-plan-context-action")
-  .addEdge("generate-plan", END);
+  .addEdge("generate-plan", "summarizer")
+  .addEdge("summarizer", END);
 
 // TODO: Fix zod types
 export const plannerGraph = workflow.compile() as any;
