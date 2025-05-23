@@ -54,6 +54,13 @@ export const GraphAnnotation = z.object({
     .string()
     .optional()
     .langgraph.reducer((_state, update) => update),
+  /**
+   * The name of the branch changes in this thread will be pushed to
+   */
+  branchName: z
+    .string()
+    .optional()
+    .langgraph.reducer((_state, update) => update),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;

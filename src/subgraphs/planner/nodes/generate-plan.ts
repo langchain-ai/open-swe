@@ -1,4 +1,8 @@
-import { isHumanMessage } from "@langchain/core/messages";
+import {
+  isAIMessage,
+  isHumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { sessionPlanTool } from "../../../tools/index.js";
 import { GraphConfig } from "../../../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
@@ -29,6 +33,17 @@ export async function generatePlan(
 
   const firstUserMessage = state.messages.find(isHumanMessage);
 
+  let optionalToolMessage: ToolMessage | undefined;
+  const lastMessage = state.plannerMessages[state.plannerMessages.length - 1];
+  if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
+    const lastMessageToolCall = lastMessage.tool_calls?.[0];
+    optionalToolMessage = new ToolMessage({
+      tool_call_id: lastMessageToolCall.id ?? "",
+      name: lastMessageToolCall.name,
+      content: "Tool call not executed. Max actions reached.",
+    });
+  }
+
   const response = await modelWithTools
     .bind({ tags: ["langsmith:nostream"] })
     .invoke([
@@ -38,6 +53,7 @@ export async function generatePlan(
       },
       ...(firstUserMessage ? [firstUserMessage] : []),
       ...state.plannerMessages,
+      ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);
 
   if (!response.tool_calls?.length) {
@@ -54,5 +70,7 @@ export async function generatePlan(
     proposedPlan: response.tool_calls[0].args.plan,
     plan: [],
     ...(newSessionId && { sandboxSessionId: newSessionId }),
+    // Do this so that the planner state is up to date with the tool call.
+    ...(optionalToolMessage && { plannerMessages: [optionalToolMessage] }),
   };
 }

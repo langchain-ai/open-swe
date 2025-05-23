@@ -8,7 +8,7 @@ export function getRepoAbsolutePath(config: GraphConfig): string {
     throw new Error("No repository name provided");
   }
 
-  return `/app/${repoName}`;
+  return `/home/user/${repoName}`;
 }
 
 export function getBranchName(config: GraphConfig): string {
@@ -134,16 +134,39 @@ export async function commitAllAndPush(
   }
 }
 
+export async function getChangedFilesStatus(
+  absoluteRepoDir: string,
+  sandbox: Sandbox,
+): Promise<string[]> {
+  const gitStatusOutput = await sandbox.commands.run("git status --porcelain", {
+    cwd: absoluteRepoDir,
+  });
+
+  if (gitStatusOutput.exitCode !== 0) {
+    console.error("Failed to get changed files status", gitStatusOutput);
+    return [];
+  }
+
+  return gitStatusOutput.stdout.split("\n").map((line) => line.trim());
+}
+
 export async function checkoutBranchAndCommit(
   config: GraphConfig,
   sandbox: Sandbox,
-) {
+  options?: {
+    branchName?: string;
+  },
+): Promise<string> {
   console.log("\nChecking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(config);
-  const branchName = getBranchName(config);
+  const branchName = options?.branchName || getBranchName(config);
+
   console.log(`Checking out branch ${branchName}`);
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
+
   console.log(`Committing changes to branch ${branchName}`);
   await commitAllAndPush(absoluteRepoDir, "Apply patch", sandbox);
   console.log("Successfully checked out & committed changes.\n");
+
+  return branchName;
 }

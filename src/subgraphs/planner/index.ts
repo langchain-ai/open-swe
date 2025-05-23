@@ -5,7 +5,7 @@
  * Steps:
  */
 
-import { END, Send, START, StateGraph } from "@langchain/langgraph";
+import { END, START, StateGraph } from "@langchain/langgraph";
 import { PlannerGraphState, PlannerGraphStateObj } from "./types.js";
 import { GraphConfiguration } from "../../types.js";
 import {
@@ -14,11 +14,11 @@ import {
   summarizer,
   takeAction,
 } from "./nodes/index.js";
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { isAIMessage } from "@langchain/core/messages";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
-): "take-plan-action" | "generate-plan" | Send {
+): "take-plan-action" | "generate-plan" {
   const { plannerMessages } = state;
   const lastMessage = plannerMessages[plannerMessages.length - 1];
   // If the last message is a tool call, and we have executed less than 6 actions, take action.
@@ -30,23 +30,6 @@ function takeActionOrGeneratePlan(
     plannerMessages.length < maxActionsCount
   ) {
     return "take-plan-action";
-  }
-
-  if (isAIMessage(lastMessage) && lastMessage.tool_calls?.length) {
-    // If this is true, we need to return a `Command` adding a ToolMessage to the state
-    // so that the last AI message has a tool message pair
-    const lastMessageToolCall = lastMessage.tool_calls[0];
-    return new Send("generate-plan", {
-      ...state,
-      plannerMessages: [
-        ...state.plannerMessages,
-        new ToolMessage({
-          tool_call_id: lastMessageToolCall.id ?? "",
-          name: lastMessageToolCall.name,
-          content: "Tool call not executed. Max actions reached.",
-        }),
-      ],
-    });
   }
 
   // If the last message does not have tool calls, continue to generate plan without modifications.

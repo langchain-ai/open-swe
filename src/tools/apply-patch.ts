@@ -1,11 +1,10 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { applyPatch } from "diff";
-import { GraphConfig, GraphState } from "../types.js";
+import { GraphState } from "../types.js";
 import { Sandbox } from "@e2b/code-interpreter";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
-import { checkoutBranchAndCommit } from "../utils/git/index.js";
 
 const applyPatchToolSchema = z.object({
   diff: z.string().describe("The diff to apply. Use a standard diff format."),
@@ -13,7 +12,7 @@ const applyPatchToolSchema = z.object({
 });
 
 export const applyPatchTool = tool(
-  async (input, config: GraphConfig) => {
+  async (input) => {
     const state = getCurrentTaskInput<GraphState>();
     const { sandboxSessionId } = state;
     if (!sandboxSessionId) {
@@ -47,8 +46,6 @@ export const applyPatchTool = tool(
     if (!writeFileSuccess) {
       return writeFileOutput;
     }
-
-    await checkoutBranchAndCommit(config, sandbox);
 
     return `Successfully applied diff to \`${file_path}\` and saved changes.`;
   },
