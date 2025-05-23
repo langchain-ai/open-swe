@@ -37,7 +37,14 @@ export const applyPatchTool = tool(
     console.log(`\nApplying patch to file ${file_path}\n`);
     console.log("\nreadFileOutput\n", readFileOutput);
     console.log("\ndiff\n", diff);
-    const patchedContent = applyPatch(readFileOutput, diff);
+
+    let patchedContent: string | false;
+    try {
+      patchedContent = applyPatch(readFileOutput, diff);
+    } catch (e) {
+      console.error("Failed to apply patch", e);
+      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`;
+    }
 
     if (patchedContent === false) {
       return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`;

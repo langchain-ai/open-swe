@@ -12,16 +12,16 @@ async function runE2E() {
 
   const threadId = uuidv4();
 
-  const userRequest = "ADD YOUR REQUEST HERE";
+  const userRequest =
+    "This repo contains the react/next.js code for my persona/portfolio site. It currently has static values set for the number of stars on the repositories I highlight. I want this to be accurate, but I do NOT want it to make requests to GitHub every time a user visits. Instead, please implement a solution which will run once a day, fetch the number of stars from a list of repos, then write them to vercel's KV store. Finally, update the UI to make a request to the KV store when the user visits my page and render the accurate star counts.";
 
   const configurable: Omit<
     GraphConfig["configurable"],
     "thread_id" | "assistant_id"
   > = {
     target_repository: {
-      owner: "YOUR_USERNAME",
-      repo: "YOUR_REPO",
-      branch: "OPTIONAL BRANCH NAME",
+      owner: "bracesproul",
+      repo: "personal-site",
     },
   };
 

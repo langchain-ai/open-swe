@@ -29,6 +29,7 @@ You MUST adhere to the following criteria when executing the task:
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Avoid writing to files which you have not already read.
+        - If writing to an empty file, or completely overwriting a file, you should not use \`apply_patch\` and instead use \`cat\` via the \`shell\` tool to write the file contents directly.
         - Fix the problem at the root cause rather than applying surface-level patches, when possible.
         - Avoid unneeded complexity in your solution.
             - Ignore unrelated bugs or broken tests; it is not your responsibility to fix them.
