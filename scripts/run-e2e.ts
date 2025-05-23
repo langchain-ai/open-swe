@@ -25,7 +25,7 @@ async function runE2E() {
     },
   };
 
-  const stream = client.runs.stream(threadId, "open-codex", {
+  const stream = client.runs.stream(threadId, "open-swe", {
     input: {
       messages: [{ role: "user", content: userRequest }],
     },
@@ -37,6 +37,8 @@ async function runE2E() {
     streamSubgraphs: true,
     streamMode: "updates",
   });
+
+  console.log(`\nRun started with thread ID: "${threadId}"\n`);
 
   for await (const chunk of stream) {
     console.dir(chunk.data, { depth: null });
@@ -57,7 +59,7 @@ async function resumeGraph(threadId: string) {
     },
   ];
 
-  const stream = client.runs.stream(threadId, "open-codex", {
+  const stream = client.runs.stream(threadId, "open-swe", {
     command: {
       resume: resumeValue,
     },

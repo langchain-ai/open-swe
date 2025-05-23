@@ -1,9 +1,9 @@
 {
-  "name": "open-codex",
-  "homepage": "https://github.com/langchain-ai/open-codex/blob/main/README.md",
+  "name": "open-swe",
+  "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langchain-ai/open-codex.git"
+    "url": "https://github.com/langchain-ai/open-swe.git"
   },
   "private": true,
   "version": "0.0.0",

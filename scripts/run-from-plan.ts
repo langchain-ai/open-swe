@@ -125,7 +125,7 @@ async function runFromPlan() {
     `Sandbox initialized successfully. ID: ${initResult.sandboxSessionId}\n\n`,
   );
 
-  const stream = client.runs.stream(threadId, "open-codex", {
+  const stream = client.runs.stream(threadId, "open-swe", {
     command: {
       goto: "generate-action",
       update: {

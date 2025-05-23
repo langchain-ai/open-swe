@@ -1,8 +1,10 @@
 {
   "node_version": "20",
   "graphs": {
-    "open-codex": "./src/index.ts:graph"
+    "open-swe": "./src/index.ts:graph"
   },
   "env": ".env",
-  "dependencies": ["."]
+  "dependencies": [
+    "."
+  ]
 }
