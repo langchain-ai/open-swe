@@ -1,9 +1,10 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { applyPatch } from "diff";
-import { GraphConfig } from "../types.js";
+import { GraphState } from "../types.js";
 import { Sandbox } from "@e2b/code-interpreter";
 import { readFile, writeFile } from "../utils/read-write.js";
+import { getCurrentTaskInput } from "@langchain/langgraph";
 
 const applyPatchToolSchema = z.object({
   diff: z.string().describe("The diff to apply. Use a standard diff format."),
@@ -11,14 +12,19 @@ const applyPatchToolSchema = z.object({
 });
 
 export const applyPatchTool = tool(
-  async (input, config: GraphConfig) => {
-    const { diff, file_path } = input;
-    const sessionId = config.configurable?.sandbox_session_id;
-    if (!sessionId) {
-      return "FAILED TO RUN COMMAND: No sandbox session ID provided";
+  async (input) => {
+    const state = getCurrentTaskInput<GraphState>();
+    const { sandboxSessionId } = state;
+    if (!sandboxSessionId) {
+      console.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
+        input,
+      });
+      throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
     }
 
-    const sandbox = await Sandbox.connect(sessionId);
+    const { diff, file_path } = input;
+
+    const sandbox = await Sandbox.connect(sandboxSessionId);
 
     const { success: readFileSuccess, output: readFileOutput } = await readFile(
       sandbox,

@@ -3,13 +3,18 @@ import { GraphConfig } from "../types.js";
 
 export enum Task {
   PLANNER = "planner",
+  PLANNER_CONTEXT = "plannerContext",
   ACTION_GENERATOR = "actionGenerator",
   PROGRESS_PLAN_CHECKER = "progressPlanChecker",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
   [Task.PLANNER]: {
-    modelName: "anthropic:extended-thinking:claude-sonnet-4-0",
+    modelName: "anthropic:claude-sonnet-4-0",
+    temperature: 0,
+  },
+  [Task.PLANNER_CONTEXT]: {
+    modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
   [Task.ACTION_GENERATOR]: {
@@ -34,9 +39,11 @@ export async function loadModel(config: GraphConfig, task: Task) {
 
   let thinkingModel = false;
   if (modelNameParts[0] === "extended-thinking") {
+    console.log("THINKING ENABLED", modelNameParts);
     // Using a thinking model. Remove it from the model name.
     modelNameParts.shift();
     thinkingModel = true;
+    console.log("THINKING ENABLED", modelNameParts);
   }
 
   const modelName = modelNameParts.join(":");
@@ -44,11 +51,17 @@ export async function loadModel(config: GraphConfig, task: Task) {
     thinkingModel = true;
   }
 
+  const thinkingBudgetTokens = 5000;
+  const maxTokens = thinkingBudgetTokens * 4;
+
   const model = await initChatModel(modelName, {
     modelProvider,
     temperature: thinkingModel ? undefined : temperature,
     ...(thinkingModel && modelProvider === "anthropic"
-      ? { thinking: { budgetTokens: 5000, type: "enabled" } }
+      ? {
+          thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
+          maxTokens,
+        }
       : {}),
   });
 

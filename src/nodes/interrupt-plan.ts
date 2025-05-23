@@ -5,9 +5,9 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { v4 as uuidv4 } from "uuid";
+import { resumeSandbox } from "../utils/sandbox.js";
 
-export function interruptPlan(state: GraphState): Command {
+export async function interruptPlan(state: GraphState): Promise<Command> {
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
@@ -30,33 +30,46 @@ export function interruptPlan(state: GraphState): Command {
     If editing the plan, ensure each step in the plan is separated by ":::".`,
   })[0];
 
+  if (!state.sandboxSessionId) {
+    // TODO: This should prob just create a sandbox?
+    throw new Error("No sandbox session ID found.");
+  }
+
   if (interruptRes.type === "accept") {
-    // Plan was accepted, route to the initialize node.
+    const newSandboxSessionId = (await resumeSandbox(state.sandboxSessionId))
+      .sandboxId;
+
+    // Plan was accepted, route to the generate-action node to start taking actions.
     return new Command({
-      goto: "initialize",
+      goto: "generate-action",
       update: {
-        plan: proposedPlan.map((p) => ({
-          id: uuidv4(),
+        plan: proposedPlan.map((p, index) => ({
+          index,
           plan: p,
           completed: false,
         })),
+        sandboxSessionId: newSandboxSessionId,
       },
     });
   }
 
   if (interruptRes.type === "edit") {
-    // Plan was edited, route to the initialize node.
+    const newSandboxSessionId = (await resumeSandbox(state.sandboxSessionId))
+      .sandboxId;
+
+    // Plan was edited, route to the generate-action node to start taking actions.
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(":::")
       .map((step: string) => step.trim());
     return new Command({
-      goto: "initialize",
+      goto: "generate-action",
       update: {
-        plan: editedPlan.map((p: string) => ({
-          id: uuidv4(),
+        plan: editedPlan.map((p: string, index: number) => ({
+          index,
           plan: p,
           completed: false,
         })),
+        sandboxSessionId: newSandboxSessionId,
       },
     });
   }

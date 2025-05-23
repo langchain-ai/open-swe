@@ -24,6 +24,9 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
     gitCloneCommand.push(repoUrlWithToken);
   }
 
+  console.log("Cloning repository...", {
+    command: gitCloneCommand.join(" "),
+  });
   return await sandbox.commands.run(
     gitCloneCommand.join(" "),
     TIMEOUT_EXTENSION_OPT,
@@ -37,24 +40,34 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
  * branch.
  */
 export async function initialize(
-  _state: GraphState,
+  state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   if (!config.configurable) {
     throw new Error("Configuration object not found.");
   }
-  const { sandbox_session_id, target_repository, sandbox_language } =
-    config.configurable;
-  if (sandbox_session_id) {
+  const { sandboxSessionId } = state;
+
+  if (sandboxSessionId) {
     try {
+      console.log("Sandbox session ID exists. Resuming...", {
+        sandboxSessionId,
+      });
       // Resume the sandbox if the session ID is in the config.
-      await Sandbox.resume(sandbox_session_id, TIMEOUT_EXTENSION_OPT);
-      return {};
+      const newSandbox = await Sandbox.resume(
+        sandboxSessionId,
+        TIMEOUT_EXTENSION_OPT,
+      );
+      return {
+        sandboxSessionId: newSandbox.sandboxId,
+      };
     } catch (e) {
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
       console.error("Failed to get sandbox session.", e);
     }
   }
+
+  const { target_repository, sandbox_language } = config.configurable;
 
   if (!sandbox_language || !target_repository) {
     throw new Error(
@@ -63,18 +76,22 @@ export async function initialize(
   }
 
   if (sandbox_language === "js") {
+    console.log("Creating JS sandbox...");
     const sandbox = await Sandbox.create(
       JS_SANDBOX_TEMPLATE_ID,
       TIMEOUT_EXTENSION_OPT,
     );
-    config.configurable.sandbox_session_id = sandbox.sandboxId;
 
     const res = await cloneRepo(sandbox, target_repository);
     if (res.error) {
       // TODO: This should probably be an interrupt.
+      console.error("Failed to clone repository.", res.error);
       throw new Error(`Failed to clone repository.\n${res.error}`);
     }
-    return {};
+    console.log("Repository cloned successfully.");
+    return {
+      sandboxSessionId: sandbox.sandboxId,
+    };
   }
 
   if (sandbox_language === "python") {

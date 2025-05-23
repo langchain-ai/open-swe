@@ -16,11 +16,15 @@ export function formatPlanPrompt(plan: PlanItem[]): string {
 
   return PLAN_PROMPT.replace(
     "{COMPLETED_TASKS}",
-    completedTasks.map((task) => `${task.index}. ${task.plan}`).join("\n"),
+    completedTasks?.length
+      ? completedTasks.map((task) => `${task.index}. ${task.plan}`).join("\n")
+      : "No completed tasks.",
   )
     .replace(
       "{REMAINING_TASKS}",
-      remainingTasks.map((task) => `${task.index}. ${task.plan}`).join("\n"),
+      remainingTasks?.length
+        ? remainingTasks.map((task) => `${task.index}. ${task.plan}`).join("\n")
+        : "No remaining tasks.",
     )
-    .replace("{CURRENT_TASK}", currentTask.plan);
+    .replace("{CURRENT_TASK}", currentTask?.plan || "No current task.");
 }

@@ -47,6 +47,13 @@ export const GraphAnnotation = z.object({
     .nullable()
     .default(() => null)
     .langgraph.reducer((_state, update) => update),
+  /**
+   * The session ID of the Sandbox to use.
+   */
+  sandboxSessionId: z
+    .string()
+    .optional()
+    .langgraph.reducer((_state, update) => update),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;
@@ -111,18 +118,12 @@ const MODEL_OPTIONS = [
   },
 ];
 
+const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
+  ({ value }) =>
+    !value.includes("extended-thinking") || !value.startsWith("openai:o"),
+);
+
 export const GraphConfiguration = z.object({
-  /**
-   * The session ID of the Sandbox to use.
-   */
-  sandbox_session_id: z
-    .string()
-    .optional()
-    .langgraph.metadata({
-      x_lg_ui_config: {
-        type: "hidden",
-      },
-    }),
   /**
    * The URL of the repository to clone.
    */
@@ -132,25 +133,54 @@ export const GraphConfiguration = z.object({
       repo: z.string(),
       branch: z.string().optional(),
     })
-    .langgraph.metadata({}),
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "json",
+        default: `{
+  "owner": "",
+  "repo": "",
+  "branch": ""
+}`,
+      },
+    }),
   /**
    * The language of the sandbox to use.
    */
-  sandbox_language: z.enum(["js", "python"]).optional().langgraph.metadata({}),
+  sandbox_language: z
+    .enum(["js", "python"])
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "select",
+        default: "js",
+        description: "The primary language of the sandbox to use.",
+        options: [
+          {
+            label: "JavaScript/TypeScript",
+            value: "js",
+          },
+          {
+            label: "Python",
+            value: "python",
+          },
+        ],
+      },
+    }),
   /**
    * The model ID to use for the planning step.
    * This includes initial planning, and rewriting.
-   * @default "anthropic:extended-thinking:claude-sonnet-4-0"
+   * @default "anthropic:claude-sonnet-4-0"
    */
   plannerModelName: z
     .string()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
         type: "select",
-        default: "anthropic:extended-thinking:claude-sonnet-4-0",
+        default: "anthropic:claude-sonnet-4-0",
         description: "The model to use for planning",
-        options: MODEL_OPTIONS,
+        // Do not show extended thinking models
+        options: MODEL_OPTIONS_NO_THINKING,
       },
     }),
   /**
@@ -163,7 +193,42 @@ export const GraphConfiguration = z.object({
     .number()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
+    }),
+  /**
+   * The model ID to use for the planning step.
+   * This includes initial planning, and rewriting.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
+  plannerContextModelName: z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description: "The model to use for planning",
+        options: MODEL_OPTIONS,
+      },
+    }),
+  /**
+   * The temperature to use for the planning step.
+   * This includes initial planning, and rewriting.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
+   */
+  plannerContextTemperature: z
+    .number()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
         type: "slider",
         default: 0,
         min: 0,
@@ -181,7 +246,7 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
         type: "select",
         default: "anthropic:claude-sonnet-4-0",
         description: "The model to use for action generation",
@@ -197,7 +262,7 @@ export const GraphConfiguration = z.object({
     .number()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
         type: "slider",
         default: 0,
         min: 0,
@@ -215,11 +280,11 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
         type: "select",
         default: "anthropic:claude-sonnet-4-0",
         description: "The model to use for progress plan checking",
-        options: MODEL_OPTIONS,
+        options: MODEL_OPTIONS_NO_THINKING,
       },
     }),
   /**
@@ -231,7 +296,7 @@ export const GraphConfiguration = z.object({
     .number()
     .optional()
     .langgraph.metadata({
-      x_lg_ui_config: {
+      x_oap_ui_config: {
         type: "slider",
         default: 0,
         min: 0,

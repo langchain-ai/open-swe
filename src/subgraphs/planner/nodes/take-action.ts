@@ -1,12 +1,14 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { applyPatchTool, shellTool } from "../tools/index.js";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import { applyPatchTool, shellTool } from "../../../tools/index.js";
+import { GraphConfig } from "../../../types.js";
+import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 
 export async function takeAction(
-  state: GraphState,
+  state: PlannerGraphState,
   _config: GraphConfig,
-): Promise<GraphUpdate> {
-  const lastMessage = state.messages[state.messages.length - 1];
+): Promise<PlannerGraphUpdate> {
+  const { plannerMessages: messages } = state;
+  const lastMessage = messages[messages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
@@ -28,11 +30,6 @@ export async function takeAction(
   if (!tool) {
     throw new Error(`Unknown tool: ${toolCall.name}`);
   }
-  if (!state.sandboxSessionId) {
-    throw new Error(
-      "Failed to take action: No sandbox session ID found in state.",
-    );
-  }
 
   // @ts-expect-error tool.invoke types are weird here...
   const result: string = await tool.invoke(toolCall.args);
@@ -43,6 +40,6 @@ export async function takeAction(
   });
 
   return {
-    messages: [toolMessage],
+    plannerMessages: [toolMessage],
   };
 }

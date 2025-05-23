@@ -1,4 +1,5 @@
 import { Sandbox } from "@e2b/code-interpreter";
+import { TIMEOUT_MS } from "../constants.js";
 
 export async function readFile(
   sandbox: Sandbox,
@@ -9,6 +10,9 @@ export async function readFile(
 }> {
   try {
     const readOutput = await sandbox.commands.run(`cat "${filePath}"`);
+    // Add an extra 5 min timeout to the sandbox.
+    await sandbox.setTimeout(TIMEOUT_MS);
+
     if (readOutput.exitCode !== 0) {
       console.error(
         `Error reading file '${filePath}' from sandbox via cat:`,
@@ -51,6 +55,8 @@ export async function writeFile(
   try {
     const writeCommand = `printf '%s' '${content}' > "${filePath}"`;
     const writeOutput = await sandbox.commands.run(writeCommand);
+    // Add an extra 5 min timeout to the sandbox.
+    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (writeOutput.exitCode !== 0) {
       console.error(

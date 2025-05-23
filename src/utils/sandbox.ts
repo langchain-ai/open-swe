@@ -15,3 +15,14 @@ export async function pauseSandbox(
   const sandboxClient = sandbox ?? (await Sandbox.connect(sandboxSessionId));
   return await sandboxClient.pause();
 }
+
+/**
+ * Resumes the sandbox.
+ * @param sandboxSessionId The ID of the sandbox to resume.
+ * @returns The sandbox client.
+ */
+export async function resumeSandbox(
+  sandboxSessionId: string,
+): Promise<Sandbox> {
+  return await Sandbox.resume(sandboxSessionId);
+}

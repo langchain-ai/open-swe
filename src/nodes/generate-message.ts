@@ -2,6 +2,7 @@ import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
+import { pauseSandbox } from "../utils/sandbox.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -48,7 +49,9 @@ You MUST adhere to the following criteria when executing the task:
 - When your task involves writing or modifying files:
     - Do NOT tell the user to "save the file" or "copy the code into a file" if you already created or modified the file using \`apply_patch\`. Instead, reference the file as already saved.
     - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
-- Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.`;
+- Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.
+  - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
+`;
 
 const formatPrompt = (plan: PlanItem[]): string => {
   return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan));
@@ -70,7 +73,16 @@ export async function generateAction(
     ...state.messages,
   ]);
 
+  const hasToolCalls = !!response.tool_calls?.length;
+  // No tool calls means the graph is going to end. Pause the sandbox.
+  let newSandboxSessionId: string | undefined;
+  if (!hasToolCalls && state.sandboxSessionId) {
+    console.log("No tool calls found. Pausing sandbox...");
+    newSandboxSessionId = await pauseSandbox(state.sandboxSessionId);
+  }
+
   return {
     messages: [response],
+    ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
   };
 }
