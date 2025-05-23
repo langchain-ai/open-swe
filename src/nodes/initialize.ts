@@ -12,6 +12,7 @@ import {
   getBranchName,
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
+import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 
 const SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
 
@@ -20,23 +21,29 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
     throw new Error("GITHUB_PAT environment variable not set.");
   }
 
-  const gitCloneCommand = ["git", "clone"];
+  try {
+    const gitCloneCommand = ["git", "clone"];
 
-  const repoUrlWithToken = `https://${process.env.GITHUB_PAT}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+    const repoUrlWithToken = `https://${process.env.GITHUB_PAT}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
-  if (targetRepository.branch) {
-    gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
-  } else {
-    gitCloneCommand.push(repoUrlWithToken);
+    if (targetRepository.branch) {
+      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
+    } else {
+      gitCloneCommand.push(repoUrlWithToken);
+    }
+
+    console.log("Cloning repository...", {
+      command: gitCloneCommand.join(" "),
+    });
+    return await sandbox.commands.run(
+      gitCloneCommand.join(" "),
+      TIMEOUT_EXTENSION_OPT,
+    );
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    console.error("Failed to clone repository", errorFields ?? e);
+    throw e;
   }
-
-  console.log("Cloning repository...", {
-    command: gitCloneCommand.join(" "),
-  });
-  return await sandbox.commands.run(
-    gitCloneCommand.join(" "),
-    TIMEOUT_EXTENSION_OPT,
-  );
 }
 
 /**
