@@ -151,29 +151,6 @@ export const GraphConfiguration = z.object({
       },
     }),
   /**
-   * The language of the sandbox to use.
-   */
-  sandbox_language: z
-    .enum(["js", "python"])
-    .optional()
-    .langgraph.metadata({
-      x_oap_ui_config: {
-        type: "select",
-        default: "js",
-        description: "The primary language of the sandbox to use.",
-        options: [
-          {
-            label: "JavaScript/TypeScript",
-            value: "js",
-          },
-          {
-            label: "Python",
-            value: "python",
-          },
-        ],
-      },
-    }),
-  /**
    * The model ID to use for the planning step.
    * This includes initial planning, and rewriting.
    * @default "anthropic:claude-sonnet-4-0"

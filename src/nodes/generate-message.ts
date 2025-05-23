@@ -28,6 +28,7 @@ You MUST adhere to the following criteria when executing the task:
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
+        - Avoid writing to files which you have not already read.
         - Fix the problem at the root cause rather than applying surface-level patches, when possible.
         - Avoid unneeded complexity in your solution.
             - Ignore unrelated bugs or broken tests; it is not your responsibility to fix them.
@@ -35,6 +36,7 @@ You MUST adhere to the following criteria when executing the task:
         - Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.
             - Use \`git log\` and \`git blame\` to search the history of the codebase if additional context is required; internet access is disabled.
         - NEVER add copyright or license headers unless specifically requested.
+        - If creating a new file or directory plus file, always remember to create both before trying to read/write the file. Keep in mind you can not write to files which don't exist.
         - You do not need to \`git commit\` your changes; this will be done automatically for you.
         - If there is a .pre-commit-config.yaml, use \`pre-commit run --files ...\` to check that your changes pass the pre-commit checks. However, do not fix pre-existing errors on lines you didn't touch.
             - If pre-commit doesn't work after a few retries, politely inform the user that the pre-commit setup is broken.

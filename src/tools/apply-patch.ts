@@ -34,6 +34,9 @@ export const applyPatchTool = tool(
       return readFileOutput;
     }
 
+    console.log(`\nApplying patch to file ${file_path}\n`);
+    console.log("\nreadFileOutput\n", readFileOutput);
+    console.log("\ndiff\n", diff);
     const patchedContent = applyPatch(readFileOutput, diff);
 
     if (patchedContent === false) {

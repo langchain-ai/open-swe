@@ -1,6 +1,7 @@
 import { CommandResult, Sandbox } from "@e2b/code-interpreter";
 import { GraphConfig } from "../../types.js";
 import { TIMEOUT_MS } from "../../constants.js";
+import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 
 export function getRepoAbsolutePath(config: GraphConfig): string {
   const repoName = config.configurable?.target_repository.repo;
@@ -24,10 +25,11 @@ export async function checkoutBranch(
   absoluteRepoDir: string,
   branchName: string,
   sandbox: Sandbox,
-  options?: {
-    isNew?: boolean;
-  },
 ): Promise<CommandResult | false> {
+  console.log("\nChecking out branch...", {
+    branchName,
+  });
+
   try {
     const getCurrentBranchOutput = await sandbox.commands.run(
       "git branch --show-current",
@@ -40,17 +42,7 @@ export async function checkoutBranch(
     } else {
       const currentBranch = getCurrentBranchOutput.stdout.trim();
       if (currentBranch === branchName) {
-        if (options?.isNew) {
-          console.warn(
-            `Branch '${branchName}' already exists and is the current branch. Cannot create new branch with the same name.`,
-          );
-          return {
-            stdout: "",
-            stderr: `fatal: A branch named '${branchName}' already exists.`,
-            exitCode: 128,
-          };
-        }
-        console.log(`Already on branch '${branchName}'. No checkout needed.`);
+        console.log(`\nAlready on branch '${branchName}'. No checkout needed.`);
         return {
           stdout: `Already on branch ${branchName}`,
           stderr: "",
@@ -58,21 +50,202 @@ export async function checkoutBranch(
         };
       }
     }
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    console.error("Failed to get current branch", errorFields ?? e);
+    return false;
+  }
 
-    const gitCheckoutOutput = await sandbox.commands.run(
-      `git checkout ${options?.isNew ? "-b" : ""} "${branchName}"`,
+  let checkoutCommand: string;
+  try {
+    console.log("\nChecking if branch exists...", {
+      command: `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
+    });
+    // Check if branch exists using git rev-parse for robustness
+    const checkBranchExistsOutput = await sandbox.commands.run(
+      `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
       { cwd: absoluteRepoDir },
     );
+    await sandbox.setTimeout(TIMEOUT_MS);
+
+    if (checkBranchExistsOutput.exitCode === 0) {
+      // Branch exists (rev-parse exit code 0 means success)
+      checkoutCommand = `git checkout "${branchName}"`;
+    } else {
+      // Branch does not exist (rev-parse non-zero exit code) or other error.
+      // Attempt to create it.
+      checkoutCommand = `git checkout -b "${branchName}"`;
+    }
+  } catch (e: unknown) {
+    const errorFields = getSandboxErrorFields(e);
+    if (
+      errorFields &&
+      errorFields.exitCode === 1 &&
+      errorFields.stderr === ""
+    ) {
+      checkoutCommand = `git checkout -b "${branchName}"`;
+    } else {
+      console.error("\nError checking if branch exists", e);
+      return false;
+    }
+  }
+
+  try {
+    const gitCheckoutOutput = await sandbox.commands.run(checkoutCommand, {
+      cwd: absoluteRepoDir,
+    });
 
     if (gitCheckoutOutput.exitCode !== 0) {
-      console.error("Failed to checkout branch", gitCheckoutOutput);
+      console.error("\nFailed to checkout branch", gitCheckoutOutput);
       return false;
     }
 
+    console.log("\nChecked out branch successfully.", {
+      branchName,
+      gitCheckoutOutput: gitCheckoutOutput.stdout,
+    });
+
     return gitCheckoutOutput;
   } catch (e) {
-    console.error("Failed to checkout branch", e);
+    const errorFields = getSandboxErrorFields(e);
+    console.error("Error checking out branch", errorFields ?? e);
     return false;
+  }
+}
+
+interface GitHubUserResponse {
+  login: string;
+  id: number;
+  name: string | null;
+  email: string | null;
+}
+
+async function getGitUserDetailsFromGitHub(): Promise<{
+  userName?: string;
+  userEmail?: string;
+}> {
+  const githubToken = process.env.GITHUB_PAT;
+  if (!githubToken) {
+    console.warn(
+      "GITHUB_PAT environment variable is not set. Cannot fetch user details from GitHub.",
+    );
+    return {};
+  }
+
+  try {
+    const response = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `token ${githubToken}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+
+    if (!response.ok) {
+      console.error(
+        `Failed to fetch GitHub user info: ${response.status} ${response.statusText}. Response: ${await response.text()}`,
+      );
+      return {};
+    }
+
+    const userData = (await response.json()) as GitHubUserResponse;
+    const fetchedUserName = userData.name || userData.login;
+    let fetchedUserEmail = userData.email; // This can be string | null
+
+    if (!fetchedUserEmail && userData.id && userData.login) {
+      fetchedUserEmail = `${userData.id}+${userData.login}@users.noreply.github.com`;
+    } else if (!fetchedUserEmail && userData.login) {
+      fetchedUserEmail = `${userData.login}@users.noreply.github.com`;
+    }
+
+    const finalUserName = fetchedUserName || undefined;
+    const finalUserEmail = fetchedUserEmail || undefined;
+
+    if (!finalUserName) {
+      console.warn("Could not determine GitHub username from API response.");
+    }
+    if (!finalUserEmail) {
+      console.warn("Could not determine GitHub user email from API response.");
+    }
+    return { userName: finalUserName, userEmail: finalUserEmail };
+  } catch (e) {
+    console.error("Error fetching GitHub user info:", e);
+    return {};
+  }
+}
+
+export async function configureGitUserInRepo(
+  absoluteRepoDir: string,
+  sandbox: Sandbox,
+): Promise<void> {
+  let needsGitConfig = false;
+  try {
+    const nameCheck = await sandbox.commands.run("git config user.name", {
+      cwd: absoluteRepoDir,
+    });
+    await sandbox.setTimeout(TIMEOUT_MS);
+    const emailCheck = await sandbox.commands.run("git config user.email", {
+      cwd: absoluteRepoDir,
+    });
+    await sandbox.setTimeout(TIMEOUT_MS);
+
+    if (
+      nameCheck.exitCode !== 0 ||
+      nameCheck.stdout.trim() === "" ||
+      emailCheck.exitCode !== 0 ||
+      emailCheck.stdout.trim() === ""
+    ) {
+      needsGitConfig = true;
+    }
+  } catch (checkError) {
+    console.warn(
+      "Could not check existing git config, will attempt to set it:",
+      checkError,
+    );
+    needsGitConfig = true;
+  }
+
+  if (needsGitConfig) {
+    const { userName, userEmail } = await getGitUserDetailsFromGitHub();
+
+    if (userName) {
+      const configUserNameOutput = await sandbox.commands.run(
+        `git config user.name "${userName}"`,
+        { cwd: absoluteRepoDir },
+      );
+      await sandbox.setTimeout(TIMEOUT_MS);
+      if (configUserNameOutput.exitCode !== 0) {
+        console.error(
+          "Failed to set git user.name:",
+          configUserNameOutput.stderr || configUserNameOutput.stdout,
+        );
+      } else {
+        console.log("\nSet git user.name successfully.", {
+          userName,
+        });
+      }
+    }
+
+    if (userEmail) {
+      const configUserEmailOutput = await sandbox.commands.run(
+        `git config user.email "${userEmail}"`,
+        { cwd: absoluteRepoDir },
+      );
+      await sandbox.setTimeout(TIMEOUT_MS);
+      if (configUserEmailOutput.exitCode !== 0) {
+        console.error(
+          "Failed to set git user.email:",
+          configUserEmailOutput.stderr || configUserEmailOutput.stdout,
+        );
+      } else {
+        console.log("\nSet git user.email successfully.", {
+          userEmail,
+        });
+      }
+    }
+  } else {
+    console.log(
+      "Git user.name and user.email are already configured in this repository.",
+    );
   }
 }
 
@@ -94,7 +267,6 @@ export async function commitAll(
         gitAddOutput,
       );
     }
-
     return gitAddOutput;
   } catch (e) {
     console.error("Failed to commit all changes to git repository", e);
@@ -147,7 +319,10 @@ export async function getChangedFilesStatus(
     return [];
   }
 
-  return gitStatusOutput.stdout.split("\n").map((line) => line.trim());
+  return gitStatusOutput.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
 }
 
 export async function checkoutBranchAndCommit(
@@ -161,7 +336,6 @@ export async function checkoutBranchAndCommit(
   const absoluteRepoDir = getRepoAbsolutePath(config);
   const branchName = options?.branchName || getBranchName(config);
 
-  console.log(`Checking out branch ${branchName}`);
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
 
   console.log(`Committing changes to branch ${branchName}`);

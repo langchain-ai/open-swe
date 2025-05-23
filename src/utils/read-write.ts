@@ -1,5 +1,6 @@
 import { Sandbox } from "@e2b/code-interpreter";
 import { TIMEOUT_MS } from "../constants.js";
+import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 
 export async function readFile(
   sandbox: Sandbox,
@@ -15,7 +16,7 @@ export async function readFile(
 
     if (readOutput.exitCode !== 0) {
       console.error(
-        `Error reading file '${filePath}' from sandbox via cat:`,
+        `\nError reading file '${filePath}' from sandbox via cat:`,
         readOutput,
       );
       return {
@@ -25,7 +26,7 @@ export async function readFile(
     }
     if (readOutput.stderr) {
       console.warn(
-        `Stderr while reading file '${filePath}' from sandbox via cat: ${readOutput.stderr}`,
+        `\nStderr while reading file '${filePath}' from sandbox via cat: ${readOutput.stderr}`,
       );
     }
     return {
@@ -34,12 +35,20 @@ export async function readFile(
     };
   } catch (e: any) {
     console.error(
-      `Exception while trying to read file '${filePath}' from sandbox via cat:`,
+      `\nException while trying to read file '${filePath}' from sandbox via cat:`,
       e,
     );
+    let outputMessage = `FAILED TO EXECUTE READ COMMAND for sandbox '${filePath}'.`;
+    const errorFields = getSandboxErrorFields(e);
+    if (errorFields) {
+      outputMessage += `\nExit code: ${errorFields.exitCode}.\nStderr: ${errorFields.stderr}.\nStdout: ${errorFields.stdout}`;
+    } else {
+      outputMessage += ` Error: ${(e as Error).message || String(e)}`;
+    }
+
     return {
       success: false,
-      output: `FAILED TO EXECUTE READ COMMAND for sandbox '${filePath}'. Error: ${(e as Error).message || String(e)}`,
+      output: outputMessage,
     };
   }
 }
@@ -60,7 +69,7 @@ export async function writeFile(
 
     if (writeOutput.exitCode !== 0) {
       console.error(
-        `Error writing file '${filePath}' to sandbox via printf:`,
+        `\nError writing file '${filePath}' to sandbox via printf:`,
         writeOutput,
       );
       return {
@@ -70,7 +79,7 @@ export async function writeFile(
     }
     if (writeOutput.stderr) {
       console.warn(
-        `Stderr while writing file '${filePath}' to sandbox via printf: ${writeOutput.stderr}`,
+        `\nStderr while writing file '${filePath}' to sandbox via printf: ${writeOutput.stderr}`,
       );
     }
     return {
@@ -79,12 +88,21 @@ export async function writeFile(
     };
   } catch (e: any) {
     console.error(
-      `Exception while trying to write file '${filePath}' to sandbox via printf:`,
+      `\nException while trying to write file '${filePath}' to sandbox via printf:`,
       e,
     );
+
+    let outputMessage = `FAILED TO EXECUTE WRITE COMMAND for sandbox '${filePath}'.`;
+    const errorFields = getSandboxErrorFields(e);
+    if (errorFields) {
+      outputMessage += `\nExit code: ${errorFields.exitCode}.\nStderr: ${errorFields.stderr}.\nStdout: ${errorFields.stdout}`;
+    } else {
+      outputMessage += ` Error: ${(e as Error).message || String(e)}`;
+    }
+
     return {
       success: false,
-      output: `FAILED TO EXECUTE WRITE COMMAND for sandbox '${filePath}'. Error: ${(e as Error).message || String(e)}`,
+      output: outputMessage,
     };
   }
 }

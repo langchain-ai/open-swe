@@ -934,6 +934,16 @@
     yaml "^2.7.0"
     zod "^3.23.8"
 
+"@langchain/langgraph-sdk@^0.0.78":
+  version "0.0.78"
+  resolved "https://registry.yarnpkg.com/@langchain/langgraph-sdk/-/langgraph-sdk-0.0.78.tgz#898fbd5d844e3b8a74341df89af008d878956766"
+  integrity sha512-skkUDmEhClWzlsr8jRaS1VpXVBISm5OFd0MUtS1jKRL5pn08K+IJRvHnlzgum9x7Dste9KXGcIGVoR7cNKJQrw==
+  dependencies:
+    "@types/json-schema" "^7.0.15"
+    p-queue "^6.6.2"
+    p-retry "4"
+    uuid "^9.0.0"
+
 "@langchain/langgraph-sdk@~0.0.32":
   version "0.0.74"
   resolved "https://registry.yarnpkg.com/@langchain/langgraph-sdk/-/langgraph-sdk-0.0.74.tgz#ef74d34d3c36437cb3d5249ea79091b8192c9b0c"

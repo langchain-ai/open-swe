@@ -6,8 +6,14 @@ import {
   TargetRepository,
 } from "../types.js";
 import { TIMEOUT_EXTENSION_OPT } from "../constants.js";
+import {
+  checkoutBranch,
+  configureGitUserInRepo,
+  getBranchName,
+  getRepoAbsolutePath,
+} from "../utils/git/index.js";
 
-const JS_SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
+const SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
 
 async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
   if (!process.env.GITHUB_PAT) {
@@ -67,36 +73,47 @@ export async function initialize(
     }
   }
 
-  const { target_repository, sandbox_language } = config.configurable;
+  const { target_repository } = config.configurable;
 
-  if (!sandbox_language || !target_repository) {
+  if (!target_repository) {
     throw new Error(
-      "Missing required configuration. Please provide a sandbox language and git repository URL.",
+      "Missing required configuration. Please provide a git repository URL.",
     );
   }
 
-  if (sandbox_language === "js") {
-    console.log("Creating JS sandbox...");
-    const sandbox = await Sandbox.create(
-      JS_SANDBOX_TEMPLATE_ID,
-      TIMEOUT_EXTENSION_OPT,
-    );
+  console.log("Creating sandbox...");
+  const sandbox = await Sandbox.create(
+    SANDBOX_TEMPLATE_ID,
+    TIMEOUT_EXTENSION_OPT,
+  );
 
-    const res = await cloneRepo(sandbox, target_repository);
-    if (res.error) {
-      // TODO: This should probably be an interrupt.
-      console.error("Failed to clone repository.", res.error);
-      throw new Error(`Failed to clone repository.\n${res.error}`);
-    }
-    console.log("Repository cloned successfully.");
-    return {
-      sandboxSessionId: sandbox.sandboxId,
-    };
+  const res = await cloneRepo(sandbox, target_repository);
+  if (res.error) {
+    // TODO: This should probably be an interrupt.
+    console.error("Failed to clone repository.", res.error);
+    throw new Error(`Failed to clone repository.\n${res.error}`);
+  }
+  console.log("Repository cloned successfully.");
+
+  const absoluteRepoDir = getRepoAbsolutePath(config);
+
+  console.log(`Configuring git user for repository at "${absoluteRepoDir}"...`);
+  await configureGitUserInRepo(absoluteRepoDir, sandbox);
+  console.log("Git user configured successfully.");
+
+  const checkoutBranchRes = await checkoutBranch(
+    absoluteRepoDir,
+    state.branchName ?? getBranchName(config),
+    sandbox,
+  );
+
+  if (!checkoutBranchRes) {
+    // TODO: This should probably be an interrupt.
+    console.error("\nFailed to checkout branch.");
+    throw new Error("Failed to checkout branch");
   }
 
-  if (sandbox_language === "python") {
-    throw new Error("Python sandbox not implemented yet.");
-  }
-
-  throw new Error("Unsupported sandbox language: " + sandbox_language);
+  return {
+    sandboxSessionId: sandbox.sandboxId,
+  };
 }

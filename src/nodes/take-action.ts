@@ -51,14 +51,16 @@ export async function takeAction(
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
   const sandbox = await Sandbox.connect(state.sandboxSessionId);
-  const hasChangedFiles = await getChangedFilesStatus(
+  const changedFiles = await getChangedFilesStatus(
     getRepoAbsolutePath(config),
     sandbox,
   );
 
   let branchName: string | undefined = state.branchName;
-  if (hasChangedFiles.length > 0) {
-    console.log(`\nHas ${hasChangedFiles.length} changed files. Committing...`);
+  if (changedFiles.length > 0) {
+    console.log(`\nHas ${changedFiles.length} changed files. Committing...`, {
+      changedFiles,
+    });
     branchName = await checkoutBranchAndCommit(config, sandbox, {
       branchName,
     });
