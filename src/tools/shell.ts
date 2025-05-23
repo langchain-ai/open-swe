@@ -1,9 +1,11 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { Sandbox } from "@e2b/code-interpreter";
-import { GraphState } from "../types.js";
+import { GraphConfig, GraphState } from "../types.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { TIMEOUT_MS } from "../constants.js";
+import { isWriteCommand } from "../utils/shell.js";
+import { checkoutBranchAndCommit } from "../utils/git/index.js";
 
 const shellToolSchema = z.object({
   command: z.array(z.string()).describe("The command to run"),
@@ -20,7 +22,7 @@ const shellToolSchema = z.object({
 });
 
 export const shellTool = tool(
-  async (input) => {
+  async (input, config: GraphConfig) => {
     try {
       const state = getCurrentTaskInput<GraphState>();
       const { sandboxSessionId } = state;
@@ -49,6 +51,11 @@ export const shellTool = tool(
           input,
         });
         return `Command failed. Exit code: ${result.exitCode}\nError: ${result.error}\nStderr:\n${result.stderr}`;
+      }
+
+      const writeCommandExecuted = isWriteCommand(command)
+      if (writeCommandExecuted) {
+        await checkoutBranchAndCommit(config, sandbox);
       }
 
       return result.stdout;
