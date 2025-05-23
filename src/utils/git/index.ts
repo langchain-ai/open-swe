@@ -26,12 +26,12 @@ export async function checkoutBranch(
   sandbox: Sandbox,
   options?: {
     isNew?: boolean;
-  }
+  },
 ): Promise<CommandResult | false> {
   try {
     const getCurrentBranchOutput = await sandbox.commands.run(
-      'git branch --show-current',
-      { cwd: absoluteRepoDir }
+      "git branch --show-current",
+      { cwd: absoluteRepoDir },
     );
     await sandbox.setTimeout(TIMEOUT_MS);
 
@@ -41,7 +41,9 @@ export async function checkoutBranch(
       const currentBranch = getCurrentBranchOutput.stdout.trim();
       if (currentBranch === branchName) {
         if (options?.isNew) {
-          console.warn(`Branch '${branchName}' already exists and is the current branch. Cannot create new branch with the same name.`);
+          console.warn(
+            `Branch '${branchName}' already exists and is the current branch. Cannot create new branch with the same name.`,
+          );
           return {
             stdout: "",
             stderr: `fatal: A branch named '${branchName}' already exists.`,
@@ -59,7 +61,7 @@ export async function checkoutBranch(
 
     const gitCheckoutOutput = await sandbox.commands.run(
       `git checkout ${options?.isNew ? "-b" : ""} "${branchName}"`,
-      { cwd: absoluteRepoDir }
+      { cwd: absoluteRepoDir },
     );
 
     if (gitCheckoutOutput.exitCode !== 0) {
@@ -82,12 +84,15 @@ export async function commitAll(
   try {
     const gitAddOutput = await sandbox.commands.run(
       `git add -A && git commit -m "${message}"`,
-      { cwd: absoluteRepoDir }
+      { cwd: absoluteRepoDir },
     );
     await sandbox.setTimeout(TIMEOUT_MS);
 
     if (gitAddOutput.exitCode !== 0) {
-      console.error("Failed to commit all changes to git repository", gitAddOutput);
+      console.error(
+        "Failed to commit all changes to git repository",
+        gitAddOutput,
+      );
     }
 
     return gitAddOutput;
@@ -105,16 +110,16 @@ export async function commitAllAndPush(
   try {
     const commitOutput = await commitAll(absoluteRepoDir, message, sandbox);
 
-    const pushCurrentBranchCmd = "git push -u origin $(git rev-parse --abbrev-ref HEAD)";
+    const pushCurrentBranchCmd =
+      "git push -u origin $(git rev-parse --abbrev-ref HEAD)";
 
     if (!commitOutput || commitOutput.exitCode !== 0) {
       return false;
     }
 
-    const gitPushOutput = await sandbox.commands.run(
-      pushCurrentBranchCmd,
-      { cwd: absoluteRepoDir }
-    );
+    const gitPushOutput = await sandbox.commands.run(pushCurrentBranchCmd, {
+      cwd: absoluteRepoDir,
+    });
     await sandbox.setTimeout(TIMEOUT_MS);
 
     if (gitPushOutput.exitCode !== 0) {
@@ -129,7 +134,10 @@ export async function commitAllAndPush(
   }
 }
 
-export async function checkoutBranchAndCommit(config: GraphConfig, sandbox: Sandbox) {
+export async function checkoutBranchAndCommit(
+  config: GraphConfig,
+  sandbox: Sandbox,
+) {
   console.log("\nChecking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(config);
   const branchName = getBranchName(config);
@@ -137,5 +145,5 @@ export async function checkoutBranchAndCommit(config: GraphConfig, sandbox: Sand
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
   console.log(`Committing changes to branch ${branchName}`);
   await commitAllAndPush(absoluteRepoDir, "Apply patch", sandbox);
-  console.log("Successfully checked out & committed changes.\n")
+  console.log("Successfully checked out & committed changes.\n");
 }

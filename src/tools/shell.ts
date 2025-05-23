@@ -53,7 +53,7 @@ export const shellTool = tool(
         return `Command failed. Exit code: ${result.exitCode}\nError: ${result.error}\nStderr:\n${result.stderr}`;
       }
 
-      const writeCommandExecuted = isWriteCommand(command)
+      const writeCommandExecuted = isWriteCommand(command);
       if (writeCommandExecuted) {
         await checkoutBranchAndCommit(config, sandbox);
       }
