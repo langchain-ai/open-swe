@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -37,7 +38,7 @@ const formatPrompt = (plan: PlanItem[]): string => {
 export async function progressPlanStep(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
   const modelWithTools = model.bindTools([confirmTaskCompletionTool], {
     tool_choice: confirmTaskCompletionTool.name,
@@ -61,28 +62,36 @@ export async function progressPlanStep(
   ).current_task_completed;
 
   if (!isCompleted) {
-    // Not completed, no changes need to be made
-    return {};
+    logger.info(
+      "Current task has not been completed. Progressing to the next action.",
+    );
+    return new Command({ goto: "generate-action" });
   }
 
   const remainingTask = state.plan.find((p) => !p.completed);
   if (!remainingTask) {
-    // No remaining tasks, end the process
     logger.info(
-      "Found no remaining tasks in the plan during the check plan step.",
+      "Found no remaining tasks in the plan during the check plan step. Progressing to the next action.",
     );
-    return {};
+    return new Command({ goto: "generate-action" });
   }
 
-  return {
-    plan: state.plan.map((p) => {
-      if (p.index === remainingTask.index) {
-        return {
-          ...p,
-          completed: true,
-        };
-      }
-      return p;
-    }),
-  };
+  logger.info("Task marked as completed. Routing to task summarization step.", {
+    remainingTask,
+  });
+
+  return new Command({
+    goto: "summarize-task-steps",
+    update: {
+      plan: state.plan.map((p) => {
+        if (p.index === remainingTask.index) {
+          return {
+            ...p,
+            completed: true,
+          };
+        }
+        return p;
+      }),
+    },
+  });
 }

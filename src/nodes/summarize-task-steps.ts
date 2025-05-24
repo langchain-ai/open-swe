@@ -10,6 +10,9 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -49,16 +52,18 @@ const condenseContextTool = {
 };
 
 function removeLastTaskMessages(messages: BaseMessage[]): BaseMessage[] {
-  return messages.map((m) => {
-    if (
-      m.additional_kwargs?.summary_message ||
-      (!isAIMessage(m) && !isToolMessage(m)) ||
-      !m.id
-    ) {
-      return m;
-    }
-    return new RemoveMessage({ id: m.id });
-  });
+  return messages
+    .filter((m) => {
+      if (
+        m.additional_kwargs?.summary_message ||
+        (!isAIMessage(m) && !isToolMessage(m)) ||
+        !m.id
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .map((m) => new RemoveMessage({ id: m.id ?? "" }));
 }
 
 export async function summarizeTaskSteps(
@@ -70,6 +75,7 @@ export async function summarizeTaskSteps(
     tool_choice: condenseContextTool.name,
   });
 
+  logger.info(`Summarizing task steps...`);
   const response = await modelWithTools.invoke([
     {
       role: "system",
@@ -92,9 +98,11 @@ export async function summarizeTaskSteps(
     },
   });
 
+  const removedMessages = removeLastTaskMessages(state.messages);
+  logger.info(`Removing ${removedMessages.length} message(s) from state.`);
   return {
     messages: [
-      ...removeLastTaskMessages(state.messages),
+      ...removedMessages,
       new AIMessage({
         ...response,
         additional_kwargs: {
