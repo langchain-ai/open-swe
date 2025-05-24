@@ -289,6 +289,41 @@ export const GraphConfiguration = z.object({
         description: "Controls randomness (0 = deterministic, 2 = creative)",
       },
     }),
+
+  /**
+   * The model ID to use for summarizing the conversation history.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
+  summarizerModelName: z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description:
+          "The model to use for summarizing the conversation history",
+        options: MODEL_OPTIONS_NO_THINKING,
+      },
+    }),
+  /**
+   * The temperature to use for summarizing the conversation history.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
+   */
+  summarizerTemperature: z
+    .number()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
+    }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

@@ -9,10 +9,24 @@ export const PLAN_PROMPT = `## Completed Tasks
 ## Current Task
 {CURRENT_TASK}`;
 
-export function formatPlanPrompt(plan: PlanItem[]): string {
+/**
+ * Formats a plan for use in a prompt.
+ * @param plan The plan to format
+ * @param options Options for formatting the plan
+ * @param options.useLastCompletedTask Whether to use the last completed task as the current task
+ * @returns The formatted plan
+ */
+export function formatPlanPrompt(
+  plan: PlanItem[],
+  options?: {
+    useLastCompletedTask?: boolean;
+  },
+): string {
   const completedTasks = plan.filter((p) => p.completed);
   const remainingTasks = plan.filter((p) => !p.completed);
-  const currentTask = remainingTasks.sort((a, b) => a.index - b.index)[0];
+  const currentTask = options?.useLastCompletedTask
+    ? completedTasks.sort((a, b) => a.index - b.index)[0]
+    : remainingTasks.sort((a, b) => a.index - b.index)[0];
 
   return PLAN_PROMPT.replace(
     "{COMPLETED_TASKS}",

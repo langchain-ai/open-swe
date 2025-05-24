@@ -42,7 +42,7 @@ export async function summarizer(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([condenseContextTool], {
     tool_choice: condenseContextTool.name,
   });

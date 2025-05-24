@@ -6,6 +6,7 @@ export enum Task {
   PLANNER_CONTEXT = "plannerContext",
   ACTION_GENERATOR = "actionGenerator",
   PROGRESS_PLAN_CHECKER = "progressPlanChecker",
+  SUMMARIZER = "summarizer",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
@@ -22,6 +23,10 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
     temperature: 0,
   },
   [Task.PROGRESS_PLAN_CHECKER]: {
+    modelName: "anthropic:claude-sonnet-4-0",
+    temperature: 0,
+  },
+  [Task.SUMMARIZER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
