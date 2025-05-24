@@ -20,16 +20,16 @@ async function runFromPlan() {
           "This repo contains the react/next.js code for my persona/portfolio site. It currently has static values set for the number of stars on the repositories I highlight. I want this to be accurate, but I do NOT want it to make requests to GitHub every time a user visits. Instead, please implement a solution which will run once a day, fetch the number of stars from a list of repos, then write them to vercel's KV store. Finally, update the UI to make a request to the KV store when the user visits my page and render the accurate star counts.",
       },
       {
-        id: "toolu_01BDCDYr7oGxJnfgY6MjXGnx",
+        id: "toolu_01RNEjViZFBXgCSNMwqKvkVL",
         role: "assistant",
         content: [
           {
             index: 0,
             type: "tool_use",
-            id: "toolu_01BDCDYr7oGxJnfgY6MjXGnx",
+            id: "toolu_01RNEjViZFBXgCSNMwqKvkVL",
             name: "condense_planning_context",
             input:
-              '{"context": "The user has a React/Next.js portfolio site with static star counts for GitHub repositories. The project structure shows:\\n\\n1. **Current Implementation**: \\n   - Main page at `./personal-site/src/app/page.tsx` contains hardcoded star values for 6 repositories:\\n     - langchain-ai/langchainjs (14.3k stars)\\n     - langchain-ai/langgraphjs (1.3k stars) \\n     - langchain-ai/open-canvas (4.4k stars)\\n     - langchain-ai/agent-inbox (496 stars)\\n     - langchain-ai/agent-chat-ui (583 stars)\\n     - langchain-ai/social-media-agent (1.2k stars)\\n   - Stars are displayed in ProjectCard components with a stars prop\\n\\n2. **Dependencies**: \\n   - Project already has `@vercel/kv` dependency installed\\n   - Uses Next.js 15.2.3 with TypeScript\\n   - Has existing API routes in `./personal-site/src/app/api/` including gh-viewer route that already uses Vercel KV\\n\\n3. **Requirements**:\\n   - Implement daily GitHub API fetching for star counts\\n   - Store results in Vercel KV store  \\n   - Update UI to fetch from KV store instead of static values\\n   - Avoid GitHub API calls on every user visit\\n\\n4. **Repository URLs to track**:\\n   - https://github.com/langchain-ai/langchainjs\\n   - https://github.com/langchain-ai/langgraphjs  \\n   - https://github.com/langchain-ai/open-canvas\\n   - https://github.com/langchain-ai/agent-inbox\\n   - https://github.com/langchain-ai/agent-chat-ui\\n   - https://github.com/langchain-ai/social-media-agent"}',
+              '{"context": "The user has a React/Next.js portfolio site with static star counts for GitHub repositories. The project structure is:\\n\\n- Located in ./personal-site/ directory\\n- Uses Next.js 15.2.3 with TypeScript\\n- Already has @vercel/kv dependency installed\\n- Main page at src/app/page.tsx contains hardcoded star values for 6 repositories:\\n  - langchain-ai/langchainjs (14.3k stars)\\n  - langchain-ai/langgraphjs (1.3k stars) \\n  - langchain-ai/open-canvas (4.4k stars)\\n  - langchain-ai/agent-inbox (496 stars)\\n  - langchain-ai/agent-chat-ui (583 stars)\\n  - langchain-ai/social-media-agent (1.2k stars)\\n\\n- Stars are displayed in ProjectCard components with a stars prop\\n- Existing API routes in src/app/api/ (gh-viewer and gh-viewer-v2)\\n- The gh-viewer route already uses Vercel KV for storing view counts\\n\\nThe user wants to:\\n1. Create a daily cron job to fetch real GitHub star counts\\n2. Store the data in Vercel KV\\n3. Update the UI to fetch from KV instead of using static values\\n4. Avoid making GitHub API calls on every page visit\\n\\nThe project already has the necessary infrastructure (Vercel KV, API routes) and just needs the GitHub star fetching logic and UI updates."}',
           },
         ],
         tool_calls: [
@@ -37,18 +37,24 @@ async function runFromPlan() {
             name: "condense_planning_context",
             args: {
               context:
-                "The user has a React/Next.js portfolio site with static star counts for GitHub repositories. The project structure shows:\n\n1. **Current Implementation**: \n   - Main page at `./personal-site/src/app/page.tsx` contains hardcoded star values for 6 repositories:\n     - langchain-ai/langchainjs (14.3k stars)\n     - langchain-ai/langgraphjs (1.3k stars) \n     - langchain-ai/open-canvas (4.4k stars)\n     - langchain-ai/agent-inbox (496 stars)\n     - langchain-ai/agent-chat-ui (583 stars)\n     - langchain-ai/social-media-agent (1.2k stars)\n   - Stars are displayed in ProjectCard components with a stars prop\n\n2. **Dependencies**: \n   - Project already has `@vercel/kv` dependency installed\n   - Uses Next.js 15.2.3 with TypeScript\n   - Has existing API routes in `./personal-site/src/app/api/` including gh-viewer route that already uses Vercel KV\n\n3. **Requirements**:\n   - Implement daily GitHub API fetching for star counts\n   - Store results in Vercel KV store  \n   - Update UI to fetch from KV store instead of static values\n   - Avoid GitHub API calls on every user visit\n\n4. **Repository URLs to track**:\n   - https://github.com/langchain-ai/langchainjs\n   - https://github.com/langchain-ai/langgraphjs  \n   - https://github.com/langchain-ai/open-canvas\n   - https://github.com/langchain-ai/agent-inbox\n   - https://github.com/langchain-ai/agent-chat-ui\n   - https://github.com/langchain-ai/social-media-agent",
+                "The user has a React/Next.js portfolio site with static star counts for GitHub repositories. The project structure is:\n\n- Located in ./personal-site/ directory\n- Uses Next.js 15.2.3 with TypeScript\n- Already has @vercel/kv dependency installed\n- Main page at src/app/page.tsx contains hardcoded star values for 6 repositories:\n  - langchain-ai/langchainjs (14.3k stars)\n  - langchain-ai/langgraphjs (1.3k stars) \n  - langchain-ai/open-canvas (4.4k stars)\n  - langchain-ai/agent-inbox (496 stars)\n  - langchain-ai/agent-chat-ui (583 stars)\n  - langchain-ai/social-media-agent (1.2k stars)\n\n- Stars are displayed in ProjectCard components with a stars prop\n- Existing API routes in src/app/api/ (gh-viewer and gh-viewer-v2)\n- The gh-viewer route already uses Vercel KV for storing view counts\n\nThe user wants to:\n1. Create a daily cron job to fetch real GitHub star counts\n2. Store the data in Vercel KV\n3. Update the UI to fetch from KV instead of using static values\n4. Avoid making GitHub API calls on every page visit\n\nThe project already has the necessary infrastructure (Vercel KV, API routes) and just needs the GitHub star fetching logic and UI updates.",
             },
-            id: "toolu_01BDCDYr7oGxJnfgY6MjXGnx",
+            id: "toolu_01RNEjViZFBXgCSNMwqKvkVL",
             type: "tool_call",
           },
         ],
+        additional_kwargs: {
+          summary_message: true,
+        },
       },
       {
         role: "tool",
-        tool_call_id: "toolu_01BDCDYr7oGxJnfgY6MjXGnx",
+        tool_call_id: "toolu_01RNEjViZFBXgCSNMwqKvkVL",
         name: "condense_planning_context",
         content: "Successfully summarized planning context.",
+        additional_kwargs: {
+          summary_message: true,
+        },
       },
     ],
     plan: [
@@ -143,7 +149,8 @@ async function runFromPlan() {
   });
 
   for await (const chunk of stream) {
-    console.dir(chunk.data, { depth: null });
+    const node = Object.keys(chunk.data)[0];
+    console.log(`${node} completed.\n`);
   }
 }
 

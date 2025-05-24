@@ -41,7 +41,8 @@ async function runE2E() {
   console.log(`\nRun started with thread ID: "${threadId}"\n`);
 
   for await (const chunk of stream) {
-    console.dir(chunk.data, { depth: null });
+    const node = Object.keys(chunk.data)[0];
+    console.log(`${node} completed.\n`);
   }
 }
 
@@ -58,17 +59,31 @@ async function resumeGraph(threadId: string) {
       args: null,
     },
   ];
+  const configurable: Omit<
+    GraphConfig["configurable"],
+    "thread_id" | "assistant_id"
+  > = {
+    target_repository: {
+      owner: "bracesproul",
+      repo: "personal-site",
+    },
+  };
 
   const stream = client.runs.stream(threadId, "open-swe", {
     command: {
       resume: resumeValue,
+    },
+    config: {
+      configurable,
+      recursion_limit: 200,
     },
     streamSubgraphs: true,
     streamMode: "updates",
   });
 
   for await (const chunk of stream) {
-    console.dir(chunk.data, { depth: null });
+    const node = Object.keys(chunk.data)[0];
+    console.log(`${node} completed.\n`);
   }
 }
 

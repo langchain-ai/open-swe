@@ -3,14 +3,16 @@ import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
   AIMessage,
-  BaseMessage,
-  isAIMessage,
-  isToolMessage,
-  RemoveMessage,
+  isHumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { getMessageString } from "../utils/message/content.js";
+import {
+  removeFirstHumanMessage,
+  removeLastTaskMessages,
+} from "../utils/message/modify-array.js";
 
 const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
@@ -51,21 +53,6 @@ const condenseContextTool = {
   schema: condenseContextToolSchema,
 };
 
-function removeLastTaskMessages(messages: BaseMessage[]): BaseMessage[] {
-  return messages
-    .filter((m) => {
-      if (
-        m.additional_kwargs?.summary_message ||
-        (!isAIMessage(m) && !isToolMessage(m)) ||
-        !m.id
-      ) {
-        return false;
-      }
-      return true;
-    })
-    .map((m) => new RemoveMessage({ id: m.id ?? "" }));
-}
-
 export async function summarizeTaskSteps(
   state: GraphState,
   config: GraphConfig,
@@ -75,13 +62,26 @@ export async function summarizeTaskSteps(
     tool_choice: condenseContextTool.name,
   });
 
+  const firstUserMessage = state.messages.find(isHumanMessage);
+
+  const conversationHistoryStr = `Here is the full conversation history for the task after the user's request.
+This history includes any previous summarization/condensation of the conversation history. Ensure you do NOT summarize those messages, or duplicate any information present in them, but do use them as context so you know what has already been seen and summarized.
+
+${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
+
+Given this full conversation history please generate a concise, and useful summary of the conversation history for this task. Ensure you pass this condensed context to the \`condense_task_context\` tool.`;
+
   logger.info(`Summarizing task steps...`);
   const response = await modelWithTools.invoke([
     {
       role: "system",
       content: formatPrompt(state.plan),
     },
-    ...state.messages,
+    ...(firstUserMessage ? [firstUserMessage] : []),
+    {
+      role: "user",
+      content: conversationHistoryStr,
+    },
   ]);
 
   const toolCall = response.tool_calls?.[0];

@@ -7,7 +7,10 @@ import {
   isHumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { getMessageContentString } from "../../../utils/message-content.js";
+import {
+  getMessageContentString,
+  getMessageString,
+} from "../../../utils/message/content.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -53,6 +56,10 @@ export async function summarizer(
 
   const firstUserMessage = state.messages.find(isHumanMessage);
 
+  const conversationHistoryStr = `Here is the full conversation history:
+
+${state.plannerMessages.map(getMessageString).join("\n")}`;
+
   const response = await modelWithTools.invoke([
     {
       role: "system",
@@ -62,7 +69,10 @@ export async function summarizer(
         ),
       ),
     },
-    ...state.plannerMessages,
+    {
+      role: "user",
+      content: conversationHistoryStr,
+    },
   ]);
 
   const toolCall = response.tool_calls?.[0];
