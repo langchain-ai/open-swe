@@ -1,22 +1,50 @@
-export function fixGitPatch(patchString, fileContents) {
+interface Hunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  context: string;
+  lines: string[];
+}
+
+interface PatchFile {
+  oldFile: string;
+  newFile: string | null;
+  hunks: Hunk[];
+}
+
+interface ParsedPatch {
+  files: PatchFile[];
+}
+
+interface FileContents {
+  [filename: string]: string;
+}
+
+export function fixGitPatch(
+  patchString: string,
+  fileContents: FileContents,
+): string {
   // First, normalize the patch string - convert literal \n to actual newlines if needed
-  const normalizedPatch = patchString.includes("\\n")
+  const normalizedPatch: string = patchString.includes("\\n")
     ? patchString.replace(/\\n/g, "\n")
     : patchString;
 
   // Parse patch into structured format
-  function parsePatch(patch) {
-    const lines = patch.split("\n").filter((line) => line !== undefined);
-    const result = {
+  function parsePatch(patch: string): ParsedPatch {
+    const lines: string[] = patch
+      .split("\n")
+      .filter((line): line is string => line !== undefined);
+    const result: ParsedPatch = {
       files: [],
     };
 
-    let currentFile = null;
-    let currentHunk = null;
-    let i = 0;
+    let currentFile: PatchFile | null = null;
+    let currentHunk: Hunk | null = null;
+    let i: number = 0;
 
     while (i < lines.length) {
-      const line = lines[i];
+      const line: string = lines[i];
 
       // Skip empty lines between files
       if (!line && !currentHunk) {
@@ -30,7 +58,7 @@ export function fixGitPatch(patchString, fileContents) {
           result.files.push(currentFile);
         }
         // Handle both --- a/file and --- file formats
-        const filename = line.startsWith("--- a/")
+        const filename: string = line.startsWith("--- a/")
           ? line.substring(6)
           : line.substring(4);
         currentFile = {
@@ -54,7 +82,7 @@ export function fixGitPatch(patchString, fileContents) {
 
       // Hunk header
       if (line.startsWith("@@")) {
-        const match = line.match(
+        const match: RegExpMatchArray | null = line.match(
           /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/,
         );
         if (match) {
@@ -97,14 +125,14 @@ export function fixGitPatch(patchString, fileContents) {
   }
 
   // Get file content as array of lines
-  function getFileLines(filename, contents) {
+  function getFileLines(filename: string, contents: FileContents): string[] {
     // Handle /dev/null for new files
     if (filename === "/dev/null") {
       return [];
     }
 
     // Try multiple variations of the filename
-    const variations = [
+    const variations: string[] = [
       filename,
       filename.replace(/^\.\//, ""),
       "./" + filename,
@@ -123,20 +151,20 @@ export function fixGitPatch(patchString, fileContents) {
   }
 
   // Check if this is a new file creation
-  function isNewFile(hunk) {
+  function isNewFile(hunk: Hunk): boolean {
     return hunk.oldStart === 0 && hunk.oldLines === 0;
   }
 
   // Check if this is a file deletion
-  function isFileDeleted(hunk) {
+  function isFileDeleted(hunk: Hunk): boolean {
     return hunk.newStart === 0 && hunk.newLines === 0;
   }
 
   // Fix a single hunk
-  function fixHunk(hunk, fileLines) {
+  function fixHunk(hunk: Hunk, fileLines: string[]): Hunk {
     // For new files, just validate line counts
     if (isNewFile(hunk)) {
-      let newCount = 0;
+      let newCount: number = 0;
       for (const line of hunk.lines) {
         if (line.startsWith("+")) {
           newCount++;
@@ -155,7 +183,7 @@ export function fixGitPatch(patchString, fileContents) {
 
     // For file deletions
     if (isFileDeleted(hunk)) {
-      let oldCount = 0;
+      let oldCount: number = 0;
       for (const line of hunk.lines) {
         if (line.startsWith("-")) {
           oldCount++;
@@ -174,7 +202,7 @@ export function fixGitPatch(patchString, fileContents) {
 
     // For regular modifications
     // Extract context and removed lines for matching
-    const matchLines = [];
+    const matchLines: string[] = [];
     for (const line of hunk.lines) {
       if (line.startsWith(" ") || line.startsWith("-")) {
         matchLines.push(line.substring(1));
@@ -182,14 +210,14 @@ export function fixGitPatch(patchString, fileContents) {
     }
 
     // Find where this hunk actually belongs
-    let actualStart = -1;
+    let actualStart: number = -1;
     if (matchLines.length > 0 && fileLines.length > 0) {
       actualStart = findBestMatch(fileLines, matchLines, hunk.oldStart);
     }
 
     // Count actual old and new lines
-    let oldCount = 0;
-    let newCount = 0;
+    let oldCount: number = 0;
+    let newCount: number = 0;
 
     for (const line of hunk.lines) {
       if (line.startsWith(" ")) {
@@ -214,7 +242,11 @@ export function fixGitPatch(patchString, fileContents) {
   }
 
   // Find best match for lines in file
-  function findBestMatch(fileLines, searchLines, startHint) {
+  function findBestMatch(
+    fileLines: string[],
+    searchLines: string[],
+    startHint: number,
+  ): number {
     if (searchLines.length === 0) {
       return startHint - 1;
     }
@@ -225,8 +257,8 @@ export function fixGitPatch(patchString, fileContents) {
     }
 
     // Search nearby lines
-    const searchRadius = Math.min(100, fileLines.length);
-    for (let offset = 1; offset <= searchRadius; offset++) {
+    const searchRadius: number = Math.min(100, fileLines.length);
+    for (let offset: number = 1; offset <= searchRadius; offset++) {
       // Try before
       if (
         startHint - 1 - offset >= 0 &&
@@ -244,7 +276,7 @@ export function fixGitPatch(patchString, fileContents) {
     }
 
     // Search entire file
-    for (let i = 0; i <= fileLines.length - searchLines.length; i++) {
+    for (let i: number = 0; i <= fileLines.length - searchLines.length; i++) {
       if (matchesAt(fileLines, searchLines, i)) {
         return i;
       }
@@ -254,12 +286,16 @@ export function fixGitPatch(patchString, fileContents) {
   }
 
   // Check if lines match at position
-  function matchesAt(fileLines, searchLines, position) {
+  function matchesAt(
+    fileLines: string[],
+    searchLines: string[],
+    position: number,
+  ): boolean {
     if (position < 0 || position + searchLines.length > fileLines.length) {
       return false;
     }
 
-    for (let i = 0; i < searchLines.length; i++) {
+    for (let i: number = 0; i < searchLines.length; i++) {
       if (fileLines[position + i].trim() !== searchLines[i].trim()) {
         return false;
       }
@@ -268,8 +304,8 @@ export function fixGitPatch(patchString, fileContents) {
   }
 
   // Rebuild patch string
-  function buildPatch(patchData) {
-    const result = [];
+  function buildPatch(patchData: ParsedPatch): string {
+    const result: string[] = [];
 
     for (const file of patchData.files) {
       // Use the exact format from the original patch
@@ -281,17 +317,17 @@ export function fixGitPatch(patchString, fileContents) {
         result.push(`+++ ${file.newFile}`);
       }
 
-      let cumulativeOffset = 0;
+      let cumulativeOffset: number = 0;
 
       for (const hunk of file.hunks) {
         // For new files, keep newStart at 1
-        let adjustedNewStart = hunk.newStart;
+        let adjustedNewStart: number = hunk.newStart;
         if (!isNewFile(hunk) && !isFileDeleted(hunk)) {
           adjustedNewStart = hunk.newStart + cumulativeOffset;
         }
 
         // Build hunk header
-        let header = `@@ -${hunk.oldStart}`;
+        let header: string = `@@ -${hunk.oldStart}`;
         if (hunk.oldLines !== 1 || hunk.oldStart === 0) {
           header += `,${hunk.oldLines}`;
         }
@@ -322,18 +358,18 @@ export function fixGitPatch(patchString, fileContents) {
 
   // Main logic
   try {
-    const parsed = parsePatch(normalizedPatch);
+    const parsed: ParsedPatch = parsePatch(normalizedPatch);
 
     if (parsed.files.length === 0) {
       return patchString;
     }
 
     for (const file of parsed.files) {
-      const fileLines = getFileLines(file.oldFile, fileContents);
-      const fixedHunks = [];
+      const fileLines: string[] = getFileLines(file.oldFile, fileContents);
+      const fixedHunks: Hunk[] = [];
 
       for (const hunk of file.hunks) {
-        const fixedHunk = fixHunk(hunk, fileLines);
+        const fixedHunk: Hunk = fixHunk(hunk, fileLines);
         if (fixedHunk) {
           fixedHunks.push(fixedHunk);
         }
@@ -342,7 +378,7 @@ export function fixGitPatch(patchString, fileContents) {
       file.hunks = fixedHunks;
     }
 
-    const result = buildPatch(parsed);
+    const result: string = buildPatch(parsed);
 
     // If original had literal \n, convert back
     if (patchString.includes("\\n") && !result.includes("\\n")) {
@@ -350,7 +386,7 @@ export function fixGitPatch(patchString, fileContents) {
     }
 
     return result;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fixing patch:", error);
     return patchString;
   }
