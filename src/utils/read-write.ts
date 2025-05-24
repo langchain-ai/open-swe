@@ -62,7 +62,10 @@ export async function writeFile(
   output: string;
 }> {
   try {
-    const writeCommand = `printf '%s' '${content}' > "${filePath}"`;
+    const delimiter = "EOF_" + Date.now() + "_" + Math.random().toString(36);
+    const writeCommand = `cat > "${filePath}" << '${delimiter}'
+${content}
+${delimiter}`;
     const writeOutput = await sandbox.commands.run(writeCommand);
     // Add an extra 5 min timeout to the sandbox.
     await sandbox.setTimeout(TIMEOUT_MS);

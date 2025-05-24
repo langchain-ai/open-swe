@@ -24,13 +24,13 @@ You MUST adhere to the following criteria when executing the task:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
+- Remember to always properly format and quote your shell commands.
 - All changes are automatically committed, so you should not worry about creating backups, or committing changes.
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Avoid writing to files which you have not already read.
-        - If writing to an empty file, or completely overwriting a file, you should not use \`apply_patch\` and instead use \`cat\` via the \`shell\` tool to write the file contents directly.
+        - If a call to \`apply_patch\` fails, it can be helpful to re-read the file to ensure you are up to date on its content.
         - Fix the problem at the root cause rather than applying surface-level patches, when possible.
         - Avoid unneeded complexity in your solution.
             - Ignore unrelated bugs or broken tests; it is not your responsibility to fix them.

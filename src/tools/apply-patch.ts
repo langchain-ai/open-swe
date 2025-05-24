@@ -5,6 +5,7 @@ import { GraphState } from "../types.js";
 import { Sandbox } from "@e2b/code-interpreter";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
+import { fixGitPatch } from "../utils/diff.js";
 
 const applyPatchToolSchema = z.object({
   diff: z.string().describe("The diff to apply. Use a standard diff format."),
@@ -40,7 +41,11 @@ export const applyPatchTool = tool(
 
     let patchedContent: string | false;
     try {
-      patchedContent = applyPatch(readFileOutput, diff);
+      const fixedDiff = fixGitPatch(diff, {
+        [file_path]: readFileOutput,
+      });
+      console.log("\n\nfixedDiff\n\n", fixedDiff);
+      patchedContent = applyPatch(readFileOutput, fixedDiff);
     } catch (e) {
       console.error("Failed to apply patch", e);
       const errMessage = e instanceof Error ? e.message : "Unknown error";
