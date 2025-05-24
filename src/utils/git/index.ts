@@ -1,7 +1,10 @@
 import { CommandResult, Sandbox } from "@e2b/code-interpreter";
+import { createLogger, LogLevel } from "../logger.js";
 import { GraphConfig } from "../../types.js";
 import { TIMEOUT_MS } from "../../constants.js";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
+
+const logger = createLogger(LogLevel.INFO, "GitUtil");
 
 export function getRepoAbsolutePath(config: GraphConfig): string {
   const repoName = config.configurable?.target_repository.repo;
@@ -26,9 +29,7 @@ export async function checkoutBranch(
   branchName: string,
   sandbox: Sandbox,
 ): Promise<CommandResult | false> {
-  console.log("\nChecking out branch...", {
-    branchName,
-  });
+  logger.info(`Checking out branch '${branchName}'...`);
 
   try {
     const getCurrentBranchOutput = await sandbox.commands.run(
@@ -38,11 +39,13 @@ export async function checkoutBranch(
     await sandbox.setTimeout(TIMEOUT_MS);
 
     if (getCurrentBranchOutput.exitCode !== 0) {
-      console.error("Failed to get current branch", getCurrentBranchOutput);
+      logger.error(`Failed to get current branch`, {
+        getCurrentBranchOutput,
+      });
     } else {
       const currentBranch = getCurrentBranchOutput.stdout.trim();
       if (currentBranch === branchName) {
-        console.log(`\nAlready on branch '${branchName}'. No checkout needed.`);
+        logger.info(`Already on branch '${branchName}'. No checkout needed.`);
         return {
           stdout: `Already on branch ${branchName}`,
           stderr: "",
@@ -52,15 +55,22 @@ export async function checkoutBranch(
     }
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
-    console.error("Failed to get current branch", errorFields ?? e);
+    logger.error(`Failed to get current branch`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
     return false;
   }
 
   let checkoutCommand: string;
   try {
-    console.log("\nChecking if branch exists...", {
-      command: `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
-    });
+    logger.info(
+      `Checking if branch 'refs/heads/${branchName}' exists using 'git rev-parse --verify --quiet'`,
+    );
     // Check if branch exists using git rev-parse for robustness
     const checkBranchExistsOutput = await sandbox.commands.run(
       `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
@@ -85,7 +95,13 @@ export async function checkoutBranch(
     ) {
       checkoutCommand = `git checkout -b "${branchName}"`;
     } else {
-      console.error("\nError checking if branch exists", e);
+      logger.error(`Error checking if branch exists`, {
+        ...(e instanceof Error && {
+          name: e.name,
+          message: e.message,
+          stack: e.stack,
+        }),
+      });
       return false;
     }
   }
@@ -96,19 +112,27 @@ export async function checkoutBranch(
     });
 
     if (gitCheckoutOutput.exitCode !== 0) {
-      console.error("\nFailed to checkout branch", gitCheckoutOutput);
+      logger.error(`Failed to checkout branch`, {
+        gitCheckoutOutput,
+      });
       return false;
     }
 
-    console.log("\nChecked out branch successfully.", {
-      branchName,
-      gitCheckoutOutput: gitCheckoutOutput.stdout,
+    logger.info(`Checked out branch '${branchName}' successfully.`, {
+      gitCheckoutOutput,
     });
 
     return gitCheckoutOutput;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
-    console.error("Error checking out branch", errorFields ?? e);
+    logger.error(`Error checking out branch`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
     return false;
   }
 }
@@ -126,7 +150,7 @@ async function getGitUserDetailsFromGitHub(): Promise<{
 }> {
   const githubToken = process.env.GITHUB_PAT;
   if (!githubToken) {
-    console.warn(
+    logger.warn(
       "GITHUB_PAT environment variable is not set. Cannot fetch user details from GitHub.",
     );
     return {};
@@ -141,9 +165,9 @@ async function getGitUserDetailsFromGitHub(): Promise<{
     });
 
     if (!response.ok) {
-      console.error(
-        `Failed to fetch GitHub user info: ${response.status} ${response.statusText}. Response: ${await response.text()}`,
-      );
+      logger.error(`Failed to fetch GitHub user info`, {
+        response,
+      });
       return {};
     }
 
@@ -161,14 +185,20 @@ async function getGitUserDetailsFromGitHub(): Promise<{
     const finalUserEmail = fetchedUserEmail || undefined;
 
     if (!finalUserName) {
-      console.warn("Could not determine GitHub username from API response.");
+      logger.warn("Could not determine GitHub username from API response.");
     }
     if (!finalUserEmail) {
-      console.warn("Could not determine GitHub user email from API response.");
+      logger.warn("Could not determine GitHub user email from API response.");
     }
     return { userName: finalUserName, userEmail: finalUserEmail };
   } catch (e) {
-    console.error("Error fetching GitHub user info:", e);
+    logger.error(`Error fetching GitHub user info`, {
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
     return {};
   }
 }
@@ -197,10 +227,13 @@ export async function configureGitUserInRepo(
       needsGitConfig = true;
     }
   } catch (checkError) {
-    console.warn(
-      "Could not check existing git config, will attempt to set it:",
-      checkError,
-    );
+    logger.warn(`Could not check existing git config, will attempt to set it`, {
+      ...(checkError instanceof Error && {
+        name: checkError.name,
+        message: checkError.message,
+        stack: checkError.stack,
+      }),
+    });
     needsGitConfig = true;
   }
 
@@ -214,14 +247,11 @@ export async function configureGitUserInRepo(
       );
       await sandbox.setTimeout(TIMEOUT_MS);
       if (configUserNameOutput.exitCode !== 0) {
-        console.error(
-          "Failed to set git user.name:",
-          configUserNameOutput.stderr || configUserNameOutput.stdout,
-        );
-      } else {
-        console.log("\nSet git user.name successfully.", {
-          userName,
+        logger.error(`Failed to set git user.name`, {
+          configUserNameOutput,
         });
+      } else {
+        logger.info(`Set git user.name to '${userName}' successfully.`);
       }
     }
 
@@ -232,18 +262,15 @@ export async function configureGitUserInRepo(
       );
       await sandbox.setTimeout(TIMEOUT_MS);
       if (configUserEmailOutput.exitCode !== 0) {
-        console.error(
-          "Failed to set git user.email:",
-          configUserEmailOutput.stderr || configUserEmailOutput.stdout,
-        );
-      } else {
-        console.log("\nSet git user.email successfully.", {
-          userEmail,
+        logger.error(`Failed to set git user.email`, {
+          configUserEmailOutput,
         });
+      } else {
+        logger.info(`Set git user.email to '${userEmail}' successfully.`);
       }
     }
   } else {
-    console.log(
+    logger.info(
       "Git user.name and user.email are already configured in this repository.",
     );
   }
@@ -262,14 +289,21 @@ export async function commitAll(
     await sandbox.setTimeout(TIMEOUT_MS);
 
     if (gitAddOutput.exitCode !== 0) {
-      console.error(
-        "Failed to commit all changes to git repository",
+      logger.error(`Failed to commit all changes to git repository`, {
         gitAddOutput,
-      );
+      });
     }
     return gitAddOutput;
   } catch (e) {
-    console.error("Failed to commit all changes to git repository", e);
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to commit all changes to git repository`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
     return false;
   }
 }
@@ -295,13 +329,23 @@ export async function commitAllAndPush(
     await sandbox.setTimeout(TIMEOUT_MS);
 
     if (gitPushOutput.exitCode !== 0) {
-      console.error("Failed to push changes to git repository", gitPushOutput);
+      logger.error(`Failed to push changes to git repository`, {
+        gitPushOutput,
+      });
       return false;
     }
 
     return gitPushOutput;
   } catch (e) {
-    console.error("Failed to commit all and push changes to git repository", e);
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to commit all and push changes to git repository`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
     return false;
   }
 }
@@ -315,7 +359,9 @@ export async function getChangedFilesStatus(
   });
 
   if (gitStatusOutput.exitCode !== 0) {
-    console.error("Failed to get changed files status", gitStatusOutput);
+    logger.error(`Failed to get changed files status`, {
+      gitStatusOutput,
+    });
     return [];
   }
 
@@ -332,15 +378,15 @@ export async function checkoutBranchAndCommit(
     branchName?: string;
   },
 ): Promise<string> {
-  console.log("\nChecking out branch and committing changes...");
+  logger.info("Checking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(config);
   const branchName = options?.branchName || getBranchName(config);
 
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
 
-  console.log(`Committing changes to branch ${branchName}`);
+  logger.info(`Committing changes to branch ${branchName}`);
   await commitAllAndPush(absoluteRepoDir, "Apply patch", sandbox);
-  console.log("Successfully checked out & committed changes.\n");
+  logger.info("Successfully checked out & committed changes.");
 
   return branchName;
 }

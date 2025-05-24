@@ -3,6 +3,9 @@ import { loadModel, Task } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { pauseSandbox } from "../utils/sandbox.js";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -81,10 +84,14 @@ export async function generateAction(
   // No tool calls means the graph is going to end. Pause the sandbox.
   let newSandboxSessionId: string | undefined;
   if (!hasToolCalls && state.sandboxSessionId) {
-    console.log("No tool calls found. Pausing sandbox...");
+    logger.info("No tool calls found. Pausing sandbox...");
     newSandboxSessionId = await pauseSandbox(state.sandboxSessionId);
   }
 
+  logger.info("Generated action", {
+    name: response.tool_calls?.[0].name,
+    args: response.tool_calls?.[0].args,
+  });
   return {
     messages: [response],
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),

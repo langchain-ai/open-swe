@@ -1,7 +1,10 @@
 import { z } from "zod";
+import { createLogger, LogLevel } from "../utils/logger.js";
 import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
+
+const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -65,7 +68,7 @@ export async function progressPlanStep(
   const remainingTask = state.plan.find((p) => !p.completed);
   if (!remainingTask) {
     // No remaining tasks, end the process
-    console.log(
+    logger.info(
       "Found no remaining tasks in the plan during the check plan step.",
     );
     return {};

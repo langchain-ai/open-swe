@@ -1,4 +1,5 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { createLogger, LogLevel } from "../utils/logger.js";
 import { applyPatchTool, shellTool } from "../tools/index.js";
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import {
@@ -7,6 +8,8 @@ import {
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
 import { Sandbox } from "@e2b/code-interpreter";
+
+const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeAction(
   state: GraphState,
@@ -45,7 +48,11 @@ export async function takeAction(
     // @ts-expect-error tool.invoke types are weird here...
     result = await tool.invoke(toolCall.args);
   } catch (e) {
-    console.error("\nFailed to call tool", e);
+    logger.error("Failed to call tool", {
+      ...(e instanceof Error
+        ? { name: e.name, message: e.message, stack: e.stack }
+        : { error: e }),
+    });
     const errMessage = e instanceof Error ? e.message : "Unknown error";
     result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
   }
@@ -66,7 +73,7 @@ export async function takeAction(
 
   let branchName: string | undefined = state.branchName;
   if (changedFiles.length > 0) {
-    console.log(`\nHas ${changedFiles.length} changed files. Committing...`, {
+    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
     branchName = await checkoutBranchAndCommit(config, sandbox, {

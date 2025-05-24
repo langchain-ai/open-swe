@@ -4,8 +4,9 @@ import { Sandbox } from "@e2b/code-interpreter";
 import { GraphState } from "../types.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { TIMEOUT_MS } from "../constants.js";
+import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 
-const DEFAULT_COMMAND_TIMEOUT = 120_000; // 2 minutes
+const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
 const shellToolSchema = z.object({
   command: z.array(z.string()).describe("The command to run"),
@@ -55,26 +56,28 @@ export const shellTool = tool(
       }
 
       return result.stdout;
-    } catch (e: any) {
-      if (typeof e === "object" && "result" in e && e.result) {
+    } catch (e) {
+      const errorFields = getSandboxErrorFields(e);
+      if (errorFields) {
         console.error("Failed to run command", {
-          error: e.message,
-          error_result: e.result,
           input,
+          error: errorFields,
         });
-        return (
-          "FAILED TO RUN COMMAND: " +
-          e.message +
-          "\n" +
-          JSON.stringify(e.result, null, 2)
-        );
+        return `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.error}\nStderr:\n${errorFields.stderr}\nStdout:\n${errorFields.stdout}`;
       }
 
-      console.error("Failed to run command: " + e.message, {
-        error: e,
-        input,
-      });
-      throw new Error("FAILED TO RUN COMMAND: " + e.message);
+      console.error(
+        "Failed to run command: " +
+          (e instanceof Error ? e.message : "Unknown error"),
+        {
+          error: e,
+          input,
+        },
+      );
+      throw new Error(
+        "FAILED TO RUN COMMAND: " +
+          (e instanceof Error ? e.message : "Unknown error"),
+      );
     }
   },
   {

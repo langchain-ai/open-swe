@@ -39,11 +39,9 @@ export async function loadModel(config: GraphConfig, task: Task) {
 
   let thinkingModel = false;
   if (modelNameParts[0] === "extended-thinking") {
-    console.log("THINKING ENABLED", modelNameParts);
     // Using a thinking model. Remove it from the model name.
     modelNameParts.shift();
     thinkingModel = true;
-    console.log("THINKING ENABLED", modelNameParts);
   }
 
   const modelName = modelNameParts.join(":");

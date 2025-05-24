@@ -1,4 +1,5 @@
 import { Sandbox } from "@e2b/code-interpreter";
+import { createLogger, LogLevel } from "../utils/logger.js";
 import {
   GraphState,
   GraphConfig,
@@ -13,6 +14,8 @@ import {
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+
+const logger = createLogger(LogLevel.INFO, "Initialize");
 
 const SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
 
@@ -32,7 +35,7 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
       gitCloneCommand.push(repoUrlWithToken);
     }
 
-    console.log("Cloning repository...", {
+    logger.info("Cloning repository", {
       command: gitCloneCommand.join(" "),
     });
     return await sandbox.commands.run(
@@ -41,7 +44,7 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
     );
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
-    console.error("Failed to clone repository", errorFields ?? e);
+    logger.error("Failed to clone repository", errorFields ?? e);
     throw e;
   }
 }
@@ -63,7 +66,7 @@ export async function initialize(
 
   if (sandboxSessionId) {
     try {
-      console.log("Sandbox session ID exists. Resuming...", {
+      logger.info("Sandbox session ID exists. Resuming", {
         sandboxSessionId,
       });
       // Resume the sandbox if the session ID is in the config.
@@ -76,7 +79,7 @@ export async function initialize(
       };
     } catch (e) {
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
-      console.error("Failed to get sandbox session.", e);
+      logger.error("Failed to get sandbox session", e);
     }
   }
 
@@ -88,7 +91,7 @@ export async function initialize(
     );
   }
 
-  console.log("Creating sandbox...");
+  logger.info("Creating sandbox...");
   const sandbox = await Sandbox.create(
     SANDBOX_TEMPLATE_ID,
     TIMEOUT_EXTENSION_OPT,
@@ -97,16 +100,16 @@ export async function initialize(
   const res = await cloneRepo(sandbox, target_repository);
   if (res.error) {
     // TODO: This should probably be an interrupt.
-    console.error("Failed to clone repository.", res.error);
+    logger.error("Failed to clone repository", res.error);
     throw new Error(`Failed to clone repository.\n${res.error}`);
   }
-  console.log("Repository cloned successfully.");
+  logger.info("Repository cloned successfully.");
 
   const absoluteRepoDir = getRepoAbsolutePath(config);
 
-  console.log(`Configuring git user for repository at "${absoluteRepoDir}"...`);
+  logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
   await configureGitUserInRepo(absoluteRepoDir, sandbox);
-  console.log("Git user configured successfully.");
+  logger.info("Git user configured successfully.");
 
   const checkoutBranchRes = await checkoutBranch(
     absoluteRepoDir,
@@ -116,7 +119,7 @@ export async function initialize(
 
   if (!checkoutBranchRes) {
     // TODO: This should probably be an interrupt.
-    console.error("\nFailed to checkout branch.");
+    logger.error("Failed to checkout branch.");
     throw new Error("Failed to checkout branch");
   }
 

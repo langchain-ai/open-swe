@@ -1,3 +1,7 @@
+import { createLogger, LogLevel } from "./logger.js";
+
+const logger = createLogger(LogLevel.INFO, "DiffUtil");
+
 interface Hunk {
   oldStart: number;
   oldLines: number;
@@ -386,8 +390,12 @@ export function fixGitPatch(
     }
 
     return result;
-  } catch (error: any) {
-    console.error("Error fixing patch:", error);
+  } catch (e) {
+    logger.error(`Error fixing patch:`, {
+      ...(e instanceof Error
+        ? { name: e.name, message: e.message, stack: e.stack }
+        : { error: e }),
+    });
     return patchString;
   }
 }
