@@ -13,6 +13,7 @@ import {
   removeFirstHumanMessage,
   removeLastTaskMessages,
 } from "../utils/message/modify-array.js";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
@@ -56,7 +57,7 @@ const condenseContextTool = {
 export async function summarizeTaskSteps(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([condenseContextTool], {
     tool_choice: condenseContextTool.name,
@@ -100,17 +101,34 @@ Given this full conversation history please generate a concise, and useful summa
 
   const removedMessages = removeLastTaskMessages(state.messages);
   logger.info(`Removing ${removedMessages.length} message(s) from state.`);
-  return {
-    messages: [
-      ...removedMessages,
-      new AIMessage({
-        ...response,
-        additional_kwargs: {
-          ...response.additional_kwargs,
-          summary_message: true,
-        },
-      }),
-      toolMessage,
-    ],
-  };
+
+  const allTasksCompleted = state.plan.every((p) => p.completed);
+
+  const newMessagesStateUpdate = [
+    ...removedMessages,
+    new AIMessage({
+      ...response,
+      additional_kwargs: {
+        ...response.additional_kwargs,
+        summary_message: true,
+      },
+    }),
+    toolMessage,
+  ];
+
+  if (!allTasksCompleted) {
+    return new Command({
+      goto: "generate-action",
+      update: {
+        messages: newMessagesStateUpdate,
+      },
+    });
+  }
+
+  return new Command({
+    goto: "generate-conclusion",
+    update: {
+      messages: newMessagesStateUpdate,
+    },
+  });
 }
