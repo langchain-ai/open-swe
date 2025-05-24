@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
   AIMessage,
