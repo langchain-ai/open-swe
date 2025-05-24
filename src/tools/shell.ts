@@ -5,6 +5,8 @@ import { GraphState } from "../types.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { TIMEOUT_MS } from "../constants.js";
 
+const DEFAULT_COMMAND_TIMEOUT = 120_000; // 2 minutes
+
 const shellToolSchema = z.object({
   command: z.array(z.string()).describe("The command to run"),
   workdir: z
@@ -14,6 +16,7 @@ const shellToolSchema = z.object({
   timeout: z
     .number()
     .optional()
+    .default(DEFAULT_COMMAND_TIMEOUT)
     .describe(
       "The maximum time to wait for the command to complete in milliseconds.",
     ),
@@ -36,7 +39,7 @@ export const shellTool = tool(
       const sandbox = await Sandbox.connect(sandboxSessionId);
       const { command, workdir, timeout } = input;
       const result = await sandbox.commands.run(command.join(" "), {
-        timeoutMs: timeout,
+        timeoutMs: timeout ?? DEFAULT_COMMAND_TIMEOUT,
         cwd: workdir,
       });
       // Add an extra 5 min timeout to the sandbox.

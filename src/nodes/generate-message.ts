@@ -25,6 +25,7 @@ You MUST adhere to the following criteria when executing the task:
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
 - User instructions may overwrite the *CODING GUIDELINES* section in this developer message.
+- All changes are automatically committed, so you should not worry about creating backups, or committing changes.
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:

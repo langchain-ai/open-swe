@@ -40,8 +40,16 @@ export async function takeAction(
     );
   }
 
-  // @ts-expect-error tool.invoke types are weird here...
-  const result: string = await tool.invoke(toolCall.args);
+  let result = "";
+  try {
+    // @ts-expect-error tool.invoke types are weird here...
+    result = await tool.invoke(toolCall.args);
+  } catch (e) {
+    console.error("\nFailed to call tool", e);
+    const errMessage = e instanceof Error ? e.message : "Unknown error";
+    result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+  }
+
   const toolMessage = new ToolMessage({
     tool_call_id: toolCall.id ?? "",
     content: result,
