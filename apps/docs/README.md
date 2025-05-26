@@ -1,6 +1,6 @@
-# Open Agent Platform Docs
+# Open SWE Docs
 
-The OAP docs are built with Mintlify. To preview the docs locally, run the following command:
+The Open SWE docs are built with Mintlify. To preview the docs locally, run the following command:
 
 ```bash
 npx mintlify dev
