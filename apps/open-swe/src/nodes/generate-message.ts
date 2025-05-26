@@ -76,7 +76,9 @@ You MUST adhere to the following criteria when executing the task:
 
 const formatPrompt = (plan: PlanItem[], config: GraphConfig): string => {
   const repoDirectory = getRepoAbsolutePath(config);
-  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan)).replace("{REPO_DIRECTORY}", repoDirectory);
+  return systemPrompt
+    .replace("{PLAN_PROMPT}", formatPlanPrompt(plan))
+    .replaceAll("{REPO_DIRECTORY}", repoDirectory);
 };
 
 export async function generateAction(

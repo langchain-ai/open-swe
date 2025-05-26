@@ -16,7 +16,7 @@ async function runE2E() {
   const threadId = uuidv4();
 
   const userRequest =
-    "The system message contains a REPO_DIRECTORY variable. But nothing is formatted in that variable. Please make sure to format the REPO_DIRECTORY variable in the system message. You will probably want to move the repo directory info from config to the State."
+    "The system message contains a REPO_DIRECTORY variable. But nothing is formatted in that variable. Please make sure to format the REPO_DIRECTORY variable in the system message. You will probably want to move the repo directory info from config to the State.";
   const configurable: Omit<
     GraphConfig["configurable"],
     "thread_id" | "assistant_id"
