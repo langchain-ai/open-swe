@@ -15,6 +15,9 @@
     "format": {
       "dependsOn": ["^format"]
     },
+    "format:check": {
+      "dependsOn": ["^format:check"]
+    },
     "dev": {
       "dependsOn": ["^dev"]
     }
