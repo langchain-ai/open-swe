@@ -13,15 +13,14 @@ async function runE2E() {
   const threadId = uuidv4();
 
   const userRequest =
-    "This repo contains the react/next.js code for my persona/portfolio site. It currently has static values set for the number of stars on the repositories I highlight. I want this to be accurate, but I do NOT want it to make requests to GitHub every time a user visits. Instead, please implement a solution which will run once a day, fetch the number of stars from a list of repos, then write them to vercel's KV store. Finally, update the UI to make a request to the KV store when the user visits my page and render the accurate star counts.";
-
+    "The system message contains a REPO_DIRECTORY variable. But nothing is formatted in that variable. Please make sure to format the REPO_DIRECTORY variable in the system message. You will probably want to move the repo directory info from config to the State."
   const configurable: Omit<
     GraphConfig["configurable"],
     "thread_id" | "assistant_id"
   > = {
     target_repository: {
-      owner: "bracesproul",
-      repo: "personal-site",
+      owner: "langchain-ai",
+      repo: "open-swe",
     },
   };
 
@@ -64,8 +63,8 @@ async function resumeGraph(threadId: string) {
     "thread_id" | "assistant_id"
   > = {
     target_repository: {
-      owner: "bracesproul",
-      repo: "personal-site",
+      owner: "langchain-ai",
+      repo: "open-swe",
     },
   };
 

@@ -1,6 +1,7 @@
 import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
+import { getRepoAbsolutePath } from "../utils/git/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { pauseSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
@@ -70,10 +71,12 @@ You MUST adhere to the following criteria when executing the task:
     - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
 - Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.
   - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
+- Only make changes to the existing Git repo ({REPO_DIRECTORY}). Any changes outside this repo will not be detected, so do not attempt to create new files or directories outside of this repo.
 `;
 
-const formatPrompt = (plan: PlanItem[]): string => {
-  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan));
+const formatPrompt = (plan: PlanItem[], config: GraphConfig): string => {
+  const repoDirectory = getRepoAbsolutePath(config);
+  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan)).replace("{REPO_DIRECTORY}", repoDirectory);
 };
 
 export async function generateAction(
@@ -87,7 +90,7 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan),
+      content: formatPrompt(state.plan, config),
     },
     ...state.messages,
   ]);
