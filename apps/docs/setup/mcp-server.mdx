@@ -1,0 +1,52 @@
+---
+title: MCP Server
+---
+<Tip>
+  Open Agent Platform only supports connecting to MCP servers which support Streamable HTTP requests. As of **05/10/2025**, there aren't many MCP servers which support this, which is why we've released the demo application connected to [Arcade's](https://arcade-ai.com/) MCP server.
+</Tip>
+
+Open Agent Platform was built with first class support for connecting agents to MCP servers which support Streamable HTTP requests. You can configure your MCP server in one of two ways.
+
+First, set your MCP server URL under the environment variable `NEXT_PUBLIC_MCP_SERVER_URL` inside the `apps/web/` directory. Ensure this URL does *not* end in `/mcp`, as the OAP web app will append this to the URL when making requests to the MCP server.
+
+E.g. if your MCP server URL is:
+
+```bash
+https://api.arcade.dev/v1/mcps/ms_0ujssxh0cECutqzMgbtXSGnjorm/mcp
+```
+
+You should set the environment variable as:
+
+```bash
+NEXT_PUBLIC_MCP_SERVER_URL="https://api.arcade.dev/v1/mcps/ms_0ujssxh0cECutqzMgbtXSGnjorm" # no /mcp
+```
+
+### Authenticated Servers
+
+To connect to an MCP server which requires authentication, you should set `NEXT_PUBLIC_MCP_AUTH_REQUIRED=true`. The way MCP authentication works is as follows:
+
+The web client makes a request to the proxy route (`/api/oap_mcp`). Inside this API route, we use Supabase's JWT to authenticate with the MCP server. This means you must implement an endpoint on your MCP server which allows for exchanging a Supabase JWT (or any other JWT if you choose to use a different authentication provider) for an MCP access token. This access token is then used to authenticate requests to the MCP server. After this exchange, we use the MCP access token to make requests to the MCP server on behalf of the user, passing it through the `Authorization` header of the request. When sending the request response back to the client, we include the MCP access token in the `x-mcp-access-token` header of the response. This allows the client to use the MCP access token in future requests to the MCP server, without having to authenticate with the MCP server each time. It's set to expire after one hour by default.
+
+The URL set to `NEXT_PUBLIC_MCP_SERVER_URL` must be formatted so that the proxy route can append `/mcp` at the end to make requests to the MCP server, and `/oauth/token` at the end to make requests to the MCP server's OAuth token endpoint.
+
+Optionally, you can set the `MCP_TOKENS` environment variable to contain an object with an `access_token` field. If this environment variable is set, we will attempt to use that access token to authenticate requests to the MCP server. This is useful for testing, or if you want to use a different authentication provider than Supabase.
+
+### Unauthenticated Servers
+
+To connect to an MCP server which does not require authentication, you should set the `NEXT_PUBLIC_MCP_SERVER_URL` environment variable to the URL of your MCP server. If this URL is set, and `NEXT_PUBLIC_MCP_AUTH_REQUIRED` is not set/not set to `true`, we will not execute the OAuth request in the proxy route, and instead directly call your MCP server.
+
+### Changing MCP Server URL
+
+If you change the MCP server URL, you'll need to update all of your agents to use the new URL. We've included a script in this repo to do just that. This script can be found in [`apps/web/scripts/update-agents-mcp-url.ts`](https://github.com/langchain-ai/open-agent-platform/blob/main/apps/web/scripts/update-agents-mcp-url.ts).
+
+To update your agent's MCP server URL, ensure the latest MCP server URL is set under the environment variable `NEXT_PUBLIC_MCP_SERVER_URL`, along with your deployments under `NEXT_PUBLIC_DEPLOYMENTS`, and a LangSmith API key under `LANGSMITH_API_KEY` (this is because the script uses LangSmith auth to authenticate with your LangGraph server, bypassing any user authentication). Then, run the script:
+
+```bash
+# Ensure you're inside the `apps/web` directory
+cd apps/web
+
+# Run the script via TSX.
+npx tsx scripts/update-agents-mcp-url.ts
+```
+
+This will fetch every agent, from every deployment listed. It then checks to see if a given agent supports MCP servers. If it does it checks the MCP server URL is not already set to the new URL. If it is not, it updates the agent's config to use the new URL.

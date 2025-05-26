@@ -1,0 +1,58 @@
+{
+  "name": "@open-swe/agent",
+  "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/langchain-ai/open-swe.git"
+  },
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "langgraphjs dev --no-browser",
+    "build": "tsc",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.test\\.ts$ --testPathIgnorePatterns=\\.int\\.test\\.ts$",
+    "test:int": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.int\\.test\\.ts$",
+    "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000",
+    "run:e2e": "npx tsx scripts/run-e2e.ts",
+    "run:from-plan": "npx tsx scripts/run-from-plan.ts"
+  },
+  "dependencies": {
+    "@e2b/code-interpreter": "^1.2.0-beta.4",
+    "@langchain/anthropic": "^0.3.20",
+    "@langchain/core": "^0.3.56",
+    "@langchain/google-genai": "^0.2.9",
+    "@langchain/langgraph": "^0.2.73",
+    "@langchain/langgraph-sdk": "^0.0.78",
+    "@langchain/openai": "^0.5.10",
+    "diff": "^8.0.1",
+    "langchain": "^0.3.26",
+    "uuid": "^11.0.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.1.0",
+    "@eslint/js": "^9.19.0",
+    "@jest/globals": "^29.7.0",
+    "@langchain/langgraph-cli": "latest",
+    "@tsconfig/recommended": "^1.0.8",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.13.5",
+    "dotenv": "^16.4.7",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-no-instanceof": "^1.0.1",
+    "eslint-plugin-prettier": "^4.2.1",
+    "jest": "^29.7.0",
+    "prettier": "^3.5.2",
+    "ts-jest": "^29.1.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.22.0"
+  },
+  "packageManager": "yarn@1.22.22"
+}

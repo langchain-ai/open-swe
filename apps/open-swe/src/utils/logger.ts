@@ -1,3 +1,5 @@
+/* eslint-disable no-console */
+
 export enum LogLevel {
   DEBUG = "debug",
   INFO = "info",

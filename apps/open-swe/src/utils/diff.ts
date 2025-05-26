@@ -146,7 +146,7 @@ export function fixGitPatch(
     ];
 
     for (const variant of variations) {
-      if (contents.hasOwnProperty(variant)) {
+      if (variant in contents) {
         return contents[variant].split("\n");
       }
     }

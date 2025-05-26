@@ -3,6 +3,9 @@ import { Client } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "../src/types.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { createLogger, LogLevel } from "../src/utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "E2E Script");
 
 async function runE2E() {
   const client = new Client({
@@ -38,11 +41,11 @@ async function runE2E() {
     streamMode: "updates",
   });
 
-  console.log(`\nRun started with thread ID: "${threadId}"\n`);
+  logger.info(`Run started with thread ID: "${threadId}"`);
 
   for await (const chunk of stream) {
     const node = Object.keys(chunk.data)[0];
-    console.log(`${node} completed.\n`);
+    logger.info(`${node} completed.`);
   }
 }
 
@@ -83,7 +86,7 @@ async function resumeGraph(threadId: string) {
 
   for await (const chunk of stream) {
     const node = Object.keys(chunk.data)[0];
-    console.log(`${node} completed.\n`);
+    logger.info(`${node} completed.\n`);
   }
 }
 
@@ -91,21 +94,21 @@ const args = process.argv.slice(2); // Skip node executable and script path
 
 if (args.length === 0) {
   runE2E().catch((error) => {
-    console.error("Error running E2E test:", error);
+    logger.error("Error running E2E test:", error);
     process.exit(1);
   });
 } else if (args.length === 2 && args[0] === "--threadId") {
   const threadId = args[1];
   resumeGraph(threadId).catch((error) => {
-    console.error(`Error resuming graph for thread ID ${threadId}:`, error);
+    logger.error(`Error resuming graph for thread ID ${threadId}:`, error);
     process.exit(1);
   });
 } else {
-  console.log("Usage:");
-  console.log("  To run a new E2E test:");
-  console.log("    yarn run:e2e");
-  console.log("");
-  console.log("  To resume a graph with a thread ID:");
-  console.log("    yarn run:e2e --threadId <thread_id>");
+  logger.info("Usage:");
+  logger.info("  To run a new E2E test:");
+  logger.info("    yarn run:e2e");
+  logger.info("");
+  logger.info("  To resume a graph with a thread ID:");
+  logger.info("    yarn run:e2e --threadId <thread_id>");
   process.exit(1);
 }

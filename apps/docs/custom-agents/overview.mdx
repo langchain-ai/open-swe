@@ -1,0 +1,41 @@
+---
+title: 'Custom Agents Overview'
+description: 'Building your own agents for the Open Agent Platform'
+---
+
+# Building Your Own Agents
+
+We built Open Agent Platform with custom agents in mind. Although we offer a few pre-built agents, we encourage you to build your own agents, and use OAP as a platform to prototype, test and use them! This guide will help you build agents that are compatible with all of Open Agent Platform's features.
+
+## Platform Requirements
+
+OAP is built on top of LangGraph Platform, which means all agents which you build to be used in OAP must be LangGraph agents deployed on LangGraph Platform.
+
+## Agent Types
+
+When building custom agents, you can create three main types:
+
+1. **Standard Agents**: These are single-purpose agents that handle specific tasks.
+2. **Tools Agents**: Agents that can access external tools via the MCP protocol.
+3. **Supervisor Agents**: Agents that can orchestrate and coordinate multiple other agents.
+
+## Development Flow
+
+The typical development flow for creating custom agents involves:
+
+1. Developing and testing your agent locally using LangGraph
+2. Deploying your agent to LangGraph Platform
+3. Configuring your Open Agent Platform to connect to your deployed agent
+4. Testing and refining your agent through the OAP interface
+
+## Getting Started
+
+To get started with building your own agents, we recommend:
+
+1. Familiarizing yourself with the [LangGraph framework](https://github.com/langchain-ai/langgraph)
+2. Studying the example agents we provide:
+   - [Tools Agent](https://github.com/langchain-ai/oap-langgraph-tools-agent)
+   - [Supervisor Agent](https://github.com/langchain-ai/oap-agent-supervisor)
+3. Understanding how to make your agent configurable, as detailed in the [Configuration](/custom-agents/configuration) section
+
+Building custom agents allows you to create specialized AI assistants that can be easily managed and used through the Open Agent Platform interface.
