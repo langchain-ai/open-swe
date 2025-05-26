@@ -29,7 +29,7 @@ export async function generateAction(
   const firstUserMessage = state.messages.find(isHumanMessage);
 
   const response = await modelWithTools
-    .bind({ tags: ["langsmith:nostream"] })
+    .withConfig({ tags: ["langsmith:nostream"] })
     .invoke([
       {
         role: "system",

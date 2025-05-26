@@ -25,7 +25,12 @@ You do not want to keep the entire conversation history, but instead you want to
 {PLAN_PROMPT}
 
 You MUST adhere to the following criteria when summarizing the conversation history:
-- Retain context such as file paths, versions, and installed software.
+- Retain context such as file paths, versions, and installed software which future iterations will find useful.
+  - It is very important to include the file paths of files you've already searched for, along with a description of the file's contents, inside a 'Codebase files and descriptions' section, so that future steps can reuse this information, and will not need to search through the codebase for files again.
+  - Consider including a section titled 'Key repository insights and learnings' which may include information, insights and learnings you've discovered while completing the task.
+    - This section should be concise, but still including enough information so following steps will not repeat any mistakes or go down rabbit holes which you already know about.
+  - If changes were made to the repository during this task, ensure you include a section titled 'Repository modifications summary' which should include a short description of the task it completed, how it did so, and every change it made to the codebase during this task.
+    - Do not include the actual changes you made, but rather high level bullet points containing context and descriptions on the modifications made.
 - Do not retain any full code snippets.
 - Do not retain any full file contents.
 - Ensure your summary is concise, but useful for future context.

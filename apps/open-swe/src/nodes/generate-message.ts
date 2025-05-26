@@ -38,7 +38,10 @@ You MUST adhere to the following criteria when executing the task:
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
 - Remember to always properly format and quote your shell commands.
-- Take advantage of the condensed context tool call messages in the conversation history. These contain summarized/condensed context from previously completed steps. Ensure you always read these messages to avoid duplicate work (e.g.: searching for file paths).
+- Take advantage of the condensed context tool call messages in the conversation history (under the names \`condense_task_context\` and \`condense_planning_context\`). These contain summarized/condensed context from previously completed steps. Ensure you always read these messages to avoid duplicate work (e.g.: searching for file paths).
+  - These summary messages may include a section called 'Codebase files and descriptions' which contains a list of files, and descriptions of the files' contents. If you need context on a file, or directory, ensure you first check this section of the summary messages to avoid duplicate work.
+  - The summary messages may also include a section called 'Key repository insights and learnings'. This contains key insights, learnings, and facts the model discovered while completing a task.
+  - Each summary message will also include a short description of the task it completed, how it did so, and every change it made to the codebase during this task. This section will be titled 'Repository modifications summary'.
 - All changes are automatically committed, so you should not worry about creating backups, or committing changes.
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - When using the \`shell\` tool, always take advantage of the \`workdir\` parameter to run commands inside the repo directory. You should not try to generate a command with \`cd <some path>\` as passing that path to \`workdir\` is much more efficient.

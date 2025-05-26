@@ -14,9 +14,11 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 In this step, you are expected to generate a high-level plan to address the user's request. The plan should be a list of actions to take, in order, to address the user's request. You should not include any code in the plan, only a list of actions to take.
 
 You MUST adhere to the following criteria when generating the plan:
-- You have already gathered context from the repository the user has requested you take actions on. This context is provided in the conversation history below.
+- You have already gathered context from the repository the user has requested you take actions on, and are now ready to generate a plan based on it.
+  - This context is provided in the conversation history below.
 - Your plan should be high-level in nature, but should still be specific enough to be actionable.
-- Ensure your plan is as concise as possible. Omit any unnecessary details or steps. Your goal is to complete the task in the least number of steps possible.
+- Ensure your plan is as concise as possible. Omit any unnecessary details or steps the user did not request, or are not required to complete the task.
+  - Your goal is to complete the task outlined by the user in the least number of steps possible.
 - Do not pack multiple complex tasks into a single plan item. Each high level task you'll need to complete should have its own plan item.
 - When you are ready to generate the plan, ensure you call the 'session_plan' tool. You are REQUIRED to call this tool.
 - The first user message in this conversation contains the user's request.
@@ -45,7 +47,7 @@ export async function generatePlan(
   }
 
   const response = await modelWithTools
-    .bind({ tags: ["langsmith:nostream"] })
+    .withConfig({ tags: ["langsmith:nostream"] })
     .invoke([
       {
         role: "system",

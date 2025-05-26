@@ -31,6 +31,7 @@
     "@langchain/openai": "^0.5.10",
     "diff": "^8.0.1",
     "langchain": "^0.3.26",
+    "langsmith": "^0.3.29",
     "uuid": "^11.0.5",
     "zod": "^3.23.8"
   },
