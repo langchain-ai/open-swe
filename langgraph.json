@@ -6,3 +6,4 @@
   "env": "./apps/open-swe/.env",
   "dependencies": ["./apps/open-swe"]
 }
+ 

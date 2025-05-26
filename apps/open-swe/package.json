@@ -9,7 +9,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "langgraphjs dev --no-browser",
+    "dev": "langgraphjs dev --no-browser --config ../../langgraph.json",
     "build": "tsc",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
