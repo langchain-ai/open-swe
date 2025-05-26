@@ -1,0 +1,75 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Open Agent Platform",
+  "colors": {
+    "primary": "#0ea5e9",
+    "light": "#38bdf8",
+    "dark": "#0369a1"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Setup",
+            "pages": [
+              "setup/agents",
+              "setup/authentication",
+              "setup/rag-server",
+              "setup/mcp-server"
+            ]
+          },
+          {
+            "group": "Custom Agents",
+            "pages": [
+              "custom-agents/overview",
+              "custom-agents/configuration"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Demo",
+          "href": "https://oap.langchain.com",
+          "icon": "link"
+        },
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/langchain-ai/open-agent-platform",
+          "icon": "github"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/langchain-ai/open-agent-platform"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/langchain-ai/open-agent-platform",
+      "twitter": "https://twitter.com/langchainai"
+    }
+  }
+}

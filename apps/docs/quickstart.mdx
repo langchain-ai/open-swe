@@ -1,0 +1,125 @@
+---
+title: 'Quick Start'
+description: 'Follow these steps to get your Open Agent Platform up and running quickly.'
+---
+
+<Info>
+  **Prerequisites:**
+  - Clone the [Open Agent Platform Repository](https://github.com/langchain-ai/open-agent-platform)
+  - [LangSmith](https://smith.langchain.com/) Account (free tier is sufficient)
+  - [Supabase](https://supabase.com/) Account
+  - MCP Server (e.g. [Arcade](https://arcade-ai.com/))
+  - An LLM API Key (e.g. [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), [Google](https://aistudio.google.com/))
+</Info>
+
+## 1. Authentication Setup
+
+Open Agent Platform uses Supabase for authentication by default.
+
+<Steps>
+  <Step title="Create a Supabase Project">
+    Create a new project in [Supabase](https://supabase.com/).
+  </Step>
+  <Step title="Configure Environment Variables">
+    Set the following environment variables inside the `apps/web/` directory:
+    ```bash
+    NEXT_PUBLIC_SUPABASE_URL="<your supabase url>"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY="<your supabase anon key>"
+    ```
+  </Step>
+  <Step title="Enable Authentication Providers">
+    Enable Google authentication in your Supabase project, or set `NEXT_PUBLIC_GOOGLE_AUTH_DISABLED=true` in your environment variables to disable showing Google as an authentication option in the UI.
+  </Step>
+</Steps>
+
+## 2. Deploying Agents
+
+The next step in setting up Open Agent Platform is to deploy and configure your agents.
+
+<Steps>
+  <Step title="Clone Pre-built Agents">
+    We've released two pre-built agents specifically for Open Agent Platform:
+    - [Tools Agent](https://github.com/langchain-ai/oap-langgraph-tools-agent)
+    - [Supervisor Agent](https://github.com/langchain-ai/oap-agent-supervisor)
+  </Step>
+  <Step title="Follow Agent Setup Instructions">
+    For each agent repository:
+    1. Clone the repository
+    2. Follow the instructions in the README
+    3. Deploy the agents to LangGraph Platform
+  </Step>
+  <Step title="Configure Environment Variables">
+    After deployment, create a configuration object for each agent:
+    ```json
+    {
+      "id": "The project ID of the deployment",
+      "tenantId": "The tenant ID of your LangSmith account",
+      "deploymentUrl": "The API URL to your deployment",
+      "name": "A custom name for your deployment",
+      "isDefault": "Whether this deployment is the default deployment (only one can be default)",
+      "defaultGraphId": "The graph ID of the default graph (optional, only required if isDefault is true)"
+    }
+    ```
+
+    You can find your project & tenant IDs with a GET request to the `/info` endpoint on your LangGraph Platform deployment.
+  </Step>
+  <Step title="Set Environment Variables">
+    Combine your agent configurations into a JSON array and set the `NEXT_PUBLIC_DEPLOYMENTS` environment variable inside the `apps/web/` directory:
+
+    ```bash
+    NEXT_PUBLIC_DEPLOYMENTS=[{"id":"bf63dc89-1de7-4a65-8336-af9ecda479d6","deploymentUrl":"http://localhost:2024","tenantId":"42d732b3-1324-4226-9fe9-513044dceb58","name":"Local deployment","isDefault":true,"defaultGraphId":"agent"}]
+    ```
+  </Step>
+</Steps>
+
+## 3. RAG Server Setup
+
+<Steps>
+  <Step title="Deploy LangConnect">
+    Follow the instructions in the [LangConnect README](https://github.com/langchain-ai/langconnect) to set up and deploy a LangConnect RAG server.
+  </Step>
+  <Step title="Configure Environment Variables">
+    Set the RAG server URL inside the `apps/web/` directory:
+    ```bash
+    NEXT_PUBLIC_RAG_API_URL="http://localhost:8080"
+    ```
+  </Step>
+</Steps>
+
+## 4. MCP Server Setup
+
+<Tip>
+  Open Agent Platform only supports connecting to MCP servers which support Streamable HTTP requests.
+</Tip>
+
+<Steps>
+  <Step title="Configure MCP Server URL">
+    Set your MCP server URL inside the `apps/web/` directory (ensure it does not end with `/mcp`. This will be auto-applied by OAP):
+    ```bash
+    NEXT_PUBLIC_MCP_SERVER_URL="<your MCP server URL>"
+    ```
+  </Step>
+  <Step title="Configure Authentication (if required)">
+    For authenticated MCP servers:
+    ```bash
+    NEXT_PUBLIC_MCP_AUTH_REQUIRED=true
+    ```
+  </Step>
+</Steps>
+
+## 5. Run Your Platform
+
+Start the application with your configured environment variables:
+
+```bash
+# Navigate to the web app directory
+cd apps/web
+
+# Install dependencies
+yarn install
+
+# Start the development server
+yarn dev
+```
+
+Your Open Agent Platform should now be running at http://localhost:3000!

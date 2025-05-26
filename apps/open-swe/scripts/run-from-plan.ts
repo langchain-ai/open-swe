@@ -3,6 +3,9 @@ import { Client } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "../src/types.js";
 import { graph } from "../src/index.js";
+import { createLogger, LogLevel } from "../src/utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "From Plan Script");
 
 async function runFromPlan() {
   const client = new Client({
@@ -118,7 +121,7 @@ async function runFromPlan() {
     },
   };
 
-  console.log("\nInitializing sandbox...");
+  logger.info("Initializing sandbox...");
 
   const initResult = await graph.nodes.initialize.invoke(inputs as any, {
     configurable,
@@ -127,7 +130,7 @@ async function runFromPlan() {
     throw new Error("Failed to initialize sandbox.");
   }
 
-  console.log(
+  logger.info(
     `Sandbox initialized successfully. ID: ${initResult.sandboxSessionId}\n\n`,
   );
 
@@ -150,8 +153,8 @@ async function runFromPlan() {
 
   for await (const chunk of stream) {
     const node = Object.keys(chunk.data)[0];
-    console.log(`${node} completed.\n`);
+    logger.info(`${node} completed.\n`);
   }
 }
 
-runFromPlan().catch(console.error);
+runFromPlan().catch(logger.error);

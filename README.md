@@ -20,7 +20,7 @@ yarn install
 Copy the `.env.example` file to `.env` and fill in the values:
 
 ```bash
-cp .env.example .env
+cp ./apps/open-swe/.env.example ./apps/open-swe/.env
 ```
 
 ```bash

@@ -5,6 +5,9 @@ import { GraphState } from "../types.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { TIMEOUT_MS } from "../constants.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "ShellTool");
 
 const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
@@ -29,7 +32,7 @@ export const shellTool = tool(
       const state = getCurrentTaskInput<GraphState>();
       const { sandboxSessionId } = state;
       if (!sandboxSessionId) {
-        console.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
+        logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
           input,
         });
         throw new Error(
@@ -47,7 +50,7 @@ export const shellTool = tool(
       await sandbox.setTimeout(TIMEOUT_MS);
 
       if (result.error) {
-        console.error("Failed to run command", {
+        logger.error("Failed to run command", {
           error: result.error,
           error_result: result,
           input,
@@ -59,14 +62,14 @@ export const shellTool = tool(
     } catch (e) {
       const errorFields = getSandboxErrorFields(e);
       if (errorFields) {
-        console.error("Failed to run command", {
+        logger.error("Failed to run command", {
           input,
           error: errorFields,
         });
         return `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.error}\nStderr:\n${errorFields.stderr}\nStdout:\n${errorFields.stdout}`;
       }
 
-      console.error(
+      logger.error(
         "Failed to run command: " +
           (e instanceof Error ? e.message : "Unknown error"),
         {
