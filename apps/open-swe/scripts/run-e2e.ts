@@ -41,7 +41,7 @@ Once you're done, ensure you've documented the development process in the readme
     },
     config: {
       configurable,
-      recursion_limit: 200,
+      recursion_limit: 400,
     },
     ifNotExists: "create",
     streamSubgraphs: true,
@@ -85,7 +85,7 @@ async function resumeGraph(threadId: string) {
     },
     config: {
       configurable,
-      recursion_limit: 200,
+      recursion_limit: 400,
     },
     streamSubgraphs: true,
     streamMode: "updates",

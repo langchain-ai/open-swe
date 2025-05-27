@@ -19,8 +19,15 @@ async function runFromPlan() {
     messages: [
       {
         role: "user",
-        content:
-          "This repo contains the react/next.js code for my persona/portfolio site. It currently has static values set for the number of stars on the repositories I highlight. I want this to be accurate, but I do NOT want it to make requests to GitHub every time a user visits. Instead, please implement a solution which will run once a day, fetch the number of stars from a list of repos, then write them to vercel's KV store. Finally, update the UI to make a request to the KV store when the user visits my page and render the accurate star counts.",
+        content: `The project is structured as a monorepo, with some apps located inside the /apps directory. In this directory, there is an /auth directory. This directory only contains the scaffolding for a new app in the monorepo, but is not yet implemented. Please take the following plan/task description and implement it in the /auth directory:
+This monorepo is for an AI coding agent. The app runs and edits the code in the cloud in a sandboxed environment. Right now, we require users to generate a GitHub PAT, which we store in a .env file and can use to authenticate with GitHub. This is not idea, and instead we want to have a github oauth app which users can authenticate with.
+Please implement a new auth server inside the /auth directory which can do this.
+You will not have any access to secrets, so you will not be able to run the server to test it.
+I want the server to be able to authenticate users with GitHub, such that we will be able to take the following actions:
+1. clone repositories they give us access to
+2. checkout existing and create new branches on the repositories they give us access to
+3. make pull requests and push changes to the repositories they give us access to
+Once you're done, ensure you've documented the development process in the readme of this new app.`,
       },
       {
         id: "toolu_01RNEjViZFBXgCSNMwqKvkVL",
@@ -116,8 +123,8 @@ async function runFromPlan() {
     "thread_id" | "assistant_id"
   > = {
     target_repository: {
-      owner: "bracesproul",
-      repo: "personal-site",
+      owner: "langchain-ai",
+      repo: "open-swe",
     },
   };
 
@@ -144,7 +151,7 @@ async function runFromPlan() {
     },
     config: {
       configurable,
-      recursion_limit: 200,
+      recursion_limit: 400,
     },
     ifNotExists: "create",
     streamSubgraphs: true,
