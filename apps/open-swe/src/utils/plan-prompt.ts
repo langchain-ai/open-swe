@@ -14,12 +14,14 @@ export const PLAN_PROMPT = `## Completed Tasks
  * @param plan The plan to format
  * @param options Options for formatting the plan
  * @param options.useLastCompletedTask Whether to use the last completed task as the current task
+ * @param options.includeSummaries Whether to include summaries of completed tasks
  * @returns The formatted plan
  */
 export function formatPlanPrompt(
   plan: PlanItem[],
   options?: {
     useLastCompletedTask?: boolean;
+    includeSummaries?: boolean;
   },
 ): string {
   const completedTasks = plan.filter((p) => p.completed);
@@ -31,14 +33,29 @@ export function formatPlanPrompt(
   return PLAN_PROMPT.replace(
     "{COMPLETED_TASKS}",
     completedTasks?.length
-      ? completedTasks.map((task) => `${task.index}. ${task.plan}`).join("\n")
+      ? options?.includeSummaries
+        ? formatPlanPromptWithSummaries(completedTasks)
+        : completedTasks
+            .map((task) => `${task.index}. "${task.plan}"`)
+            .join("\n")
       : "No completed tasks.",
   )
     .replace(
       "{REMAINING_TASKS}",
       remainingTasks?.length
-        ? remainingTasks.map((task) => `${task.index}. ${task.plan}`).join("\n")
+        ? remainingTasks
+            .map((task) => `${task.index}. "${task.plan}"`)
+            .join("\n")
         : "No remaining tasks.",
     )
     .replace("{CURRENT_TASK}", currentTask?.plan || "No current task.");
+}
+
+export function formatPlanPromptWithSummaries(plan: PlanItem[]): string {
+  return plan
+    .map(
+      (p) =>
+        `${p.index}. "${p.plan}"\nSummary: ${p.summary ?? "No task summary found"}`,
+    )
+    .join("\n");
 }

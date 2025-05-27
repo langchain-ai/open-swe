@@ -1,4 +1,4 @@
-import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
+import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { shellTool, applyPatchTool } from "../tools/index.js";
 import { getRepoAbsolutePath } from "../utils/git/index.js";
@@ -16,9 +16,13 @@ You can:
 - Apply patches, run commands, and manage user approvals based on policy.
 - Work inside a sandboxed, git-backed workspace with rollback support.
 
-You work based on a plan which was generated in a previous step. The plan items are as follows:
+You work based on a plan which was generated in a previous step. After each task in a plan is completed, a summary of the task is generated, and included in the plan list below. These messages are then removed from the conversation history, so ensure you always weigh the task summaries highly when making decisions.
 
+The plan tasks and summaries are as follows:
 {PLAN_PROMPT}
+
+When you were generating this plan, you also generated a summary of the actions you took in order to come up with this plan. Ensure you use this as context about the codebase, and plan generation process.
+{PLAN_GENERATION_SUMMARY}
 
 You are an agent - please keep going until the user's query is completely resolved, before ending your turn and yielding back to the user.
 Only terminate your turn when you are sure that the problem is solved.
@@ -38,10 +42,10 @@ You MUST adhere to the following criteria when executing the task:
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
 - Remember to always properly format and quote your shell commands.
-- Take advantage of the condensed context messages in the conversation history (under the names \`condense_task_context\` and \`condense_planning_context\`). These contain summarized/condensed context from previously completed steps. Ensure you always read these messages to avoid duplicate work (e.g.: searching for file paths).
-  - These summary messages may include a section called 'Codebase files and descriptions' which contains a list of files, and descriptions of the files' contents. If you need context on a file, or directory, ensure you first check this section of the summary messages to avoid duplicate work.
+- Take advantage of the task summaries from completed tasks in the prompt above. Ensure you always read these summaries to avoid duplicate work, and so you always have up to date context on the codebase, and tasks you've completed.
+  - Each summary message will include a short description of the task it completed, how it did so, and every change it made to the codebase during this task. This section will be titled 'Repository modifications summary'.
   - The summary messages may also include a section called 'Key repository insights and learnings'. This contains key insights, learnings, and facts the model discovered while completing a task.
-  - Each summary message will also include a short description of the task it completed, how it did so, and every change it made to the codebase during this task. This section will be titled 'Repository modifications summary'.
+- Additionally, you're also provided with a section titled 'Codebase context' which contains an up to date list of files, and descriptions of the files' contents. If you need context on a file, or directory, ensure you first check to see if you can find it in the codebase context before preforming an action to read/find it.
 - All changes are automatically committed, so you should not worry about creating backups, or committing changes.
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - You should NOT try to create empty files with \`apply_patch\`. If you need to create a file, use the \`shell\` tool, and pass \`touch <file path>\` to create the file.
@@ -76,13 +80,28 @@ You MUST adhere to the following criteria when executing the task:
 - Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.
   - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
 - Only make changes to the existing Git repo ({REPO_DIRECTORY}). Any changes outside this repo will not be detected, so do not attempt to create new files or directories outside of this repo.
+
+Codebase context:
+{CODEBASE_CONTEXT}
+
+And here is the plan, and completed task summaries one more time:
+{PLAN_PROMPT}
 `;
 
-const formatPrompt = (plan: PlanItem[], config: GraphConfig): string => {
+const formatPrompt = (state: GraphState, config: GraphConfig): string => {
   const repoDirectory = getRepoAbsolutePath(config);
   return systemPrompt
-    .replace("{PLAN_PROMPT}", formatPlanPrompt(plan))
-    .replaceAll("{REPO_DIRECTORY}", repoDirectory);
+    .replaceAll(
+      "{PLAN_PROMPT}",
+      formatPlanPrompt(state.plan, { includeSummaries: true }),
+    )
+    .replaceAll("{REPO_DIRECTORY}", repoDirectory)
+    .replaceAll("{PLAN_GENERATION_SUMMARY}", state.planContextSummary)
+    .replaceAll(
+      "{CODEBASE_CONTEXT}",
+      state.codebaseContext ??
+        "No codebase context generated yet. Please use the conversation below as context.",
+    );
 };
 
 export async function generateAction(
@@ -96,7 +115,7 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan, config),
+      content: formatPrompt(state, config),
     },
     ...state.messages,
   ]);

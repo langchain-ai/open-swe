@@ -17,7 +17,7 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 
 In your workflow, you generate a plan, then act on said plan. It may take many actions to complete a single step, or a single action to complete the step.
 
-Here is the plan:
+Here is the plan, along with the summaries of each completed task:
 
 {PLAN_PROMPT}
 
@@ -42,7 +42,10 @@ const confirmTaskCompletionTool = {
 };
 
 const formatPrompt = (plan: PlanItem[]): string => {
-  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan));
+  return systemPrompt.replace(
+    "{PLAN_PROMPT}",
+    formatPlanPrompt(plan, { includeSummaries: true }),
+  );
 };
 
 export async function progressPlanStep(
@@ -102,12 +105,13 @@ ENSURE YOU ONLY CALL THE \`confirm_task_completion\` TOOL IF YOU DETERMINE THE C
     return new Command({ goto: "generate-action" });
   }
 
+  // This should in theory never happen, but ensure we route properly if it does.
   const remainingTask = state.plan.find((p) => !p.completed);
   if (!remainingTask) {
     logger.info(
-      "Found no remaining tasks in the plan during the check plan step. Progressing to the next action.",
+      "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );
-    return new Command({ goto: "generate-action" });
+    return new Command({ goto: "generate-conclusion" });
   }
 
   logger.info("Task marked as completed. Routing to task summarization step.", {

@@ -14,21 +14,6 @@ import { isAIMessage } from "@langchain/core/messages";
 import { plannerGraph } from "./subgraphs/index.js";
 
 /**
- * @param {GraphState} state - The current graph state.
- * @returns {"interrupt-plan" | typeof END} The next node to execute, or END if the process should stop.
- */
-function routeAfterPlan(state: GraphState): "interrupt-plan" | typeof END {
-  const { messages } = state;
-  const lastMessage = messages[messages.length - 1];
-  if (isAIMessage(lastMessage) && !lastMessage.tool_calls) {
-    // The last message is an AI message without tool calls. This indicates the LLM generated followup questions.
-    return END;
-  }
-
-  return "interrupt-plan";
-}
-
-/**
  * Routes to the next appropriate node after taking action.
  * If the last message is an AI message with tool calls, it routes to "take-action".
  * Otherwise, it ends the process.
@@ -55,13 +40,12 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("generate-plan-subgraph", plannerGraph)
   .addNode("rewrite-plan", rewritePlan)
   .addNode("interrupt-plan", interruptPlan, {
-    // TODO: Hookup `Command` in interruptPlan node so this actually works.
     ends: [END, "rewrite-plan", "generate-action"],
   })
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction)
   .addNode("progress-plan-step", progressPlanStep, {
-    ends: ["summarize-task-steps", "generate-action"],
+    ends: ["summarize-task-steps", "generate-action", "generate-conclusion"],
   })
   .addNode("summarize-task-steps", summarizeTaskSteps, {
     ends: ["generate-action", "generate-conclusion"],
@@ -69,11 +53,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("generate-conclusion", generateConclusion)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-plan-subgraph")
-  // TODO: Update routing to work w/ new interrupt node.
-  .addConditionalEdges("generate-plan-subgraph", routeAfterPlan, [
-    "interrupt-plan",
-    END,
-  ])
+  .addEdge("generate-plan-subgraph", "interrupt-plan")
   // Always interrupt after rewriting the plan.
   .addEdge("rewrite-plan", "interrupt-plan")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
