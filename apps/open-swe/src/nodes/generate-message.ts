@@ -96,10 +96,13 @@ const formatPrompt = (state: GraphState, config: GraphConfig): string => {
       formatPlanPrompt(state.plan, { includeSummaries: true }),
     )
     .replaceAll("{REPO_DIRECTORY}", repoDirectory)
-    .replaceAll("{PLAN_GENERATION_SUMMARY}", state.planContextSummary)
+    .replaceAll(
+      "{PLAN_GENERATION_SUMMARY}",
+      `<plan-generation-summary>\n${state.planContextSummary}\n</plan-generation-summary>`,
+    )
     .replaceAll(
       "{CODEBASE_CONTEXT}",
-      state.codebaseContext ??
+      state.codebaseContext ||
         "No codebase context generated yet. Please use the conversation below as context.",
     );
 };

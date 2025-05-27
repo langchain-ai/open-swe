@@ -64,7 +64,7 @@ ${state.plannerMessages.map(getMessageString).join("\n")}`;
       role: "system",
       content: formatPrompt(
         getMessageContentString(
-          firstUserMessage?.content ?? "No user request provided.",
+          firstUserMessage?.content || "No user request provided.",
         ),
       ),
     },

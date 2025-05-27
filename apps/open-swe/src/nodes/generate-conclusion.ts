@@ -34,7 +34,7 @@ export async function generateConclusion(
   const firstUserMessage = state.messages.find(isHumanMessage);
 
   const userMessage = `The user's initial request is as follows:
-${getMessageContentString(firstUserMessage?.content ?? "No user message found")}
+${getMessageContentString(firstUserMessage?.content || "No user message found")}
 
 The conversation history is as follows:
 ${state.messages.map(getMessageString).join("\n")}

@@ -3,10 +3,7 @@ import { z } from "zod";
 import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import {
-  formatPlanPrompt,
-  formatPlanPromptWithSummaries,
-} from "../utils/plan-prompt.js";
+import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getMessageString } from "../utils/message/content.js";
 import { removeLastTaskMessages } from "../utils/message/modify-array.js";
@@ -18,8 +15,7 @@ const taskSummarySysPrompt = `You are operating as a terminal-based agentic codi
 
 Your current task is to look at the conversation history, and generate a concise summary of the steps which were taken to complete the task.
 
-Here are all of your tasks you've completed, remaining, and the current task you're working on:
-
+Here are all of your tasks you've completed, remaining, and the current task you're working on. The completed tasks will include summaries of the steps taken to complete them:
 {PLAN_PROMPT}
 
 You MUST adhere to the following criteria when summarizing the conversation history:
@@ -32,17 +28,21 @@ You MUST adhere to the following criteria when summarizing the conversation hist
     - Do not include the actual changes you made, but rather high level bullet points containing context and descriptions on the modifications made.
   - Do not retain any full code snippets.
   - Do not retain any full file contents.
-  - Ensure your summary is concise, but useful for future context.
   - Ensure you have an understanding of the context and summaries you've already generated (provided by the user below) and do not repeat any information you've already included.
+  - Do not duplicate ANY information. Ensure you carefully read and understand the task summaries generated above, and do not repeat any information you've already included.
+  - You do not need to include specific codebase context here, as codebase context will be generated in a separate step. Your sole task is to generate a concise summary of this specific task you just completed.
+  - Ensure your summary is concise, but useful for future context.
+
+Here is the current state of the codebase context you've accumulated:
+{CODEBASE_CONTEXT}
+
+Ensure you do NOT include codebase context in your task summary, as we want to avoid including duplicate information.
 
 With all of this in mind, please carefully summarize and condense the conversation history of the task you just completed, provided by the user below. Ensure you pass this condensed task summary to the \`condense_task_context\` tool.
 `;
 
 const userContextMessage = `Here is the task you just completed:
 {COMPLETED_TASK}
-
-And here is a list of the tasks you've already completed and generated task summaries for:
-{TASKS_AND_SUMMARIES}
 
 The first message in the conversation history is the user's request. Messages from previously completed tasks have already been removed, in favor of task summaries.
 With this in mind, please use the following conversation history to generate a concise summary of the task you just completed.
@@ -55,22 +55,22 @@ const updateCodebaseContextSysPrompt = `You are operating as a terminal-based ag
 Your current task is to update the codebase context, given the recent actions taken by the agent.
 
 The codebase context should contain:
- - Up to date information on the codebase file paths, and their contents.
-  - Do not include entire file contents, but rather high level descriptions of what a file contains, and what it does.
- - Information on the software installed, and used in the codebase, including information such as version numbers, and dependencies.
- - High level context about the codebase structure, and style.
- - Any other relevant information which may be useful for future context.
-  - Do not include task specific context here, this is extracted in a different step.
+  - Up to date information on the codebase file paths, and their contents.
+    - Do not include entire file contents, but rather high level descriptions of what a file contains, and what it does.
+  - Information on the software installed, and used in the codebase, including information such as version numbers, and dependencies.
+  - High level context about the codebase structure, and style.
+  - Any other relevant codebase information which may be useful for future context.
+  - There should be NO task specific context here. ONLY include context about the codebase. This context should be generally applicable and not tied to the specifics of the task.
 
 You have the following codebase context:
 {CODEBASE_CONTEXT}
 
 Please inspect this context, and given the rules above, please respond with a full, complete codebase context I can use for future context.
 When responding, ensure:
- - You do not duplicate information.
- - You remove old/stale context from the existing codebase context string if recent messages contradict it.
- - You do NOT remove any information from the existing codebase context string if recent messages do not contradict it. We want to ensure we always have a complete picture of the codebase.
- - You modify/combine information from the existing codebase context string if if new information is provided which warrants a change.
+  - You do not duplicate information.
+  - You remove old/stale context from the existing codebase context string if recent messages contradict it.
+  - You do NOT remove any information from the existing codebase context string if recent messages do not contradict it. We want to ensure we always have a complete picture of the codebase.
+  - You modify/combine information from the existing codebase context string if if new information is provided which warrants a change.
 
 Please be concise, clear and helpful. Omit any extraneous information. Call the \`update_codebase_context\` tool when you are finished.
 `;
@@ -99,11 +99,19 @@ const updateCodebaseContextTool = {
 
 const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
-const formatPrompt = (plan: PlanItem[]): string =>
-  taskSummarySysPrompt.replace(
-    "{PLAN_PROMPT}",
-    formatPlanPrompt(plan, { useLastCompletedTask: true }),
-  );
+const formatPrompt = (plan: PlanItem[], codebaseContext: string): string =>
+  taskSummarySysPrompt
+    .replace(
+      "{PLAN_PROMPT}",
+      formatPlanPrompt(plan, {
+        useLastCompletedTask: true,
+        includeSummaries: true,
+      }),
+    )
+    .replace(
+      "{CODEBASE_CONTEXT}",
+      codebaseContext || "No codebase context generated yet.",
+    );
 
 const formatUserMessage = (
   messages: BaseMessage[],
@@ -115,16 +123,9 @@ const formatUserMessage = (
       "No completed task found when trying to format user message for task summary.",
     );
   }
-  const completedTasks = plans.filter(
-    (p) => p.completed && p.index !== completedTask.index,
-  );
 
   return userContextMessage
     .replace("{COMPLETED_TASK}", completedTask.plan)
-    .replace(
-      "{TASKS_AND_SUMMARIES}",
-      formatPlanPromptWithSummaries(completedTasks),
-    )
     .replace(
       "{CONVERSATION_HISTORY}",
       messages.map(getMessageString).join("\n"),
@@ -134,7 +135,7 @@ const formatUserMessage = (
 const formatCodebaseContextPrompt = (codebaseContext: string): string =>
   updateCodebaseContextSysPrompt.replace(
     "{CODEBASE_CONTEXT}",
-    codebaseContext ?? "No codebase context generated yet.",
+    codebaseContext || "No codebase context generated yet.",
   );
 
 const formatUserCodebaseContextMessage = (
@@ -187,7 +188,7 @@ async function generateTaskSummaryFunc(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan),
+      content: formatPrompt(state.plan, state.codebaseContext),
     },
     {
       role: "user",

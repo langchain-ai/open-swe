@@ -24,11 +24,22 @@ export function formatPlanPrompt(
     includeSummaries?: boolean;
   },
 ): string {
-  const completedTasks = plan.filter((p) => p.completed);
-  const remainingTasks = plan.filter((p) => !p.completed);
-  const currentTask = options?.useLastCompletedTask
-    ? completedTasks.sort((a, b) => a.index - b.index)[0]
-    : remainingTasks.sort((a, b) => a.index - b.index)[0];
+  let completedTasks = plan.filter((p) => p.completed);
+  let remainingTasks = plan.filter((p) => !p.completed);
+  let currentTask: PlanItem | undefined;
+  if (options?.useLastCompletedTask) {
+    currentTask = completedTasks.sort((a, b) => a.index - b.index)[0];
+    // Remove the current task from the completed tasks list:
+    completedTasks = completedTasks.filter(
+      (p) => p.index !== currentTask?.index,
+    );
+  } else {
+    currentTask = remainingTasks.sort((a, b) => a.index - b.index)[0];
+    // Remove the current task from the remaining tasks list:
+    remainingTasks = remainingTasks.filter(
+      (p) => p.index !== currentTask?.index,
+    );
+  }
 
   return PLAN_PROMPT.replace(
     "{COMPLETED_TASKS}",
@@ -36,7 +47,10 @@ export function formatPlanPrompt(
       ? options?.includeSummaries
         ? formatPlanPromptWithSummaries(completedTasks)
         : completedTasks
-            .map((task) => `${task.index}. "${task.plan}"`)
+            .map(
+              (task) =>
+                `<completed-task index="${task.index}">${task.plan}</completed-task>`,
+            )
             .join("\n")
       : "No completed tasks.",
   )
@@ -44,18 +58,24 @@ export function formatPlanPrompt(
       "{REMAINING_TASKS}",
       remainingTasks?.length
         ? remainingTasks
-            .map((task) => `${task.index}. "${task.plan}"`)
+            .map(
+              (task) =>
+                `<remaining-task index="${task.index}">${task.plan}</remaining-task>`,
+            )
             .join("\n")
         : "No remaining tasks.",
     )
-    .replace("{CURRENT_TASK}", currentTask?.plan || "No current task.");
+    .replace(
+      "{CURRENT_TASK}",
+      `<current-task index="${currentTask?.index}">${currentTask?.plan || "No current task found."}</current-task>`,
+    );
 }
 
 export function formatPlanPromptWithSummaries(plan: PlanItem[]): string {
   return plan
     .map(
       (p) =>
-        `${p.index}. "${p.plan}"\nSummary: ${p.summary ?? "No task summary found"}`,
+        `<task index="${p.index}">\n${p.plan}\n  <task-summary>${p.summary || "No task summary found"}</task-summary>\n</task>`,
     )
     .join("\n");
 }
