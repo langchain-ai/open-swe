@@ -8,15 +8,21 @@ import {
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
 import { Sandbox } from "@e2b/code-interpreter";
-import { zodSchemaToString } from "../utils/zod-to-string.js";
+import {
+  getMissingKeysFromObjectSchema,
+  zodSchemaToString,
+} from "../utils/zod-to-string.js";
 import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
+  const missingKeys = getMissingKeysFromObjectSchema(schema, args);
   return `Invalid arguments for tool call. Expected:\n${zodSchemaToString(
     schema,
-  )}.\nGot:\n${JSON.stringify(args)}`;
+  )}.\nGot:\n${JSON.stringify(args)}\nMissing keys:\n - ${missingKeys.join(
+    "\n - ",
+  )}\n`;
 }
 
 export async function takeAction(

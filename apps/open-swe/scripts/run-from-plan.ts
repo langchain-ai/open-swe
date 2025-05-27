@@ -57,7 +57,7 @@ Once you're done, ensure you've documented the development process in the readme
       },
       {
         index: 4,
-        plan: "Add comprehensive error handling and logging throughout the authentication flow",
+        plan: "Add comprehensive error handling throughout the authentication flow",
         completed: false,
         summary: undefined,
       },
@@ -73,7 +73,7 @@ Once you're done, ensure you've documented the development process in the readme
       "Implement GitHub OAuth flow endpoints including authorization redirect and callback handling",
       "Create middleware for JWT token generation and validation for authenticated sessions",
       "Add environment configuration management for OAuth app credentials and server settings",
-      "Add comprehensive error handling and logging throughout the authentication flow",
+      "Add comprehensive error handling throughout the authentication flow",
       "Create comprehensive README documentation covering setup, configuration, and development process",
     ],
     planContextSummary: `## User Request Summary
