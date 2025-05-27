@@ -22,6 +22,10 @@ You MUST adhere to the following criteria when generating the plan:
 - Do not pack multiple complex tasks into a single plan item. Each high level task you'll need to complete should have its own plan item.
 - When you are ready to generate the plan, ensure you call the 'session_plan' tool. You are REQUIRED to call this tool.
 - The first user message in this conversation contains the user's request.
+- Your plan should be as simple as possible, while still containing all the tasks required to complete the user's request.
+  - If the user did not explicitly request you write tests, do not include a task to write tests.
+  - If the user did not explicitly request you write documentation, do not include a task to do so.
+  - You should aim to complete the user's request in the least number of steps possible.
 `;
 
 export async function generatePlan(
