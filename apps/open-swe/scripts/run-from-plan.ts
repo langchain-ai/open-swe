@@ -25,7 +25,8 @@ async function runFromPlan() {
       {
         id: "msg_01UM7mQS4P37haW1LrABGZez",
         role: "assistant",
-        content: "The project is structured as a monorepo, with some apps located inside the /apps directory. In this directory, there is an /auth directory. This directory only contains the scaffolding for a new app in the monorepo, but is not yet implemented. Please take the following plan/task description and implement it in the /auth directory:\nThis monorepo is for an AI coding agent. The app runs and edits the code in the cloud in a sandboxed environment. Right now, we require users to generate a GitHub PAT, which we store in a .env file and can use to authenticate with GitHub. This is not idea, and instead we want to have a github oauth app which users can authenticate with.\nPlease implement a new auth server inside the /auth directory which can do this.\nYou will not have any access to secrets, so you will not be able to run the server to test it.\nI want the server to be able to authenticate users with GitHub, such that we will be able to take the following actions:\n1. clone repositories they give us access to\n2. checkout existing and create new branches on the repositories they give us access to\n3. make pull requests and push changes to the repositories they give us access to\nOnce you're done, ensure you've documented the development process in the readme of this new app.",
+        content:
+          "The project is structured as a monorepo, with some apps located inside the /apps directory. In this directory, there is an /auth directory. This directory only contains the scaffolding for a new app in the monorepo, but is not yet implemented. Please take the following plan/task description and implement it in the /auth directory:\nThis monorepo is for an AI coding agent. The app runs and edits the code in the cloud in a sandboxed environment. Right now, we require users to generate a GitHub PAT, which we store in a .env file and can use to authenticate with GitHub. This is not idea, and instead we want to have a github oauth app which users can authenticate with.\nPlease implement a new auth server inside the /auth directory which can do this.\nYou will not have any access to secrets, so you will not be able to run the server to test it.\nI want the server to be able to authenticate users with GitHub, such that we will be able to take the following actions:\n1. clone repositories they give us access to\n2. checkout existing and create new branches on the repositories they give us access to\n3. make pull requests and push changes to the repositories they give us access to\nOnce you're done, ensure you've documented the development process in the readme of this new app.",
         additional_kwargs: {
           summary_message: true,
         },
@@ -87,7 +88,7 @@ async function runFromPlan() {
       "Implement API endpoints for checking authentication status and user permissions",
       "Add comprehensive error handling and logging throughout the authentication flow",
       "Create comprehensive README documentation covering setup, configuration, and development process",
-      "Add TypeScript type definitions for GitHub OAuth responses and internal data structures"
+      "Add TypeScript type definitions for GitHub OAuth responses and internal data structures",
     ],
     planChangeRequest: undefined,
     sandboxSessionId: undefined,
