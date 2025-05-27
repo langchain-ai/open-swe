@@ -8,8 +8,16 @@ import {
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
 import { Sandbox } from "@e2b/code-interpreter";
+import { zodSchemaToString } from "../utils/zod-to-string.js";
+import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
+
+function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
+  return `Invalid arguments for tool call. Expected:\n${zodSchemaToString(
+    schema,
+  )}.\nGot:\n${JSON.stringify(args)}`;
+}
 
 export async function takeAction(
   state: GraphState,
@@ -48,13 +56,24 @@ export async function takeAction(
     // @ts-expect-error tool.invoke types are weird here...
     result = await tool.invoke(toolCall.args);
   } catch (e) {
-    logger.error("Failed to call tool", {
-      ...(e instanceof Error
-        ? { name: e.name, message: e.message, stack: e.stack }
-        : { error: e }),
-    });
-    const errMessage = e instanceof Error ? e.message : "Unknown error";
-    result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+    if (
+      e instanceof Error &&
+      e.message === "Received tool input did not match expected schema"
+    ) {
+      logger.error("Received tool input did not match expected schema", {
+        toolCall,
+        expectedSchema: zodSchemaToString(tool.schema),
+      });
+      result = formatBadArgsError(tool.schema, toolCall.args);
+    } else {
+      logger.error("Failed to call tool", {
+        ...(e instanceof Error
+          ? { name: e.name, message: e.message, stack: e.stack }
+          : { error: e }),
+      });
+      const errMessage = e instanceof Error ? e.message : "Unknown error";
+      result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+    }
   }
 
   const toolMessage = new ToolMessage({

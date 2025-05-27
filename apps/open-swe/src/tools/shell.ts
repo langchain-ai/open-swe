@@ -12,13 +12,13 @@ const logger = createLogger(LogLevel.INFO, "ShellTool");
 const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
 const shellToolSchema = z.object({
+  command: z.array(z.string()).describe("The command to run"),
   workdir: z
     .string()
-    .optional()
+    .default("/home/user")
     .describe(
-      "The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically.",
+      "The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '/home/user' as this is the root directory of the sandbox.",
     ),
-  command: z.array(z.string()).describe("The command to run"),
   timeout: z
     .number()
     .optional()

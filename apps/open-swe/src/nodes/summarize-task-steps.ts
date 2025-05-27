@@ -1,11 +1,7 @@
 import { z } from "zod";
 import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
-import {
-  AIMessage,
-  isHumanMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { AIMessage, isHumanMessage } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getMessageString } from "../utils/message/content.js";
@@ -95,31 +91,28 @@ Given this full conversation history please generate a concise, and useful summa
     throw new Error("Failed to generate plan");
   }
 
-  const toolMessage = new ToolMessage({
-    tool_call_id: toolCall.id ?? "",
-    name: toolCall.name,
-    content: `Successfully summarized planning context.`,
-    additional_kwargs: {
-      summary_message: true,
-    },
-  });
-
   const removedMessages = removeLastTaskMessages(state.messages);
   logger.info(`Removing ${removedMessages.length} message(s) from state.`);
 
   const allTasksCompleted = state.plan.every((p) => p.completed);
 
-  const newMessagesStateUpdate = [
-    ...removedMessages,
-    new AIMessage({
-      ...response,
-      additional_kwargs: {
-        ...response.additional_kwargs,
-        summary_message: true,
-      },
-    }),
-    toolMessage,
-  ];
+  // Ensure all tool calls are removed from the message.
+  delete response.tool_call_chunks;
+  delete response.tool_calls;
+  delete response.invalid_tool_calls;
+
+  const messageWithoutToolCall = new AIMessage({
+    ...response,
+    content:
+      "Condensed Task Context:\n\n" +
+      (toolCall.args as z.infer<typeof condenseContextToolSchema>).context,
+    additional_kwargs: {
+      ...response.additional_kwargs,
+      summary_message: true,
+    },
+  });
+
+  const newMessagesStateUpdate = [...removedMessages, messageWithoutToolCall];
 
   if (!allTasksCompleted) {
     return new Command({

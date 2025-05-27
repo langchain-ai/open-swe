@@ -2,11 +2,7 @@ import { z } from "zod";
 import { GraphConfig } from "../../../types.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
-import {
-  AIMessage,
-  isHumanMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { AIMessage, isHumanMessage } from "@langchain/core/messages";
 import {
   getMessageContentString,
   getMessageString,
@@ -83,25 +79,22 @@ ${state.plannerMessages.map(getMessageString).join("\n")}`;
     throw new Error("Failed to generate plan");
   }
 
-  const toolMessage = new ToolMessage({
-    tool_call_id: toolCall.id ?? "",
-    name: toolCall.name,
-    content: `Successfully summarized planning context.`,
+  delete response.tool_call_chunks;
+  delete response.tool_calls;
+  delete response.invalid_tool_calls;
+
+  const messageWithoutToolCall = new AIMessage({
+    ...response,
+    content:
+      "Condensed Planning Context:\n\n" +
+      (toolCall.args as z.infer<typeof condenseContextToolSchema>).context,
     additional_kwargs: {
+      ...response.additional_kwargs,
       summary_message: true,
     },
   });
 
   return {
-    messages: [
-      new AIMessage({
-        ...response,
-        additional_kwargs: {
-          ...response.additional_kwargs,
-          summary_message: true,
-        },
-      }),
-      toolMessage,
-    ],
+    messages: [messageWithoutToolCall],
   };
 }
