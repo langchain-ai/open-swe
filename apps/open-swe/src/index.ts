@@ -9,6 +9,7 @@ import {
   progressPlanStep,
   summarizeTaskSteps,
   generateConclusion,
+  openPullRequest,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { plannerGraph } from "./subgraphs/index.js";
@@ -67,6 +68,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: ["generate-action", "generate-conclusion"],
   })
   .addNode("generate-conclusion", generateConclusion)
+  .addNode("open-pr", openPullRequest)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-plan-subgraph")
   // TODO: Update routing to work w/ new interrupt node.
@@ -78,7 +80,8 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("rewrite-plan", "interrupt-plan")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
   .addEdge("take-action", "progress-plan-step")
-  .addEdge("generate-conclusion", END);
+  .addEdge("generate-conclusion", "open-pr")
+  .addEdge("open-pr", END);
 
 // Zod types are messed up
 export const graph = workflow.compile() as any;

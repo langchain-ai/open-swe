@@ -421,9 +421,11 @@ export async function createPullRequest({
       owner,
       repo,
     });
-    
+
     const defaultBranch = repository.default_branch;
-    logger.info(`Creating pull request against default branch: ${defaultBranch}`);
+    logger.info(
+      `Creating pull request against default branch: ${defaultBranch}`,
+    );
 
     // Step 2: Create the pull request
     const { data: pullRequest } = await octokit.pulls.create({
@@ -435,9 +437,8 @@ export async function createPullRequest({
       base: defaultBranch,
     });
 
-    logger.info(`Pull request created: ${pullRequest.html_url}`);
+    logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
     return pullRequest;
-
   } catch (error) {
     logger.error(`Failed to create pull request`, {
       error,
