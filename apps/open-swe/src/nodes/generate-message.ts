@@ -6,6 +6,7 @@ import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { pauseSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getCurrentTask } from "../utils/current-task.js";
+import { getMessageContentString } from "../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -136,9 +137,15 @@ export async function generateAction(
 
   logger.info("Generated action", {
     currentTask: getCurrentTask(state.plan).plan,
-    name: response.tool_calls?.[0].name,
-    args: response.tool_calls?.[0].args,
+    ...(response.tool_calls?.[0] && {
+      name: response.tool_calls?.[0].name,
+      args: response.tool_calls?.[0].args,
+    }),
+    ...(getMessageContentString(response.content) && {
+      content: getMessageContentString(response.content),
+    }),
   });
+
   return {
     messages: [response],
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
