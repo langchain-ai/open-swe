@@ -81,7 +81,7 @@ export function ThreadActionsView({
   } = useInterruptedActions({
     interrupt,
   });
-  const [apiUrl] = useQueryState("apiUrl");
+  const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
 
   const handleOpenInStudio = () => {
     if (!apiUrl) {

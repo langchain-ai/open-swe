@@ -2,6 +2,11 @@ import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { applyPatchTool, shellTool } from "../../../tools/index.js";
 import { GraphConfig } from "../../../types.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { zodSchemaToString } from "../../../utils/zod-to-string.js";
+import { formatBadArgsError } from "../../../utils/zod-to-string.js";
+
+const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeAction(
   state: PlannerGraphState,
@@ -31,12 +36,41 @@ export async function takeAction(
     throw new Error(`Unknown tool: ${toolCall.name}`);
   }
 
-  // @ts-expect-error tool.invoke types are weird here...
-  const result: string = await tool.invoke(toolCall.args);
+  let result = "";
+  let toolCallStatus: "success" | "error" = "success";
+  try {
+    const toolResult: { result: string; status: "success" | "error" } =
+      // @ts-expect-error tool.invoke types are weird here...
+      await tool.invoke(toolCall.args);
+    result = toolResult.result;
+    toolCallStatus = toolResult.status;
+  } catch (e) {
+    toolCallStatus = "error";
+    if (
+      e instanceof Error &&
+      e.message === "Received tool input did not match expected schema"
+    ) {
+      logger.error("Received tool input did not match expected schema", {
+        toolCall,
+        expectedSchema: zodSchemaToString(tool.schema),
+      });
+      result = formatBadArgsError(tool.schema, toolCall.args);
+    } else {
+      logger.error("Failed to call tool", {
+        ...(e instanceof Error
+          ? { name: e.name, message: e.message, stack: e.stack }
+          : { error: e }),
+      });
+      const errMessage = e instanceof Error ? e.message : "Unknown error";
+      result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+    }
+  }
+
   const toolMessage = new ToolMessage({
     tool_call_id: toolCall.id ?? "",
     content: result,
     name: toolCall.name,
+    status: toolCallStatus,
   });
 
   return {

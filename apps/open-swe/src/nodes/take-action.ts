@@ -13,22 +13,12 @@ import {
 } from "../utils/git/index.js";
 import { Sandbox } from "@e2b/code-interpreter";
 import {
-  getMissingKeysFromObjectSchema,
+  formatBadArgsError,
   zodSchemaToString,
 } from "../utils/zod-to-string.js";
-import { z } from "zod";
 import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
-
-function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
-  const missingKeys = getMissingKeysFromObjectSchema(schema, args);
-  return `Invalid arguments for tool call. Expected:\n${zodSchemaToString(
-    schema,
-  )}.\nGot:\n${JSON.stringify(args)}\nMissing keys:\n - ${missingKeys.join(
-    "\n - ",
-  )}\n`;
-}
 
 /**
  * Whether or not to route to the diagnose error step. This is true if:

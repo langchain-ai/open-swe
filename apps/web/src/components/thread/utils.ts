@@ -7,7 +7,7 @@ import type { Message } from "@langchain/langgraph-sdk";
  * - If unknown, returns 'Multimodal message'.
  */
 export function getContentString(content: Message["content"]): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string" || !content) return content;
   const texts = content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
     .map((c) => c.text);

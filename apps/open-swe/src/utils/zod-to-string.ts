@@ -59,3 +59,12 @@ function getZodType(schema: z.ZodTypeAny): string {
 
   return def.typeName || "unknown";
 }
+
+export function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
+  const missingKeys = getMissingKeysFromObjectSchema(schema, args);
+  return `Invalid arguments for tool call. Expected:\n${zodSchemaToString(
+    schema,
+  )}.\nGot:\n${JSON.stringify(args)}\nMissing keys:\n - ${missingKeys.join(
+    "\n - ",
+  )}\n`;
+}
