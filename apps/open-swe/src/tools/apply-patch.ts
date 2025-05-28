@@ -11,7 +11,11 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
 const applyPatchToolSchema = z.object({
-  diff: z.string().describe("The diff to apply. Use a standard diff format."),
+  diff: z
+    .string()
+    .describe(
+      "The diff to apply. Use a standard diff format. Ensure this field is ALWAYS provided.",
+    ),
   file_path: z.string().describe("The file path to apply the diff to."),
   workdir: z
     .string()

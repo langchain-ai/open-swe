@@ -138,12 +138,14 @@ export async function takeAction(
     });
   }
 
+  const shouldRouteDiagnoseNode = shouldDiagnoseError(
+    [...state.messages, toolMessage].filter(
+      (m): m is ToolMessage =>
+        isToolMessage(m) && !m.additional_kwargs?.is_diagnosis,
+    ),
+  );
   return new Command({
-    goto: shouldDiagnoseError(
-      [...state.messages, toolMessage].filter(isToolMessage),
-    )
-      ? "diagnose-error"
-      : "progress-plan-step",
+    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
     update: {
       messages: [toolMessage],
       ...(branchName && { branchName }),

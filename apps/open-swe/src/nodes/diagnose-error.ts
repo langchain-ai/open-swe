@@ -15,6 +15,21 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "DiagnoseError");
 
+/**
+ * Whether or not enough errored tool calls have occurred to interrupt the graph.
+ * This will return true if the last tool call was an error, and 7 of the last 10
+ * tool calls have been errors.
+ * @param toolMessages
+ *
+ * @TODO Implement this. Should interrupt after generating a diagnosis for 7 consecutive errors.
+ */
+// function shouldInterruptError(toolMessages: ToolMessage[]): boolean {
+//   if (toolMessages[toolMessages.length - 1].status !== "error") {
+//     return false;
+//   }
+//   return toolMessages.slice(-10).filter((m) => m.status === "error").length >= 7;
+// }
+
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
 The last command you tried to execute failed with an error. Please carefully diagnose the error, and provide a helpful explanation of exactly what the issue is, and how you can fix it.
@@ -134,6 +149,9 @@ export async function diagnoseError(
     content: `Successfully diagnosed error. Please use the diagnosis to continue with the next action.`,
     name: toolCall.name,
     status: "success",
+    additional_kwargs: {
+      is_diagnosis: true,
+    },
   });
 
   return {

@@ -61,7 +61,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   // Always interrupt after rewriting the plan.
   .addEdge("rewrite-plan", "interrupt-plan")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
-  .addEdge("diagnose-error", "progress-plan-step")
+  .addEdge("diagnose-error", "generate-action")
   .addEdge("generate-conclusion", END);
 
 // Zod types are messed up
