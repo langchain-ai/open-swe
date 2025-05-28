@@ -1,3 +1,7 @@
+import { createLogger, LogLevel } from "./logger.js";
+
+const logger = createLogger(LogLevel.INFO, "TruncateOutputs");
+
 export function truncateOutput(
   output: string,
   options?: {
@@ -27,6 +31,15 @@ export function truncateOutput(
   if (output.length <= numStartCharacters + numEndCharacters) {
     return output;
   }
+
+  logger.warn(
+    `Truncating output due to its length exceeding the maximum allowed characters. Received ${output.length} characters, but only ${numStartCharacters + numEndCharacters} were allowed.`,
+    {
+      numAllowedStartCharacters: numStartCharacters,
+      numAllowedEndCharacters: numEndCharacters,
+      outputLength: output.length,
+    },
+  );
 
   return (
     `The following output was truncated due to its length exceeding the maximum allowed characters. Received ${output.length} characters, but only ${numStartCharacters + numEndCharacters} were allowed.\n\n` +
