@@ -4,7 +4,7 @@ import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { GraphConfig } from "../../../types.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getCurrentTask } from "../../../utils/current-task.js";
+import { getMessageContentString } from "../../../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -43,10 +43,14 @@ export async function generateAction(
       ...state.plannerMessages,
     ]);
 
-  logger.info("Generated planning action", {
-    currentTask: getCurrentTask(state.plan).plan,
-    name: response.tool_calls?.[0].name,
-    args: response.tool_calls?.[0].args,
+  logger.info("Generated planning message", {
+    ...(response.tool_calls?.[0] && {
+      name: response.tool_calls?.[0].name,
+      args: response.tool_calls?.[0].args,
+    }),
+    ...(getMessageContentString(response.content) && {
+      content: getMessageContentString(response.content),
+    }),
   });
 
   return {
