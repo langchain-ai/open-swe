@@ -86,13 +86,13 @@ export function useFileUpload({
     // Global drag events with counter for robust dragOver state
     const handleWindowDragEnter = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes("Files")) {
-        dragCounter.current++;
+        dragCounter.current += 1;
         setDragOver(true);
       }
     };
     const handleWindowDragLeave = (e: DragEvent) => {
       if (e.dataTransfer?.types?.includes("Files")) {
-        dragCounter.current--;
+        dragCounter.current -= 1;
         if (dragCounter.current <= 0) {
           setDragOver(false);
           dragCounter.current = 0;
@@ -200,18 +200,20 @@ export function useFileUpload({
   const handlePaste = async (
     e: React.ClipboardEvent<HTMLTextAreaElement | HTMLInputElement>,
   ) => {
-    e.preventDefault();
     const items = e.clipboardData.items;
     if (!items) return;
     const files: File[] = [];
-    for (let i = 0; i < items.length; i++) {
+    for (let i = 0; i < items.length; i += 1) {
       const item = items[i];
       if (item.kind === "file") {
         const file = item.getAsFile();
         if (file) files.push(file);
       }
     }
-    if (files.length === 0) return;
+    if (files.length === 0) {
+      return;
+    }
+    e.preventDefault();
     const validFiles = files.filter((file) =>
       SUPPORTED_FILE_TYPES.includes(file.type),
     );
