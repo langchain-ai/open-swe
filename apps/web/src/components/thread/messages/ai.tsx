@@ -141,19 +141,19 @@ export function AssistantMessage({
   }
 
   return (
-    <div className="group mr-auto flex items-start gap-2">
-      <div className="flex flex-col gap-2">
+    <div className="group mr-auto flex items-start gap-2 max-w-3xl w-full">
+      <div className="flex flex-col gap-2 w-full">
         {isToolResult ? (
-          <>
+          <span>
             <ToolResult message={message} />
             <Interrupt
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
-          </>
+          </span>
         ) : (
-          <>
+          <span>
             {contentString.length > 0 && (
               <div className="py-1">
                 <MarkdownText>{contentString}</MarkdownText>
@@ -161,7 +161,7 @@ export function AssistantMessage({
             )}
 
             {!hideToolCalls && (
-              <>
+              <span>
                 {(hasToolCalls && toolCallsHaveContents && (
                   <ToolCalls toolCalls={message.tool_calls} />
                 )) ||
@@ -171,7 +171,7 @@ export function AssistantMessage({
                   (hasToolCalls && (
                     <ToolCalls toolCalls={message.tool_calls} />
                   ))}
-              </>
+              </span>
             )}
 
             {message && (
@@ -204,7 +204,7 @@ export function AssistantMessage({
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
               />
             </div>
-          </>
+          </span>
         )}
       </div>
     </div>

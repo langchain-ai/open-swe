@@ -1,5 +1,5 @@
 import { loadModel, Task } from "../../../utils/load-model.js";
-import { shellTool, applyPatchTool } from "../../../tools/index.js";
+import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { GraphConfig } from "../../../types.js";
 import { isHumanMessage } from "@langchain/core/messages";
@@ -23,7 +23,7 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [shellTool, applyPatchTool];
+  const tools = [shellTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
   const firstUserMessage = state.messages.find(isHumanMessage);
