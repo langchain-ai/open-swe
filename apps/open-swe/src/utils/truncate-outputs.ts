@@ -29,8 +29,9 @@ export function truncateOutput(
   }
 
   return (
+    `The following output was truncated due to its length exceeding the maximum allowed characters. Received ${output.length} characters, but only ${numStartCharacters + numEndCharacters} were allowed.\n\n` +
     output.slice(0, numStartCharacters) +
-    `\n... Output too long. Truncated the middle ${output.length - numStartCharacters - numEndCharacters} characters of the output ...\n` +
+    `\n\n... [content truncated] ...\n\n` +
     output.slice(-numEndCharacters)
   );
 }
