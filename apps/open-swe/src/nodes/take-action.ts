@@ -1,7 +1,11 @@
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  isAIMessage,
+  isToolMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { applyPatchTool, shellTool } from "../tools/index.js";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import { GraphState, GraphConfig } from "../types.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -13,6 +17,7 @@ import {
   zodSchemaToString,
 } from "../utils/zod-to-string.js";
 import { z } from "zod";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -28,7 +33,7 @@ function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
 export async function takeAction(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const lastMessage = state.messages[state.messages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
@@ -58,10 +63,15 @@ export async function takeAction(
   }
 
   let result = "";
+  let toolCallStatus: "success" | "error" = "success";
   try {
-    // @ts-expect-error tool.invoke types are weird here...
-    result = await tool.invoke(toolCall.args);
+    const toolResult: { result: string; status: "success" | "error" } =
+      // @ts-expect-error tool.invoke types are weird here...
+      await tool.invoke(toolCall.args);
+    result = toolResult.result;
+    toolCallStatus = toolResult.status;
   } catch (e) {
+    toolCallStatus = "error";
     if (
       e instanceof Error &&
       e.message === "Received tool input did not match expected schema"
@@ -86,6 +96,7 @@ export async function takeAction(
     tool_call_id: toolCall.id ?? "",
     content: result,
     name: toolCall.name,
+    status: toolCallStatus,
   });
 
   // Always check if there are changed files after running a tool.
@@ -106,8 +117,18 @@ export async function takeAction(
     });
   }
 
-  return {
-    messages: [toolMessage],
-    ...(branchName && { branchName }),
-  };
+  const optimisticStateMessages = [...state.messages, toolMessage];
+  const toolMessages = optimisticStateMessages.filter(isToolMessage);
+  const lastTwoToolCallsErrored =
+    toolMessages.length >= 2 &&
+    toolMessages.slice(-2).every((m) => m.status === "error");
+
+  return new Command({
+    // Only route to diagnose error if the last two tool calls in a row errored.
+    goto: lastTwoToolCallsErrored ? "diagnose-error" : "progress-plan-step",
+    update: {
+      messages: [toolMessage],
+      ...(branchName && { branchName }),
+    },
+  });
 }

@@ -4,6 +4,7 @@ export const PLAN_PROMPT = `## Completed Tasks
 {COMPLETED_TASKS}
 
 ## Remaining Tasks
+(This list does not include the current task)
 {REMAINING_TASKS}
 
 ## Current Task
@@ -75,7 +76,7 @@ export function formatPlanPromptWithSummaries(plan: PlanItem[]): string {
   return plan
     .map(
       (p) =>
-        `<task index="${p.index}">\n${p.plan}\n  <task-summary>${p.summary || "No task summary found"}</task-summary>\n</task>`,
+        `<task index="${p.index}">\n${p.plan}\n  <task-summary>\n${p.summary || "No task summary found"}\n  </task-summary>\n</task>`,
     )
     .join("\n");
 }

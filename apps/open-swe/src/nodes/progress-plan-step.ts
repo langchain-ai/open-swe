@@ -15,10 +15,10 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 In your workflow, you generate a plan, then act on said plan. It may take many actions to complete a single step, or a single action to complete the step.
 
 Here is the plan, along with the summaries of each completed task:
-
 {PLAN_PROMPT}
 
-Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on. In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
+Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on.
+In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.
@@ -27,15 +27,20 @@ Once you've determined the status of the current task, call the \`set_task_statu
 const setTaskStatusToolSchema = z.object({
   reasoning: z
     .string()
-    .describe("Reasoning for the status of the current task."),
+    .describe(
+      "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
+    ),
   task_status: z
     .enum(["completed", "not_completed"])
-    .describe("The status of the current task."),
+    .describe(
+      "The status of the current task, based on the reasoning provided.",
+    ),
 });
 
 const setTaskStatusTool = {
   name: "set_task_status",
-  description: "The status of the current task.",
+  description:
+    "The status of the current task, along with a concise reasoning summary to support the status.",
   schema: setTaskStatusToolSchema,
 };
 

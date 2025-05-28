@@ -51,7 +51,7 @@ export async function generatePlan(
   }
 
   const response = await modelWithTools
-    .withConfig({ tags: ["langsmith:nostream"] })
+    .withConfig({ tags: ["nostream"] })
     .invoke([
       {
         role: "system",

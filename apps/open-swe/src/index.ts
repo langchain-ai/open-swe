@@ -9,6 +9,7 @@ import {
   progressPlanStep,
   summarizeTaskSteps,
   generateConclusion,
+  diagnoseError,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { plannerGraph } from "./subgraphs/index.js";
@@ -43,7 +44,9 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: [END, "rewrite-plan", "generate-action"],
   })
   .addNode("generate-action", generateAction)
-  .addNode("take-action", takeAction)
+  .addNode("take-action", takeAction, {
+    ends: ["progress-plan-step", "diagnose-error"],
+  })
   .addNode("progress-plan-step", progressPlanStep, {
     ends: ["summarize-task-steps", "generate-action", "generate-conclusion"],
   })
@@ -51,13 +54,14 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: ["generate-action", "generate-conclusion"],
   })
   .addNode("generate-conclusion", generateConclusion)
+  .addNode("diagnose-error", diagnoseError)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-plan-subgraph")
   .addEdge("generate-plan-subgraph", "interrupt-plan")
   // Always interrupt after rewriting the plan.
   .addEdge("rewrite-plan", "interrupt-plan")
   .addConditionalEdges("generate-action", takeActionOrEnd, ["take-action", END])
-  .addEdge("take-action", "progress-plan-step")
+  .addEdge("diagnose-error", "progress-plan-step")
   .addEdge("generate-conclusion", END);
 
 // Zod types are messed up

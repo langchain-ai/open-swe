@@ -1,11 +1,13 @@
 import { v4 as uuidv4 } from "uuid";
-import { z } from "zod";
 import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { getMessageString } from "../utils/message/content.js";
+import {
+  getMessageContentString,
+  getMessageString,
+} from "../utils/message/content.js";
 import { removeLastTaskMessages } from "../utils/message/modify-array.js";
 import { Command } from "@langchain/langgraph";
 import { ConfigurableModel } from "langchain/chat_models/universal";
@@ -19,9 +21,9 @@ Here are all of your tasks you've completed, remaining, and the current task you
 {PLAN_PROMPT}
 
 You MUST adhere to the following criteria when summarizing the conversation history:
-  - Consider including a section titled 'Key repository insights and learnings' which may include information, insights and learnings you've discovered about the codebase or specific files while completing the task.
-    - This section should be concise, but still including enough information so following steps will not repeat any mistakes or go down rabbit holes which you already know about.
-  - If changes were made to the repository during this task, ensure you include a section titled 'Repository modifications summary' which should include a short description of each change. Include information such as:
+  - Include insights, and learnings you've discovered about the codebase or specific files while completing the task.
+    - You should NOT document scripts, file structure, or other context which could be categorized as 'general codebase context'. General codebase context (e.g. scripts, file structure, package managers, etc.) will be generated in a separate step. Inspect the codebase context string provided below for this information.
+  - If files were created or modified, include short summaries of the changes made.
     - What file(s) were modified/created.
     - What content was added/removed.
     - If you had to make a change which required you to undo previous changes, include that information.
@@ -31,14 +33,15 @@ You MUST adhere to the following criteria when summarizing the conversation hist
   - Ensure you have an understanding of the context and summaries you've already generated (provided by the user below) and do not repeat any information you've already included.
   - Do not duplicate ANY information. Ensure you carefully read and understand the task summaries generated above, and do not repeat any information you've already included.
   - You do not need to include specific codebase context here, as codebase context will be generated in a separate step. Your sole task is to generate a concise summary of this specific task you just completed.
-  - Ensure your summary is concise, but useful for future context.
+  - Ensure your summary is as concise as possible, but useful for future context.
 
-Here is the current state of the codebase context you've accumulated:
+Here is the current state of the codebase context you've accumulated. Remember YOU SHOULD NOT INCLUDE ANY GENERAL CODEBASE CONTEXT IN YOUR TASK SUMMARY.
 {CODEBASE_CONTEXT}
 
 Ensure you do NOT include codebase context in your task summary, as we want to avoid including duplicate information.
 
-With all of this in mind, please carefully summarize and condense the conversation history of the task you just completed, provided by the user below. Ensure you pass this condensed task summary to the \`condense_task_context\` tool.
+With all of this in mind, please carefully summarize and condense the conversation history of the task you just completed, provided by the user below. Remember that this summary should ONLY include details about the completed task, and should NOT include any general codebase context.
+Respond ONLY with the task summary. Do not include any additional information, or text before or after the task summary.
 `;
 
 const userContextMessage = `Here is the task you just completed:
@@ -72,7 +75,7 @@ When responding, ensure:
   - You do NOT remove any information from the existing codebase context string if recent messages do not contradict it. We want to ensure we always have a complete picture of the codebase.
   - You modify/combine information from the existing codebase context string if if new information is provided which warrants a change.
 
-Please be concise, clear and helpful. Omit any extraneous information. Call the \`update_codebase_context\` tool when you are finished.
+Please be concise, clear and helpful. Omit any extraneous information. Respond ONLY with the codebase context. Do not include any additional information, or text before or after the codebase context.
 `;
 
 const updateCodebaseContextUserMessage = `Here is the task you just completed:
@@ -83,19 +86,6 @@ With this in mind, please use the following conversation history to update the c
 
 Conversation history:
 {CONVERSATION_HISTORY}`;
-
-const updateCodebaseContextToolSchema = z.object({
-  context: z
-    .string()
-    .describe(
-      "The full, updated codebase context to be used for future context. Should include all of the existing codebase context, as well as any new information provided by the recent messages.",
-    ),
-});
-const updateCodebaseContextTool = {
-  name: "update_codebase_context",
-  description: "Update the codebase context with the most recent changes.",
-  schema: updateCodebaseContextToolSchema,
-};
 
 const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
@@ -110,7 +100,7 @@ const formatPrompt = (plan: PlanItem[], codebaseContext: string): string =>
     )
     .replace(
       "{CODEBASE_CONTEXT}",
-      codebaseContext || "No codebase context generated yet.",
+      `<codebase-context>\n${codebaseContext || "No codebase context generated yet."}\n</codebase-context>`,
     );
 
 const formatUserMessage = (
@@ -135,7 +125,7 @@ const formatUserMessage = (
 const formatCodebaseContextPrompt = (codebaseContext: string): string =>
   updateCodebaseContextSysPrompt.replace(
     "{CODEBASE_CONTEXT}",
-    codebaseContext || "No codebase context generated yet.",
+    `<codebase-context>\n${codebaseContext || "No codebase context generated yet."}\n</codebase-context>`,
   );
 
 const formatUserCodebaseContextMessage = (
@@ -157,20 +147,6 @@ const formatUserCodebaseContextMessage = (
     );
 };
 
-const condenseContextToolSchema = z.object({
-  context: z
-    .string()
-    .describe(
-      "The condensed context from the conversation history relevant to the recently completed task.",
-    ),
-});
-const condenseContextTool = {
-  name: "condense_task_context",
-  description:
-    "Condense the conversation history into a concise summary, while still retaining the most relevant and important snippets.",
-  schema: condenseContextToolSchema,
-};
-
 async function generateTaskSummaryFunc(
   state: GraphState,
   model: ConfigurableModel,
@@ -180,12 +156,8 @@ async function generateTaskSummaryFunc(
     throw new Error("Unable to find last completed task.");
   }
 
-  const modelWithTools = model.bindTools([condenseContextTool], {
-    tool_choice: condenseContextTool.name,
-  });
-
   logger.info(`Summarizing task steps...`);
-  const response = await modelWithTools.invoke([
+  const response = await model.withConfig({ tags: ["nostream"] }).invoke([
     {
       role: "system",
       content: formatPrompt(state.plan, state.codebaseContext),
@@ -196,22 +168,14 @@ async function generateTaskSummaryFunc(
     },
   ]);
 
-  const toolCall = response.tool_calls?.[0];
-  if (!toolCall) {
-    throw new Error("Failed to generate plan");
-  }
-
-  const contextSummary = (
-    toolCall.args as z.infer<typeof condenseContextToolSchema>
-  ).context;
-
+  const contentString = getMessageContentString(response.content);
   const newPlanWithSummary = state.plan.map((p) => {
     if (p.index !== lastCompletedTask.index) {
       return p;
     }
     return {
       ...p,
-      summary: contextSummary,
+      summary: contentString,
     };
   });
 
@@ -226,12 +190,8 @@ async function updateCodebaseContextFunc(
   state: GraphState,
   model: ConfigurableModel,
 ): Promise<string> {
-  const modelWithTools = model.bindTools([updateCodebaseContextTool], {
-    tool_choice: updateCodebaseContextTool.name,
-  });
-
   logger.info(`Updating codebase context...`);
-  const response = await modelWithTools.invoke([
+  const response = await model.withConfig({ tags: ["nostream"] }).invoke([
     {
       role: "system",
       content: formatCodebaseContextPrompt(state.codebaseContext),
@@ -241,14 +201,8 @@ async function updateCodebaseContextFunc(
       content: formatUserCodebaseContextMessage(state.messages, state.plan),
     },
   ]);
-
-  const toolCall = response.tool_calls?.[0];
-  if (!toolCall) {
-    throw new Error("Failed to update codebase context");
-  }
-
-  return (toolCall.args as z.infer<typeof updateCodebaseContextToolSchema>)
-    .context;
+  const contentString = getMessageContentString(response.content);
+  return contentString;
 }
 
 const updateCodebaseContext = traceable(updateCodebaseContextFunc, {

@@ -22,7 +22,7 @@ const applyPatchToolSchema = z.object({
 });
 
 export const applyPatchTool = tool(
-  async (input) => {
+  async (input): Promise<{ result: string; status: "success" | "error" }> => {
     const state = getCurrentTaskInput<GraphState>();
     const { sandboxSessionId } = state;
     if (!sandboxSessionId) {
@@ -44,8 +44,11 @@ export const applyPatchTool = tool(
       },
     );
     if (!readFileSuccess) {
-      logger.error("Failed to read file", readFileOutput);
-      return readFileOutput;
+      logger.error(readFileOutput);
+      return {
+        result: readFileOutput,
+        status: "error",
+      };
     }
 
     let patchedContent: string | false;
@@ -62,14 +65,20 @@ export const applyPatchTool = tool(
           : { error: e }),
       });
       const errMessage = e instanceof Error ? e.message : "Unknown error";
-      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`;
+      return {
+        result: `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`,
+        status: "error",
+      };
     }
 
     if (patchedContent === false) {
       logger.error(
         `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
       );
-      return `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`;
+      return {
+        result: `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
+        status: "error",
+      };
     }
 
     const { success: writeFileSuccess, output: writeFileOutput } =
@@ -80,17 +89,24 @@ export const applyPatchTool = tool(
       logger.error("Failed to write file", {
         writeFileOutput,
       });
-      return writeFileOutput;
+      return {
+        result: writeFileOutput,
+        status: "error",
+      };
     }
 
     logger.info(
       `Successfully applied diff to \`${file_path}\` and saved changes.`,
     );
-    return `Successfully applied diff to \`${file_path}\` and saved changes.`;
+    return {
+      result: `Successfully applied diff to \`${file_path}\` and saved changes.`,
+      status: "success",
+    };
   },
   {
     name: "apply_patch",
-    description: "Applies a diff to a file given a file path and diff content.",
+    description:
+      "Applies a diff to a file given a file path and diff content. Ensure you ALWAYS pass a valid file path to this tool. The combination of \`workdir\` and \`file_path\` should point to a valid file in the sandbox. Ensure you do not omit parts of the path between \`workdir\` and \`file_path\`.",
     schema: applyPatchToolSchema,
   },
 );

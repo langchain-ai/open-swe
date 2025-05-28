@@ -19,7 +19,7 @@ You can:
 You work based on a plan which was generated in a previous step. After each task in a plan is completed, a summary of the task is generated, and included in the plan list below. These messages are then removed from the conversation history, so ensure you always weigh the task summaries highly when making decisions.
 
 The plan tasks and summaries are as follows:
-{PLAN_PROMPT}
+{PLAN_PROMPT_WITH_SUMMARIES}
 
 When you were generating this plan, you also generated a summary of the actions you took in order to come up with this plan. Ensure you use this as context about the codebase, and plan generation process.
 {PLAN_GENERATION_SUMMARY}
@@ -81,10 +81,10 @@ You MUST adhere to the following criteria when executing the task:
   - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
 - Only make changes to the existing Git repo ({REPO_DIRECTORY}). Any changes outside this repo will not be detected, so do not attempt to create new files or directories outside of this repo.
 
-Codebase context:
+Below, is a collection of useful context about the codebase. It is updated after each completed task, and is provided to you to help you make decisions, and avoid duplicate work:
 {CODEBASE_CONTEXT}
 
-And here is the plan, and completed task summaries one more time:
+Once again, here are the completed tasks, remaining tasks, and the current task you're working on:
 {PLAN_PROMPT}
 `;
 
@@ -92,9 +92,10 @@ const formatPrompt = (state: GraphState, config: GraphConfig): string => {
   const repoDirectory = getRepoAbsolutePath(config);
   return systemPrompt
     .replaceAll(
-      "{PLAN_PROMPT}",
+      "{PLAN_PROMPT_WITH_SUMMARIES}",
       formatPlanPrompt(state.plan, { includeSummaries: true }),
     )
+    .replaceAll("{PLAN_PROMPT}", formatPlanPrompt(state.plan))
     .replaceAll("{REPO_DIRECTORY}", repoDirectory)
     .replaceAll(
       "{PLAN_GENERATION_SUMMARY}",
@@ -102,8 +103,7 @@ const formatPrompt = (state: GraphState, config: GraphConfig): string => {
     )
     .replaceAll(
       "{CODEBASE_CONTEXT}",
-      state.codebaseContext ||
-        "No codebase context generated yet. Please use the conversation below as context.",
+      `<codebase-context>\n${state.codebaseContext || "No codebase context generated yet. Please use the conversation below as context."}\n</codebase-context>`,
     );
 };
 

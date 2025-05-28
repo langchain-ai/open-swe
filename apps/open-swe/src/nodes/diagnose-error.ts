@@ -1,0 +1,142 @@
+import {
+  BaseMessage,
+  isToolMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
+import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
+import {
+  getMessageContentString,
+  getMessageString,
+} from "../utils/message/content.js";
+import { loadModel, Task } from "../utils/load-model.js";
+import { z } from "zod";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "DiagnoseError");
+
+const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+
+The last command you tried to execute failed with an error. Please carefully diagnose the error, and provide a helpful explanation of exactly what the issue is, and how you can fix it.
+
+Following these rules when diagnosing the error:
+  - You should provide a clear, concise, and helpful explanation of exactly what the issue is, and how you can fix it.
+  - You do not want to be overly verbose in your diagnosis. You should only include information which is directly relevant to diagnosing and fixing the error.
+  - NEVER make up reasons, or make a guess as to what the issue is. Your reasoning must ALWAYS be grounded in the information provided to you.
+    - Making up reasons, or making a guess can lead to more problems, so it's best to say you don't know rather than make up a reason.
+  - Reference specific lines of code, or context from the conversation history to support your diagnosis.
+  
+Here is the result of the last two failed commands:
+{FAILED_ACTION_OUTPUT}
+
+Here is the current task you're working on:
+{CURRENT_TASK}
+
+And here are all of the tasks you've completed so far, along with their summaries:
+{PLAN_PROMPT}
+
+Finally, here is a summary of general context about the codebase:
+{CODEBASE_CONTEXT}
+
+Please carefully go over all of this information, and provide a helpful explanation of exactly what the issue is, and how you can fix it. When you are ready to provide your diagnosis, call the \`diagnose_error\` tool.
+`;
+
+const userPrompt = `Here is the full conversation history from the steps taken to complete the current task, along with the user's initial request:
+
+{CONVERSATION_HISTORY}
+
+Please carefully go over all of this information, and provide a helpful explanation of exactly what the issue is, and how you can fix it. When you are ready to provide your diagnosis, call the \`diagnose_error\` tool.`;
+
+const diagnoseErrorToolSchema = z.object({
+  diagnosis: z.string().describe("The diagnosis of the error."),
+});
+
+const diagnoseErrorTool = {
+  name: "diagnose_error",
+  description: "Diagnoses an error given a diagnosis.",
+  schema: diagnoseErrorToolSchema,
+};
+
+const formatSystemPrompt = (
+  lastFailedActionContent: string,
+  plan: PlanItem[],
+  codebaseContext: string,
+): string => {
+  const currentTask = plan.find((p) => !p.completed);
+  const completedTasks = plan.filter((p) => p.completed);
+
+  return systemPrompt
+    .replace(
+      "{FAILED_ACTION_OUTPUT}",
+      `<failed-action-output>${lastFailedActionContent}</failed-action-output>`,
+    )
+    .replace(
+      "{CURRENT_TASK}",
+      `<current-task index="${currentTask?.index}">${currentTask?.plan}</current-task>`,
+    )
+    .replace("{PLAN_PROMPT}", formatPlanPromptWithSummaries(completedTasks))
+    .replace("{CODEBASE_CONTEXT}", codebaseContext);
+};
+
+const formatUserPrompt = (messages: BaseMessage[]): string => {
+  return userPrompt.replace(
+    "{CONVERSATION_HISTORY}",
+    messages.map(getMessageString).join("\n"),
+  );
+};
+
+export async function diagnoseError(
+  state: GraphState,
+  config: GraphConfig,
+): Promise<GraphUpdate> {
+  const lastFailedAction = state.messages.findLast(
+    (m) => isToolMessage(m) && m.status === "error",
+  );
+  if (!lastFailedAction?.content) {
+    throw new Error("No failed action found in messages");
+  }
+
+  logger.info("The last two tool calls resulted in errors. Diagnosing error.");
+
+  const model = await loadModel(config, Task.SUMMARIZER);
+  const modelWithTools = model.bindTools([diagnoseErrorTool], {
+    tool_choice: diagnoseErrorTool.name,
+  });
+
+  const response = await modelWithTools.invoke([
+    {
+      role: "system",
+      content: formatSystemPrompt(
+        getMessageContentString(lastFailedAction.content),
+        state.plan,
+        state.codebaseContext,
+      ),
+    },
+    {
+      role: "user",
+      content: formatUserPrompt(state.messages),
+    },
+  ]);
+
+  const toolCall = response.tool_calls?.[0];
+
+  if (!toolCall) {
+    throw new Error("Failed to generate a tool call when diagnosing error.");
+  }
+
+  logger.info("Diagnosed error successfully.", {
+    diagnosis: (toolCall.args as z.infer<typeof diagnoseErrorToolSchema>)
+      .diagnosis,
+  });
+
+  const toolMessage = new ToolMessage({
+    tool_call_id: toolCall.id ?? "",
+    content: `Successfully diagnosed error. Please use the diagnosis to continue with the next action.`,
+    name: toolCall.name,
+    status: "success",
+  });
+
+  return {
+    messages: [response, toolMessage],
+  };
+}

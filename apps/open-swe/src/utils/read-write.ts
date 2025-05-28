@@ -56,14 +56,10 @@ async function readFileFunc(
       });
       return {
         success: false,
-        output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nStderr: ${readOutput.stderr}.\nStdout: ${readOutput.stdout}`,
+        output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nStderr: ${readOutput.stderr}\nStdout: ${readOutput.stdout}`,
       };
     }
-    if (readOutput.stderr) {
-      logger.warn(
-        `Stderr while reading file '${filePath}' from sandbox via cat: ${readOutput.stderr}`,
-      );
-    }
+
     return {
       success: true,
       output: readOutput.stdout,
@@ -93,9 +89,13 @@ async function readFileFunc(
     let outputMessage = `FAILED TO EXECUTE READ COMMAND for sandbox '${filePath}'.`;
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      outputMessage += `\nExit code: ${errorFields.exitCode}.\nStderr: ${errorFields.stderr}.\nStdout: ${errorFields.stdout}`;
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nStderr: ${errorFields.stderr}\nStdout: ${errorFields.stdout}`;
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
+    }
+
+    if (outputMessage.includes("No such file or directory")) {
+      outputMessage += `\nPlease check the file paths you passed to \`workdir\` and \`file_path\` to ensure they are valid, and when combined they point to a valid file in the sandbox.`;
     }
 
     return {
@@ -137,7 +137,7 @@ ${delimiter}`;
       });
       return {
         success: false,
-        output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}. Stderr: ${writeOutput.stderr}. Stdout: ${writeOutput.stdout}`,
+        output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}\nStderr: ${writeOutput.stderr}\nStdout: ${writeOutput.stdout}`,
       };
     }
     if (writeOutput.stderr) {
@@ -162,7 +162,7 @@ ${delimiter}`;
     let outputMessage = `FAILED TO EXECUTE WRITE COMMAND for sandbox '${filePath}'.`;
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      outputMessage += `\nExit code: ${errorFields.exitCode}.\nStderr: ${errorFields.stderr}.\nStdout: ${errorFields.stdout}`;
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nStderr: ${errorFields.stderr}\nStdout: ${errorFields.stdout}`;
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
     }
