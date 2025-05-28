@@ -70,12 +70,14 @@ export async function takeAction(
     return new Command({
       goto: "progress-plan-step",
       update: {
-        messages: [new ToolMessage({
-          tool_call_id: toolCall.id ?? "",
-          content: `Unknown tool: ${toolCall.name}`,
-          name: toolCall.name,
-          status: "error",
-        })],
+        messages: [
+          new ToolMessage({
+            tool_call_id: toolCall.id ?? "",
+            content: `Unknown tool: ${toolCall.name}`,
+            name: toolCall.name,
+            status: "error",
+          }),
+        ],
       },
     });
   }

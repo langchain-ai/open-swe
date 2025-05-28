@@ -32,15 +32,17 @@ export async function takeAction(
 
   const tool = toolsMap[toolCall.name];
 
-if (!tool) {
+  if (!tool) {
     logger.error(`Unknown tool: ${toolCall.name}`);
     return {
-      plannerMessages: [new ToolMessage({
-        tool_call_id: toolCall.id ?? "",
-        content: `Unknown tool: ${toolCall.name}`,
-        name: toolCall.name,
-        status: "error",
-      })],
+      plannerMessages: [
+        new ToolMessage({
+          tool_call_id: toolCall.id ?? "",
+          content: `Unknown tool: ${toolCall.name}`,
+          name: toolCall.name,
+          status: "error",
+        }),
+      ],
     };
   }
 
