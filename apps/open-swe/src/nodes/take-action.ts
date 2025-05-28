@@ -30,6 +30,27 @@ function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
   )}\n`;
 }
 
+/**
+ * Whether or not to route to the diagnose error step. This is true if:
+ * - the last two tool messages are of an error status
+ * - two of the last three messages are an error status, including the last tool message
+ * @param toolMessages The tool messages to check the status of.
+ */
+function shouldDiagnoseError(toolMessages: ToolMessage[]) {
+  if (
+    toolMessages[toolMessages.length - 1].status !== "error" ||
+    toolMessages.length < 2
+  ) {
+    // Last message is not an error, then neither of the below two conditions should be true.
+    return false;
+  }
+  return (
+    // Two of the three last tool calls are errors, return true
+    // (this is either the last two, or the 3rd, and last since the check above ensures the last is an error)
+    toolMessages.slice(-3).filter((m) => m.status === "error").length >= 2
+  );
+}
+
 export async function takeAction(
   state: GraphState,
   config: GraphConfig,
@@ -117,15 +138,12 @@ export async function takeAction(
     });
   }
 
-  const optimisticStateMessages = [...state.messages, toolMessage];
-  const toolMessages = optimisticStateMessages.filter(isToolMessage);
-  const lastTwoToolCallsErrored =
-    toolMessages.length >= 2 &&
-    toolMessages.slice(-2).every((m) => m.status === "error");
-
   return new Command({
-    // Only route to diagnose error if the last two tool calls in a row errored.
-    goto: lastTwoToolCallsErrored ? "diagnose-error" : "progress-plan-step",
+    goto: shouldDiagnoseError(
+      [...state.messages, toolMessage].filter(isToolMessage),
+    )
+      ? "diagnose-error"
+      : "progress-plan-step",
     update: {
       messages: [toolMessage],
       ...(branchName && { branchName }),
