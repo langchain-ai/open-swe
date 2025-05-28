@@ -30,7 +30,7 @@ export function truncateOutput(
 
   return (
     output.slice(0, numStartCharacters) +
-    `\n... truncated the middle ${output.length - numStartCharacters - numEndCharacters} characters of the output ...\n` +
+    `\n... Output too long. Truncated the middle ${output.length - numStartCharacters - numEndCharacters} characters of the output ...\n` +
     output.slice(-numEndCharacters)
   );
 }
