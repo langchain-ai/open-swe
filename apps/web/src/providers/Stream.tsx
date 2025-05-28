@@ -81,12 +81,13 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [copyTooltipText, setCopyTooltipText] = useState(baseCopyTooltipText);
 
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
-  const assistantId: string | undefined = process.env.NEXT_PUBLIC_ASSISTANT_ID ?? "";
+  const assistantId: string | undefined =
+    process.env.NEXT_PUBLIC_ASSISTANT_ID ?? "";
 
   if (!apiUrl || !assistantId) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
-        <div className="animate-in fade-in-0 zoom-in-95 bg-red-50 flex max-w-3xl flex-col rounded-lg border shadow-lg">
+        <div className="animate-in fade-in-0 zoom-in-95 flex max-w-3xl flex-col rounded-lg border bg-red-50 shadow-lg">
           <div className="flex flex-col gap-4 border-b p-6">
             <div className="flex flex-col items-start gap-2">
               <LangGraphLogoSVG className="h-7" />
@@ -105,7 +106,10 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                   const textToCopy = `NEXT_PUBLIC_API_URL=${apiUrl}\nNEXT_PUBLIC_ASSISTANT_ID=${assistantId}`;
                   navigator.clipboard.writeText(textToCopy).then(() => {
                     setCopyTooltipText("Copied!");
-                    setTimeout(() => setCopyTooltipText(baseCopyTooltipText), 2000);
+                    setTimeout(
+                      () => setCopyTooltipText(baseCopyTooltipText),
+                      2000,
+                    );
                   });
                 }}
                 className="absolute top-2 right-2 cursor-pointer"
@@ -133,7 +137,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                   </motion.div>
                 )}
               </TooltipIconButton>
-              <code className="rounded-md border border-red-200 bg-muted py-3 px-4 text-sm flex flex-col gap-2">
+              <code className="bg-muted flex flex-col gap-2 rounded-md border border-red-200 px-4 py-3 text-sm">
                 <span>NEXT_PUBLIC_API_URL={apiUrl}</span>
                 <span>NEXT_PUBLIC_ASSISTANT_ID={assistantId}</span>
               </code>
