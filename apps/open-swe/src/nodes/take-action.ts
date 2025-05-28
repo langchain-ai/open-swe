@@ -17,6 +17,7 @@ import {
   zodSchemaToString,
 } from "../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
+import { truncateOutput } from "../utils/truncate-outputs.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -105,7 +106,7 @@ export async function takeAction(
 
   const toolMessage = new ToolMessage({
     tool_call_id: toolCall.id ?? "",
-    content: result,
+    content: truncateOutput(result),
     name: toolCall.name,
     status: toolCallStatus,
   });

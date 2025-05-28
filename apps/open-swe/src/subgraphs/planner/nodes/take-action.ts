@@ -5,6 +5,7 @@ import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
+import { truncateOutput } from "../../../utils/truncate-outputs.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -70,7 +71,7 @@ export async function takeAction(
 
   const toolMessage = new ToolMessage({
     tool_call_id: toolCall.id ?? "",
-    content: result,
+    content: truncateOutput(result),
     name: toolCall.name,
     status: toolCallStatus,
   });

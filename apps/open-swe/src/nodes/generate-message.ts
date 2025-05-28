@@ -135,7 +135,7 @@ export async function generateAction(
   }
 
   logger.info("Generated action", {
-    currentTask: getCurrentTask(state.plan),
+    currentTask: getCurrentTask(state.plan).plan,
     name: response.tool_calls?.[0].name,
     args: response.tool_calls?.[0].args,
   });

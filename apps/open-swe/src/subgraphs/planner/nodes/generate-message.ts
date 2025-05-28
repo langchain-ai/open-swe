@@ -3,6 +3,10 @@ import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { GraphConfig } from "../../../types.js";
 import { isHumanMessage } from "@langchain/core/messages";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { getCurrentTask } from "../../../utils/current-task.js";
+
+const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -38,6 +42,12 @@ export async function generateAction(
       ...(firstUserMessage ? [firstUserMessage] : []),
       ...state.plannerMessages,
     ]);
+
+  logger.info("Generated planning action", {
+    currentTask: getCurrentTask(state.plan).plan,
+    name: response.tool_calls?.[0].name,
+    args: response.tool_calls?.[0].args,
+  });
 
   return {
     plannerMessages: [response],
