@@ -4,10 +4,7 @@ import { GraphConfig, GraphState, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
-import {
-  getMessageContentString,
-  getMessageString,
-} from "../utils/message/content.js";
+import { getMessageString } from "../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { removeFirstHumanMessage } from "../utils/message/modify-array.js";
 
@@ -17,32 +14,41 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 
 In your workflow, you generate a plan, then act on said plan. It may take many actions to complete a single step, or a single action to complete the step.
 
-Here is the plan:
-
+Here is the plan, along with the summaries of each completed task:
 {PLAN_PROMPT}
 
-Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on. In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
+Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on.
+In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
 
-Take all of this information, and determine whether or not you have completed this task in the plan. Be careful to not mark a task as completed if it is not, this can cause cascading issues in the workflow.
-If you determine a task has been completed, you should call the \`confirm_task_completion\` tool. If you do NOT think the current task has been completed, do not call the tool and instead respond with \`not completed.\`.`;
+Take all of this information, and determine whether or not you have completed this task in the plan.
+Once you've determined the status of the current task, call the \`set_task_status\` tool.
+`;
 
-const confirmTaskCompletionToolSchema = z.object({
+const setTaskStatusToolSchema = z.object({
   reasoning: z
     .string()
-    .describe("Reasoning for whether or not the task has been completed."),
-  current_task_completed: z
-    .boolean()
-    .describe("Whether or not the current task has been completed."),
+    .describe(
+      "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
+    ),
+  task_status: z
+    .enum(["completed", "not_completed"])
+    .describe(
+      "The status of the current task, based on the reasoning provided.",
+    ),
 });
 
-const confirmTaskCompletionTool = {
-  name: "confirm_task_completion",
-  description: "Whether or not the current task has been completed.",
-  schema: confirmTaskCompletionToolSchema,
+const setTaskStatusTool = {
+  name: "set_task_status",
+  description:
+    "The status of the current task, along with a concise reasoning summary to support the status.",
+  schema: setTaskStatusToolSchema,
 };
 
 const formatPrompt = (plan: PlanItem[]): string => {
-  return systemPrompt.replace("{PLAN_PROMPT}", formatPlanPrompt(plan));
+  return systemPrompt.replace(
+    "{PLAN_PROMPT}",
+    formatPlanPrompt(plan, { includeSummaries: true }),
+  );
 };
 
 export async function progressPlanStep(
@@ -50,8 +56,8 @@ export async function progressPlanStep(
   config: GraphConfig,
 ): Promise<Command> {
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
-  const modelWithTools = model.bindTools([confirmTaskCompletionTool], {
-    tool_choice: "auto",
+  const modelWithTools = model.bindTools([setTaskStatusTool], {
+    tool_choice: setTaskStatusTool.name,
   });
 
   const firstUserMessage = state.messages.find(isHumanMessage);
@@ -60,10 +66,8 @@ export async function progressPlanStep(
   
 ${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
 
-Take all of this information, and determine whether or not you have completed this task in the plan. Be careful to not mark a task as completed if it is not, this can cause cascading issues in the workflow.
-If you determine a task has been completed, you should call the \`confirm_task_completion\` tool. If you do NOT think the current task has been completed, do not call the tool and instead respond with \`not completed.\`.
-
-ENSURE YOU ONLY CALL THE \`confirm_task_completion\` TOOL IF YOU DETERMINE THE CURRENT TASK HAS BEEN COMPLETED, OR RESPOND WITH 'not completed.'. DO NOT TAKE ANY OTHER ACTION.`;
+Take all of this information, and determine whether or not you have completed this task in the plan.
+Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
 
   const response = await modelWithTools.invoke([
     {
@@ -79,18 +83,23 @@ ENSURE YOU ONLY CALL THE \`confirm_task_completion\` TOOL IF YOU DETERMINE THE C
   const toolCall = response.tool_calls?.[0];
 
   if (!toolCall) {
-    logger.info(
-      "Current task has not been completed, as no tool call was generated. Progressing to the next action.",
-      {
-        responseContent: getMessageContentString(response.content),
-      },
+    throw new Error(
+      "Failed to generate a tool call when checking task status.",
     );
-    return new Command({ goto: "generate-action" });
   }
 
-  const isCompleted = (
-    toolCall.args as z.infer<typeof confirmTaskCompletionToolSchema>
-  ).current_task_completed;
+  const isCompleted =
+    (toolCall.args as z.infer<typeof setTaskStatusToolSchema>).task_status ===
+    "completed";
+  const currentTask = state.plan.filter((p) => !p.completed)?.[0];
+  const toolMessage = {
+    role: "tool",
+    tool_call_id: toolCall.id,
+    content: `Saved task status as ${
+      toolCall.args.task_status
+    } for task ${currentTask?.plan || "unknown"}`,
+    name: toolCall.name,
+  };
 
   if (!isCompleted) {
     logger.info(
@@ -99,15 +108,22 @@ ENSURE YOU ONLY CALL THE \`confirm_task_completion\` TOOL IF YOU DETERMINE THE C
         reasoning: toolCall.args.reasoning,
       },
     );
-    return new Command({ goto: "generate-action" });
+    return new Command({
+      goto: "generate-action",
+      update: { messages: [response, toolMessage] },
+    });
   }
 
+  // This should in theory never happen, but ensure we route properly if it does.
   const remainingTask = state.plan.find((p) => !p.completed);
   if (!remainingTask) {
     logger.info(
-      "Found no remaining tasks in the plan during the check plan step. Progressing to the next action.",
+      "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );
-    return new Command({ goto: "generate-action" });
+    return new Command({
+      goto: "generate-conclusion",
+      update: { messages: [response, toolMessage] },
+    });
   }
 
   logger.info("Task marked as completed. Routing to task summarization step.", {
@@ -120,6 +136,7 @@ ENSURE YOU ONLY CALL THE \`confirm_task_completion\` TOOL IF YOU DETERMINE THE C
   return new Command({
     goto: "summarize-task-steps",
     update: {
+      messages: [response, toolMessage],
       plan: state.plan.map((p) => {
         if (p.index === remainingTask.index) {
           return {

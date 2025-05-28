@@ -21,6 +21,10 @@ export type PlanItem = {
    * Whether or not the plan item has been completed.
    */
   completed: boolean;
+  /**
+   * A summary of the completed task.
+   */
+  summary?: string;
 };
 
 export type TargetRepository = {
@@ -46,6 +50,14 @@ export const GraphAnnotation = z.object({
     .string()
     .nullable()
     .default(() => null)
+    .langgraph.reducer((_state, update) => update),
+  planContextSummary: z
+    .string()
+    .default(() => "")
+    .langgraph.reducer((_state, update) => update),
+  codebaseContext: z
+    .string()
+    .default(() => "")
     .langgraph.reducer((_state, update) => update),
   /**
    * The session ID of the Sandbox to use.

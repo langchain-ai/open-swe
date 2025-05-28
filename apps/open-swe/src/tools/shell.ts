@@ -29,7 +29,7 @@ const shellToolSchema = z.object({
 });
 
 export const shellTool = tool(
-  async (input) => {
+  async (input): Promise<{ result: string; status: "success" | "error" }> => {
     try {
       const state = getCurrentTaskInput<GraphState>();
       const { sandboxSessionId } = state;
@@ -57,10 +57,16 @@ export const shellTool = tool(
           error_result: result,
           input,
         });
-        return `Command failed. Exit code: ${result.exitCode}\nError: ${result.error}\nStderr:\n${result.stderr}`;
+        return {
+          result: `Command failed. Exit code: ${result.exitCode}\nError: ${result.error}\nStderr:\n${result.stderr}`,
+          status: "error",
+        };
       }
 
-      return result.stdout;
+      return {
+        result: result.stdout,
+        status: "success",
+      };
     } catch (e) {
       const errorFields = getSandboxErrorFields(e);
       if (errorFields) {
@@ -68,7 +74,10 @@ export const shellTool = tool(
           input,
           error: errorFields,
         });
-        return `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.error}\nStderr:\n${errorFields.stderr}\nStdout:\n${errorFields.stdout}`;
+        return {
+          result: `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.error}\nStderr:\n${errorFields.stderr}\nStdout:\n${errorFields.stdout}`,
+          status: "error",
+        };
       }
 
       logger.error(

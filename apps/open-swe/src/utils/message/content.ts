@@ -41,7 +41,9 @@ export function getToolMessageString(message: ToolMessage): string {
   const content = getMessageContentString(message.content);
   const toolCallId = message.tool_call_id;
   const toolCallName = message.name;
-  return `<tool message-id=${message.id ?? "No ID"}>\nTool Call ID: ${toolCallId}\nTool Call Name: ${toolCallName}\nContent: ${content}\n</tool>`;
+  const toolStatus = message.status || "success";
+
+  return `<tool message-id=${message.id ?? "No ID"} status="${toolStatus}">\nTool Call ID: ${toolCallId}\nTool Call Name: ${toolCallName}\nContent: ${content}\n</tool>`;
 }
 
 export function getSystemMessageString(message: SystemMessage): string {

@@ -140,7 +140,7 @@ async function identifyTasksToModifyFunc(
       role: "user",
       content: formatSysPromptIdentifyTasks(
         getMessageContentString(
-          firstUserMessage?.content ?? "No user message found",
+          firstUserMessage?.content || "No user message found",
         ),
         state.planChangeRequest,
         state.proposedPlan,
@@ -205,7 +205,7 @@ async function updatePlanTasksFunc(
       role: "user",
       content: formatSysPromptRewritePlan(
         getMessageContentString(
-          firstUserMessage?.content ?? "No user message found",
+          firstUserMessage?.content || "No user message found",
         ),
         state.planChangeRequest,
         state.proposedPlan,

@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+export function getMissingKeysFromObjectSchema(
+  schema: z.ZodTypeAny,
+  obj: Record<string, any>,
+): string[] {
+  if (!(schema instanceof z.ZodObject)) {
+    throw new Error("Schema must be a ZodObject.");
+  }
+
+  return Object.keys(schema._def.shape()).filter((key) => !(key in obj));
+}
+
 export function zodSchemaToString(schema: z.ZodTypeAny, indent = 0): string {
   const spaces = " ".repeat(indent);
 

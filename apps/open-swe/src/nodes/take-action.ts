@@ -1,28 +1,60 @@
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  isAIMessage,
+  isToolMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { applyPatchTool, shellTool } from "../tools/index.js";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import { GraphState, GraphConfig } from "../types.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
   getRepoAbsolutePath,
 } from "../utils/git/index.js";
 import { Sandbox } from "@e2b/code-interpreter";
-import { zodSchemaToString } from "../utils/zod-to-string.js";
+import {
+  getMissingKeysFromObjectSchema,
+  zodSchemaToString,
+} from "../utils/zod-to-string.js";
 import { z } from "zod";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
+  const missingKeys = getMissingKeysFromObjectSchema(schema, args);
   return `Invalid arguments for tool call. Expected:\n${zodSchemaToString(
     schema,
-  )}.\nGot:\n${JSON.stringify(args)}`;
+  )}.\nGot:\n${JSON.stringify(args)}\nMissing keys:\n - ${missingKeys.join(
+    "\n - ",
+  )}\n`;
+}
+
+/**
+ * Whether or not to route to the diagnose error step. This is true if:
+ * - the last two tool messages are of an error status
+ * - two of the last three messages are an error status, including the last tool message
+ * @param toolMessages The tool messages to check the status of.
+ */
+function shouldDiagnoseError(toolMessages: ToolMessage[]) {
+  if (
+    toolMessages[toolMessages.length - 1].status !== "error" ||
+    toolMessages.length < 2
+  ) {
+    // Last message is not an error, then neither of the below two conditions should be true.
+    return false;
+  }
+  return (
+    // Two of the three last tool calls are errors, return true
+    // (this is either the last two, or the 3rd, and last since the check above ensures the last is an error)
+    toolMessages.slice(-3).filter((m) => m.status === "error").length >= 2
+  );
 }
 
 export async function takeAction(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const lastMessage = state.messages[state.messages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
@@ -52,10 +84,15 @@ export async function takeAction(
   }
 
   let result = "";
+  let toolCallStatus: "success" | "error" = "success";
   try {
-    // @ts-expect-error tool.invoke types are weird here...
-    result = await tool.invoke(toolCall.args);
+    const toolResult: { result: string; status: "success" | "error" } =
+      // @ts-expect-error tool.invoke types are weird here...
+      await tool.invoke(toolCall.args);
+    result = toolResult.result;
+    toolCallStatus = toolResult.status;
   } catch (e) {
+    toolCallStatus = "error";
     if (
       e instanceof Error &&
       e.message === "Received tool input did not match expected schema"
@@ -80,6 +117,7 @@ export async function takeAction(
     tool_call_id: toolCall.id ?? "",
     content: result,
     name: toolCall.name,
+    status: toolCallStatus,
   });
 
   // Always check if there are changed files after running a tool.
@@ -100,8 +138,17 @@ export async function takeAction(
     });
   }
 
-  return {
-    messages: [toolMessage],
-    ...(branchName && { branchName }),
-  };
+  const shouldRouteDiagnoseNode = shouldDiagnoseError(
+    [...state.messages, toolMessage].filter(
+      (m): m is ToolMessage =>
+        isToolMessage(m) && !m.additional_kwargs?.is_diagnosis,
+    ),
+  );
+  return new Command({
+    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
+    update: {
+      messages: [toolMessage],
+      ...(branchName && { branchName }),
+    },
+  });
 }
