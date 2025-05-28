@@ -50,7 +50,8 @@ You MUST adhere to the following criteria when executing the task:
 - Use \`apply_patch\` to edit files. This tool accepts diffs and file paths. It will then apply the given diff to the file.
 - You should NOT try to create empty files with \`apply_patch\`. If you need to create a file, use the \`shell\` tool, and pass \`touch <file path>\` to create the file.
 - When using the \`shell\` tool, always take advantage of the \`workdir\` parameter to run commands inside the repo directory. You should not try to generate a command with \`cd <some path>\` as passing that path to \`workdir\` is much more efficient.
-- Do not try to install dependencies, or run a server, compile the code, etc., unless you are explicitly asked to.
+- Always use the correct package manager to install dependencies. If the package manager is not already installed in the sandbox, use the \`shell\` tool to install it.
+  - If the package manager fails to install, or you have issues installing dependencies, do not try to use a different package manager. Instead, skip installing dependencies.
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Avoid writing to files which you have not already read.
