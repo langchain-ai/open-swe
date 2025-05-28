@@ -15,8 +15,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yarn and pnpm globally
-RUN npm install -g yarn pnpm
+# Update corepack to latest version (to avoid outdated signature issues)
+RUN npm install -g corepack@latest
+
+# Enable corepack for yarn and pnpm (creates shims)
+RUN corepack enable yarn pnpm
+
+# Pre-download specific versions to avoid download on first use
+RUN corepack prepare yarn@stable --activate \
+    && corepack prepare pnpm@latest --activate
 
 # Set the working directory
 WORKDIR /app
