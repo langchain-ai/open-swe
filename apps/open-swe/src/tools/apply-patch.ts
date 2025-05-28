@@ -106,7 +106,7 @@ export const applyPatchTool = tool(
   {
     name: "apply_patch",
     description:
-      "Applies a diff to a file given a file path and diff content. Ensure you ALWAYS pass a valid file path to this tool. The combination of \`workdir\` and \`file_path\` should point to a valid file in the sandbox. Ensure you do not omit parts of the path between \`workdir\` and \`file_path\`.",
+      "Applies a diff to a file given a file path and diff content. Ensure you ALWAYS pass a valid file path to this tool. The combination of `workdir` and `file_path` should point to a valid file in the sandbox. Ensure you do not omit parts of the path between `workdir` and `file_path`.",
     schema: applyPatchToolSchema,
   },
 );
