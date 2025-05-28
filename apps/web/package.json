@@ -84,5 +84,5 @@
   "overrides": {
     "react-is": "^19.0.0-rc-69d4b800-20241021"
   },
-  "packageManager": "pnpm@10.5.1"
+  "packageManager": "yarn@3.5.1"
 }
