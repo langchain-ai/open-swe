@@ -66,8 +66,20 @@ export async function takeAction(
   const tool = toolsMap[toolCall.name];
 
   if (!tool) {
-    throw new Error(`Unknown tool: ${toolCall.name}`);
+    logger.error(`Unknown tool: ${toolCall.name}`);
+    return new Command({
+      goto: "progress-plan-step",
+      update: {
+        messages: [new ToolMessage({
+          tool_call_id: toolCall.id ?? "",
+          content: `Unknown tool: ${toolCall.name}`,
+          name: toolCall.name,
+          status: "error",
+        })],
+      },
+    });
   }
+
   if (!state.sandboxSessionId) {
     throw new Error(
       "Failed to take action: No sandbox session ID found in state.",
