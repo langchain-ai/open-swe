@@ -30,6 +30,7 @@ const shellToolSchema = z.object({
 
 export const shellTool = tool(
   async (input): Promise<{ result: string; status: "success" | "error" }> => {
+    let sandbox: Sandbox | undefined;
     try {
       const state = getCurrentTaskInput<GraphState>();
       const { sandboxSessionId } = state;
@@ -42,14 +43,12 @@ export const shellTool = tool(
         );
       }
 
-      const sandbox = await Sandbox.connect(sandboxSessionId);
+      sandbox = await Sandbox.connect(sandboxSessionId);
       const { command, workdir, timeout } = input;
       const result = await sandbox.commands.run(command.join(" "), {
         timeoutMs: timeout ?? DEFAULT_COMMAND_TIMEOUT,
         cwd: workdir,
       });
-      // Add an extra 5 min timeout to the sandbox.
-      await sandbox.setTimeout(TIMEOUT_MS);
 
       if (result.error) {
         logger.error("Failed to run command", {
@@ -92,6 +91,17 @@ export const shellTool = tool(
         "FAILED TO RUN COMMAND: " +
           (e instanceof Error ? e.message : "Unknown error"),
       );
+    } finally {
+      try {
+        if (sandbox) {
+          // Add an extra 5 min timeout to the sandbox.
+          await sandbox.setTimeout(TIMEOUT_MS);
+        }
+      } catch (_) {
+        logger.warn(
+          "Failed to set timeout for sandbox inside 'finally' block for shell tool.",
+        );
+      }
     }
   },
   {

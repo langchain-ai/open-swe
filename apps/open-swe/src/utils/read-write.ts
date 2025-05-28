@@ -47,8 +47,6 @@ async function readFileFunc(
     const readOutput = await sandbox.commands.run(`cat "${filePath}"`, {
       cwd: args?.workDir,
     });
-    // Add an extra 5 min timeout to the sandbox.
-    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (readOutput.exitCode !== 0) {
       logger.error(`Error reading file '${filePath}' from sandbox via cat:`, {
@@ -102,6 +100,17 @@ async function readFileFunc(
       success: false,
       output: outputMessage,
     };
+  } finally {
+    try {
+      if (sandbox) {
+        // Add an extra 5 min timeout to the sandbox.
+        await sandbox.setTimeout(TIMEOUT_MS);
+      }
+    } catch (_) {
+      logger.warn(
+        "Failed to set timeout for sandbox inside 'finally' block for read file.",
+      );
+    }
   }
 }
 
@@ -128,8 +137,6 @@ ${delimiter}`;
     const writeOutput = await sandbox.commands.run(writeCommand, {
       cwd: args?.workDir,
     });
-    // Add an extra 5 min timeout to the sandbox.
-    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (writeOutput.exitCode !== 0) {
       logger.error(`Error writing file '${filePath}' to sandbox via cat:`, {
@@ -171,6 +178,17 @@ ${delimiter}`;
       success: false,
       output: outputMessage,
     };
+  } finally {
+    try {
+      if (sandbox) {
+        // Add an extra 5 min timeout to the sandbox.
+        await sandbox.setTimeout(TIMEOUT_MS);
+      }
+    } catch (_) {
+      logger.warn(
+        "Failed to set timeout for sandbox inside 'finally' block for write file.",
+      );
+    }
   }
 }
 
