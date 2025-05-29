@@ -352,7 +352,8 @@ export const GraphConfiguration = z.object({
         default: 6,
         min: 1,
         max: 20,
-        description: "Maximum number of context gathering actions during planning",
+        description:
+          "Maximum number of context gathering actions during planning",
       },
     }),
 });
@@ -363,4 +364,3 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
-
