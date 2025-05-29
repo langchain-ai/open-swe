@@ -7,7 +7,9 @@ import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
 
-export function getRepoAbsolutePath(targetRepository: TargetRepository): string {
+export function getRepoAbsolutePath(
+  targetRepository: TargetRepository,
+): string {
   const repoName = targetRepository.repo;
   if (!repoName) {
     throw new Error("No repository name provided");
@@ -446,4 +448,3 @@ export async function createPullRequest({
     return null;
   }
 }
-

@@ -15,7 +15,12 @@ import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { Copy, CopyCheck } from "lucide-react";
 import { motion } from "framer-motion";
 
-export type StateType = { messages: Message[]; ui?: UIMessage[] };
+type TargetRepository = { owner: string; repo: string };
+export type StateType = {
+  messages: Message[];
+  ui?: UIMessage[];
+  targetRepository?: TargetRepository;
+};
 
 const useTypedStream = useStream<
   StateType,
@@ -24,6 +29,7 @@ const useTypedStream = useStream<
       messages?: Message[] | Message | string;
       ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
       context?: Record<string, unknown>;
+      targetRepository?: TargetRepository;
     };
     CustomEventType: UIMessage | RemoveUIMessage;
   }

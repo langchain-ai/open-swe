@@ -83,12 +83,7 @@ export async function initialize(
     }
   }
 
-  // Get target repository from state, or from config as fallback during transition
-  let targetRepository = state.targetRepository;
-  if (!targetRepository && config.configurable?.target_repository) {
-    targetRepository = config.configurable.target_repository;
-  }
-
+  const { targetRepository } = state;
   if (!targetRepository) {
     throw new Error(
       "Missing required target repository. Please provide a git repository in state or configuration.",
@@ -132,4 +127,3 @@ export async function initialize(
     targetRepository,
   };
 }
-

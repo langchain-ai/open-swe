@@ -68,13 +68,6 @@ export function HumanMessage({
           };
         },
         config: {
-          // TODO: Make configurable (just that target_repository object) & recursion limit in the UI.
-          configurable: {
-            target_repository: {
-              owner: "langchain-ai",
-              repo: "open-swe",
-            },
-          },
           recursion_limit: 400,
         },
       },

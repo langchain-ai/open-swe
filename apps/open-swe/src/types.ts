@@ -78,7 +78,6 @@ export const GraphAnnotation = z.object({
    */
   targetRepository: z
     .custom<TargetRepository>()
-    .optional()
     .langgraph.reducer((_state, update) => update),
 });
 
@@ -332,4 +331,3 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
-
