@@ -22,11 +22,11 @@ import { plannerGraph } from "./subgraphs/index.js";
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {typeof END | "take-action" | "request-help"} The next node to execute, or END if the process should stop.
+ * @returns {"open-pr" | "take-action" | "request-help"} The next node to execute, or END if the process should stop.
  */
 async function routeGeneratedAction(
   state: GraphState,
-): Promise<typeof END | "take-action" | "request-help"> {
+): Promise<"open-pr" | "take-action" | "request-help"> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 
@@ -40,7 +40,8 @@ async function routeGeneratedAction(
     return "take-action";
   }
 
-  return END;
+  // No tool calls, create PR then end.
+  return "open-pr";
 }
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
@@ -74,7 +75,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
-    END,
+    "open-pr",
   ])
   .addEdge("generate-conclusion", "open-pr")
   .addEdge("diagnose-error", "generate-action")
