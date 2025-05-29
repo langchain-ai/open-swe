@@ -12,6 +12,7 @@ const logger = createLogger(LogLevel.INFO, "ShellTool");
 const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
 const DEFAULT_ENV = {
+  // Prevents corepack from showing a y/n download prompt which causes the command to hang
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
