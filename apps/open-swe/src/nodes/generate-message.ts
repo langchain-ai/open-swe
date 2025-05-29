@@ -1,6 +1,10 @@
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
-import { shellTool, applyPatchTool } from "../tools/index.js";
+import {
+  shellTool,
+  applyPatchTool,
+  requestHumanHelpTool,
+} from "../tools/index.js";
 import { getRepoAbsolutePath } from "../utils/git/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { pauseSandbox } from "../utils/sandbox.js";
@@ -54,7 +58,8 @@ You MUST adhere to the following criteria when executing the task:
 - When using the \`shell\` tool, always take advantage of the \`workdir\` parameter to run commands inside the repo directory. You should not try to generate a command with \`cd <some path>\` as passing that path to \`workdir\` is much more efficient.
 - Always use the correct package manager to install dependencies. If the package manager is not already installed in the sandbox, use the \`shell\` tool to install it.
   - If the package manager fails to install, or you have issues installing dependencies, do not try to use a different package manager. Instead, skip installing dependencies.
-  - If installing dependencies fails, it can be useful to try again passing in a much longer timeout than the default.
+- If you are lacking enough context to complete the user's task, you may call the \`request_human_help\` tool to request help from the human.
+  - This tool should only be used if you have already tried to gather all the context you need, and are still unable to complete the user's task.
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Avoid writing to files which you have not already read.
@@ -117,7 +122,7 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [shellTool, applyPatchTool];
+  const tools = [shellTool, applyPatchTool, requestHumanHelpTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
   const response = await modelWithTools.invoke([
