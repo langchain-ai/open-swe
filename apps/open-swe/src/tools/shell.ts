@@ -11,6 +11,10 @@ const logger = createLogger(LogLevel.INFO, "ShellTool");
 
 const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
+const DEFAULT_ENV = {
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+};
+
 const shellToolSchema = z.object({
   command: z.array(z.string()).describe("The command to run"),
   workdir: z
@@ -48,6 +52,7 @@ export const shellTool = tool(
       const result = await sandbox.commands.run(command.join(" "), {
         timeoutMs: timeout ?? DEFAULT_COMMAND_TIMEOUT,
         cwd: workdir,
+        envs: DEFAULT_ENV,
       });
 
       if (result.error) {
