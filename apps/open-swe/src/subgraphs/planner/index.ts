@@ -18,12 +18,15 @@ import { isAIMessage } from "@langchain/core/messages";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
+  config?: { configurable?: { maxContextActions?: number } },
 ): "take-plan-action" | "generate-plan" {
   const { plannerMessages } = state;
   const lastMessage = plannerMessages[plannerMessages.length - 1];
   // If the last message is a tool call, and we have executed less than 6 actions, take action.
-  // Max actions is 13, because that's 6 actions (2 messages per action, ai & tool) plus the input message.
-  const maxActionsCount = 13;
+  // Max actions count is calculated as: maxContextActions * 2 + 1
+  // This is because each action generates 2 messages (AI request + tool result) plus 1 initial human message
+  const maxContextActions = config?.configurable?.maxContextActions ?? 6;
+  const maxActionsCount = maxContextActions * 2 + 1;
   if (
     isAIMessage(lastMessage) &&
     lastMessage.tool_calls?.length &&
@@ -54,3 +57,4 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
 // TODO: Fix zod types
 export const plannerGraph = workflow.compile() as any;
 plannerGraph.name = "Planner";
+
