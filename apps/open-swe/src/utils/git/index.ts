@@ -1,14 +1,14 @@
 import { Octokit } from "@octokit/rest";
 import { CommandResult, Sandbox } from "@e2b/code-interpreter";
 import { createLogger, LogLevel } from "../logger.js";
-import { GraphConfig } from "../../types.js";
+import { GraphConfig, TargetRepository } from "../../types.js";
 import { TIMEOUT_MS } from "../../constants.js";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
 
-export function getRepoAbsolutePath(config: GraphConfig): string {
-  const repoName = config.configurable?.target_repository.repo;
+export function getRepoAbsolutePath(targetRepository: TargetRepository): string {
+  const repoName = targetRepository.repo;
   if (!repoName) {
     throw new Error("No repository name provided");
   }
@@ -446,3 +446,4 @@ export async function createPullRequest({
     return null;
   }
 }
+
