@@ -56,23 +56,37 @@ export const applyPatchTool = tool(
     }
 
     let patchedContent: string | false;
+    let fixedDiff: string | false = false;
     try {
       logger.info(`Applying patch to file ${file_path}`);
-      const fixedDiff = fixGitPatch(diff, {
-        [file_path]: readFileOutput,
-      });
-      patchedContent = applyPatch(readFileOutput, fixedDiff);
+      patchedContent = applyPatch(readFileOutput, diff);
     } catch (e) {
-      logger.error("Failed to apply patch", {
-        ...(e instanceof Error
-          ? { name: e.name, message: e.message, stack: e.stack }
-          : { error: e }),
-      });
-      const errMessage = e instanceof Error ? e.message : "Unknown error";
-      return {
-        result: `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`,
-        status: "error",
-      };
+      try {
+        logger.warn("Failed to apply patch, trying to fix diff", {
+          error: e,
+        });
+        const fixedDiff_ = fixGitPatch(diff, {
+          [file_path]: readFileOutput,
+        });
+        patchedContent = applyPatch(readFileOutput, fixedDiff_);
+        logger.info("Successfully fixed diff and applied patch to file", {
+          file_path,
+        });
+        if (patchedContent) {
+          fixedDiff = fixedDiff_;
+        }
+      } catch (_) {
+        logger.error("Failed to apply patch", {
+          ...(e instanceof Error
+            ? { name: e.name, message: e.message, stack: e.stack }
+            : { error: e }),
+        });
+        const errMessage = e instanceof Error ? e.message : "Unknown error";
+        return {
+          result: `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`,
+          status: "error",
+        };
+      }
     }
 
     if (patchedContent === false) {
@@ -99,11 +113,13 @@ export const applyPatchTool = tool(
       };
     }
 
-    logger.info(
-      `Successfully applied diff to \`${file_path}\` and saved changes.`,
-    );
+    let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
+    logger.info(resultMessage);
+    if (fixedDiff) {
+      resultMessage += `\n\nNOTE: The generated diff was NOT formatted properly, and had to be fixed. The diff which was applied is:\n<fixed-diff>\n${fixedDiff}\n</fixed-diff>`;
+    }
     return {
-      result: `Successfully applied diff to \`${file_path}\` and saved changes.`,
+      result: resultMessage,
       status: "success",
     };
   },
