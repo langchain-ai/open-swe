@@ -7,7 +7,7 @@
 
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { PlannerGraphState, PlannerGraphStateObj } from "./types.js";
-import { GraphConfiguration } from "../../types.js";
+import { GraphConfig, GraphConfiguration } from "../../types.js";
 import {
   generateAction,
   generatePlan,
@@ -18,14 +18,14 @@ import { isAIMessage } from "@langchain/core/messages";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
-  config?: { configurable?: { maxContextActions?: number } },
+  config: GraphConfig,
 ): "take-plan-action" | "generate-plan" {
   const { plannerMessages } = state;
   const lastMessage = plannerMessages[plannerMessages.length - 1];
   // If the last message is a tool call, and we have executed less than 6 actions, take action.
   // Max actions count is calculated as: maxContextActions * 2 + 1
   // This is because each action generates 2 messages (AI request + tool result) plus 1 initial human message
-  const maxContextActions = config?.configurable?.maxContextActions ?? 6;
+  const maxContextActions = config.configurable?.maxContextActions ?? 6;
   const maxActionsCount = maxContextActions * 2 + 1;
   if (
     isAIMessage(lastMessage) &&
