@@ -113,7 +113,7 @@ jobs:
         run: yarn build
         working-directory: .
       - name: Build dev server check script
-        run: yarn tsc --module commonjs --outDir ./dist/scripts ./scripts/check-dev-server.ts
+        run: yarn tsc --module commonjs --skipLibCheck --outDir ./dist/scripts ./scripts/check-dev-server.ts
       - name: Rename compiled script to .cjs
         run: mv ./dist/scripts/check-dev-server.js ./dist/scripts/check-dev-server.cjs
       - name: Create .env file for dev server check
