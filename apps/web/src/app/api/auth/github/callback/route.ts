@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { storeGitHubToken } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -60,11 +61,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // TODO: Store the access token securely (will be implemented in next task)
-    // For now, redirect to homepage with success indicator
+    // Store the access token securely in HTTP-only cookies
+    await storeGitHubToken({
+      access_token: tokenData.access_token,
+      token_type: tokenData.token_type || 'bearer',
+      scope: tokenData.scope || '',
+    });
+
+    // Redirect to homepage with success indicator
     return NextResponse.redirect(new URL('/?auth=success', request.url));
   } catch (error) {
+    console.error('OAuth callback error:', error);
     return NextResponse.redirect(new URL('/?error=callback_failed', request.url));
   }
 }
-
