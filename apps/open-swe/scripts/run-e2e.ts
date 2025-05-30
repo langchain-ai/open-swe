@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { Client } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig } from "../src/types.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 
@@ -25,22 +24,17 @@ I want the server to be able to authenticate users with GitHub, such that we wil
 3. make pull requests and push changes to the repositories they give us access to
 Once you're done, ensure you've documented the development process in the readme of this new app.`;
 
-  const configurable: Omit<
-    GraphConfig["configurable"],
-    "thread_id" | "assistant_id"
-  > = {
-    target_repository: {
-      owner: "langchain-ai",
-      repo: "open-swe",
-    },
+  const targetRepository = {
+    owner: "langchain-ai",
+    repo: "open-swe",
   };
 
   const stream = client.runs.stream(threadId, "open-swe", {
     input: {
       messages: [{ role: "user", content: userRequest }],
+      targetRepository,
     },
     config: {
-      configurable,
       recursion_limit: 400,
     },
     ifNotExists: "create",
@@ -69,22 +63,12 @@ async function resumeGraph(threadId: string) {
       args: null,
     },
   ];
-  const configurable: Omit<
-    GraphConfig["configurable"],
-    "thread_id" | "assistant_id"
-  > = {
-    target_repository: {
-      owner: "langchain-ai",
-      repo: "open-swe",
-    },
-  };
 
   const stream = client.runs.stream(threadId, "open-swe", {
     command: {
       resume: resumeValue,
     },
     config: {
-      configurable,
       recursion_limit: 400,
     },
     streamSubgraphs: true,
