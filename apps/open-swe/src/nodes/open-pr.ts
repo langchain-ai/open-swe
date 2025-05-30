@@ -1,5 +1,4 @@
 import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
-import { Sandbox } from "@e2b/code-interpreter";
 import {
   checkoutBranchAndCommit,
   createPullRequest,
@@ -13,6 +12,7 @@ import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
 import { isHumanMessage, ToolMessage } from "@langchain/core/messages";
 import { getMessageContentString } from "../utils/message/content.js";
+import { daytonaClient } from "../utils/sandbox.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -66,7 +66,7 @@ export async function openPullRequest(
     );
   }
 
-  const sandbox = await Sandbox.connect(sandboxSessionId);
+  const sandbox = await daytonaClient().get(sandboxSessionId);
 
   const { owner, repo } = state.targetRepository;
 

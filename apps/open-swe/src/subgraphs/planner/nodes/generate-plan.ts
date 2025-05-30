@@ -7,7 +7,7 @@ import { sessionPlanTool } from "../../../tools/index.js";
 import { GraphConfig } from "../../../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
-import { pauseSandbox } from "../../../utils/sandbox.js";
+import { stopSandbox } from "../../../utils/sandbox.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -68,8 +68,8 @@ export async function generatePlan(
 
   let newSessionId: string | undefined;
   if (state.sandboxSessionId) {
-    // Pause before returning, as the next step will be to interrupt the graph.
-    newSessionId = await pauseSandbox(state.sandboxSessionId);
+    // Stop before returning, as the next step will be to interrupt the graph.
+    newSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
   return {

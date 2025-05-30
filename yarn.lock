@@ -449,13 +449,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@bufbuild/protobuf@npm:^2.2.2":
-  version: 2.5.0
-  resolution: "@bufbuild/protobuf@npm:2.5.0"
-  checksum: ff7f015e3ab7243461ac480efcc58a6b36473fef036aaa118361eb45871587d97a0bebc9daf77127ef86cdf08f1af990469e51c54b59b1818997c032dd221407
-  languageName: node
-  linkType: hard
-
 "@cfworker/json-schema@npm:^4.0.2":
   version: 4.1.1
   resolution: "@cfworker/json-schema@npm:4.1.1"
@@ -479,25 +472,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@connectrpc/connect-web@npm:2.0.0-rc.3":
-  version: 2.0.0-rc.3
-  resolution: "@connectrpc/connect-web@npm:2.0.0-rc.3"
-  peerDependencies:
-    "@bufbuild/protobuf": ^2.2.0
-    "@connectrpc/connect": 2.0.0-rc.3
-  checksum: 2889806b7161507f20d01a472b8173ea8fec4db664e89a3c46b2a04690abafb3b73a7541334d34b70be5d4867b2c4e51558bec7dfb3cead061f66fcc42076f8d
-  languageName: node
-  linkType: hard
-
-"@connectrpc/connect@npm:2.0.0-rc.3":
-  version: 2.0.0-rc.3
-  resolution: "@connectrpc/connect@npm:2.0.0-rc.3"
-  peerDependencies:
-    "@bufbuild/protobuf": ^2.2.0
-  checksum: 78e993f48b4ff7dd290a919eb34578ca97848f12576a1fb8e988af50a100c6aa790c2cfaa0aca6fae658e56c652c81db5be9cbf650a4a69f18fa0a8a3b94b58d
-  languageName: node
-  linkType: hard
-
 "@dabh/diagnostics@npm:^2.0.2":
   version: 2.0.3
   resolution: "@dabh/diagnostics@npm:2.0.3"
@@ -509,12 +483,54 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@e2b/code-interpreter@npm:1.2.0-beta.4":
-  version: 1.2.0-beta.4
-  resolution: "@e2b/code-interpreter@npm:1.2.0-beta.4"
+"@daytonaio/api-client@npm:^0.19.1":
+  version: 0.19.1
+  resolution: "@daytonaio/api-client@npm:0.19.1"
   dependencies:
-    e2b: 1.2.0-beta.4
-  checksum: c08fb0381482156301f1147bf5cf71bab7c817afa7c02613bde3dc1b8c7011f9aca14b9edd1e4e9c365cec486818b8d3e5c54b1e7bcc70248bdf722a5b4026bd
+    axios: ^1.6.1
+  checksum: fc5402ff535b4299d9e5124795f02e09f86f22d0e07153943452e2771038c803fe11153d52c9b5f1b618bd17d18a4af76aa421547f640b86cbcdc6dec1d4d063
+  languageName: node
+  linkType: hard
+
+"@daytonaio/sdk@npm:^0.18.1":
+  version: 0.18.1
+  resolution: "@daytonaio/sdk@npm:0.18.1"
+  dependencies:
+    "@daytonaio/api-client": ^0.19.1
+    "@dotenvx/dotenvx": ^1.25.1
+    axios: ^1.6.0
+    form-data: ^4.0.0
+    uuid: ^11.0.3
+  checksum: a3e0afd4e60a8f631f78579e8defed206dcd97ebe6e005d3bb75bb0e289be7bbf51e68075c255638beba98eea272f642a2c6872dbc6689d0d8bab7ba660fd475
+  languageName: node
+  linkType: hard
+
+"@dotenvx/dotenvx@npm:^1.25.1":
+  version: 1.44.1
+  resolution: "@dotenvx/dotenvx@npm:1.44.1"
+  dependencies:
+    commander: ^11.1.0
+    dotenv: ^16.4.5
+    eciesjs: ^0.4.10
+    execa: ^5.1.1
+    fdir: ^6.2.0
+    ignore: ^5.3.0
+    object-treeify: 1.1.33
+    picomatch: ^4.0.2
+    which: ^4.0.0
+  bin:
+    dotenvx: src/cli/dotenvx.js
+    git-dotenvx: src/cli/dotenvx.js
+  checksum: a868270e4fdb0d3ac307fc44728630dbfb3a17685799de8483fdb3e2e8543cc4eb6f576fe6284804d0aeccbf9cbf5ca4b14906ff554d090960f3223d88db93b5
+  languageName: node
+  linkType: hard
+
+"@ecies/ciphers@npm:^0.2.3":
+  version: 0.2.3
+  resolution: "@ecies/ciphers@npm:0.2.3"
+  peerDependencies:
+    "@noble/ciphers": ^1.0.0
+  checksum: fdf01fd5e687a74802df60d21ff9be5aa6cdf692dcf671186e94eb17e9c260a4652b64c7127b277af20c35d3ccc733003cefb2fdaee93e8b516fa71d317d503f
   languageName: node
   linkType: hard
 
@@ -2416,6 +2432,29 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@noble/ciphers@npm:^1.3.0":
+  version: 1.3.0
+  resolution: "@noble/ciphers@npm:1.3.0"
+  checksum: 19722c35475df9bc78db60d261d0b5ef8a6d722561efc2135453f943eaa421b492195dc666e3e4df2b755bca3739e04f04b9c660198559f5dd05d3cfbf1b9e92
+  languageName: node
+  linkType: hard
+
+"@noble/curves@npm:^1.9.1":
+  version: 1.9.1
+  resolution: "@noble/curves@npm:1.9.1"
+  dependencies:
+    "@noble/hashes": 1.8.0
+  checksum: 4f3483a1001538d2f55516cdcb19319d1eaef79550633f670e7d570b989cdbc0129952868b72bb67643329746b8ffefe8e4cd791c8cc35574e05a37f873eef42
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:1.8.0, @noble/hashes@npm:^1.8.0":
+  version: 1.8.0
+  resolution: "@noble/hashes@npm:1.8.0"
+  checksum: c94e98b941963676feaba62475b1ccfa8341e3f572adbb3b684ee38b658df44100187fa0ef4220da580b13f8d27e87d5492623c8a02ecc61f23fb9960c7918f5
+  languageName: node
+  linkType: hard
+
 "@nodelib/fs.scandir@npm:2.1.5":
   version: 2.1.5
   resolution: "@nodelib/fs.scandir@npm:2.1.5"
@@ -2608,7 +2647,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/agent@workspace:apps/open-swe"
   dependencies:
-    "@e2b/code-interpreter": 1.2.0-beta.4
+    "@daytonaio/sdk": ^0.18.1
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
@@ -5375,7 +5414,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:^1.4.0, axios@npm:^1.6.2":
+"axios@npm:^1.4.0, axios@npm:^1.6.0, axios@npm:^1.6.1, axios@npm:^1.6.2":
   version: 1.9.0
   resolution: "axios@npm:1.9.0"
   dependencies:
@@ -6240,6 +6279,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"commander@npm:^11.1.0":
+  version: 11.1.0
+  resolution: "commander@npm:11.1.0"
+  checksum: fd1a8557c6b5b622c89ecdfde703242ab7db3b628ea5d1755784c79b8e7cb0d74d65b4a262289b533359cd58e1bfc0bf50245dfbcd2954682a6f367c828b79ef
+  languageName: node
+  linkType: hard
+
 "commander@npm:^13.0.0":
   version: 13.1.0
   resolution: "commander@npm:13.1.0"
@@ -6251,13 +6297,6 @@ __metadata:
   version: 8.3.0
   resolution: "commander@npm:8.3.0"
   checksum: 0f82321821fc27b83bd409510bb9deeebcfa799ff0bf5d102128b500b7af22872c0c92cb6a0ebc5a4cf19c6b550fba9cedfa7329d18c6442a625f851377bacf0
-  languageName: node
-  linkType: hard
-
-"compare-versions@npm:^6.1.0":
-  version: 6.1.1
-  resolution: "compare-versions@npm:6.1.1"
-  checksum: 73fe6c4f52d22efe28f0a3be10df2afd704e10b3593360cd963e86b33a7a263c263b41a1361b69c30a0fe68bfa70fef90860c1cf2ef41502629d4402890fcd57
   languageName: node
   linkType: hard
 
@@ -6876,7 +6915,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"dotenv@npm:^16.4.7":
+"dotenv@npm:^16.4.5, dotenv@npm:^16.4.7":
   version: 16.5.0
   resolution: "dotenv@npm:16.5.0"
   checksum: 6543fe87b5ddf2d60dd42df6616eec99148a5fc150cb4530fef5bda655db5204a3afa0e6f25f7cd64b20657ace4d79c0ef974bec32fdb462cad18754191e7a90
@@ -6894,24 +6933,22 @@ __metadata:
   languageName: node
   linkType: hard
 
-"e2b@npm:1.2.0-beta.4":
-  version: 1.2.0-beta.4
-  resolution: "e2b@npm:1.2.0-beta.4"
-  dependencies:
-    "@bufbuild/protobuf": ^2.2.2
-    "@connectrpc/connect": 2.0.0-rc.3
-    "@connectrpc/connect-web": 2.0.0-rc.3
-    compare-versions: ^6.1.0
-    openapi-fetch: ^0.9.7
-    platform: ^1.3.6
-  checksum: 98adde94c74d18313d71fca2fdc8bf99992940238e667f797d99e1b1987887b2ef20cd94d4275cf4033026f74486929a090fb3789def02a20b3361693f6950ae
-  languageName: node
-  linkType: hard
-
 "eastasianwidth@npm:^0.2.0":
   version: 0.2.0
   resolution: "eastasianwidth@npm:0.2.0"
   checksum: 7d00d7cd8e49b9afa762a813faac332dee781932d6f2c848dc348939c4253f1d4564341b7af1d041853bc3f32c2ef141b58e0a4d9862c17a7f08f68df1e0f1ed
+  languageName: node
+  linkType: hard
+
+"eciesjs@npm:^0.4.10":
+  version: 0.4.15
+  resolution: "eciesjs@npm:0.4.15"
+  dependencies:
+    "@ecies/ciphers": ^0.2.3
+    "@noble/ciphers": ^1.3.0
+    "@noble/curves": ^1.9.1
+    "@noble/hashes": ^1.8.0
+  checksum: 133a0ded69da0579d7082fe89b6a15225cf5cf503f653438355c2106cfc42576ab75835421f6a1ad099b9b802f389fc0077e72a951fd0e7dbc5c1e5220457ac9
   languageName: node
   linkType: hard
 
@@ -7879,7 +7916,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"execa@npm:^5.0.0":
+"execa@npm:^5.0.0, execa@npm:^5.1.1":
   version: 5.1.1
   resolution: "execa@npm:5.1.1"
   dependencies:
@@ -8186,6 +8223,18 @@ __metadata:
   dependencies:
     pend: ~1.2.0
   checksum: c8585fd5713f4476eb8261150900d2cb7f6ff2d87f8feb306ccc8a1122efd152f1783bdb2b8dc891395744583436bfd8081d8e63ece0ec8687eeefea394d4ff2
+  languageName: node
+  linkType: hard
+
+"fdir@npm:^6.2.0":
+  version: 6.4.5
+  resolution: "fdir@npm:6.4.5"
+  peerDependencies:
+    picomatch: ^3 || ^4
+  peerDependenciesMeta:
+    picomatch:
+      optional: true
+  checksum: 14efd2d6617a6f9fb314916ccff64e00bdb96216f26542ec9dfa532ed60a7ebb45463f7009aa215c14071566bf43caeb8ba268ccb52a11e6b51e4aaa8cb58d81
   languageName: node
   linkType: hard
 
@@ -9284,7 +9333,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ignore@npm:^5.2.0, ignore@npm:^5.3.1":
+"ignore@npm:^5.2.0, ignore@npm:^5.3.0, ignore@npm:^5.3.1":
   version: 5.3.2
   resolution: "ignore@npm:5.3.2"
   checksum: 2acfd32a573260ea522ea0bfeff880af426d68f6831f973129e2ba7363f422923cf53aab62f8369cbf4667c7b25b6f8a3761b34ecdb284ea18e87a5262a865be
@@ -12549,6 +12598,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"object-treeify@npm:1.1.33":
+  version: 1.1.33
+  resolution: "object-treeify@npm:1.1.33"
+  checksum: 3af7f889349571ee73f5bdfb5ac478270c85eda8bcba950b454eb598ce41759a1ed6b0b43fbd624cb449080a4eb2df906b602e5138b6186b9563b692231f1694
+  languageName: node
+  linkType: hard
+
 "object.assign@npm:^4.1.4, object.assign@npm:^4.1.7":
   version: 4.1.7
   resolution: "object.assign@npm:4.1.7"
@@ -12703,26 +12759,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"openapi-fetch@npm:^0.9.7":
-  version: 0.9.8
-  resolution: "openapi-fetch@npm:0.9.8"
-  dependencies:
-    openapi-typescript-helpers: ^0.0.8
-  checksum: 32a32698942b12b4c2fe2249eb90f745fa8dfde16d3312966e009fb7aaf7a233f883536ed58b1cdd58b6cafd6b55784e6aa7d13fefaf7c990929868e335d6cbe
-  languageName: node
-  linkType: hard
-
 "openapi-types@npm:^12.0.0, openapi-types@npm:^12.1.3":
   version: 12.1.3
   resolution: "openapi-types@npm:12.1.3"
   checksum: 7fa5547f87a58d2aa0eba6e91d396f42d7d31bc3ae140e61b5d60b47d2fd068b48776f42407d5a8da7280cf31195aa128c2fc285e8bb871d1105edee5647a0bb
-  languageName: node
-  linkType: hard
-
-"openapi-typescript-helpers@npm:^0.0.8":
-  version: 0.0.8
-  resolution: "openapi-typescript-helpers@npm:0.0.8"
-  checksum: e309d7d297cf78308c41c324ffe094c3ef194117bf104b5300e45535d158265f665c69e810a143f1d3db7020575c3041e370d2ee93fc8094f5aabc14a366fc39
   languageName: node
   linkType: hard
 
@@ -13108,13 +13148,6 @@ __metadata:
   dependencies:
     find-up: ^4.0.0
   checksum: 9863e3f35132bf99ae1636d31ff1e1e3501251d480336edb1c211133c8d58906bed80f154a1d723652df1fda91e01c7442c2eeaf9dc83157c7ae89087e43c8d6
-  languageName: node
-  linkType: hard
-
-"platform@npm:^1.3.6":
-  version: 1.3.6
-  resolution: "platform@npm:1.3.6"
-  checksum: 6f472a09c61d418c7e26c1c16d0bdc029549d512dbec6526216a1e59ec68100d07007d0097dcba69dddad883d6f2a83361b4bdfe0094a3d9a2af24158643d85e
   languageName: node
   linkType: hard
 
@@ -16184,7 +16217,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:^11.0.5, uuid@npm:^11.1.0":
+"uuid@npm:^11.0.3, uuid@npm:^11.0.5, uuid@npm:^11.1.0":
   version: 11.1.0
   resolution: "uuid@npm:11.1.0"
   bin:
@@ -16400,6 +16433,17 @@ __metadata:
   bin:
     node-which: ./bin/node-which
   checksum: 1a5c563d3c1b52d5f893c8b61afe11abc3bab4afac492e8da5bde69d550de701cf9806235f20a47b5c8fa8a1d6a9135841de2596535e998027a54589000e66d1
+  languageName: node
+  linkType: hard
+
+"which@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "which@npm:4.0.0"
+  dependencies:
+    isexe: ^3.1.1
+  bin:
+    node-which: bin/which.js
+  checksum: f17e84c042592c21e23c8195108cff18c64050b9efb8459589116999ea9da6dd1509e6a1bac3aeebefd137be00fabbb61b5c2bc0aa0f8526f32b58ee2f545651
   languageName: node
   linkType: hard
 

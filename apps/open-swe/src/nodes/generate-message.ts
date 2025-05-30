@@ -7,7 +7,7 @@ import {
 } from "../tools/index.js";
 import { getRepoAbsolutePath } from "../utils/git/index.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
-import { pauseSandbox } from "../utils/sandbox.js";
+import { stopSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getCurrentTask } from "../utils/current-task.js";
 import { getMessageContentString } from "../utils/message/content.js";
@@ -134,11 +134,11 @@ export async function generateAction(
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;
-  // No tool calls means the graph is going to end. Pause the sandbox.
+  // No tool calls means the graph is going to end. Stop the sandbox.
   let newSandboxSessionId: string | undefined;
   if (!hasToolCalls && state.sandboxSessionId) {
-    logger.info("No tool calls found. Pausing sandbox...");
-    newSandboxSessionId = await pauseSandbox(state.sandboxSessionId);
+    logger.info("No tool calls found. Stopping sandbox...");
+    newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
   logger.info("Generated action", {

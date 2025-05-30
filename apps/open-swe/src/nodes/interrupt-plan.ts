@@ -5,7 +5,7 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { resumeSandbox } from "../utils/sandbox.js";
+import { startSandbox } from "../utils/sandbox.js";
 
 export async function interruptPlan(state: GraphState): Promise<Command> {
   const { proposedPlan } = state;
@@ -36,8 +36,7 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
   }
 
   if (interruptRes.type === "accept") {
-    const newSandboxSessionId = (await resumeSandbox(state.sandboxSessionId))
-      .sandboxId;
+    const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
 
     // Plan was accepted, route to the generate-action node to start taking actions.
     return new Command({
@@ -55,8 +54,7 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
   }
 
   if (interruptRes.type === "edit") {
-    const newSandboxSessionId = (await resumeSandbox(state.sandboxSessionId))
-      .sandboxId;
+    const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
 
     // Plan was edited, route to the generate-action node to start taking actions.
     const editedPlan = (interruptRes.args as ActionRequest).args.plan

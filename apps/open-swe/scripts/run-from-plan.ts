@@ -3,6 +3,7 @@ import { Client } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import { graph } from "../src/index.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
+import { SANDBOX_ROOT_DIR } from "../src/constants.js";
 
 const logger = createLogger(LogLevel.INFO, "From Plan Script");
 
@@ -88,11 +89,11 @@ The user wants to implement a GitHub OAuth authentication server in the \`/apps/
 3. Making pull requests and pushing changes
 
 ## Codebase Files and Descriptions
-- **Project root**: \`/home/user/open-swe/\` - Main monorepo directory
-- **Apps directory**: \`/home/user/open-swe/apps/\` - Contains multiple apps including auth, docs, and open-swe
-- **Auth app directory**: \`/home/user/open-swe/apps/auth/\` - Target directory for implementation, currently contains only scaffolding
-- **Auth package.json**: \`/home/user/open-swe/apps/auth/package.json\` - Contains basic TypeScript/Node.js setup with name "@open-swe/auth", includes dev dependencies for TypeScript, Jest, ESLint, Prettier
-- **Auth src directory**: \`/home/user/open-swe/apps/auth/src/\` - Contains only an empty \`index.ts\` file
+- **Project root**: \`${SANDBOX_ROOT_DIR}/open-swe/\` - Main monorepo directory
+- **Apps directory**: \`${SANDBOX_ROOT_DIR}/open-swe/apps/\` - Contains multiple apps including auth, docs, and open-swe
+- **Auth app directory**: \`${SANDBOX_ROOT_DIR}/open-swe/apps/auth/\` - Target directory for implementation, currently contains only scaffolding
+- **Auth package.json**: \`${SANDBOX_ROOT_DIR}/open-swe/apps/auth/package.json\` - Contains basic TypeScript/Node.js setup with name "@open-swe/auth", includes dev dependencies for TypeScript, Jest, ESLint, Prettier
+- **Auth src directory**: \`${SANDBOX_ROOT_DIR}/open-swe/apps/auth/src/\` - Contains only an empty \`index.ts\` file
 - **Auth config files**: Directory includes standard config files (.gitignore, .dockerignore, .prettierrc, eslint.config.js, jest.config.js, tsconfig.json, turbo.json)
 
 ## Key Repository Insights and Learnings

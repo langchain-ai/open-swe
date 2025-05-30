@@ -1,8 +1,8 @@
-import { CommandResult } from "@e2b/code-interpreter";
+import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 
 export function getSandboxErrorFields(
   error: unknown,
-): CommandResult | undefined {
+): ExecuteResponse | undefined {
   if (
     !error ||
     typeof error !== "object" ||
@@ -16,5 +16,5 @@ export function getSandboxErrorFields(
     return undefined;
   }
 
-  return error.result as CommandResult;
+  return error.result as unknown as ExecuteResponse;
 }

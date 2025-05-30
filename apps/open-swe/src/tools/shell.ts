@@ -1,11 +1,12 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { Sandbox } from "@e2b/code-interpreter";
+import { Sandbox } from "@daytonaio/sdk";
 import { GraphState } from "../types.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
-import { TIMEOUT_MS } from "../constants.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { daytonaClient } from "../utils/sandbox.js";
+import { SANDBOX_ROOT_DIR } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
 
@@ -20,9 +21,9 @@ const shellToolSchema = z.object({
   command: z.array(z.string()).describe("The command to run"),
   workdir: z
     .string()
-    .default("/home/user")
+    .default(SANDBOX_ROOT_DIR)
     .describe(
-      "The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '/home/user' as this is the root directory of the sandbox.",
+      `The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '${SANDBOX_ROOT_DIR}' as this is the root directory of the sandbox.`,
     ),
   timeout: z
     .number()
@@ -48,28 +49,29 @@ export const shellTool = tool(
         );
       }
 
-      sandbox = await Sandbox.connect(sandboxSessionId);
+      sandbox = await daytonaClient().get(sandboxSessionId);
       const { command, workdir, timeout } = input;
-      const result = await sandbox.commands.run(command.join(" "), {
-        timeoutMs: timeout ?? DEFAULT_COMMAND_TIMEOUT,
-        cwd: workdir,
-        envs: DEFAULT_ENV,
-      });
+      const response = await sandbox.process.executeCommand(
+        command.join(" "),
+        workdir,
+        DEFAULT_ENV,
+        timeout ?? DEFAULT_COMMAND_TIMEOUT,
+      );
 
-      if (result.error) {
+      if (response.exitCode !== 0) {
         logger.error("Failed to run command", {
-          error: result.error,
-          error_result: result,
+          error: response.result,
+          error_result: response,
           input,
         });
         return {
-          result: `Command failed. Exit code: ${result.exitCode}\nError: ${result.error}\nStderr:\n${result.stderr}`,
+          result: `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
           status: "error",
         };
       }
 
       return {
-        result: result.stdout,
+        result: response.result,
         status: "success",
       };
     } catch (e) {
@@ -80,7 +82,7 @@ export const shellTool = tool(
           error: errorFields,
         });
         return {
-          result: `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.error}\nStderr:\n${errorFields.stderr}\nStdout:\n${errorFields.stdout}`,
+          result: `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`,
           status: "error",
         };
       }
@@ -97,17 +99,6 @@ export const shellTool = tool(
         "FAILED TO RUN COMMAND: " +
           (e instanceof Error ? e.message : "Unknown error"),
       );
-    } finally {
-      try {
-        if (sandbox) {
-          // Add an extra 5 min timeout to the sandbox.
-          await sandbox.setTimeout(TIMEOUT_MS);
-        }
-      } catch (_) {
-        logger.warn(
-          "Failed to set timeout for sandbox inside 'finally' block for shell tool.",
-        );
-      }
     }
   },
   {
