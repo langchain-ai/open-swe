@@ -343,6 +343,24 @@ export const GraphConfiguration = z.object({
           "Maximum number of context gathering actions during planning",
       },
     }),
+  /**
+   * The maximum number of tokens to generate in an individual generation.
+   * @default 10_000
+   */
+  maxTokens: z
+    .number()
+    .optional()
+    .default(() => 10_000)
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "number",
+        default: 10_000,
+        min: 1,
+        max: 64_000,
+        description:
+          "The maximum number of tokens to generate in an individual generation",
+      },
+    }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<
