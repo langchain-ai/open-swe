@@ -492,7 +492,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@daytonaio/sdk@npm:0.18.1":
+"@daytonaio/sdk@npm:^0.18.1":
   version: 0.18.1
   resolution: "@daytonaio/sdk@npm:0.18.1"
   dependencies:
@@ -2647,7 +2647,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/agent@workspace:apps/open-swe"
   dependencies:
-    "@daytonaio/sdk": 0.18.1
+    "@daytonaio/sdk": ^0.18.1
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0

@@ -1,4 +1,4 @@
-import { Sandbox } from '@daytonaio/sdk'
+import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import {
   GraphState,
@@ -14,8 +14,8 @@ import {
   pullLatestChanges,
 } from "../utils/git/index.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
-import { daytonaClient } from '../utils/sandbox.js';
-import { SNAPSHOT_NAME } from '../constants.js';
+import { daytonaClient } from "../utils/sandbox.js";
+import { SNAPSHOT_NAME } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
@@ -88,7 +88,7 @@ export async function initialize(
   logger.info("Creating sandbox...");
   const sandbox = await daytonaClient().create({
     image: SNAPSHOT_NAME,
-  })
+  });
 
   const res = await cloneRepo(sandbox, targetRepository);
   if (res.exitCode !== 0) {

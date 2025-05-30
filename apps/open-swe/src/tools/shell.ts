@@ -51,7 +51,12 @@ export const shellTool = tool(
 
       sandbox = await daytonaClient().get(sandboxSessionId);
       const { command, workdir, timeout } = input;
-      const response = await sandbox.process.executeCommand(command.join(" "), workdir, DEFAULT_ENV, timeout ?? DEFAULT_COMMAND_TIMEOUT);
+      const response = await sandbox.process.executeCommand(
+        command.join(" "),
+        workdir,
+        DEFAULT_ENV,
+        timeout ?? DEFAULT_COMMAND_TIMEOUT,
+      );
 
       if (response.exitCode !== 0) {
         logger.error("Failed to run command", {
@@ -84,7 +89,7 @@ export const shellTool = tool(
 
       logger.error(
         "Failed to run command: " +
-        (e instanceof Error ? e.message : "Unknown error"),
+          (e instanceof Error ? e.message : "Unknown error"),
         {
           error: e,
           input,
@@ -92,7 +97,7 @@ export const shellTool = tool(
       );
       throw new Error(
         "FAILED TO RUN COMMAND: " +
-        (e instanceof Error ? e.message : "Unknown error"),
+          (e instanceof Error ? e.message : "Unknown error"),
       );
     }
   },

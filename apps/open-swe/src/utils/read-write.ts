@@ -14,7 +14,10 @@ async function handleCreateFile(
 ) {
   try {
     const touchCommand = `touch "${filePath}"`;
-    const touchOutput = await sandbox.process.executeCommand(touchCommand, args?.workDir);
+    const touchOutput = await sandbox.process.executeCommand(
+      touchCommand,
+      args?.workDir,
+    );
     return touchOutput;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
@@ -41,7 +44,10 @@ async function readFileFunc(
   output: string;
 }> {
   try {
-    const readOutput = await sandbox.process.executeCommand(`cat "${filePath}"`, args?.workDir);
+    const readOutput = await sandbox.process.executeCommand(
+      `cat "${filePath}"`,
+      args?.workDir,
+    );
 
     if (readOutput.exitCode !== 0) {
       logger.error(`Error reading file '${filePath}' from sandbox via cat:`, {
@@ -118,7 +124,10 @@ async function writeFileFunc(
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
 ${content}
 ${delimiter}`;
-    const writeOutput = await sandbox.process.executeCommand(writeCommand, args?.workDir);
+    const writeOutput = await sandbox.process.executeCommand(
+      writeCommand,
+      args?.workDir,
+    );
 
     if (writeOutput.exitCode !== 0) {
       logger.error(`Error writing file '${filePath}' to sandbox via cat:`, {
