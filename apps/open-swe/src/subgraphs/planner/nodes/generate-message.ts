@@ -1,16 +1,30 @@
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
-import { GraphConfig } from "../../../types.js";
-import { isHumanMessage } from "@langchain/core/messages";
+import { GraphConfig, PlanItem } from "../../../types.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getMessageContentString } from "../../../utils/message/content.js";
+import {
+  getMessageContentString,
+  getMessageString,
+} from "../../../utils/message/content.js";
+import { getUserRequest } from "../../../utils/user-request.js";
+import { BaseMessage } from "@langchain/core/messages";
+import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
-const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+const followupMessagePrompt = `
+The user is sending a followup request, so you should assume the most recent message they sent is their request. You are also provided with the full conversation history from their previous request, which you should use as context when generating a plan.
 
-Your sole task is to gather context from the repository the user has provided which will be helpful when generating a plan to address the user's request.
+Here is the full list of tasks and task summaries from the previous plan you executed:
+{PREVIOUS_PLAN}
+
+Here is the full conversation history from the previous plan you executed:
+{PREVIOUS_CONVERSATION_HISTORY}
+`;
+
+const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+{FOLLOWUP_MESSAGE_PROMPT}
 
 You MUST adhere to the following criteria when gathering context for the plan:
 - You must ONLY take read actions to gather context. Write actions are NOT allowed.
@@ -22,6 +36,18 @@ You MUST adhere to the following criteria when gathering context for the plan:
 - The first user message in this conversation contains the user's request.
 `;
 
+function formatFollowupMessagePrompt(
+  plan: PlanItem[],
+  conversationHistory: BaseMessage[],
+): string {
+  return followupMessagePrompt
+    .replace("{PREVIOUS_PLAN}", formatPlanPromptWithSummaries(plan))
+    .replace(
+      "{PREVIOUS_CONVERSATION_HISTORY}",
+      conversationHistory.slice(0, -1).map(getMessageString).join("\n"),
+    );
+}
+
 export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
@@ -30,16 +56,25 @@ export async function generateAction(
   const tools = [shellTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
+  // If there is only one message it's not a followup.
+  const isFollowup = state.messages.length > 1;
 
+  const userRequest = getUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
       {
         role: "system",
-        content: systemPrompt,
+        content: systemPrompt.replace(
+          "{FOLLOWUP_MESSAGE_PROMPT}",
+          isFollowup
+            ? formatFollowupMessagePrompt(state.plan, state.messages)
+            : "",
+        ),
       },
-      ...(firstUserMessage ? [firstUserMessage] : []),
+      userRequest,
       ...state.plannerMessages,
     ]);
 

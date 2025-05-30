@@ -1,11 +1,8 @@
-import { isHumanMessage } from "@langchain/core/messages";
 import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
-import {
-  getMessageContentString,
-  getMessageString,
-} from "../utils/message/content.js";
+import { getMessageString } from "../utils/message/content.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { getUserRequest } from "../utils/user-request.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -31,10 +28,9 @@ export async function generateConclusion(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages);
   const userMessage = `The user's initial request is as follows:
-${getMessageContentString(firstUserMessage?.content || "No user message found")}
+${userRequest || "No user message found"}
 
 The conversation history is as follows:
 ${state.messages.map(getMessageString).join("\n")}

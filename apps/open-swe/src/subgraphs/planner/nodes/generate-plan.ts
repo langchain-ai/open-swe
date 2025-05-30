@@ -1,13 +1,10 @@
-import {
-  isAIMessage,
-  isHumanMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { sessionPlanTool } from "../../../tools/index.js";
 import { GraphConfig } from "../../../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { pauseSandbox } from "../../../utils/sandbox.js";
+import { getUserRequest } from "../../../utils/user-request.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -37,8 +34,9 @@ export async function generatePlan(
     tool_choice: sessionPlanTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   let optionalToolMessage: ToolMessage | undefined;
   const lastMessage = state.plannerMessages[state.plannerMessages.length - 1];
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
@@ -57,7 +55,7 @@ export async function generatePlan(
         role: "system",
         content: systemPrompt,
       },
-      ...(firstUserMessage ? [firstUserMessage] : []),
+      userRequest,
       ...state.plannerMessages,
       ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);
