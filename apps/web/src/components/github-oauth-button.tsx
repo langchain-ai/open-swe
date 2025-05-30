@@ -73,6 +73,7 @@ export function GitHubOAuthButton() {
 
   return (
     <Button
+      variant="outline"
       onClick={handleLogin}
       disabled={isLoading}
     >

@@ -46,6 +46,7 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+import { GitHubOAuthButton } from "../github-oauth-button";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -337,7 +338,7 @@ export function Thread() {
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center">
-                <OpenGitHubRepo />
+                <GitHubOAuthButton />
               </div>
             </div>
           )}
@@ -383,7 +384,7 @@ export function Thread() {
 
               <div className="flex items-center gap-4">
                 <div className="flex items-center">
-                  <OpenGitHubRepo />
+                  <GitHubOAuthButton />
                 </div>
                 <TooltipIconButton
                   size="lg"
