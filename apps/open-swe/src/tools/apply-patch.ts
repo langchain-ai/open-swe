@@ -57,10 +57,12 @@ export const applyPatchTool = tool(
 
     let patchedContent: string | false;
     let fixedDiff: string | false = false;
+    let errorApplyingPatchMessage: string | undefined;
     try {
       logger.info(`Applying patch to file ${file_path}`);
       patchedContent = applyPatch(readFileOutput, diff);
     } catch (e) {
+      errorApplyingPatchMessage = e instanceof Error ? e.message : undefined;
       try {
         logger.warn("Failed to apply patch, trying to fix diff", {
           error: e,
@@ -116,7 +118,10 @@ export const applyPatchTool = tool(
     let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
     logger.info(resultMessage);
     if (fixedDiff) {
-      resultMessage += `\n\nNOTE: The generated diff was NOT formatted properly, and had to be fixed. The diff which was applied is:\n<fixed-diff>\n${fixedDiff}\n</fixed-diff>`;
+      resultMessage +=
+        "\n\nNOTE: The generated diff was NOT formatted properly, and had to be fixed." +
+        `\nHere is the error that was thrown when your generated diff was applied:\n<apply-diff-error>\n${errorApplyingPatchMessage}\n</apply-diff-error>` +
+        `\nThe diff which was applied is:\n<fixed-diff>\n${fixedDiff}\n</fixed-diff>`;
     }
     return {
       result: resultMessage,
