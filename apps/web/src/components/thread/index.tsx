@@ -94,7 +94,7 @@ function OpenGitHubRepo() {
       <Tooltip>
         <TooltipTrigger asChild>
           <a
-            href="https://github.com/langchain-ai/open-swe"
+            href="https://github.com/langchain-ai/langgraph"
             target="_blank"
             className="flex items-center justify-center"
           >
@@ -233,7 +233,7 @@ export function Thread() {
           configurable: {
             target_repository: {
               owner: "langchain-ai",
-              repo: "open-swe",
+              repo: "langgraph",
             },
           },
           recursion_limit: 400,
@@ -259,7 +259,7 @@ export function Thread() {
         configurable: {
           target_repository: {
             owner: "langchain-ai",
-            repo: "open-swe",
+            repo: "langgraph",
           },
         },
         recursion_limit: 400,

@@ -93,7 +93,7 @@ export default function useInterruptedActions({
             configurable: {
               target_repository: {
                 owner: "langchain-ai",
-                repo: "open-swe",
+                repo: "langgraph",
               },
             },
             recursion_limit: 400,
