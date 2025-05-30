@@ -1,12 +1,18 @@
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  isAIMessage,
+  isHumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { sessionPlanTool } from "../../../tools/index.js";
 import { GraphConfig } from "../../../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { pauseSandbox } from "../../../utils/sandbox.js";
 import { getUserRequest } from "../../../utils/user-request.js";
+import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+{FOLLOWUP_MESSAGE_PROMPT}
 
 In this step, you are expected to generate a high-level plan to address the user's request. The plan should be a list of actions to take, in order, to address the user's request. You should not include any code in the plan, only a list of actions to take.
 
@@ -18,12 +24,28 @@ You MUST adhere to the following criteria when generating the plan:
   - Your goal is to complete the task outlined by the user in the least number of steps possible.
 - Do not pack multiple complex tasks into a single plan item. Each high level task you'll need to complete should have its own plan item.
 - When you are ready to generate the plan, ensure you call the 'session_plan' tool. You are REQUIRED to call this tool.
-- The first user message in this conversation contains the user's request.
 - Your plan should be as simple as possible, while still containing all the tasks required to complete the user's request.
   - If the user did not explicitly request you write tests, do not include a task to write tests.
   - If the user did not explicitly request you write documentation, do not include a task to do so.
   - You should aim to complete the user's request in the least number of steps possible.
+
+
+The user's request is as follows. Ensure you generate your plan in accordance with the user's request.
+{USER_REQUEST}
 `;
+
+function formatSystemPrompt(state: PlannerGraphState): string {
+  // It's a followup if there's more than one human message.
+  const isFollowup = state.messages.filter(isHumanMessage).length > 1;
+  const userRequest = getUserRequest(state.messages);
+
+  return systemPrompt
+    .replace(
+      "{FOLLOWUP_MESSAGE_PROMPT}",
+      isFollowup ? formatFollowupMessagePrompt(state.plan, state.messages) : "",
+    )
+    .replace("{USER_REQUEST}", userRequest);
+}
 
 export async function generatePlan(
   state: PlannerGraphState,
@@ -34,9 +56,6 @@ export async function generatePlan(
     tool_choice: sessionPlanTool.name,
   });
 
-  const userRequest = getUserRequest(state.messages, {
-    returnFullMessage: true,
-  });
   let optionalToolMessage: ToolMessage | undefined;
   const lastMessage = state.plannerMessages[state.plannerMessages.length - 1];
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
@@ -53,9 +72,8 @@ export async function generatePlan(
     .invoke([
       {
         role: "system",
-        content: systemPrompt,
+        content: formatSystemPrompt(state),
       },
-      userRequest,
       ...state.plannerMessages,
       ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);

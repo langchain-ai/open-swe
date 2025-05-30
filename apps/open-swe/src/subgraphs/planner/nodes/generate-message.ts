@@ -1,27 +1,14 @@
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
-import { GraphConfig, PlanItem } from "../../../types.js";
+import { GraphConfig } from "../../../types.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import {
-  getMessageContentString,
-  getMessageString,
-} from "../../../utils/message/content.js";
+import { getMessageContentString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { BaseMessage } from "@langchain/core/messages";
-import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
+import { isHumanMessage } from "@langchain/core/messages";
+import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
-
-const followupMessagePrompt = `
-The user is sending a followup request, so you should assume the most recent message they sent is their request. You are also provided with the full conversation history from their previous request, which you should use as context when generating a plan.
-
-Here is the full list of tasks and task summaries from the previous plan you executed:
-{PREVIOUS_PLAN}
-
-Here is the full conversation history from the previous plan you executed:
-{PREVIOUS_CONVERSATION_HISTORY}
-`;
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 {FOLLOWUP_MESSAGE_PROMPT}
@@ -33,19 +20,23 @@ You MUST adhere to the following criteria when gathering context for the plan:
   - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
 - If you determine you've gathered enough context to generate a plan, simply reply with 'done' and do NOT call any tools.
 - Not generating a tool call will be interpreted as an indication that you've gathered enough context to generate a plan.
-- The first user message in this conversation contains the user's request.
+
+
+The user's request is as follows. Ensure you generate your plan in accordance with the user's request.
+{USER_REQUEST}
 `;
 
-function formatFollowupMessagePrompt(
-  plan: PlanItem[],
-  conversationHistory: BaseMessage[],
-): string {
-  return followupMessagePrompt
-    .replace("{PREVIOUS_PLAN}", formatPlanPromptWithSummaries(plan))
+function formatSystemPrompt(state: PlannerGraphState): string {
+  // It's a followup if there's more than one human message.
+  const isFollowup = state.messages.filter(isHumanMessage).length > 1;
+  const userRequest = getUserRequest(state.messages);
+
+  return systemPrompt
     .replace(
-      "{PREVIOUS_CONVERSATION_HISTORY}",
-      conversationHistory.slice(0, -1).map(getMessageString).join("\n"),
-    );
+      "{FOLLOWUP_MESSAGE_PROMPT}",
+      isFollowup ? formatFollowupMessagePrompt(state.plan, state.messages) : "",
+    )
+    .replace("{USER_REQUEST}", userRequest);
 }
 
 export async function generateAction(
@@ -56,35 +47,23 @@ export async function generateAction(
   const tools = [shellTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
-  // If there is only one message it's not a followup.
-  const isFollowup = state.messages.length > 1;
-
-  const userRequest = getUserRequest(state.messages, {
-    returnFullMessage: true,
-  });
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
       {
         role: "system",
-        content: systemPrompt.replace(
-          "{FOLLOWUP_MESSAGE_PROMPT}",
-          isFollowup
-            ? formatFollowupMessagePrompt(state.plan, state.messages)
-            : "",
-        ),
+        content: formatSystemPrompt(state),
       },
-      userRequest,
       ...state.plannerMessages,
     ]);
 
   logger.info("Generated planning message", {
+    ...(getMessageContentString(response.content) && {
+      content: getMessageContentString(response.content),
+    }),
     ...(response.tool_calls?.[0] && {
       name: response.tool_calls?.[0].name,
       args: response.tool_calls?.[0].args,
-    }),
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
     }),
   });
 
