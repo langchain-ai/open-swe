@@ -19,7 +19,7 @@ You MUST adhere to the following criteria when summarizing the conversation hist
 - Do not retain any full file contents.
 - Ensure your summary is concise, but useful for future context.
 
-Here is the user's initial request
+Here is the user's request
 ## User request:
 {USER_REQUEST}
 
