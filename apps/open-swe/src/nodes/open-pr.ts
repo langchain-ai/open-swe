@@ -68,7 +68,7 @@ export async function openPullRequest(
 
   const sandbox = await Sandbox.connect(sandboxSessionId);
 
-  const { owner, repo } = config.configurable?.target_repository ?? {};
+  const { owner, repo } = state.targetRepository;
 
   if (!owner || !repo) {
     throw new Error(
@@ -77,7 +77,7 @@ export async function openPullRequest(
   }
 
   const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(config),
+    getRepoAbsolutePath(state.targetRepository),
     sandbox,
   );
   let branchName = state.branchName;
@@ -85,9 +85,14 @@ export async function openPullRequest(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    branchName = await checkoutBranchAndCommit(config, sandbox, {
-      branchName,
-    });
+    branchName = await checkoutBranchAndCommit(
+      config,
+      state.targetRepository,
+      sandbox,
+      {
+        branchName,
+      },
+    );
   }
 
   const model = await loadModel(config, Task.SUMMARIZER);

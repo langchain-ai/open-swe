@@ -215,8 +215,16 @@ export function Thread() {
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
 
+    const targetRepository = {
+      owner: "langchain-ai",
+      repo: "langgraph",
+    };
     stream.submit(
-      { messages: [...toolMessages, newHumanMessage], context },
+      {
+        messages: [...toolMessages, newHumanMessage],
+        context,
+        targetRepository,
+      },
       {
         streamMode: ["values"],
         optimisticValues: (prev) => ({
@@ -229,13 +237,6 @@ export function Thread() {
           ],
         }),
         config: {
-          // TODO: Make configurable (just that target_repository object) & recursion limit in the UI.
-          configurable: {
-            target_repository: {
-              owner: "langchain-ai",
-              repo: "langgraph",
-            },
-          },
           recursion_limit: 400,
         },
       },
@@ -255,13 +256,6 @@ export function Thread() {
       checkpoint: parentCheckpoint,
       streamMode: ["values"],
       config: {
-        // TODO: Make configurable (just that target_repository object) & recursion limit in the UI.
-        configurable: {
-          target_repository: {
-            owner: "langchain-ai",
-            repo: "langgraph",
-          },
-        },
         recursion_limit: 400,
       },
     });

@@ -73,6 +73,12 @@ export const GraphAnnotation = z.object({
     .string()
     .optional()
     .langgraph.reducer((_state, update) => update),
+  /**
+   * The target repository information
+   */
+  targetRepository: z
+    .custom<TargetRepository>()
+    .langgraph.reducer((_state, update) => update),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;
@@ -143,25 +149,6 @@ const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
 );
 
 export const GraphConfiguration = z.object({
-  /**
-   * The URL of the repository to clone.
-   */
-  target_repository: z
-    .object({
-      owner: z.string(),
-      repo: z.string(),
-      branch: z.string().optional(),
-    })
-    .langgraph.metadata({
-      x_oap_ui_config: {
-        type: "json",
-        default: `{
-  "owner": "",
-  "repo": "",
-  "branch": ""
-}`,
-      },
-    }),
   /**
    * The model ID to use for the planning step.
    * This includes initial planning, and rewriting.
@@ -334,6 +321,26 @@ export const GraphConfiguration = z.object({
         max: 2,
         step: 0.1,
         description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
+    }),
+
+  /**
+   * The maximum number of context gathering actions to take during planning.
+   * Each action consists of 2 messages (request & result), plus 1 human message.
+   * Total messages = maxContextActions * 2 + 1
+   * @default 6
+   */
+  maxContextActions: z
+    .number()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "number",
+        default: 6,
+        min: 1,
+        max: 20,
+        description:
+          "Maximum number of context gathering actions during planning",
       },
     }),
 });

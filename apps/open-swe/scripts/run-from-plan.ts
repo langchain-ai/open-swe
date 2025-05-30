@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { Client } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig } from "../src/types.js";
 import { graph } from "../src/index.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 
@@ -15,7 +14,13 @@ async function runFromPlan() {
 
   const threadId = uuidv4();
 
+  const targetRepository = {
+    owner: "langchain-ai",
+    repo: "open-swe",
+  };
+
   const inputs = {
+    targetRepository,
     messages: [
       {
         role: "user",
@@ -111,21 +116,9 @@ The user wants to implement a GitHub OAuth authentication server in the \`/apps/
     branchName: `open-swe/${threadId}`,
   };
 
-  const configurable: Omit<
-    GraphConfig["configurable"],
-    "thread_id" | "assistant_id"
-  > = {
-    target_repository: {
-      owner: "langchain-ai",
-      repo: "open-swe",
-    },
-  };
-
   logger.info("Initializing sandbox...");
 
-  const initResult = await graph.nodes.initialize.invoke(inputs as any, {
-    configurable,
-  });
+  const initResult = await graph.nodes.initialize.invoke(inputs as any);
   if (!initResult.sandboxSessionId) {
     throw new Error("Failed to initialize sandbox.");
   }
@@ -143,7 +136,6 @@ The user wants to implement a GitHub OAuth authentication server in the \`/apps/
       },
     },
     config: {
-      configurable,
       recursion_limit: 400,
     },
     ifNotExists: "create",

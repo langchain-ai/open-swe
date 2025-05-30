@@ -129,7 +129,7 @@ export async function takeAction(
   // If there are, commit them.
   const sandbox = await Sandbox.connect(state.sandboxSessionId);
   const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(config),
+    getRepoAbsolutePath(state.targetRepository),
     sandbox,
   );
 
@@ -138,9 +138,14 @@ export async function takeAction(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    branchName = await checkoutBranchAndCommit(config, sandbox, {
-      branchName,
-    });
+    branchName = await checkoutBranchAndCommit(
+      config,
+      state.targetRepository,
+      sandbox,
+      {
+        branchName,
+      },
+    );
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError(

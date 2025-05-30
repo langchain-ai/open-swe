@@ -384,10 +384,9 @@ export function fixGitPatch(
 
     const result: string = buildPatch(parsed);
 
-    // Check if patch uses literal \n as line separators (not just contains \n in content)
-    const usesLiteralNewlines = patchString.includes("\\n") && !patchString.includes("\n");
+    // More robust check for patches that use literal \n as line separators
+    const usesLiteralNewlines = /^[^\\]*\\n/.test(patchString) && patchString.split('\n').length === 1;
 
-    // If original used literal \n as separators, convert back
     if (usesLiteralNewlines && !result.includes("\\n")) {
       return result.replace(/\n/g, "\\n");
     }

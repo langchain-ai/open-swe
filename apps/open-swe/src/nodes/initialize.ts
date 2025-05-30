@@ -12,6 +12,7 @@ import {
   configureGitUserInRepo,
   getBranchName,
   getRepoAbsolutePath,
+  pullLatestChanges,
 } from "../utils/git/index.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 
@@ -63,6 +64,13 @@ export async function initialize(
     throw new Error("Configuration object not found.");
   }
   const { sandboxSessionId } = state;
+  const { targetRepository } = state;
+  if (!targetRepository) {
+    throw new Error(
+      "Missing required target repository. Please provide a git repository in state or configuration.",
+    );
+  }
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   if (sandboxSessionId) {
     try {
@@ -74,6 +82,7 @@ export async function initialize(
         sandboxSessionId,
         TIMEOUT_EXTENSION_OPT,
       );
+      await pullLatestChanges(absoluteRepoDir, newSandbox);
       return {
         sandboxSessionId: newSandbox.sandboxId,
       };
@@ -83,29 +92,19 @@ export async function initialize(
     }
   }
 
-  const { target_repository } = config.configurable;
-
-  if (!target_repository) {
-    throw new Error(
-      "Missing required configuration. Please provide a git repository URL.",
-    );
-  }
-
   logger.info("Creating sandbox...");
   const sandbox = await Sandbox.create(
     SANDBOX_TEMPLATE_ID,
     TIMEOUT_EXTENSION_OPT,
   );
 
-  const res = await cloneRepo(sandbox, target_repository);
+  const res = await cloneRepo(sandbox, targetRepository);
   if (res.error) {
     // TODO: This should probably be an interrupt.
     logger.error("Failed to clone repository", res.error);
     throw new Error(`Failed to clone repository.\n${res.error}`);
   }
   logger.info("Repository cloned successfully.");
-
-  const absoluteRepoDir = getRepoAbsolutePath(config);
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
   await configureGitUserInRepo(absoluteRepoDir, sandbox);
@@ -125,5 +124,6 @@ export async function initialize(
 
   return {
     sandboxSessionId: sandbox.sandboxId,
+    targetRepository,
   };
 }

@@ -1,5 +1,8 @@
 # Open SWE
 
+> [!WARNING]
+> Open SWE is under active development and is not yet ready for production use.
+
 Open SWE is an open-source cloud based coding agent.
 
 ## Usage
@@ -17,11 +20,16 @@ Next, install dependencies:
 yarn install
 ```
 
-Copy the `.env.example` file to `.env` and fill in the values:
+Copy the `.env.example` files to `.env` in their respective packages, and fill in the values:
 
 ```bash
+# Agent .env file
 cp ./apps/open-swe/.env.example ./apps/open-swe/.env
+# Web .env file
+cp ./apps/web/.env.example ./apps/web/.env
 ```
+
+The agent `.env` file should contain the following variables:
 
 ```bash
 # ------------------LangSmith tracing------------------
@@ -40,48 +48,68 @@ E2B_API_KEY=""
 
 # Your GitHub PAT with access to the repositories you want to modify.
 GITHUB_PAT=""
-
 ```
 
-Your GitHub personal access token should have access to only the repositories you want to modify. It must have the following `Repository` permissions:
+And the web `.env` file should contain the following variables:
 
-- `Read access to metadata`
-- `Read and Write access to code and pull requests`
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:2024 # Change to production URL when deployed
+NEXT_PUBLIC_ASSISTANT_ID=open-swe
+```
 
-You can generate a personal access token in [GitHub settings](https://github.com/settings/personal-access-tokens).
+To generate the GitHub personal access token, you should:
+
+1. Go to [GitHub settings](https://github.com/settings/personal-access-tokens)
+2. Click on `Generate new token` to generate a new fine grained token.
+3. Give the token a name & description.
+4. Choose `Only select repositories`, and select the repositories you want to give Open SWE access to.
+5. Under `Permissions`, give it `Repository permission`:
+  - `Contents` - `Read and write`
+  - `Metadata` - `Read-only` (should be auto enabled after selecting `Contents`)
+  - `Pull requests` - `Read and write`
+6. Click `Generate token` & copy the token.
+7. Paste the token into the `GITHUB_PAT` variable in the agent `.env` file.
 
 ## Running the graph
 
-To run the graph, first modify the `e2e.ts` file to set the `userRequest` along with the target repository information.
+> [!INFO]
+> Since Open SWE is still under development, the following requires hard coding the repository information. This will be changed before the release.
 
-The `userRequest` should contain the task description for Open SWE to execute.
+To run the graph, first you must set which repository you want Open SWE to make changes to inside the `web` package. To do this, search for instances of `repo: "open-swe",` inside the `apps/web` directory. This should yield _7_ results in _5_ files. Go through each of these, and modify the `owner` and `repo` properties to match the repository you want Open SWE to make changes to. (ensure your GitHub PAT has access to this repository).
 
-The `target_repository` object should contain the information for the repository Open SWE should clone and make changes to. You're required to set the `owner` and `repo` properties. The `branch` property is optional, and defaults to whatever the base branch of the repository is.
-
-After setting the `userRequest` and `target_repository`, run the following command on a terminal session:
+After updating these values, you should start the web server:
 
 ```bash
+# Inside `apps/web`
 yarn dev
 ```
 
-This will start the LangGraph server running locally. The server will be available at `http://localhost:2024` by default.
-
-Then, run the following command on a second terminal session:
+And the agent server:
 
 ```bash
-yarn run:e2e
+# Inside `apps/open-swe`
+yarn dev
 ```
 
-This will start the graph with the inputs you specified in the file. The graph always runs a planning sub-graph first, and once it's finished planning it will interrupt with the plan. To interact with the interrupt, you should add Open SWE to [Agent Inbox](https://dev.agentinbox.ai).
+You can now open the web app at `http://localhost:3000` and send a request.
 
-Once you've added the graph to the inbox, you can inspect the interrupt with the generated plan. It will allow you to:
+Sending a request will trigger the agent, which first enters the planning subgraph. This will run for just under a minute, and once it's finished, it'll interrupt the graph with the proposed plan.
 
-1. Accept the plan as is.
-2. Edit, and submit the plan.
-3. Respond with natural language to have the plan modified. This step will _not_ rerun the planning subgraph, it will only modify the plan.
-4. Reject the plan by clicking the `Ignore` button.
+To start the agent execution flow, you can:
+- accept the plan as is
+- edit & submit the plan
 
-If you want to accept the plan as is, you should re-invoke the graph from the terminal with the `yarn run:e2e --threadId <threadId>` command. Replace `<threadId>` with the thread ID of the interrupt you want to accept. This will resume the graph, and log the updates to the terminal. You may also resume from Agent Inbox, however this will not show you the outputs of the graph.
+Both of these actions will trigger the agent to start the execution flow with the plan.
+
+If you are not happy with the plan, you can also send a response. This will cause the agent to rewrite the plan according to the instructions you provided.
+
+> [!TIP]
+> Responding to the plan interrupt will not trigger the agent to re-enter the planning subgraph, so it will not be able to gather more information than it already has. If you want the agent to start over and gather new context, you must create a new chat and send an updated prompt.
+
+Once you've accepted the plan, it will begin the execution flow. When the agent finishes, a pull request will automatically be opened in the repository.
+
+> [!NOTE]
+> The chat UI is very buggy at the moment, so I recommend also having the agent server terminal window open so you can inspect the logs as the agent runs.
 
 ## Accessing Changes
 
