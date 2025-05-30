@@ -15,7 +15,7 @@ export default function DemoPage(): React.ReactNode {
       <ThreadProvider>
         <StreamProvider>
           <ArtifactProvider>
-            <div className="flex justify-between items-center p-4 border-b">
+            <div className="flex items-center justify-between border-b p-4">
               <h1 className="text-xl font-semibold">AI Coding Agent</h1>
               <GitHubOAuthButton />
             </div>
@@ -26,4 +26,3 @@ export default function DemoPage(): React.ReactNode {
     </React.Suspense>
   );
 }
-

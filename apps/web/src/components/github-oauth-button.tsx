@@ -42,8 +42,14 @@ export function GitHubOAuthButton() {
 
   if (isAuth === null) {
     return (
-      <Button variant="outline" disabled>
-        <GitHubSVG width="16" height="16" />
+      <Button
+        variant="outline"
+        disabled
+      >
+        <GitHubSVG
+          width="16"
+          height="16"
+        />
         Checking...
       </Button>
     );
@@ -51,18 +57,30 @@ export function GitHubOAuthButton() {
 
   if (isAuth) {
     return (
-      <Button variant="outline" onClick={handleLogout} disabled={isLoading}>
-        <GitHubSVG width="16" height="16" />
+      <Button
+        variant="outline"
+        onClick={handleLogout}
+        disabled={isLoading}
+      >
+        <GitHubSVG
+          width="16"
+          height="16"
+        />
         {isLoading ? "Disconnecting..." : "Disconnect GitHub"}
       </Button>
     );
   }
 
   return (
-    <Button onClick={handleLogin} disabled={isLoading}>
-      <GitHubSVG width="16" height="16" />
+    <Button
+      onClick={handleLogin}
+      disabled={isLoading}
+    >
+      <GitHubSVG
+        width="16"
+        height="16"
+      />
       {isLoading ? "Connecting..." : "Connect GitHub"}
     </Button>
   );
 }
-
