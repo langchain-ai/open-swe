@@ -12,6 +12,7 @@ import {
   configureGitUserInRepo,
   getBranchName,
   getRepoAbsolutePath,
+  pullLatestChanges,
 } from "../utils/git/index.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 
@@ -63,6 +64,13 @@ export async function initialize(
     throw new Error("Configuration object not found.");
   }
   const { sandboxSessionId } = state;
+  const { targetRepository } = state;
+  if (!targetRepository) {
+    throw new Error(
+      "Missing required target repository. Please provide a git repository in state or configuration.",
+    );
+  }
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   if (sandboxSessionId) {
     try {
@@ -74,6 +82,7 @@ export async function initialize(
         sandboxSessionId,
         TIMEOUT_EXTENSION_OPT,
       );
+      await pullLatestChanges(absoluteRepoDir, newSandbox);
       return {
         sandboxSessionId: newSandbox.sandboxId,
       };
@@ -81,13 +90,6 @@ export async function initialize(
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
       logger.error("Failed to get sandbox session", e);
     }
-  }
-
-  const { targetRepository } = state;
-  if (!targetRepository) {
-    throw new Error(
-      "Missing required target repository. Please provide a git repository in state or configuration.",
-    );
   }
 
   logger.info("Creating sandbox...");
@@ -103,8 +105,6 @@ export async function initialize(
     throw new Error(`Failed to clone repository.\n${res.error}`);
   }
   logger.info("Repository cloned successfully.");
-
-  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
   await configureGitUserInRepo(absoluteRepoDir, sandbox);
