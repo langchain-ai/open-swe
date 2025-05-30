@@ -65,7 +65,7 @@ export async function loadModel(config: GraphConfig, task: Task) {
           thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
           maxTokens,
         }
-      : { maxTokens: 10000}),
+      : { maxTokens: 5_000 }),
   });
 
   return model;
