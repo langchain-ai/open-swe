@@ -217,7 +217,7 @@ export function Thread() {
 
     const targetRepository = {
       owner: "langchain-ai",
-      repo: "langgraph",
+      repo: "open-swe",
     };
     stream.submit(
       {
