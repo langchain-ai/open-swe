@@ -20,6 +20,7 @@ export type StateType = {
   messages: Message[];
   ui?: UIMessage[];
   targetRepository?: TargetRepository;
+  branchName?: string;
 };
 
 const useTypedStream = useStream<
@@ -30,6 +31,7 @@ const useTypedStream = useStream<
       ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
       context?: Record<string, unknown>;
       targetRepository?: TargetRepository;
+      branchName?: string;
     };
     CustomEventType: UIMessage | RemoveUIMessage;
   }

@@ -130,6 +130,19 @@ export async function checkoutBranch(
       gitCheckoutOutput,
     });
 
+    if (!checkoutCommand.includes("-b")) {
+      logger.info(`Branch '${branchName}' is not new, pulling latest.`);
+      // Branch is not new, ensure we pull latest.
+      const pullChangesRes = await pullLatestChanges(absoluteRepoDir, sandbox);
+      if (pullChangesRes !== false && pullChangesRes.exitCode === 0) {
+        logger.info(`Pulled latest changes successfully.`);
+      } else {
+        logger.error(`Failed to pull latest changes.`, {
+          pullChangesRes,
+        });
+      }
+    }
+
     return gitCheckoutOutput;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);

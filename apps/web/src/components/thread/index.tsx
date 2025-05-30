@@ -224,6 +224,7 @@ export function Thread() {
         messages: [...toolMessages, newHumanMessage],
         context,
         targetRepository,
+        branchName: "open-swe/4db73421-588b-4465-9b59-6c656807c804",
       },
       {
         streamMode: ["values"],
