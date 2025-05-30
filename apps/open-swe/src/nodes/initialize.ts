@@ -106,7 +106,6 @@ export async function initialize(
   }
   logger.info("Repository cloned successfully.");
 
-
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
   await configureGitUserInRepo(absoluteRepoDir, sandbox);
   logger.info("Git user configured successfully.");
