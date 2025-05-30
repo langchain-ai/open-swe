@@ -1,9 +1,10 @@
 import { Octokit } from "@octokit/rest";
-import { CommandResult, Sandbox } from "@e2b/code-interpreter";
+import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../logger.js";
 import { GraphConfig, TargetRepository } from "../../types.js";
-import { TIMEOUT_MS } from "../../constants.js";
+import { TIMEOUT_MS, SANDBOX_ROOT_DIR } from "../../constants.js";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
+import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
 
@@ -15,7 +16,7 @@ export function getRepoAbsolutePath(
     throw new Error("No repository name provided");
   }
 
-  return `/home/user/${repoName}`;
+  return `${SANDBOX_ROOT_DIR}/${repoName}`;
 }
 
 export function getBranchName(config: GraphConfig): string {
@@ -31,27 +32,27 @@ export async function checkoutBranch(
   absoluteRepoDir: string,
   branchName: string,
   sandbox: Sandbox,
-): Promise<CommandResult | false> {
+): Promise<ExecuteResponse | false> {
   logger.info(`Checking out branch '${branchName}'...`);
 
   try {
-    const getCurrentBranchOutput = await sandbox.commands.run(
+    const getCurrentBranchOutput = await sandbox.process.executeCommand(
       "git branch --show-current",
-      { cwd: absoluteRepoDir },
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
     );
-    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (getCurrentBranchOutput.exitCode !== 0) {
       logger.error(`Failed to get current branch`, {
         getCurrentBranchOutput,
       });
     } else {
-      const currentBranch = getCurrentBranchOutput.stdout.trim();
+      const currentBranch = getCurrentBranchOutput.result.trim();
       if (currentBranch === branchName) {
         logger.info(`Already on branch '${branchName}'. No checkout needed.`);
         return {
-          stdout: `Already on branch ${branchName}`,
-          stderr: "",
+          result: `Already on branch ${branchName}`,
           exitCode: 0,
         };
       }
@@ -75,11 +76,12 @@ export async function checkoutBranch(
       `Checking if branch 'refs/heads/${branchName}' exists using 'git rev-parse --verify --quiet'`,
     );
     // Check if branch exists using git rev-parse for robustness
-    const checkBranchExistsOutput = await sandbox.commands.run(
+    const checkBranchExistsOutput = await sandbox.process.executeCommand(
       `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
-      { cwd: absoluteRepoDir },
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
     );
-    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (checkBranchExistsOutput.exitCode === 0) {
       // Branch exists (rev-parse exit code 0 means success)
@@ -94,7 +96,7 @@ export async function checkoutBranch(
     if (
       errorFields &&
       errorFields.exitCode === 1 &&
-      errorFields.stderr === ""
+      errorFields.result === ""
     ) {
       checkoutCommand = `git checkout -b "${branchName}"`;
     } else {
@@ -110,9 +112,12 @@ export async function checkoutBranch(
   }
 
   try {
-    const gitCheckoutOutput = await sandbox.commands.run(checkoutCommand, {
-      cwd: absoluteRepoDir,
-    });
+    const gitCheckoutOutput = await sandbox.process.executeCommand(
+      checkoutCommand,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
+    );
 
     if (gitCheckoutOutput.exitCode !== 0) {
       logger.error(`Failed to checkout branch`, {
@@ -212,20 +217,24 @@ export async function configureGitUserInRepo(
 ): Promise<void> {
   let needsGitConfig = false;
   try {
-    const nameCheck = await sandbox.commands.run("git config user.name", {
-      cwd: absoluteRepoDir,
-    });
-    await sandbox.setTimeout(TIMEOUT_MS);
-    const emailCheck = await sandbox.commands.run("git config user.email", {
-      cwd: absoluteRepoDir,
-    });
-    await sandbox.setTimeout(TIMEOUT_MS);
+    const nameCheck = await sandbox.process.executeCommand(
+      "git config user.name",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
+    );
+    const emailCheck = await sandbox.process.executeCommand(
+      "git config user.email",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
+    );
 
     if (
       nameCheck.exitCode !== 0 ||
-      nameCheck.stdout.trim() === "" ||
+      nameCheck.result.trim() === "" ||
       emailCheck.exitCode !== 0 ||
-      emailCheck.stdout.trim() === ""
+      emailCheck.result.trim() === ""
     ) {
       needsGitConfig = true;
     }
@@ -244,11 +253,12 @@ export async function configureGitUserInRepo(
     const { userName, userEmail } = await getGitUserDetailsFromGitHub();
 
     if (userName) {
-      const configUserNameOutput = await sandbox.commands.run(
+      const configUserNameOutput = await sandbox.process.executeCommand(
         `git config user.name "${userName}"`,
-        { cwd: absoluteRepoDir },
+        absoluteRepoDir,
+        undefined,
+        TIMEOUT_MS,
       );
-      await sandbox.setTimeout(TIMEOUT_MS);
       if (configUserNameOutput.exitCode !== 0) {
         logger.error(`Failed to set git user.name`, {
           configUserNameOutput,
@@ -259,11 +269,12 @@ export async function configureGitUserInRepo(
     }
 
     if (userEmail) {
-      const configUserEmailOutput = await sandbox.commands.run(
+      const configUserEmailOutput = await sandbox.process.executeCommand(
         `git config user.email "${userEmail}"`,
-        { cwd: absoluteRepoDir },
+        absoluteRepoDir,
+        undefined,
+        TIMEOUT_MS,
       );
-      await sandbox.setTimeout(TIMEOUT_MS);
       if (configUserEmailOutput.exitCode !== 0) {
         logger.error(`Failed to set git user.email`, {
           configUserEmailOutput,
@@ -283,13 +294,14 @@ export async function commitAll(
   absoluteRepoDir: string,
   message: string,
   sandbox: Sandbox,
-): Promise<CommandResult | false> {
+): Promise<ExecuteResponse | false> {
   try {
-    const gitAddOutput = await sandbox.commands.run(
+    const gitAddOutput = await sandbox.process.executeCommand(
       `git add -A && git commit -m "${message}"`,
-      { cwd: absoluteRepoDir },
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
     );
-    await sandbox.setTimeout(TIMEOUT_MS);
 
     if (gitAddOutput.exitCode !== 0) {
       logger.error(`Failed to commit all changes to git repository`, {
@@ -315,7 +327,7 @@ export async function commitAllAndPush(
   absoluteRepoDir: string,
   message: string,
   sandbox: Sandbox,
-): Promise<CommandResult | false> {
+): Promise<ExecuteResponse | false> {
   try {
     const commitOutput = await commitAll(absoluteRepoDir, message, sandbox);
 
@@ -326,10 +338,12 @@ export async function commitAllAndPush(
       return false;
     }
 
-    const gitPushOutput = await sandbox.commands.run(pushCurrentBranchCmd, {
-      cwd: absoluteRepoDir,
-    });
-    await sandbox.setTimeout(TIMEOUT_MS);
+    const gitPushOutput = await sandbox.process.executeCommand(
+      pushCurrentBranchCmd,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
+    );
 
     if (gitPushOutput.exitCode !== 0) {
       logger.error(`Failed to push changes to git repository`, {
@@ -357,9 +371,12 @@ export async function getChangedFilesStatus(
   absoluteRepoDir: string,
   sandbox: Sandbox,
 ): Promise<string[]> {
-  const gitStatusOutput = await sandbox.commands.run("git status --porcelain", {
-    cwd: absoluteRepoDir,
-  });
+  const gitStatusOutput = await sandbox.process.executeCommand(
+    "git status --porcelain",
+    absoluteRepoDir,
+    undefined,
+    TIMEOUT_MS,
+  );
 
   if (gitStatusOutput.exitCode !== 0) {
     logger.error(`Failed to get changed files status`, {
@@ -368,7 +385,7 @@ export async function getChangedFilesStatus(
     return [];
   }
 
-  return gitStatusOutput.stdout
+  return gitStatusOutput.result
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== "");
@@ -453,12 +470,14 @@ export async function createPullRequest({
 export async function pullLatestChanges(
   absoluteRepoDir: string,
   sandbox: Sandbox,
-): Promise<CommandResult | false> {
+): Promise<ExecuteResponse | false> {
   try {
-    const gitPullOutput = await sandbox.commands.run("git pull", {
-      cwd: absoluteRepoDir,
-    });
-    await sandbox.setTimeout(TIMEOUT_MS);
+    const gitPullOutput = await sandbox.process.executeCommand(
+      "git pull",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_MS,
+    );
     return gitPullOutput;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);

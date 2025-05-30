@@ -1,4 +1,4 @@
-import { Sandbox } from "@e2b/code-interpreter";
+import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import {
   GraphState,
@@ -6,7 +6,6 @@ import {
   GraphUpdate,
   TargetRepository,
 } from "../types.js";
-import { TIMEOUT_EXTENSION_OPT } from "../constants.js";
 import {
   checkoutBranch,
   configureGitUserInRepo,
@@ -15,10 +14,10 @@ import {
   pullLatestChanges,
 } from "../utils/git/index.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+import { daytonaClient } from "../utils/sandbox.js";
+import { SNAPSHOT_NAME } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
-
-const SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
 
 async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
   if (!process.env.GITHUB_PAT) {
@@ -39,10 +38,7 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
     logger.info("Cloning repository", {
       command: gitCloneCommand.join(" "),
     });
-    return await sandbox.commands.run(
-      gitCloneCommand.join(" "),
-      TIMEOUT_EXTENSION_OPT,
-    );
+    return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error("Failed to clone repository", errorFields ?? e);
@@ -78,13 +74,10 @@ export async function initialize(
         sandboxSessionId,
       });
       // Resume the sandbox if the session ID is in the config.
-      const newSandbox = await Sandbox.resume(
-        sandboxSessionId,
-        TIMEOUT_EXTENSION_OPT,
-      );
-      await pullLatestChanges(absoluteRepoDir, newSandbox);
+      const existingSandbox = await daytonaClient().get(sandboxSessionId);
+      await pullLatestChanges(absoluteRepoDir, existingSandbox);
       return {
-        sandboxSessionId: newSandbox.sandboxId,
+        sandboxSessionId: existingSandbox.id,
       };
     } catch (e) {
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
@@ -93,16 +86,15 @@ export async function initialize(
   }
 
   logger.info("Creating sandbox...");
-  const sandbox = await Sandbox.create(
-    SANDBOX_TEMPLATE_ID,
-    TIMEOUT_EXTENSION_OPT,
-  );
+  const sandbox = await daytonaClient().create({
+    image: SNAPSHOT_NAME,
+  });
 
   const res = await cloneRepo(sandbox, targetRepository);
-  if (res.error) {
+  if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
-    logger.error("Failed to clone repository", res.error);
-    throw new Error(`Failed to clone repository.\n${res.error}`);
+    logger.error("Failed to clone repository", res.result);
+    throw new Error(`Failed to clone repository.\n${res.result}`);
   }
   logger.info("Repository cloned successfully.");
 
@@ -123,7 +115,7 @@ export async function initialize(
   }
 
   return {
-    sandboxSessionId: sandbox.sandboxId,
+    sandboxSessionId: sandbox.id,
     targetRepository,
   };
 }
