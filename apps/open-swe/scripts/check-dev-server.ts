@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { spawn } from "child_process";
 import * as path from "path";
 
@@ -49,6 +50,7 @@ function checkDevServer(): Promise<void> {
         if (!lowerCaseMessage.includes("warning")) {
           errorDetected = true;
           console.error("Error detected in server output!");
+          console.error(output);
         } else {
           console.log(
             "Warning detected, not treating as fatal error:",
@@ -72,6 +74,7 @@ function checkDevServer(): Promise<void> {
       ) {
         errorDetected = true;
         console.error("Potential error detected in server stderr output!");
+        console.error(output);
       }
     });
 
