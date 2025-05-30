@@ -21,11 +21,12 @@ export function daytonaClient(): Daytona {
  * @param sandbox The sandbox client to stop. If not provided, the sandbox will be connected to.
  * @returns The sandbox session ID.
  */
-export async function stopSandbox(
-  sandboxSessionId: string
-): Promise<string> {
+export async function stopSandbox(sandboxSessionId: string): Promise<string> {
   const sandbox = await daytonaClient().get(sandboxSessionId);
-  if (sandbox.instance.state == SandboxState.STOPPED || sandbox.instance.state == SandboxState.ARCHIVED) {
+  if (
+    sandbox.instance.state == SandboxState.STOPPED ||
+    sandbox.instance.state == SandboxState.ARCHIVED
+  ) {
     return sandboxSessionId;
   } else if (sandbox.instance.state == "started") {
     await daytonaClient().stop(sandbox);
@@ -39,11 +40,12 @@ export async function stopSandbox(
  * @param sandboxSessionId The ID of the sandbox to start.
  * @returns The sandbox client.
  */
-export async function startSandbox(
-  sandboxSessionId: string,
-): Promise<Sandbox> {
+export async function startSandbox(sandboxSessionId: string): Promise<Sandbox> {
   const sandbox = await daytonaClient().get(sandboxSessionId);
-  if (sandbox.instance.state == SandboxState.STOPPED || sandbox.instance.state == SandboxState.ARCHIVED) {
+  if (
+    sandbox.instance.state == SandboxState.STOPPED ||
+    sandbox.instance.state == SandboxState.ARCHIVED
+  ) {
     await daytonaClient().start(sandbox);
   }
   return sandbox;
