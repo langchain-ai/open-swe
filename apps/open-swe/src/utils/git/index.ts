@@ -376,13 +376,14 @@ export async function getChangedFilesStatus(
 
 export async function checkoutBranchAndCommit(
   config: GraphConfig,
+  targetRepository: TargetRepository,
   sandbox: Sandbox,
   options?: {
     branchName?: string;
   },
 ): Promise<string> {
   logger.info("Checking out branch and committing changes...");
-  const absoluteRepoDir = getRepoAbsolutePath(config);
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options?.branchName || getBranchName(config);
 
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);

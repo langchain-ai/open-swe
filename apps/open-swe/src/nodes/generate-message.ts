@@ -93,8 +93,8 @@ Once again, here are the completed tasks, remaining tasks, and the current task 
 {PLAN_PROMPT}
 `;
 
-const formatPrompt = (state: GraphState, config: GraphConfig): string => {
-  const repoDirectory = getRepoAbsolutePath(config);
+const formatPrompt = (state: GraphState): string => {
+  const repoDirectory = getRepoAbsolutePath(state.targetRepository);
   return systemPrompt
     .replaceAll(
       "{PLAN_PROMPT_WITH_SUMMARIES}",
@@ -123,7 +123,7 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state, config),
+      content: formatPrompt(state),
     },
     ...state.messages,
   ]);
