@@ -94,7 +94,7 @@ function OpenGitHubRepo() {
       <Tooltip>
         <TooltipTrigger asChild>
           <a
-            href="https://github.com/langchain-ai/langgraph"
+            href="https://github.com/langchain-ai/open-swe"
             target="_blank"
             className="flex items-center justify-center"
           >
