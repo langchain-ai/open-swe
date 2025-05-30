@@ -2,11 +2,8 @@ import { z } from "zod";
 import { GraphConfig } from "../../../types.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
-import { isHumanMessage } from "@langchain/core/messages";
-import {
-  getMessageContentString,
-  getMessageString,
-} from "../../../utils/message/content.js";
+import { getMessageString } from "../../../utils/message/content.js";
+import { getUserRequest } from "../../../utils/user-request.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -22,7 +19,7 @@ You MUST adhere to the following criteria when summarizing the conversation hist
 - Do not retain any full file contents.
 - Ensure your summary is concise, but useful for future context.
 
-Here is the user's initial request
+Here is the user's request
 ## User request:
 {USER_REQUEST}
 
@@ -53,8 +50,7 @@ export async function summarizer(
     tool_choice: condenseContextTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages);
   const conversationHistoryStr = `Here is the full conversation history:
 
 ${state.plannerMessages.map(getMessageString).join("\n")}`;
@@ -62,11 +58,7 @@ ${state.plannerMessages.map(getMessageString).join("\n")}`;
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(
-        getMessageContentString(
-          firstUserMessage?.content || "No user request provided.",
-        ),
-      ),
+      content: formatPrompt(userRequest || "No user request provided."),
     },
     {
       role: "user",

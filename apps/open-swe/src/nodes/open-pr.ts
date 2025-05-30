@@ -11,8 +11,8 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { z } from "zod";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
-import { isHumanMessage, ToolMessage } from "@langchain/core/messages";
-import { getMessageContentString } from "../utils/message/content.js";
+import { ToolMessage } from "@langchain/core/messages";
+import { getUserRequest } from "../utils/user-request.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -100,20 +100,11 @@ export async function openPullRequest(
     tool_choice: openPrTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-  if (!firstUserMessage) {
-    throw new Error(
-      "Failed to open pull request: No user message found in state.",
-    );
-  }
-
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithTool.invoke([
     {
       role: "user",
-      content: formatPrompt(
-        state.plan,
-        getMessageContentString(firstUserMessage.content),
-      ),
+      content: formatPrompt(state.plan, userRequest),
     },
   ]);
 

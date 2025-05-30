@@ -143,12 +143,12 @@ export async function generateAction(
 
   logger.info("Generated action", {
     currentTask: getCurrentTask(state.plan).plan,
+    ...(getMessageContentString(response.content) && {
+      content: getMessageContentString(response.content),
+    }),
     ...(response.tool_calls?.[0] && {
       name: response.tool_calls?.[0].name,
       args: response.tool_calls?.[0].args,
-    }),
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
     }),
   });
 

@@ -5,8 +5,8 @@ import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
 import { getMessageString } from "../utils/message/content.js";
-import { isHumanMessage } from "@langchain/core/messages";
 import { removeFirstHumanMessage } from "../utils/message/modify-array.js";
+import { getUserRequest } from "../utils/user-request.js";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -60,8 +60,9 @@ export async function progressPlanStep(
     tool_choice: setTaskStatusTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   const conversationHistoryStr = `Here is the full conversation history after the user's request:
   
 ${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
@@ -74,7 +75,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
       role: "system",
       content: formatPrompt(state.plan),
     },
-    ...(firstUserMessage ? [firstUserMessage] : []),
+    userRequest,
     {
       role: "user",
       content: conversationHistoryStr,
