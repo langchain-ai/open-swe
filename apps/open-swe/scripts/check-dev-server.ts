@@ -11,7 +11,7 @@ function checkDevServer(): Promise<void> {
     console.log("Starting development server in apps/agents...");
 
     const scriptDir = __dirname;
-    const targetCwd = path.resolve(scriptDir, "..", "apps", "open-swe");
+    const targetCwd = path.resolve(scriptDir, "..");
 
     const serverProcess = spawn("yarn", ["dev"], {
       cwd: targetCwd,
@@ -52,7 +52,7 @@ function checkDevServer(): Promise<void> {
         } else {
           console.log(
             "Warning detected, not treating as fatal error:",
-            message
+            message,
           );
         }
       }
@@ -99,12 +99,12 @@ function checkDevServer(): Promise<void> {
     const timeoutId = setTimeout(() => {
       if (!serverProcess.killed) {
         console.log(
-          `Timeout reached (${timeoutDuration / 1000}s). Killing server process.`
+          `Timeout reached (${timeoutDuration / 1000}s). Killing server process.`,
         );
         const killed = serverProcess.kill("SIGTERM");
         if (!killed) {
           console.warn(
-            "Failed to kill server process with SIGTERM, attempting SIGKILL."
+            "Failed to kill server process with SIGTERM, attempting SIGKILL.",
           );
           serverProcess.kill("SIGKILL");
         }
@@ -114,25 +114,25 @@ function checkDevServer(): Promise<void> {
 
       if (errorDetected) {
         console.error(
-          "Server check failed! Errors were detected during server startup."
+          "Server check failed! Errors were detected during server startup.",
         );
         reject(
           new Error(
-            "Errors detected during server startup. Check logs for details."
-          )
+            "Errors detected during server startup. Check logs for details.",
+          ),
         );
       } else if (!serverReady) {
         console.error(
-          "Server check failed! Server did not indicate readiness within the timeout."
+          "Server check failed! Server did not indicate readiness within the timeout.",
         );
         reject(
           new Error(
-            "Server did not indicate successful startup within timeout."
-          )
+            "Server did not indicate successful startup within timeout.",
+          ),
         );
       } else {
         console.log(
-          "Server check passed! Server started successfully and indicated readiness."
+          "Server check passed! Server started successfully and indicated readiness.",
         );
         resolve();
       }

@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/agents
+        working-directory: apps/open-swe
     steps:
       - uses: actions/checkout@v4
       - name: Enable Corepack
@@ -118,7 +118,7 @@ jobs:
         run: mv ./dist/scripts/check-dev-server.js ./dist/scripts/check-dev-server.cjs
       - name: Create .env file for dev server check
         # .env needs to be in the apps/open-swe directory
-        run: touch ../../apps/open-swe/.env
+        run: touch .env
       - name: Run dev server check
         run: node ./dist/scripts/check-dev-server.cjs
         env:
