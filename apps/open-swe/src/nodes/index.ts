@@ -8,3 +8,4 @@ export * from "./summarize-task-steps.js";
 export * from "./generate-conclusion.js";
 export * from "./open-pr.js";
 export * from "./diagnose-error.js";
+export * from "./request-help.js";

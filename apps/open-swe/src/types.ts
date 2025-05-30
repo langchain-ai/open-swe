@@ -323,6 +323,26 @@ export const GraphConfiguration = z.object({
         description: "Controls randomness (0 = deterministic, 2 = creative)",
       },
     }),
+
+  /**
+   * The maximum number of context gathering actions to take during planning.
+   * Each action consists of 2 messages (request & result), plus 1 human message.
+   * Total messages = maxContextActions * 2 + 1
+   * @default 6
+   */
+  maxContextActions: z
+    .number()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "number",
+        default: 6,
+        min: 1,
+        max: 20,
+        description:
+          "Maximum number of context gathering actions during planning",
+      },
+    }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<
