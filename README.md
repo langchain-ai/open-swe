@@ -5,6 +5,22 @@
 
 Open SWE is an open-source cloud based coding agent.
 
+## GitHub Authentication Overview
+
+Open SWE uses GitHub Personal Access Token (PAT) authentication to interact with GitHub repositories on your behalf. This approach provides secure, token-based authentication without requiring a complex OAuth flow.
+
+### How GitHub Authentication Works
+
+1. **Token Generation**: You generate a fine-grained Personal Access Token from your GitHub account settings
+2. **Repository Access**: The token is configured with specific permissions for selected repositories
+3. **API Authentication**: Open SWE uses this token to authenticate with the GitHub API via the Octokit library
+4. **Secure Operations**: The agent can perform git operations, create pull requests, and access repository content using the token
+
+### Key Benefits
+- **Granular Control**: Fine-grained tokens allow you to specify exactly which repositories Open SWE can access
+- **Secure**: Tokens can be easily revoked or regenerated if needed
+- **Simple Setup**: No complex OAuth callback URLs or client credentials required
+
 ## Usage
 
 First, clone the repository:
@@ -114,3 +130,4 @@ Once you've accepted the plan, it will begin the execution flow. When the agent 
 ## Accessing Changes
 
 Open SWE will automatically create a branch whenever you create a new thread with a naming format of `open-swe/<threadId>`. Every time a file is created, modified, or deleted, the changes will be committed to this branch. You can access the changes in the repository by checking out this branch.
+
