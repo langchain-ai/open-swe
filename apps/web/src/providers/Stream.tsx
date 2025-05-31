@@ -15,7 +15,7 @@ import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { Copy, CopyCheck } from "lucide-react";
 import { motion } from "framer-motion";
 
-type TargetRepository = { owner: string; repo: string };
+export type TargetRepository = { owner: string; repo: string };
 export type StateType = {
   messages: Message[];
   ui?: UIMessage[];
