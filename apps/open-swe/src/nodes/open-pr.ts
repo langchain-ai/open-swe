@@ -65,6 +65,10 @@ export async function openPullRequest(
       "Failed to open pull request: No sandbox session ID found in state.",
     );
   }
+  const githubToken = config.configurable?.["x-github-installation-token"];
+  if (!githubToken) {
+    throw new Error("Missing required x-github-installation-token in configuration.");
+  }
 
   const sandbox = await daytonaClient().get(sandboxSessionId);
 
@@ -133,6 +137,7 @@ export async function openPullRequest(
     headBranch: branchName ?? getBranchName(config),
     title,
     body,
+    githubToken,
   });
 
   return {

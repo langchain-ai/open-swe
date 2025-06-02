@@ -19,15 +19,12 @@ import { SNAPSHOT_NAME } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
-async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
-  if (!process.env.GITHUB_PAT) {
-    throw new Error("GITHUB_PAT environment variable not set.");
-  }
-
+async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository, githubToken: string) {
   try {
     const gitCloneCommand = ["git", "clone"];
 
-    const repoUrlWithToken = `https://${process.env.GITHUB_PAT}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+    // Use x-access-token format for better GitHub authentication
+    const repoUrlWithToken = `https://x-access-token:${githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
     if (targetRepository.branch) {
       gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
@@ -36,7 +33,9 @@ async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
     }
 
     logger.info("Cloning repository", {
-      command: gitCloneCommand.join(" "),
+      // Don't log the full command with token for security reasons
+      repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
+      branch: targetRepository.branch || "default",
     });
     return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
   } catch (e) {
@@ -58,6 +57,14 @@ export async function initialize(
 ): Promise<GraphUpdate> {
   if (!config.configurable) {
     throw new Error("Configuration object not found.");
+  }
+  const githubToken = config.configurable["x-github-installation-token"];
+  const githubAccessToken = config.configurable["x-github-access-token"];
+  if (!githubToken) {
+    throw new Error("Missing required x-github-installation-token in configuration.");
+  }
+  if (!githubAccessToken) {
+    throw new Error("Missing required x-github-access-token in configuration.");
   }
   const { sandboxSessionId } = state;
   const { targetRepository } = state;
@@ -90,7 +97,7 @@ export async function initialize(
     image: SNAPSHOT_NAME,
   });
 
-  const res = await cloneRepo(sandbox, targetRepository);
+  const res = await cloneRepo(sandbox, targetRepository, githubToken);
   if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
     logger.error("Failed to clone repository", res.result);
@@ -99,7 +106,14 @@ export async function initialize(
   logger.info("Repository cloned successfully.");
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
-  await configureGitUserInRepo(absoluteRepoDir, sandbox);
+  await configureGitUserInRepo(
+    absoluteRepoDir,
+    sandbox,
+    githubToken,
+    githubAccessToken,
+    targetRepository.owner,
+    targetRepository.repo
+  );
   logger.info("Git user configured successfully.");
 
   const checkoutBranchRes = await checkoutBranch(

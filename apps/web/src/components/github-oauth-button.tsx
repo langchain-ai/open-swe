@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
-import { isAuthenticated, clearGitHubToken } from "@/lib/auth";
 
 export function GitHubOAuthButton() {
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
@@ -15,8 +14,9 @@ export function GitHubOAuthButton() {
 
   const checkAuthStatus = async () => {
     try {
-      const authenticated = await isAuthenticated();
-      setIsAuth(authenticated);
+      const response = await fetch("/api/auth/status");
+      const data = await response.json();
+      setIsAuth(data.authenticated);
     } catch (error) {
       console.error("Error checking auth status:", error);
       setIsAuth(false);
@@ -31,8 +31,14 @@ export function GitHubOAuthButton() {
   const handleLogout = async () => {
     setIsLoading(true);
     try {
-      await clearGitHubToken();
-      setIsAuth(false);
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+      if (response.ok) {
+        setIsAuth(false);
+      } else {
+        console.error("Logout failed");
+      }
     } catch (error) {
       console.error("Error during logout:", error);
     } finally {

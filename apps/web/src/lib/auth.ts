@@ -1,62 +1,79 @@
-"use server";
+import { NextRequest, NextResponse } from "next/server";
 
-import { cookies } from "next/headers";
-
-const GITHUB_TOKEN_COOKIE = "github_access_token";
-const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
-const GITHUB_TOKEN_SCOPE_COOKIE = "github_token_scope";
-
-// Token expiration: 30 days (GitHub tokens don't expire by default, but we set a reasonable limit)
-const TOKEN_EXPIRY_DAYS = 30;
+// Prefix the access token with `x-` so that it's included in requests to the LangGraph server.
+export const GITHUB_TOKEN_COOKIE = "x-github_access_token";
+export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
+export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
+export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
+export const GITHUB_INSTALLATION_STATE_COOKIE = "github_installation_state";
+export const GITHUB_INSTALLATION_RETURN_TO_COOKIE = "installation_return_to";
 
 export interface GitHubTokenData {
   access_token: string;
   token_type: string;
-  scope: string;
+  installation_id?: string;
+}
+
+/**
+ * Cookie options for GitHub token cookies
+ */
+function getCookieOptions(expires?: Date) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    maxAge: expires ? undefined : 60 * 60 * 24 * 30, // 30 days
+    expires,
+    path: "/",
+  };
 }
 
 /**
  * Stores GitHub OAuth token data in secure HTTP-only cookies
+ *
+ * @param tokenData The GitHub token data to store
+ * @param response NextResponse to set cookies on
  */
-export async function storeGitHubToken(
+export function storeGitHubToken(
   tokenData: GitHubTokenData,
-): Promise<void> {
-  const cookieStore = await cookies();
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + TOKEN_EXPIRY_DAYS);
-
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    expires: expiryDate,
-    path: "/",
-  };
+  response: NextResponse,
+): void {
+  const cookieOptions = getCookieOptions();
 
   // Store token components in separate cookies for better security
-  cookieStore.set(GITHUB_TOKEN_COOKIE, tokenData.access_token, cookieOptions);
-  cookieStore.set(
+  response.cookies.set(
+    GITHUB_TOKEN_COOKIE,
+    tokenData.access_token,
+    cookieOptions,
+  );
+  response.cookies.set(
     GITHUB_TOKEN_TYPE_COOKIE,
     tokenData.token_type || "bearer",
     cookieOptions,
   );
-  cookieStore.set(
-    GITHUB_TOKEN_SCOPE_COOKIE,
-    tokenData.scope || "",
-    cookieOptions,
-  );
+
+  // Store installation ID if provided
+  if (tokenData.installation_id) {
+    response.cookies.set(
+      GITHUB_INSTALLATION_ID_COOKIE,
+      tokenData.installation_id,
+      cookieOptions,
+    );
+  }
 }
 
 /**
  * Retrieves GitHub OAuth token data from cookies
+ *
+ * @param request NextRequest to get cookies from
  */
-export async function getGitHubToken(): Promise<GitHubTokenData | null> {
+export function getGitHubToken(request: NextRequest): GitHubTokenData | null {
   try {
-    const cookieStore = await cookies();
-
-    const accessToken = cookieStore.get(GITHUB_TOKEN_COOKIE)?.value;
-    const tokenType = cookieStore.get(GITHUB_TOKEN_TYPE_COOKIE)?.value;
-    const scope = cookieStore.get(GITHUB_TOKEN_SCOPE_COOKIE)?.value;
+    const accessToken = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
+    const tokenType = request.cookies.get(GITHUB_TOKEN_TYPE_COOKIE)?.value;
+    const installationId = request.cookies.get(
+      GITHUB_INSTALLATION_ID_COOKIE,
+    )?.value;
 
     if (!accessToken) {
       return null;
@@ -65,7 +82,7 @@ export async function getGitHubToken(): Promise<GitHubTokenData | null> {
     return {
       access_token: accessToken,
       token_type: tokenType || "bearer",
-      scope: scope || "",
+      installation_id: installationId,
     };
   } catch (error) {
     console.error("Error retrieving GitHub token:", error);
@@ -75,27 +92,23 @@ export async function getGitHubToken(): Promise<GitHubTokenData | null> {
 
 /**
  * Removes GitHub OAuth token data from cookies (logout)
+ *
+ * @param response NextResponse to set cookies on
  */
-export async function clearGitHubToken(): Promise<void> {
-  const cookieStore = await cookies();
+export function clearGitHubToken(response: NextResponse): void {
+  const cookieOptions = getCookieOptions(new Date(0)); // Expire immediately
 
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    expires: new Date(0), // Expire immediately
-    path: "/",
-  };
-
-  cookieStore.set(GITHUB_TOKEN_COOKIE, "", cookieOptions);
-  cookieStore.set(GITHUB_TOKEN_TYPE_COOKIE, "", cookieOptions);
-  cookieStore.set(GITHUB_TOKEN_SCOPE_COOKIE, "", cookieOptions);
+  response.cookies.set(GITHUB_TOKEN_COOKIE, "", cookieOptions);
+  response.cookies.set(GITHUB_TOKEN_TYPE_COOKIE, "", cookieOptions);
+  response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, "", cookieOptions);
 }
 
 /**
  * Checks if user has a valid GitHub token
+ *
+ * @param request NextRequest to get cookies from
  */
-export async function isAuthenticated(): Promise<boolean> {
-  const token = await getGitHubToken();
+export function isAuthenticated(request: NextRequest): boolean {
+  const token = getGitHubToken(request);
   return token !== null && token.access_token.length > 0;
 }

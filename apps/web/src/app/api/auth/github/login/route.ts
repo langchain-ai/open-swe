@@ -1,13 +1,14 @@
+import { GITHUB_AUTH_STATE_COOKIE } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
-    const clientId = process.env.GITHUB_CLIENT_ID;
-    const redirectUri = process.env.GITHUB_REDIRECT_URI;
+    const clientId = process.env.GITHUB_APP_CLIENT_ID;
+    const redirectUri = process.env.GITHUB_APP_REDIRECT_URI;
 
     if (!clientId || !redirectUri) {
       return NextResponse.json(
-        { error: "GitHub OAuth configuration missing" },
+        { error: "GitHub App configuration missing" },
         { status: 500 },
       );
     }
@@ -15,20 +16,29 @@ export async function GET(request: NextRequest) {
     // Generate a random state parameter for security
     const state = crypto.randomUUID();
 
-    // Define the required scopes for the GitHub app
-    const scopes = ["repo", "read:user"].join(" ");
-
-    // Build the GitHub OAuth authorization URL
+    // Build the GitHub App authorization URL
     const authUrl = new URL("https://github.com/login/oauth/authorize");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
-    authUrl.searchParams.set("scope", scopes);
+    authUrl.searchParams.set("allow_signup", "true");
     authUrl.searchParams.set("state", state);
 
-    return NextResponse.redirect(authUrl.toString());
+    // Create response with redirect and store state in a cookie
+    const response = NextResponse.redirect(authUrl.toString());
+
+    response.cookies.set(GITHUB_AUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 10, // 10 minutes
+      path: "/",
+    });
+
+    return response;
   } catch (error) {
+    console.error("GitHub App login error:", error);
     return NextResponse.json(
-      { error: "Failed to initiate OAuth flow" },
+      { error: "Failed to initiate GitHub App authentication flow" },
       { status: 500 },
     );
   }

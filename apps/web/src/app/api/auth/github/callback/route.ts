@@ -1,5 +1,10 @@
+import {
+  GITHUB_AUTH_STATE_COOKIE,
+  GITHUB_INSTALLATION_ID_COOKIE,
+  GITHUB_TOKEN_COOKIE,
+  GITHUB_TOKEN_TYPE_COOKIE,
+} from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { storeGitHubToken } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,8 +12,9 @@ export async function GET(request: NextRequest) {
     const code = searchParams.get("code");
     const state = searchParams.get("state");
     const error = searchParams.get("error");
+    const installationId = searchParams.get("installation_id");
 
-    // Handle OAuth errors
+    // Handle GitHub App errors
     if (error) {
       return NextResponse.redirect(
         new URL(`/?error=${encodeURIComponent(error)}`, request.url),
@@ -16,15 +22,24 @@ export async function GET(request: NextRequest) {
     }
 
     // Validate required parameters
-    if (!code || !state) {
+    if (!code) {
       return NextResponse.redirect(
-        new URL("/?error=missing_parameters", request.url),
+        new URL("/?error=missing_code_parameter", request.url),
       );
     }
 
-    const clientId = process.env.GITHUB_CLIENT_ID;
-    const clientSecret = process.env.GITHUB_CLIENT_SECRET;
-    const redirectUri = process.env.GITHUB_REDIRECT_URI;
+    // Verify state parameter to prevent CSRF attacks
+    const storedState = request.cookies.get(GITHUB_AUTH_STATE_COOKIE)?.value;
+
+    if (storedState && state !== storedState) {
+      return NextResponse.redirect(
+        new URL("/?error=invalid_state", request.url),
+      );
+    }
+
+    const clientId = process.env.GITHUB_APP_CLIENT_ID;
+    const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
+    const redirectUri = process.env.GITHUB_APP_REDIRECT_URI;
 
     if (!clientId || !clientSecret || !redirectUri) {
       return NextResponse.redirect(
@@ -51,6 +66,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (!tokenResponse.ok) {
+      console.error("Token exchange failed:", await tokenResponse.text());
       return NextResponse.redirect(
         new URL("/?error=token_exchange_failed", request.url),
       );
@@ -64,17 +80,52 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Store the access token securely in HTTP-only cookies
-    await storeGitHubToken({
-      access_token: tokenData.access_token,
-      token_type: tokenData.token_type || "bearer",
-      scope: tokenData.scope || "",
+    // Create the success response
+    const response = NextResponse.redirect(
+      new URL("/?auth=success", request.url),
+    );
+
+    // Clear the state cookie as it's no longer needed
+    response.cookies.set(GITHUB_AUTH_STATE_COOKIE, "", {
+      expires: new Date(0),
+      path: "/",
     });
 
-    // Redirect to homepage with success indicator
-    return NextResponse.redirect(new URL("/?auth=success", request.url));
+    // Set token cookies directly on the response
+    response.cookies.set(GITHUB_TOKEN_COOKIE, tokenData.access_token, {
+      // httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: "/",
+    });
+
+    response.cookies.set(
+      GITHUB_TOKEN_TYPE_COOKIE,
+      tokenData.token_type || "bearer",
+      {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: "/",
+      },
+    );
+
+    // If there's an installation_id, store that as well for future API calls
+    if (installationId) {
+      response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, installationId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 30, // 30 days
+        path: "/",
+      });
+    }
+
+    return response;
   } catch (error) {
-    console.error("OAuth callback error:", error);
+    console.error("GitHub App callback error:", error);
     return NextResponse.redirect(
       new URL("/?error=callback_failed", request.url),
     );

@@ -2,7 +2,7 @@ import { Octokit } from "@octokit/rest";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../logger.js";
 import { GraphConfig, TargetRepository } from "../../types.js";
-import { TIMEOUT_MS, SANDBOX_ROOT_DIR } from "../../constants.js";
+import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "../../constants.js";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 
@@ -40,7 +40,7 @@ export async function checkoutBranch(
       "git branch --show-current",
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (getCurrentBranchOutput.exitCode !== 0) {
@@ -80,7 +80,7 @@ export async function checkoutBranch(
       `git rev-parse --verify --quiet "refs/heads/${branchName}"`,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (checkBranchExistsOutput.exitCode === 0) {
@@ -116,7 +116,7 @@ export async function checkoutBranch(
       checkoutCommand,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (gitCheckoutOutput.exitCode !== 0) {
@@ -152,29 +152,36 @@ interface GitHubUserResponse {
   email: string | null;
 }
 
-async function getGitUserDetailsFromGitHub(): Promise<{
+async function getGitUserDetailsFromGitHub(githubToken: string): Promise<{
   userName?: string;
   userEmail?: string;
 }> {
-  const githubToken = process.env.GITHUB_PAT;
-  if (!githubToken) {
-    logger.warn(
-      "GITHUB_PAT environment variable is not set. Cannot fetch user details from GitHub.",
-    );
-    return {};
-  }
-
   try {
-    const response = await fetch("https://api.github.com/user", {
+    // Try with Bearer token first (for GitHub App installation tokens)
+    let response = await fetch("https://api.github.com/user", {
       headers: {
-        Authorization: `token ${githubToken}`,
+        Authorization: `Bearer ${githubToken}`,
         Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE",
       },
     });
 
+    // If that fails, try with token format (for personal access tokens)
+    if (!response.ok) {
+      logger.info("Bearer token authentication failed, trying token format...");
+      response = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `token ${githubToken}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "OpenSWE",
+        },
+      });
+    }
+
     if (!response.ok) {
       logger.error(`Failed to fetch GitHub user info`, {
-        response,
+        status: response.status,
+        statusText: response.statusText,
       });
       return {};
     }
@@ -198,6 +205,10 @@ async function getGitUserDetailsFromGitHub(): Promise<{
     if (!finalUserEmail) {
       logger.warn("Could not determine GitHub user email from API response.");
     }
+    logger.info("Successfully fetched GitHub user info", {
+      userName: finalUserName,
+      userEmail: finalUserEmail,
+    });
     return { userName: finalUserName, userEmail: finalUserEmail };
   } catch (e) {
     logger.error(`Error fetching GitHub user info`, {
@@ -214,6 +225,10 @@ async function getGitUserDetailsFromGitHub(): Promise<{
 export async function configureGitUserInRepo(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  githubToken: string,
+  githubAccessToken: string,
+  owner: string,
+  repo: string,
 ): Promise<void> {
   let needsGitConfig = false;
   try {
@@ -221,13 +236,13 @@ export async function configureGitUserInRepo(
       "git config user.name",
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
     const emailCheck = await sandbox.process.executeCommand(
       "git config user.email",
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (
@@ -249,39 +264,67 @@ export async function configureGitUserInRepo(
     needsGitConfig = true;
   }
 
-  if (needsGitConfig) {
-    const { userName, userEmail } = await getGitUserDetailsFromGitHub();
+  // Configure git to use the token for authentication with GitHub by updating the remote URL
+  logger.info("Configuring git to use token for GitHub authentication via remote URL...");
+  try {
+    // Set the remote URL with the token using the provided owner and repo
+    const setRemoteOutput = await sandbox.process.executeCommand(
+      `git remote set-url origin https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    
+    if (setRemoteOutput.exitCode !== 0) {
+      logger.error(`Failed to set remote URL with token`, {
+        setRemoteOutput,
+      });
+    } else {
+      logger.info("Git remote URL updated with token successfully.");
+    }
+  } catch (authError) {
+    logger.error(`Error configuring git authentication for GitHub`, {
+      ...(authError instanceof Error && {
+        name: authError.name,
+        message: authError.message,
+        stack: authError.stack,
+      }),
+    });
+  }
 
-    if (userName) {
-      const configUserNameOutput = await sandbox.process.executeCommand(
-        `git config user.name "${userName}"`,
-        absoluteRepoDir,
-        undefined,
-        TIMEOUT_MS,
-      );
-      if (configUserNameOutput.exitCode !== 0) {
-        logger.error(`Failed to set git user.name`, {
-          configUserNameOutput,
-        });
-      } else {
-        logger.info(`Set git user.name to '${userName}' successfully.`);
-      }
+  if (needsGitConfig) {
+    const { userName, userEmail } = await getGitUserDetailsFromGitHub(githubAccessToken);
+
+    // Set user name - use fetched name or fallback to "GitHub App User"
+    const nameToUse = userName || "GitHub App User";
+    const configUserNameOutput = await sandbox.process.executeCommand(
+      `git config user.name "${nameToUse}"`,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (configUserNameOutput.exitCode !== 0) {
+      logger.error(`Failed to set git user.name`, {
+        configUserNameOutput,
+      });
+    } else {
+      logger.info(`Set git user.name to '${nameToUse}' successfully.`);
     }
 
-    if (userEmail) {
-      const configUserEmailOutput = await sandbox.process.executeCommand(
-        `git config user.email "${userEmail}"`,
-        absoluteRepoDir,
-        undefined,
-        TIMEOUT_MS,
-      );
-      if (configUserEmailOutput.exitCode !== 0) {
-        logger.error(`Failed to set git user.email`, {
-          configUserEmailOutput,
-        });
-      } else {
-        logger.info(`Set git user.email to '${userEmail}' successfully.`);
-      }
+    // Set user email - use fetched email or fallback to a generic noreply address
+    const emailToUse = userEmail || "open-swe-bot@noreply.github.com";
+    const configUserEmailOutput = await sandbox.process.executeCommand(
+      `git config user.email "${emailToUse}"`,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (configUserEmailOutput.exitCode !== 0) {
+      logger.error(`Failed to set git user.email`, {
+        configUserEmailOutput,
+      });
+    } else {
+      logger.info(`Set git user.email to '${emailToUse}' successfully.`);
     }
   } else {
     logger.info(
@@ -300,7 +343,7 @@ export async function commitAll(
       `git add -A && git commit -m "${message}"`,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (gitAddOutput.exitCode !== 0) {
@@ -330,7 +373,7 @@ export async function commitAllAndPush(
 ): Promise<ExecuteResponse | false> {
   try {
     const commitOutput = await commitAll(absoluteRepoDir, message, sandbox);
-
+    logger.info("Committed changes to git repository successfully. Now pushing...")
     const pushCurrentBranchCmd =
       "git push -u origin $(git rev-parse --abbrev-ref HEAD)";
 
@@ -342,7 +385,7 @@ export async function commitAllAndPush(
       pushCurrentBranchCmd,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
 
     if (gitPushOutput.exitCode !== 0) {
@@ -375,7 +418,7 @@ export async function getChangedFilesStatus(
     "git status --porcelain",
     absoluteRepoDir,
     undefined,
-    TIMEOUT_MS,
+    TIMEOUT_SEC,
   );
 
   if (gitStatusOutput.exitCode !== 0) {
@@ -418,21 +461,17 @@ export async function createPullRequest({
   headBranch,
   title,
   body = "",
+  githubToken,
 }: {
   owner: string;
   repo: string;
   headBranch: string;
   title: string;
   body?: string;
+  githubToken: string;
 }) {
-  // Initialize Octokit with the personal access token
-  const token = process.env.GITHUB_PAT;
-  if (!token) {
-    throw new Error("GITHUB_PAT environment variable is not set");
-  }
-
   const octokit = new Octokit({
-    auth: token,
+    auth: githubToken,
   });
 
   try {
@@ -476,7 +515,7 @@ export async function pullLatestChanges(
       "git pull",
       absoluteRepoDir,
       undefined,
-      TIMEOUT_MS,
+      TIMEOUT_SEC,
     );
     return gitPullOutput;
   } catch (e) {
