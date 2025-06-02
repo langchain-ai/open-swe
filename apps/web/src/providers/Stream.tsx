@@ -65,13 +65,11 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
-  console.log("document.cookie", document.cookie.split("; "));
   const githubAccessToken =
     document.cookie
       .split("; ")
       .find((row) => row.startsWith("x-github_access_token="))
       ?.split("=")[1] || "";
-  console.log("githubAccessToken", githubAccessToken);
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
