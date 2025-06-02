@@ -5,22 +5,6 @@
 
 Open SWE is an open-source cloud based coding agent.
 
-## GitHub Authentication Overview
-
-Open SWE uses GitHub Personal Access Token (PAT) authentication to interact with GitHub repositories on your behalf. This approach provides secure, token-based authentication without requiring a complex OAuth flow.
-
-### How GitHub Authentication Works
-
-1. **Token Generation**: You generate a fine-grained Personal Access Token from your GitHub account settings
-2. **Repository Access**: The token is configured with specific permissions for selected repositories
-3. **API Authentication**: Open SWE uses this token to authenticate with the GitHub API via the Octokit library
-4. **Secure Operations**: The agent can perform git operations, create pull requests, and access repository content using the token
-
-### Key Benefits
-- **Granular Control**: Fine-grained tokens allow you to specify exactly which repositories Open SWE can access
-- **Secure**: Tokens can be easily revoked or regenerated if needed
-- **Simple Setup**: No complex OAuth callback URLs or client credentials required
-
 ## Usage
 
 First, clone the repository:
@@ -61,30 +45,53 @@ GOOGLE_API_KEY=""
 
 # Daytona API key for accessing and modifying the code in the cloud sandbox.
 DAYTONA_API_KEY=""
-
-# Your GitHub PAT with access to the repositories you want to modify.
-GITHUB_PAT=""
 ```
 
 And the web `.env` file should contain the following variables:
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:2024 # Change to production URL when deployed
-NEXT_PUBLIC_ASSISTANT_ID=open-swe
+NEXT_PUBLIC_ASSISTANT_ID="open-swe"
+
+# For the GitHub OAuth flow
+GITHUB_APP_CLIENT_ID=""
+GITHUB_APP_CLIENT_SECRET=""
+GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
+
+GITHUB_APP_NAME="open-swe-dev"
+GITHUB_APP_ID=""
+GITHUB_APP_PRIVATE_KEY=""
 ```
 
-To generate the GitHub personal access token, you should:
+To get the GitHub App secrets, first create a new GitHub app (note: this is not the same as the OAuth app) in [the developer settings](https://github.com/settings/apps/new).
 
-1. Go to [GitHub settings](https://github.com/settings/personal-access-tokens)
-2. Click on `Generate new token` to generate a new fine grained token.
-3. Give the token a name & description.
-4. Choose `Only select repositories`, and select the repositories you want to give Open SWE access to.
-5. Under `Permissions`, give it `Repository permission`:
-  - `Contents` - `Read and write`
-  - `Metadata` - `Read-only` (should be auto enabled after selecting `Contents`)
-  - `Pull requests` - `Read and write`
-6. Click `Generate token` & copy the token.
-7. Paste the token into the `GITHUB_PAT` variable in the agent `.env` file.
+Give the app a name and description.
+
+Under `Callback URL`, set it to: `http://localhost:3000/api/auth/github/callback` for local development. Then, uncheck `Expire user authorization tokens`, and check `Request user authorization (OAuth) during installation`.
+
+Under `Post installation`, check `Redirect on update`.
+
+Under `Webhook`, uncheck `Active`.
+
+Under `Repository permissions`, give the app the following permissions:
+
+- `Contents` - `Read & Write`
+- `Metadata` - `Read & Write`
+- `Pull requests` - `Read & Write`
+- `Issues` - `Read & Write`
+
+Finally, under `Where can this GitHub App be installed?` ensure `Any account` is selected.
+
+After creating the app, you will be taken to the app's settings page. Copy/generate the following fields for your environment variables:
+
+`App ID` - `GITHUB_APP_ID`
+`Client ID` - `GITHUB_APP_CLIENT_ID`
+`Client secrets` - Generate a new secret key, and set it under `GITHUB_APP_CLIENT_SECRET`
+Scroll down to `Private keys`, and generate a new private key. This will download a file. Set the contents of this file under `GITHUB_APP_PRIVATE_KEY`.
+Set `GITHUB_APP_REDIRECT_URI` to `http://localhost:3000/api/auth/github/callback` for local development.
+Set `GITHUB_APP_NAME` to the name of your app.
+
+That's it! You can now authenticate users with GitHub, and generate tokens for them.
 
 ## Running the graph
 
