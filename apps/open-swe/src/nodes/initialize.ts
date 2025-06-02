@@ -10,6 +10,7 @@ import {
 } from "../utils/git.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { SNAPSHOT_NAME } from "../constants.js";
+import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
@@ -23,26 +24,8 @@ export async function initialize(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  if (!config.configurable) {
-    throw new Error("Configuration object not found.");
-  }
-  const githubToken = config.configurable["x-github-installation-token"];
-  const githubAccessToken = config.configurable["x-github-access-token"];
-  if (!githubToken) {
-    throw new Error(
-      "Missing required x-github-installation-token in configuration.",
-    );
-  }
-  if (!githubAccessToken) {
-    throw new Error("Missing required x-github-access-token in configuration.");
-  }
-  const { sandboxSessionId } = state;
-  const { targetRepository } = state;
-  if (!targetRepository) {
-    throw new Error(
-      "Missing required target repository. Please provide a git repository in state or configuration.",
-    );
-  }
+  const { githubToken, githubAccessToken } = getGitHubTokensFromConfig(config);
+  const { sandboxSessionId, targetRepository } = state;
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   if (sandboxSessionId) {

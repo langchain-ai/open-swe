@@ -45,7 +45,6 @@ export function InstallAppButton({
           <GitHubSVG
             width="16"
             height="16"
-            className="mr-2"
           />
           {children || "Install GitHub App"}
         </>

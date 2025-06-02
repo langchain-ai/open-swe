@@ -13,6 +13,7 @@ import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
 import { isHumanMessage, ToolMessage } from "@langchain/core/messages";
 import { getMessageContentString } from "../utils/message/content.js";
 import { daytonaClient } from "../utils/sandbox.js";
+import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -65,12 +66,7 @@ export async function openPullRequest(
       "Failed to open pull request: No sandbox session ID found in state.",
     );
   }
-  const githubToken = config.configurable?.["x-github-installation-token"];
-  if (!githubToken) {
-    throw new Error(
-      "Missing required x-github-installation-token in configuration.",
-    );
-  }
+  const { githubToken } = getGitHubTokensFromConfig(config);
 
   const sandbox = await daytonaClient().get(sandboxSessionId);
 
