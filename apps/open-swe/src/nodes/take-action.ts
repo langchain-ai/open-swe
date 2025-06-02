@@ -10,7 +10,7 @@ import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
   getRepoAbsolutePath,
-} from "../utils/git/index.js";
+} from "../utils/git.js";
 import {
   formatBadArgsError,
   zodSchemaToString,

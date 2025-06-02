@@ -364,19 +364,25 @@ export const GraphConfiguration = z.object({
   /**
    * The user's GitHub installation token. To be used to take actions on behalf of the user.
    */
-  "x-github-installation-token": z.string().optional().langgraph.metadata({
-    x_oap_ui_config: {
-      type: "hidden",
-    },
-  }),
+  "x-github-installation-token": z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "hidden",
+      },
+    }),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */
-  "x-github-access-token": z.string().optional().langgraph.metadata({
-    x_oap_ui_config: {
-      type: "hidden",
-    },
-  }),
+  "x-github-access-token": z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "hidden",
+      },
+    }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

@@ -1,49 +1,17 @@
-import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import {
-  GraphState,
-  GraphConfig,
-  GraphUpdate,
-  TargetRepository,
-} from "../types.js";
+import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import {
   checkoutBranch,
+  cloneRepo,
   configureGitUserInRepo,
   getBranchName,
   getRepoAbsolutePath,
   pullLatestChanges,
-} from "../utils/git/index.js";
-import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+} from "../utils/git.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { SNAPSHOT_NAME } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
-
-async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository, githubToken: string) {
-  try {
-    const gitCloneCommand = ["git", "clone"];
-
-    // Use x-access-token format for better GitHub authentication
-    const repoUrlWithToken = `https://x-access-token:${githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
-
-    if (targetRepository.branch) {
-      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
-    } else {
-      gitCloneCommand.push(repoUrlWithToken);
-    }
-
-    logger.info("Cloning repository", {
-      // Don't log the full command with token for security reasons
-      repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
-      branch: targetRepository.branch || "default",
-    });
-    return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
-  } catch (e) {
-    const errorFields = getSandboxErrorFields(e);
-    logger.error("Failed to clone repository", errorFields ?? e);
-    throw e;
-  }
-}
 
 /**
  * Initializes the session. This ensures there's an active VM session, and that
@@ -61,7 +29,9 @@ export async function initialize(
   const githubToken = config.configurable["x-github-installation-token"];
   const githubAccessToken = config.configurable["x-github-access-token"];
   if (!githubToken) {
-    throw new Error("Missing required x-github-installation-token in configuration.");
+    throw new Error(
+      "Missing required x-github-installation-token in configuration.",
+    );
   }
   if (!githubAccessToken) {
     throw new Error("Missing required x-github-access-token in configuration.");
@@ -97,7 +67,7 @@ export async function initialize(
     image: SNAPSHOT_NAME,
   });
 
-  const res = await cloneRepo(sandbox, targetRepository, githubToken);
+  const res = await cloneRepo(sandbox, targetRepository, { githubToken });
   if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
     logger.error("Failed to clone repository", res.result);
@@ -106,14 +76,12 @@ export async function initialize(
   logger.info("Repository cloned successfully.");
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
-  await configureGitUserInRepo(
-    absoluteRepoDir,
-    sandbox,
+  await configureGitUserInRepo(absoluteRepoDir, sandbox, {
     githubToken,
     githubAccessToken,
-    targetRepository.owner,
-    targetRepository.repo
-  );
+    owner: targetRepository.owner,
+    repo: targetRepository.repo,
+  });
   logger.info("Git user configured successfully.");
 
   const checkoutBranchRes = await checkoutBranch(

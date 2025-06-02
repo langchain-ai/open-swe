@@ -1,9 +1,9 @@
 import { Octokit } from "@octokit/rest";
 import { Sandbox } from "@daytonaio/sdk";
-import { createLogger, LogLevel } from "../logger.js";
-import { GraphConfig, TargetRepository } from "../../types.js";
-import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "../../constants.js";
-import { getSandboxErrorFields } from "../sandbox-error-fields.js";
+import { createLogger, LogLevel } from "./logger.js";
+import { GraphConfig, TargetRepository } from "../types.js";
+import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "../constants.js";
+import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
@@ -225,11 +225,14 @@ async function getGitUserDetailsFromGitHub(githubToken: string): Promise<{
 export async function configureGitUserInRepo(
   absoluteRepoDir: string,
   sandbox: Sandbox,
-  githubToken: string,
-  githubAccessToken: string,
-  owner: string,
-  repo: string,
+  args: {
+    githubToken: string;
+    githubAccessToken: string;
+    owner: string;
+    repo: string;
+  },
 ): Promise<void> {
+  const { githubToken, githubAccessToken, owner, repo } = args;
   let needsGitConfig = false;
   try {
     const nameCheck = await sandbox.process.executeCommand(
@@ -265,7 +268,9 @@ export async function configureGitUserInRepo(
   }
 
   // Configure git to use the token for authentication with GitHub by updating the remote URL
-  logger.info("Configuring git to use token for GitHub authentication via remote URL...");
+  logger.info(
+    "Configuring git to use token for GitHub authentication via remote URL...",
+  );
   try {
     // Set the remote URL with the token using the provided owner and repo
     const setRemoteOutput = await sandbox.process.executeCommand(
@@ -274,7 +279,7 @@ export async function configureGitUserInRepo(
       undefined,
       TIMEOUT_SEC,
     );
-    
+
     if (setRemoteOutput.exitCode !== 0) {
       logger.error(`Failed to set remote URL with token`, {
         setRemoteOutput,
@@ -293,7 +298,8 @@ export async function configureGitUserInRepo(
   }
 
   if (needsGitConfig) {
-    const { userName, userEmail } = await getGitUserDetailsFromGitHub(githubAccessToken);
+    const { userName, userEmail } =
+      await getGitUserDetailsFromGitHub(githubAccessToken);
 
     // Set user name - use fetched name or fallback to "GitHub App User"
     const nameToUse = userName || "GitHub App User";
@@ -373,7 +379,9 @@ export async function commitAllAndPush(
 ): Promise<ExecuteResponse | false> {
   try {
     const commitOutput = await commitAll(absoluteRepoDir, message, sandbox);
-    logger.info("Committed changes to git repository successfully. Now pushing...")
+    logger.info(
+      "Committed changes to git repository successfully. Now pushing...",
+    );
     const pushCurrentBranchCmd =
       "git push -u origin $(git rev-parse --abbrev-ref HEAD)";
 
@@ -529,5 +537,37 @@ export async function pullLatestChanges(
       }),
     });
     return false;
+  }
+}
+
+export async function cloneRepo(
+  sandbox: Sandbox,
+  targetRepository: TargetRepository,
+  args: {
+    githubToken: string;
+  },
+) {
+  try {
+    const gitCloneCommand = ["git", "clone"];
+
+    // Use x-access-token format for better GitHub authentication
+    const repoUrlWithToken = `https://x-access-token:${args.githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+
+    if (targetRepository.branch) {
+      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
+    } else {
+      gitCloneCommand.push(repoUrlWithToken);
+    }
+
+    logger.info("Cloning repository", {
+      // Don't log the full command with token for security reasons
+      repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
+      branch: targetRepository.branch || "default",
+    });
+    return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error("Failed to clone repository", errorFields ?? e);
+    throw e;
   }
 }

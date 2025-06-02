@@ -5,7 +5,7 @@ import {
   applyPatchTool,
   requestHumanHelpTool,
 } from "../tools/index.js";
-import { getRepoAbsolutePath } from "../utils/git/index.js";
+import { getRepoAbsolutePath } from "../utils/git.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { stopSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";

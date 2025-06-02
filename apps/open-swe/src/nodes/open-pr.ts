@@ -5,7 +5,7 @@ import {
   getBranchName,
   getChangedFilesStatus,
   getRepoAbsolutePath,
-} from "../utils/git/index.js";
+} from "../utils/git.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { z } from "zod";
 import { loadModel, Task } from "../utils/load-model.js";
@@ -67,7 +67,9 @@ export async function openPullRequest(
   }
   const githubToken = config.configurable?.["x-github-installation-token"];
   if (!githubToken) {
-    throw new Error("Missing required x-github-installation-token in configuration.");
+    throw new Error(
+      "Missing required x-github-installation-token in configuration.",
+    );
   }
 
   const sandbox = await daytonaClient().get(sandboxSessionId);
