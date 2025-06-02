@@ -158,25 +158,13 @@ async function getGitUserDetailsFromGitHub(githubToken: string): Promise<{
 }> {
   try {
     // Try with Bearer token first (for GitHub App installation tokens)
-    let response = await fetch("https://api.github.com/user", {
+    const response = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${githubToken}`,
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "OpenSWE",
       },
     });
-
-    // If that fails, try with token format (for personal access tokens)
-    if (!response.ok) {
-      logger.info("Bearer token authentication failed, trying token format...");
-      response = await fetch("https://api.github.com/user", {
-        headers: {
-          Authorization: `token ${githubToken}`,
-          Accept: "application/vnd.github.v3+json",
-          "User-Agent": "OpenSWE",
-        },
-      });
-    }
 
     if (!response.ok) {
       logger.error(`Failed to fetch GitHub user info`, {
