@@ -8,6 +8,7 @@ import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { SANDBOX_ROOT_DIR } from "../constants.js";
+import { getRepoAbsolutePath } from "../utils/git.js";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
@@ -20,9 +21,9 @@ const applyPatchToolSchema = z.object({
   file_path: z.string().describe("The file path to apply the diff to."),
   workdir: z
     .string()
-    .default(SANDBOX_ROOT_DIR)
+    .optional()
     .describe(
-      `The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '${SANDBOX_ROOT_DIR}' as this is the root directory of the sandbox.`,
+      "The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to the cloned repository directory.",
     ),
 });
 
@@ -37,7 +38,10 @@ export const applyPatchTool = tool(
       throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
     }
 
-    const { diff, file_path, workdir } = input;
+    const { diff, file_path } = input;
+    // Use the provided workdir or default to the repository path
+    const workdir = input.workdir || getRepoAbsolutePath(state.targetRepository);
+
 
     const sandbox = await daytonaClient().get(sandboxSessionId);
 
@@ -136,3 +140,5 @@ export const applyPatchTool = tool(
     schema: applyPatchToolSchema,
   },
 );
+
+
