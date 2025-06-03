@@ -19,13 +19,24 @@ export function getRepoAbsolutePath(
   return `${SANDBOX_ROOT_DIR}/${repoName}`;
 }
 
-export function getBranchName(config: GraphConfig): string {
+export function getBranchName(
+  config: GraphConfig,
+  targetRepository: TargetRepository,
+): string {
+  if (!targetRepository) {
+    throw new Error("No target repository provided");
+  }
+
+  if (!targetRepository.repo) {
+    throw new Error("No repository name provided in target repository");
+  }
+
   const threadId = config.configurable?.thread_id;
   if (!threadId) {
     throw new Error("No thread ID provided");
   }
 
-  return `open-swe/${threadId}`;
+  return `${targetRepository.repo}/${threadId}`;
 }
 
 export async function checkoutBranch(
@@ -306,7 +317,7 @@ export async function configureGitUserInRepo(
     }
 
     // Set user email - use fetched email or fallback to a generic noreply address
-    const emailToUse = userEmail || "open-swe-bot@noreply.github.com";
+    const emailToUse = userEmail || `${repo}-bot@noreply.github.com`;
     const configUserEmailOutput = await sandbox.process.executeCommand(
       `git config user.email "${emailToUse}"`,
       absoluteRepoDir,
@@ -440,7 +451,8 @@ export async function checkoutBranchAndCommit(
 ): Promise<string> {
   logger.info("Checking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-  const branchName = options?.branchName || getBranchName(config);
+  const branchName =
+    options?.branchName || getBranchName(config, targetRepository);
 
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
 

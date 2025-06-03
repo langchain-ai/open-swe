@@ -73,6 +73,7 @@ const StreamSession = ({
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
+    reconnectOnMount: true,
     threadId: threadId ?? null,
     defaultHeaders: {
       "x-github-installation-token": githubToken,
