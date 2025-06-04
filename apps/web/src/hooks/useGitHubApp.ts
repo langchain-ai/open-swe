@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import { Repository } from "@/utils/github";
+import { useQueryState } from "nuqs";
+import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
+import type { TargetRepository } from "../../../open-swe/src/types";
 
 interface UseGitHubAppReturn {
   isInstalled: boolean | null;
@@ -7,6 +9,25 @@ interface UseGitHubAppReturn {
   error: string | null;
   repositories: Repository[];
   refreshRepositories: () => Promise<void>;
+  selectedRepository: TargetRepository | null;
+  setSelectedRepository: (repo: TargetRepository | null) => void;
+  branches: Branch[];
+  branchesLoading: boolean;
+  branchesError: string | null;
+  selectedBranch: string | null;
+  setSelectedBranch: (branch: string | null) => void;
+  refreshBranches: () => Promise<void>;
+}
+
+// Helper function to get GitHub OAuth access token from cookies
+function getGitHubAccessToken(): string | null {
+  if (typeof document === "undefined") return null;
+
+  const cookies = document.cookie.split("; ");
+  const tokenCookie = cookies.find((row) =>
+    row.startsWith("x-github_access_token="),
+  );
+  return tokenCookie ? tokenCookie.split("=")[1] : null;
 }
 
 export function useGitHubApp(): UseGitHubAppReturn {
@@ -14,6 +35,47 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState<string | null>(null);
+  const [selectedRepositoryParam, setSelectedRepositoryParam] =
+    useQueryState("repo");
+  const [selectedBranchParam, setSelectedBranchParam] = useQueryState("branch");
+
+  const selectedRepository = selectedRepositoryParam
+    ? (() => {
+        try {
+          // Parse "owner/repo" format instead of JSON
+          const parts = selectedRepositoryParam.split("/");
+          if (parts.length === 2) {
+            return {
+              owner: parts[0],
+              repo: parts[1],
+              branch: selectedBranchParam || undefined,
+            } as TargetRepository;
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      })()
+    : null;
+
+  const selectedBranch = selectedBranchParam;
+
+  const setSelectedRepository = (repo: TargetRepository | null) => {
+    // Use "owner/repo" format instead of JSON
+    setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
+    // Clear branch when repository changes
+    if (!repo) {
+      setSelectedBranchParam(null);
+      setBranches([]);
+    }
+  };
+
+  const setSelectedBranch = (branch: string | null) => {
+    setSelectedBranchParam(branch);
+  };
 
   const checkInstallation = async () => {
     setIsLoading(true);
@@ -43,12 +105,56 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   };
 
+  const fetchBranches = async () => {
+    if (!selectedRepository) {
+      setBranches([]);
+      return;
+    }
+
+    const accessToken = getGitHubAccessToken();
+    if (!accessToken) {
+      setBranchesError("GitHub access token not found");
+      return;
+    }
+
+    setBranchesLoading(true);
+    setBranchesError(null);
+
+    try {
+      const branchData = await getRepositoryBranches(
+        selectedRepository.owner,
+        selectedRepository.repo,
+        accessToken,
+      );
+      setBranches(branchData || []);
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to fetch branches";
+      setBranchesError(errorMessage);
+    } finally {
+      setBranchesLoading(false);
+    }
+  };
+
   useEffect(() => {
     checkInstallation();
   }, []);
 
+  useEffect(() => {
+    if (selectedRepository) {
+      fetchBranches();
+    } else {
+      setBranches([]);
+      setSelectedBranchParam(null);
+    }
+  }, [selectedRepository?.owner, selectedRepository?.repo]);
+
   const refreshRepositories = async () => {
     await checkInstallation();
+  };
+
+  const refreshBranches = async () => {
+    await fetchBranches();
   };
 
   return {
@@ -57,5 +163,13 @@ export function useGitHubApp(): UseGitHubAppReturn {
     error,
     repositories,
     refreshRepositories,
+    selectedRepository,
+    setSelectedRepository,
+    branches,
+    branchesLoading,
+    branchesError,
+    selectedBranch,
+    setSelectedBranch,
+    refreshBranches,
   };
 }

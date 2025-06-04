@@ -77,6 +77,34 @@ export async function getInstallationRepositories(
 }
 
 /**
+ * Fetches branches for a specific repository using OAuth access token
+ */
+export async function getRepositoryBranches(
+  owner: string,
+  repo: string,
+  accessToken: string,
+): Promise<Branch[]> {
+  const response = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/branches`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE-Agent",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`Failed to fetch branches: ${JSON.stringify(errorData)}`);
+  }
+
+  const data = await response.json();
+  return data;
+}
+
+/**
  * Repository interface representing GitHub repository data
  */
 export interface Repository {
@@ -94,4 +122,16 @@ export interface Repository {
     triage: boolean;
     pull: boolean;
   };
+}
+
+/**
+ * Branch interface representing GitHub branch data
+ */
+export interface Branch {
+  name: string;
+  commit: {
+    sha: string;
+    url: string;
+  };
+  protected: boolean;
 }

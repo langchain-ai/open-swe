@@ -22,14 +22,14 @@ import {
   SquarePen,
   XIcon,
   Plus,
+  Settings,
 } from "lucide-react";
-import { useQueryState, parseAsBoolean } from "nuqs";
+import { useQueryState, parseAsBoolean, parseAsString } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
-import ThreadHistory from "./history";
+import TaskListSidebar from "../task-list-sidebar";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
@@ -39,6 +39,12 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { GitHubOAuthButton } from "../github-oauth-button";
+import { RepositorySelector } from "../repository-selector";
+import { useGitHubApp } from "@/hooks/useGitHubApp";
+import { BranchSelector } from "../branch-selector";
+import Link from "next/link";
+import TaskList from "../task-list";
+import { useTasks } from "@/providers/Task";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -84,16 +90,51 @@ function ScrollToBottom(props: { className?: string }) {
 export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
+  const { selectedRepository } = useGitHubApp();
+  const { getAllTasks } = useTasks();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
+  const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
+
+  const isTaskView = !!taskId;
+  const isThreadView = !!threadId;
+
+  // Track previous states to detect navigation changes
+  const prevTaskId = useRef(taskId);
+  const prevThreadId = useRef(threadId);
+
+  // Auto-expand sidebar only when navigating TO a thread/task (not continuously)
+  useEffect(() => {
+    const isNavigatingToTask = !prevTaskId.current && taskId;
+    const isNavigatingToThread = !prevThreadId.current && threadId;
+
+    // Only auto-expand if we're navigating TO a thread/task AND sidebar is currently closed
+    if ((isNavigatingToTask || isNavigatingToThread) && !chatHistoryOpen) {
+      setChatHistoryOpen(true);
+    }
+
+    // Update refs for next comparison
+    prevTaskId.current = taskId;
+    prevThreadId.current = threadId;
+  }, [taskId, threadId, chatHistoryOpen, setChatHistoryOpen]);
+
+  useEffect(() => {
+    if (taskId && typeof window !== "undefined") {
+      getAllTasks()
+        .then((allTasks) => {
+          const selectedTask = allTasks.find((task) => task.taskId === taskId);
+          if (selectedTask && selectedTask.threadId !== threadId) {
+            _setThreadId(selectedTask.threadId);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [taskId, threadId, _setThreadId, getAllTasks]);
+
   const [input, setInput] = useState("");
   const {
     contentBlocks,
@@ -101,7 +142,6 @@ export function Thread() {
     handleFileUpload,
     dropRef,
     removeBlock,
-    resetBlocks,
     dragOver,
     handlePaste,
   } = useFileUpload();
@@ -116,6 +156,11 @@ export function Thread() {
 
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
+
+    // When clearing thread (going back to dashboard), also clear task
+    if (id === null) {
+      setTaskId(null);
+    }
 
     // close artifact and reset artifact context
     closeArtifact();
@@ -168,6 +213,17 @@ export function Thread() {
     e.preventDefault();
     if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
       return;
+
+    if (!selectedRepository) {
+      toast.error("Please select a repository first", {
+        description:
+          "You need to select a repository before sending a message.",
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
@@ -184,15 +240,11 @@ export function Thread() {
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
 
-    const targetRepository = {
-      owner: "langchain-ai",
-      repo: "open-swe",
-    };
     stream.submit(
       {
         messages: [...toolMessages, newHumanMessage],
         context,
-        targetRepository,
+        targetRepository: selectedRepository,
       },
       {
         streamMode: ["values"],
@@ -257,7 +309,7 @@ export function Thread() {
             className="relative h-full"
             style={{ width: 300 }}
           >
-            <ThreadHistory />
+            <TaskListSidebar onCollapse={() => setChatHistoryOpen(false)} />
           </div>
         </motion.div>
       </div>
@@ -305,7 +357,27 @@ export function Thread() {
                   </Button>
                 )}
               </div>
-              <div className="absolute top-2 right-4 flex items-center">
+              <div className="absolute top-2 right-4 flex items-center gap-2">
+                <Link href="/github">
+                  <TooltipIconButton
+                    tooltip="github settings"
+                    variant="outline"
+                    className="w-18 py-4"
+                    size="lg"
+                  >
+                    <p className="text-sm"> Tasks </p>
+                  </TooltipIconButton>
+                </Link>
+                <Link href="/github">
+                  <TooltipIconButton
+                    tooltip="github settings"
+                    variant="outline"
+                    className="py-4"
+                    size="lg"
+                  >
+                    <Settings className="h-8 w-8" />
+                  </TooltipIconButton>
+                </Link>
                 <GitHubOAuthButton />
               </div>
             </div>
@@ -351,7 +423,16 @@ export function Thread() {
               </div>
 
               <div className="flex items-center gap-4">
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
+                  <Link href="/github">
+                    <TooltipIconButton
+                      tooltip="Settings"
+                      variant="ghost"
+                      size="sm"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </TooltipIconButton>
+                  </Link>
                   <GitHubOAuthButton />
                 </div>
                 <TooltipIconButton
@@ -373,7 +454,7 @@ export function Thread() {
             <StickyToBottomContent
               className={cn(
                 "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
-                !chatStarted && "mt-[25vh] flex flex-col items-stretch",
+                !chatStarted && "mt-[10vh] flex flex-col items-stretch",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
               contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
@@ -463,30 +544,13 @@ export function Thread() {
                         className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
                       />
 
-                      <div className="flex items-center gap-6 p-2 pt-4">
-                        <div>
-                          <div className="flex items-center space-x-2">
-                            <Switch
-                              id="render-tool-calls"
-                              checked={hideToolCalls ?? false}
-                              onCheckedChange={setHideToolCalls}
-                            />
-                            <Label
-                              htmlFor="render-tool-calls"
-                              className="text-sm text-gray-600"
-                            >
-                              Hide Tool Calls
-                            </Label>
-                          </div>
-                        </div>
+                      <div className="flex items-center gap-2 p-2 pt-4">
                         <Label
                           htmlFor="file-input"
-                          className="flex cursor-pointer items-center gap-2"
+                          className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
                         >
                           <Plus className="size-5 text-gray-600" />
-                          <span className="text-sm text-gray-600">
-                            Upload PDF or Image
-                          </span>
+                          <span className="text-sm text-gray-600"></span>
                         </Label>
                         <input
                           id="file-input"
@@ -496,6 +560,9 @@ export function Thread() {
                           accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                           className="hidden"
                         />
+                        <RepositorySelector />
+                        <BranchSelector />
+
                         {stream.isLoading ? (
                           <Button
                             key="stop"
@@ -520,6 +587,12 @@ export function Thread() {
                       </div>
                     </form>
                   </div>
+
+                  {!isTaskView && !isThreadView && (
+                    <div className="w-full max-w-3xl rounded-lg border border-gray-200 bg-white shadow-sm">
+                      <TaskList />
+                    </div>
+                  )}
                 </div>
               }
             />
