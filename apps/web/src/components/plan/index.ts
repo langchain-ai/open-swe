@@ -1,1 +1,2 @@
-export { PlanViewer, type PlanItem } from "./plan-viewer";
+export { PlanViewer } from "./plan-viewer";
+export { type PlanItem } from "@/types";

@@ -1,12 +1,6 @@
 import { Check, Clock, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-export interface PlanItem {
-  index: number;
-  plan: string;
-  completed: boolean;
-  summary?: string;
-}
+import { PlanItem } from "@/types";
 
 interface PlanViewerProps {
   planItems: PlanItem[];
