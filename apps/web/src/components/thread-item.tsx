@@ -71,7 +71,7 @@ export function ThreadItem({
         <div className={cn("flex-shrink-0", isSidebar ? "mt-0.5" : "mt-1")}>
           <StatusIndicator
             status={thread.status}
-            size={isSidebar ? "md" : "default"}
+            size={isSidebar ? "sm" : "default"}
           />
         </div>
         <div className="min-w-0 flex-1">
