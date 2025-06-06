@@ -113,15 +113,10 @@ const StreamSession = ({
   useEffect(() => {
     if (threadId) {
       if (isLoading && !prevIsLoading.current) {
-        // Stream started - mark thread as active
-        console.log(`🏃 Thread ${threadId} started streaming`);
         addActiveThread(threadId);
       } else if (!isLoading && prevIsLoading.current) {
-        // Stream finished - remove thread from active (with delay to allow status updates)
-        console.log(`⏹️ Thread ${threadId} finished streaming`);
         setTimeout(() => {
           removeActiveThread(threadId);
-          // Trigger final status update
           getAllTasks().then(setAllTasks).catch(console.error);
         }, 2000); // 2 second delay
       }
