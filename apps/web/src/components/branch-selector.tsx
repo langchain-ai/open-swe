@@ -166,32 +166,47 @@ export function BranchSelector({
           <CommandList>
             <CommandEmpty>No branches found.</CommandEmpty>
             <CommandGroup>
-              {branches.map((branch) => {
-                const isSelected = selectedBranch === branch.name;
-                return (
-                  <CommandItem
-                    key={branch.name}
-                    value={branch.name}
-                    onSelect={() => handleSelect(branch.name)}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-4 w-4",
-                        isSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="h-3 w-3" />
-                      <span className="font-medium">{branch.name}</span>
-                      {branch.protected && (
-                        <div title="Protected branch">
-                          <Shield className="h-3 w-3 text-amber-500" />
-                        </div>
-                      )}
-                    </div>
-                  </CommandItem>
-                );
-              })}
+              {branches
+                .slice()
+                .sort((a, b) => {
+                  if (defaultBranch) {
+                    if (a.name === defaultBranch) return -1;
+                    if (b.name === defaultBranch) return 1;
+                  }
+                  return 0;
+                })
+                .map((branch) => {
+                  const isSelected = selectedBranch === branch.name;
+                  const isDefault = branch.name === defaultBranch;
+                  return (
+                    <CommandItem
+                      key={branch.name}
+                      value={branch.name}
+                      onSelect={() => handleSelect(branch.name)}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <div className="flex items-center gap-2">
+                        <GitBranch className="h-3 w-3" />
+                        <span className="font-medium">{branch.name}</span>
+                        {isDefault && (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
+                            default
+                          </span>
+                        )}
+                        {branch.protected && (
+                          <div title="Protected branch">
+                            <Shield className="h-3 w-3 text-amber-500" />
+                          </div>
+                        )}
+                      </div>
+                    </CommandItem>
+                  );
+                })}
             </CommandGroup>
           </CommandList>
         </Command>

@@ -52,12 +52,6 @@ export default function TaskList() {
             >
               Threads ({totalThreads})
             </TabsTrigger>
-            <TabsTrigger
-              value="archive"
-              className="ml-6 px-0 pb-3 font-medium text-gray-500 data-[state=active]:rounded-none data-[state=active]:border-b-2 data-[state=active]:border-b-black data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-            >
-              Archived
-            </TabsTrigger>
           </TabsList>
 
           <div className="mb-4 border-b border-gray-200"></div>
