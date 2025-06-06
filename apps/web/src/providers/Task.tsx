@@ -15,12 +15,13 @@ import {
   TaskWithStatus,
 } from "@/types/index";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-import { inferTaskStatus } from "@/lib/thread-utils";
 
 // Function to create simple, predictable task ID
 function createTaskId(threadId: string, taskIndex: number): string {
   return `${threadId}-${taskIndex}`;
 }
+
+// Tasks use the same status type as threads, so we can use thread status directly
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
@@ -72,13 +73,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
         return plan.map((planItem: any, index: number) => ({
           ...planItem,
-          status: inferTaskStatus(
-            planItem,
-            index,
-            threadValues,
-            threadId,
-            threadStatus,
-          ),
+          status: threadStatus,
           repository:
             threadValues?.targetRepository?.repo ||
             threadValues?.targetRepository?.name,
@@ -217,13 +212,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
             const processedTask = {
               ...taskData,
-              status: inferTaskStatus(
-                taskData,
-                taskIndex,
-                threadValues,
-                threadSummary.thread_id,
-                threadStatus,
-              ),
+              status: threadStatus,
               taskId: createTaskId(threadSummary.thread_id, taskIndex),
               threadId: threadSummary.thread_id,
               threadTitle,
@@ -338,11 +327,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const potentiallyActiveThreads = new Set<string>();
         tasks.forEach((task) => {
           // Consider any non-idle thread as potentially active
-          if (
-            task.status === "busy" ||
-            task.status === "interrupted" ||
-            task.status === "error"
-          ) {
+          if (task.status !== "idle") {
             potentiallyActiveThreads.add(task.threadId);
           }
         });
