@@ -35,9 +35,10 @@ export function BranchSelector({
     selectedBranch,
     setSelectedBranch,
     selectedRepository,
+    defaultBranch,
   } = useGitHubApp();
 
-  // Auto-select main or master branch when repository changes and branches are loaded
+  // Auto-select default branch when repository changes and branches are loaded
   useEffect(() => {
     if (
       selectedRepository &&
@@ -51,15 +52,15 @@ export function BranchSelector({
         branches.some((branch) => branch.name === selectedBranch);
 
       if (!currentBranchExists) {
-        // Try to find main or master branch in order of preference
-        const defaultBranch =
-          branches.find((branch) => branch.name === "main") ||
-          branches.find((branch) => branch.name === "master");
+        // Try to find the repository's actual default branch first
+        const actualDefaultBranch = defaultBranch
+          ? branches.find((branch) => branch.name === defaultBranch)
+          : null;
 
-        if (defaultBranch) {
-          setSelectedBranch(defaultBranch.name);
+        if (actualDefaultBranch) {
+          setSelectedBranch(actualDefaultBranch.name);
         } else if (branches.length > 0) {
-          // If neither main nor master exists, select the first available branch
+          // If default branch doesn't exist in branches list, select the first available branch
           setSelectedBranch(branches[0].name);
         }
       }
@@ -71,6 +72,7 @@ export function BranchSelector({
     branches,
     selectedBranch,
     setSelectedBranch,
+    defaultBranch,
   ]);
 
   const handleSelect = (branchName: string) => {

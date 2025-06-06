@@ -17,6 +17,7 @@ interface UseGitHubAppReturn {
   selectedBranch: string | null;
   setSelectedBranch: (branch: string | null) => void;
   refreshBranches: () => Promise<void>;
+  defaultBranch: string | null;
 }
 
 // Helper function to get GitHub OAuth access token from cookies
@@ -155,6 +156,15 @@ export function useGitHubApp(): UseGitHubAppReturn {
     await fetchBranches();
   };
 
+  // Get the default branch for the currently selected repository
+  const defaultBranch = selectedRepository
+    ? repositories.find(
+        (repo) =>
+          repo.full_name ===
+          `${selectedRepository.owner}/${selectedRepository.repo}`,
+      )?.default_branch || null
+    : null;
+
   return {
     isInstalled,
     isLoading,
@@ -169,5 +179,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     selectedBranch,
     setSelectedBranch,
     refreshBranches,
+    defaultBranch,
   };
 }
