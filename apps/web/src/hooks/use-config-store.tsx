@@ -11,6 +11,7 @@ import { ConfigurableFieldUIMetadata } from "@/types/configurable";
 interface ConfigState {
   configs: Record<string, any>;
   getConfig: (key: string) => Record<string, any>;
+  getConfigs: () => Record<string, any>;
   updateConfig: (key: string, value: any) => void;
   resetConfig: (key: string) => void;
   setDefaultConfig: (
@@ -35,6 +36,21 @@ export const useConfigStore = create<ConfigState>()(
         return configObj;
       },
 
+      getConfigs: () => {
+        const state = get();
+        const flatConfigs: Record<string, any> = {};
+        Object.entries(state.configs).forEach(([key, configObj]) => {
+          if (
+            configObj &&
+            typeof configObj === "object" &&
+            configObj[key] !== undefined
+          ) {
+            flatConfigs[key] = configObj[key];
+          }
+        });
+        return flatConfigs;
+      },
+
       updateConfig: (key, value) =>
         set((state) => ({
           configs: {
@@ -50,7 +66,6 @@ export const useConfigStore = create<ConfigState>()(
         set((state) => {
           const config = state.configs[key];
           if (!config || !config.__defaultValues) {
-            // If no config or default values exist for this agent, do nothing or set to empty
             return state;
           }
           const defaultsToUse = { ...config.__defaultValues };

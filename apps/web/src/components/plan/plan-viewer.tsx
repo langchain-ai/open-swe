@@ -8,7 +8,6 @@ interface PlanViewerProps {
 }
 
 export function PlanViewer({ planItems, className }: PlanViewerProps) {
-  // Find the current task (lowest index where completed is false)
   const currentTaskIndex = planItems
     .filter((item) => !item.completed)
     .reduce(
@@ -34,7 +33,7 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
 
       <div className="space-y-2">
         {planItems
-          .sort((a, b) => a.index - b.index) // Ensure proper ordering
+          .sort((a, b) => a.index - b.index)
           .map((item, idx) => {
             const status = getTaskStatus(item);
 

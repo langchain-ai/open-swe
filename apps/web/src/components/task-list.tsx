@@ -11,33 +11,27 @@ import { groupTasksIntoThreads, sortThreadsByDate } from "@/lib/thread-utils";
 
 const THREADS_PER_PAGE = 5;
 
+// TODO: abstract out similar logic in task-list and task-list-sidebar
 export default function TaskList() {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
   const { allTasks, tasksLoading } = useTasks();
 
-  // Only show TaskList when no specific task is selected (dashboard mode)
   const isDashboardMode = !taskId;
 
-  // Handle thread navigation (navigate to chat mode with thread loaded)
   const handleThreadClick = (thread: ThreadSummary) => {
     setThreadId(thread.threadId);
-    setTaskId(null); // Clear task selection to show thread in chat mode
+    setTaskId(null);
   };
 
-  // Only render TaskList in dashboard mode
   if (!isDashboardMode) {
     return null;
   }
 
-  // Group tasks by thread using utility function
   const threadSummaries = groupTasksIntoThreads(allTasks);
-
-  // Sort threads by creation date (newest first) using utility function
   const sortedThreads = sortThreadsByDate(threadSummaries);
 
-  // Pagination for threads
   const totalThreads = sortedThreads.length;
   const totalPages = Math.ceil(totalThreads / THREADS_PER_PAGE);
   const startIndex = currentPage * THREADS_PER_PAGE;

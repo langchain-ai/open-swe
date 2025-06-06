@@ -24,12 +24,15 @@ interface RepositorySelectorProps {
   disabled?: boolean;
   placeholder?: string;
 }
-
+// TODO: remove this, we should use the TargetRepository type from the open-swe package
 // Convert GitHub Repository to TargetRepository format
 const repositoryToTarget = (repo: Repository): TargetRepository => {
   const [owner, repoName] = repo.full_name.split("/");
   return { owner, repo: repoName };
 };
+
+// TODO: Add utility function for repoSelector while viewing a thread
+// retrieve thread repo from nuqs params. set disabled = true.
 
 export function RepositorySelector({
   disabled = false,

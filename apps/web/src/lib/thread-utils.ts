@@ -9,9 +9,8 @@ import {
  * Analyzes thread state to determine if it has an error
  */
 function hasThreadError(threadValues: any): boolean {
-  // Check for error messages in recent messages
   const messages = threadValues?.messages || [];
-  const recentMessages = messages.slice(-5); // Check last 5 messages
+  const recentMessages = messages.slice(-5);
 
   return recentMessages.some((msg: any) => {
     const content = msg.content;
@@ -39,12 +38,10 @@ function hasThreadError(threadValues: any): boolean {
  * Analyzes thread state to determine if it has a human interrupt
  */
 function hasThreadInterrupt(threadValues: any): boolean {
-  // Check if there are any tool calls waiting for responses
   const messages = threadValues?.messages || [];
   const lastMessage = messages[messages.length - 1];
 
   if (lastMessage?.type === "ai" && lastMessage.tool_calls?.length > 0) {
-    // Check if there are pending tool calls without responses
     const pendingToolCalls = lastMessage.tool_calls.some((toolCall: any) => {
       const responseExists = messages.some(
         (msg: any) => msg.type === "tool" && msg.tool_call_id === toolCall.id,
@@ -61,13 +58,11 @@ function hasThreadInterrupt(threadValues: any): boolean {
  * Determines which task is currently being executed based on plan progress
  */
 function getCurrentTaskIndex(plan: PlanItem[]): number {
-  // Find the first non-completed task
   for (let i = 0; i < plan.length; i += 1) {
     if (!plan[i].completed) {
       return i;
     }
   }
-  // If all tasks are completed, return -1
   return -1;
 }
 
@@ -105,9 +100,7 @@ export function inferTaskStatus(
   const hasInterrupt = hasThreadInterrupt(threadValues);
   const isActive = isThreadActive(threadId, allActiveThreads);
 
-  // If this is the current task being worked on
   if (isCurrentTask) {
-    // Check for error state first
     if (hasError) {
       return "error";
     }

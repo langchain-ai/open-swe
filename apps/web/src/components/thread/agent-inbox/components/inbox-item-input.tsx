@@ -11,6 +11,32 @@ import { Separator } from "@/components/ui/separator";
 import { PlanViewer } from "@/components/plan";
 import { isPlanData, parsePlanData, getPlanKey } from "@/lib/plan-utils";
 
+interface InboxItemInputProps {
+  interruptValue: HumanInterrupt;
+  humanResponse: HumanResponseWithEdits[];
+  supportsMultipleMethods: boolean;
+  acceptAllowed: boolean;
+  hasEdited: boolean;
+  hasAddedResponse: boolean;
+  initialValues: Record<string, string>;
+
+  streaming: boolean;
+  streamFinished: boolean;
+
+  setHumanResponse: React.Dispatch<
+    React.SetStateAction<HumanResponseWithEdits[]>
+  >;
+  setSelectedSubmitType: React.Dispatch<
+    React.SetStateAction<SubmitType | undefined>
+  >;
+  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
+  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
+
+  handleSubmit: (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
+  ) => Promise<void>;
+}
+
 function ResetButton({ handleReset }: { handleReset: () => void }) {
   return (
     <Button
@@ -25,7 +51,6 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
 }
 
 function ArgsRenderer({ args }: { args: Record<string, any> }) {
-  // Check if this is plan data
   if (isPlanData(args)) {
     const planItems = parsePlanData(args);
     const planKey = getPlanKey(args);
@@ -46,7 +71,6 @@ function ArgsRenderer({ args }: { args: Record<string, any> }) {
     }
   }
 
-  // Fallback to original markdown rendering for non-plan data
   return (
     <div className="flex w-full flex-col items-start gap-6">
       {Object.entries(args).map(([k, v]) => {
@@ -73,32 +97,6 @@ function ArgsRenderer({ args }: { args: Record<string, any> }) {
       })}
     </div>
   );
-}
-
-interface InboxItemInputProps {
-  interruptValue: HumanInterrupt;
-  humanResponse: HumanResponseWithEdits[];
-  supportsMultipleMethods: boolean;
-  acceptAllowed: boolean;
-  hasEdited: boolean;
-  hasAddedResponse: boolean;
-  initialValues: Record<string, string>;
-
-  streaming: boolean;
-  streamFinished: boolean;
-
-  setHumanResponse: React.Dispatch<
-    React.SetStateAction<HumanResponseWithEdits[]>
-  >;
-  setSelectedSubmitType: React.Dispatch<
-    React.SetStateAction<SubmitType | undefined>
-  >;
-  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
-  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
-
-  handleSubmit: (
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
-  ) => Promise<void>;
 }
 
 function ResponseComponent({

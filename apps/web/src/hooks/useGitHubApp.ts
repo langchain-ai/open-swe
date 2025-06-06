@@ -64,7 +64,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const selectedBranch = selectedBranchParam;
 
   const setSelectedRepository = (repo: TargetRepository | null) => {
-    // Use "owner/repo" format instead of JSON
     setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
     // Clear branch when repository changes
     if (!repo) {
@@ -105,11 +104,52 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   };
 
-  const fetchBranches = async () => {
+  useEffect(() => {
+    checkInstallation();
+  }, []);
+
+  useEffect(() => {
     if (!selectedRepository) {
       setBranches([]);
+      setSelectedBranchParam(null);
       return;
     }
+
+    const accessToken = getGitHubAccessToken();
+    if (!accessToken) {
+      setBranchesError("GitHub access token not found");
+      return;
+    }
+
+    setBranchesLoading(true);
+    setBranchesError(null);
+
+    const fetchBranches = async () => {
+      try {
+        const branchData = await getRepositoryBranches(
+          selectedRepository.owner,
+          selectedRepository.repo,
+          accessToken,
+        );
+        setBranches(branchData || []);
+      } catch (err) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to fetch branches";
+        setBranchesError(errorMessage);
+      } finally {
+        setBranchesLoading(false);
+      }
+    };
+
+    fetchBranches();
+  }, [selectedRepository, setSelectedBranchParam]);
+
+  const refreshRepositories = async () => {
+    await checkInstallation();
+  };
+
+  const refreshBranches = async () => {
+    if (!selectedRepository) return;
 
     const accessToken = getGitHubAccessToken();
     if (!accessToken) {
@@ -134,27 +174,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     } finally {
       setBranchesLoading(false);
     }
-  };
-
-  useEffect(() => {
-    checkInstallation();
-  }, []);
-
-  useEffect(() => {
-    if (selectedRepository) {
-      fetchBranches();
-    } else {
-      setBranches([]);
-      setSelectedBranchParam(null);
-    }
-  }, [selectedRepository?.owner, selectedRepository?.repo]);
-
-  const refreshRepositories = async () => {
-    await checkInstallation();
-  };
-
-  const refreshBranches = async () => {
-    await fetchBranches();
   };
 
   return {

@@ -95,22 +95,7 @@ export function Thread() {
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubApp();
   const { getAllTasks } = useTasks();
-  const { configs } = useConfigStore();
-
-  // Extract actual config values from the nested store structure
-  const getActualConfigs = () => {
-    const actualConfigs: Record<string, any> = {};
-    Object.entries(configs).forEach(([key, configObj]) => {
-      if (
-        configObj &&
-        typeof configObj === "object" &&
-        configObj[key] !== undefined
-      ) {
-        actualConfigs[key] = configObj[key];
-      }
-    });
-    return actualConfigs;
-  };
+  const { getConfigs } = useConfigStore();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
@@ -128,17 +113,12 @@ export function Thread() {
   const prevTaskId = useRef(taskId);
   const prevThreadId = useRef(threadId);
 
-  // Auto-expand sidebar only when navigating TO a thread/task (not continuously)
   useEffect(() => {
     const isNavigatingToTask = !prevTaskId.current && taskId;
     const isNavigatingToThread = !prevThreadId.current && threadId;
-
-    // Only auto-expand if we're navigating TO a thread/task AND sidebar is currently closed
     if ((isNavigatingToTask || isNavigatingToThread) && !chatHistoryOpen) {
       setChatHistoryOpen(true);
     }
-
-    // Update refs for next comparison
     prevTaskId.current = taskId;
     prevThreadId.current = threadId;
   }, [taskId, threadId, chatHistoryOpen, setChatHistoryOpen]);
@@ -281,7 +261,7 @@ export function Thread() {
         config: {
           recursion_limit: 400,
           configurable: {
-            ...getActualConfigs(),
+            ...getConfigs(),
           },
         },
         metadata: {
@@ -306,7 +286,7 @@ export function Thread() {
       config: {
         recursion_limit: 400,
         configurable: {
-          ...getActualConfigs(),
+          ...getConfigs(),
         },
       },
       metadata: {
@@ -553,8 +533,6 @@ export function Thread() {
                 <div
                   className={cn(
                     "flex flex-col items-center gap-8 bg-white",
-                    // Don't make footer sticky when TaskList is shown to allow page scrolling
-                    // Add equivalent of 128px (32 * 4 = 8rem) bottom spacing
                     !isTaskView && !isThreadView
                       ? "mb-32 pb-32"
                       : "sticky bottom-0",

@@ -50,7 +50,6 @@ export function parsePlanData(args: Record<string, any>): PlanItem[] {
   if (args.plan && typeof args.plan === "string") {
     planString = args.plan;
   } else {
-    // Find the first string value that looks like a plan
     const planValue = Object.values(args).find(
       (value) => typeof value === "string" && value.includes(":::"),
     );
@@ -63,7 +62,6 @@ export function parsePlanData(args: Record<string, any>): PlanItem[] {
     return [];
   }
 
-  // Parse plan steps separated by :::
   const steps = planString
     .split(":::")
     .map((step) => step.trim())

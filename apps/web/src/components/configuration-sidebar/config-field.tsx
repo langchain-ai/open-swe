@@ -58,8 +58,8 @@ export function ConfigField({
   max,
   step = 1,
   className,
-  value: externalValue, // Rename to avoid conflict
-  setValue: externalSetValue, // Rename to avoid conflict
+  value: externalValue, // TODO: Rename to avoid conflict
+  setValue: externalSetValue, // TODO: Rename to avoid conflict
 }: ConfigFieldProps) {
   const store = useConfigStore();
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -69,12 +69,12 @@ export function ConfigField({
 
   const currentValue = isExternallyManaged
     ? externalValue
-    : store.configs[id]?.[id]; // Access nested value: configs[key][key]
+    : store.configs[id]?.[id];
 
   const handleChange = (newValue: any) => {
-    setJsonError(null); // Clear JSON error on any change
+    setJsonError(null);
     if (isExternallyManaged && externalSetValue) {
-      externalSetValue(newValue); // Use non-null assertion as we checked existence
+      externalSetValue(newValue);
     } else {
       store.updateConfig(id, newValue);
     }
@@ -83,19 +83,16 @@ export function ConfigField({
   const handleJsonChange = (jsonString: string) => {
     try {
       if (!jsonString.trim()) {
-        handleChange(undefined); // Use the unified handleChange
+        handleChange(undefined);
         setJsonError(null);
         return;
       }
 
-      // Attempt to parse for validation first
       const parsedJson = JSON.parse(jsonString);
-      // If parsing succeeds, call handleChange with the raw string and clear error
-      handleChange(parsedJson); // Use the unified handleChange
+
+      handleChange(parsedJson);
       setJsonError(null);
-    } catch (_) {
-      // If parsing fails, update state with invalid string but set error
-      // This allows the user to see their invalid input and the error message
+    } catch {
       if (isExternallyManaged && externalSetValue) {
         externalSetValue(jsonString);
       } else {
@@ -108,12 +105,9 @@ export function ConfigField({
   const handleFormatJson = (jsonString: string) => {
     try {
       const parsed = JSON.parse(jsonString);
-      // Directly use handleChange to update with the formatted string
       handleChange(parsed);
-      setJsonError(null); // Clear error on successful format
-    } catch (_) {
-      // If formatting fails (because input is not valid JSON), set the error state
-      // Do not change the underlying value that failed to parse/format
+      setJsonError(null);
+    } catch {
       setJsonError("Invalid JSON format");
     }
   };
@@ -130,7 +124,7 @@ export function ConfigField({
         {type === "switch" && (
           <Switch
             id={id}
-            checked={!!currentValue} // Use currentValue
+            checked={!!currentValue}
             onCheckedChange={handleChange}
           />
         )}
@@ -145,7 +139,7 @@ export function ConfigField({
       {type === "text" && (
         <Input
           id={id}
-          value={currentValue || ""} // Use currentValue
+          value={currentValue || ""}
           onChange={(e) => handleChange(e.target.value)}
           placeholder={placeholder}
         />
@@ -154,7 +148,7 @@ export function ConfigField({
       {type === "textarea" && (
         <Textarea
           id={id}
-          value={currentValue || ""} // Use currentValue
+          value={currentValue || ""}
           onChange={(e) => handleChange(e.target.value)}
           placeholder={placeholder}
           className="min-h-[100px]"
@@ -165,19 +159,16 @@ export function ConfigField({
         <Input
           id={id}
           type="number"
-          value={currentValue !== undefined ? currentValue : ""} // Use currentValue
+          value={currentValue !== undefined ? currentValue : ""}
           onChange={(e) => {
-            // Handle potential empty string or invalid number input
             const val = e.target.value;
             if (val === "") {
-              handleChange(undefined); // Treat empty string as clearing the value
+              handleChange(undefined);
             } else {
               const num = Number(val);
-              // Only call handleChange if it's a valid number
               if (!isNaN(num)) {
                 handleChange(num);
               }
-              // If not a valid number (e.g., '1.2.3'), do nothing, keep the last valid state
             }
           }}
           min={min}
@@ -191,7 +182,6 @@ export function ConfigField({
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs text-gray-500">{min ?? ""}</span>
             <span className="text-sm font-medium">
-              {/* Use currentValue */}
               {currentValue !== undefined
                 ? currentValue
                 : min !== undefined && max !== undefined
@@ -202,7 +192,6 @@ export function ConfigField({
           </div>
           <Slider
             id={id}
-            // Use currentValue, provide default based on min/max if undefined
             value={[
               currentValue !== undefined
                 ? currentValue
@@ -214,22 +203,20 @@ export function ConfigField({
             max={max}
             step={step}
             onValueChange={(vals: number[]) => handleChange(vals[0])}
-            disabled={min === undefined || max === undefined} // Disable slider if min/max not provided
+            disabled={min === undefined || max === undefined}
           />
         </div>
       )}
 
       {type === "select" && (
         <Select
-          value={currentValue ?? ""} // Use currentValue, provide default empty string if undefined/null
+          value={currentValue ?? ""}
           onValueChange={handleChange}
         >
           <SelectTrigger>
-            {/* Display selected value or placeholder */}
             <SelectValue placeholder={placeholder || "Select an option"} />
           </SelectTrigger>
           <SelectContent>
-            {/* Add a placeholder/default option if needed */}
             {placeholder && (
               <SelectItem
                 value=""
@@ -258,13 +245,13 @@ export function ConfigField({
               typeof currentValue === "string"
                 ? currentValue
                 : (JSON.stringify(currentValue, null, 2) ?? "")
-            } // Use currentValue
+            }
             onChange={(e) => handleJsonChange(e.target.value)}
             placeholder={placeholder || '{\n  "key": "value"\n}'}
             className={cn(
               "min-h-[120px] font-mono text-sm",
               jsonError &&
-                "border-red-500 focus:border-red-500 focus-visible:ring-red-500", // Add error styling
+                "border-red-500 focus:border-red-500 focus-visible:ring-red-500",
             )}
           />
           <div className="flex w-full items-start justify-between gap-2 pt-1">
@@ -274,24 +261,21 @@ export function ConfigField({
               variant="outline"
               size="sm"
               onClick={() => handleFormatJson(currentValue ?? "")}
-              // Disable if value is empty, not a string, or already has a JSON error
               disabled={
                 !currentValue || typeof currentValue !== "string" || !!jsonError
               }
-              className="mt-1" // Add margin top to align better with textarea
+              className="mt-1"
             >
               Format
             </Button>
             {jsonError && (
               <Alert
                 variant="destructive"
-                className="flex-grow px-3 py-1" // Adjusted styling
+                className="flex-grow px-3 py-1"
               >
                 <div className="flex items-center gap-2">
                   {" "}
-                  {/* Ensure icon and text are aligned */}
                   <AlertCircle className="h-4 w-4 flex-shrink-0" />{" "}
-                  {/* Added flex-shrink-0 */}
                   <AlertDescription className="text-xs">
                     {jsonError}
                   </AlertDescription>

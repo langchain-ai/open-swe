@@ -88,7 +88,6 @@ export const ConfigurationSidebar = forwardRef<
 >(({ className, open, onClose }, ref: ForwardedRef<HTMLDivElement>) => {
   const { configs, updateConfig } = useConfigStore();
 
-  // Local state for configurations and loading
   const [configurations, setConfigurations] = useState<
     ConfigurableFieldUIMetadata[]
   >([]);
@@ -97,8 +96,7 @@ export const ConfigurationSidebar = forwardRef<
   useEffect(() => {
     setLoading(true);
 
-    // Configuration fields based on the actual GraphConfiguration schema
-    // These match the x_oap_ui_config metadata from the schema
+    // These match the x_oap_ui_config metadata from the GraphConfiguration schema
     const actualConfigs: ConfigurableFieldUIMetadata[] = [
       {
         label: "plannerModelName",
@@ -156,7 +154,7 @@ export const ConfigurationSidebar = forwardRef<
       },
     ];
 
-    // Initialize configs with defaults if they don't exist
+    // Set Default Configs if they don't exist
     actualConfigs.forEach((config) => {
       if (configs[config.label] === undefined && config.default !== undefined) {
         updateConfig(config.label, config.default);

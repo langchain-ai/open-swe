@@ -15,6 +15,7 @@ import { groupTasksIntoThreads, sortThreadsByDate } from "@/lib/thread-utils";
 
 const THREADS_PER_PAGE = 10; // More threads per page in sidebar
 
+// TODO: Clarify Language about Threads and Tasks in the TaskListSidebar component
 interface TaskListSidebarProps {
   onCollapse?: () => void;
 }
@@ -25,18 +26,14 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const { allTasks, tasksLoading } = useTasks();
 
-  // Handle thread navigation (navigate to chat mode with thread loaded)
+  // Handle thread navigation
   const handleThreadClick = (thread: ThreadSummary) => {
     setThreadId(thread.threadId);
-    setTaskId(null); // Clear task selection to show thread in chat mode
+    setTaskId(null);
   };
 
-  // Group tasks by thread using utility function
   const threadSummaries = groupTasksIntoThreads(allTasks);
-
-  // Sort threads by creation date (newest first) using utility function
   const sortedThreads = sortThreadsByDate(threadSummaries);
-
   const totalThreads = sortedThreads.length;
   const totalPages = Math.ceil(totalThreads / THREADS_PER_PAGE);
   const startIndex = currentPage * THREADS_PER_PAGE;

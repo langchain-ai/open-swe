@@ -108,7 +108,7 @@ const StreamSession = ({
 
   const isLoading = streamValue.isLoading;
   const prevIsLoading = useRef(isLoading);
-
+  // TODO: improve active thread tracking implementation
   // Track loading state changes to manage active threads
   useEffect(() => {
     if (threadId) {

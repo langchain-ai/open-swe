@@ -8,33 +8,23 @@ import {
   Calendar,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import { useStreamContext } from "@/providers/Stream";
 import { TaskWithStatus, TaskStatus } from "@/types/index";
 
-// Utility function to format task plan into a proper title
+// TODO: Fix Const export to fix flash reload issue
+// TODO: create a new state for pending tasks that arent running yet?
 export const formatTaskTitle = (
   plan: string,
   maxLength: number = 60,
 ): string => {
   if (!plan) return "Untitled Task";
-
-  // Remove any leading/trailing whitespace
   let title = plan.trim();
-
-  // Capitalize first letter of each sentence
   title = title.replace(/(^\w|\.\s+\w)/g, (match) => match.toUpperCase());
-
-  // If title is too long, truncate and add ellipsis
   if (title.length > maxLength) {
-    // Try to cut at a word boundary
     const truncated = title.substring(0, maxLength);
     const lastSpace = truncated.lastIndexOf(" ");
-
     if (lastSpace > maxLength * 0.7) {
-      // If we found a good space to cut at (not too close to the beginning)
       title = truncated.substring(0, lastSpace);
     } else {
-      // Otherwise just cut and add ellipsis
       title = truncated + "...";
     }
   }
@@ -42,7 +32,6 @@ export const formatTaskTitle = (
   return title;
 };
 
-// Utility function to determine current task
 export const getCurrentTask = (
   plan: TaskWithStatus[],
 ): TaskWithStatus | null => {
@@ -52,7 +41,6 @@ export const getCurrentTask = (
   );
 };
 
-// Utility function to compute task status
 export const computeTaskStatus = (
   task: TaskWithStatus,
   currentTask: TaskWithStatus | null,
@@ -60,26 +48,21 @@ export const computeTaskStatus = (
   hasError: boolean,
   hasInterrupt: boolean,
 ): TaskStatus => {
-  // If task is completed, it's done
   if (task.completed) {
     return "done";
   }
 
-  // If this is the current task
   const isCurrentTask = currentTask?.index === task.index;
 
   if (isCurrentTask) {
-    // Check for error state first
     if (hasError) {
       return "error";
     }
 
-    // Check for interrupt state
     if (hasInterrupt) {
       return "interrupted";
     }
 
-    // If loading, it's running
     if (isLoading) {
       return "running";
     }
@@ -107,7 +90,6 @@ const StatusIndicator = ({ status }: { status: TaskStatus }) => {
 
 export const Task = ({ task }: { task: TaskWithStatus }) => {
   const formattedTitle = formatTaskTitle(task.plan);
-  const stream = useStreamContext();
 
   return (
     <motion.div
