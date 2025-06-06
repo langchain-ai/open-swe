@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "../../../open-swe/src/types";
@@ -42,6 +42,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const [selectedRepositoryParam, setSelectedRepositoryParam] =
     useQueryState("repo");
   const [selectedBranchParam, setSelectedBranchParam] = useQueryState("branch");
+
+  // Track if auto-selection has been attempted to prevent re-triggering
+  const hasAutoSelectedRef = useRef(false);
 
   const selectedRepository = selectedRepositoryParam
     ? (() => {
@@ -147,6 +150,33 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setSelectedBranchParam(null);
     }
   }, [selectedRepository?.owner, selectedRepository?.repo]);
+
+  // Auto-select first repository on initial page load
+  useEffect(() => {
+    if (
+      !hasAutoSelectedRef.current && // Haven't auto-selected yet
+      !selectedRepository && // No repo currently selected
+      !isLoading && // Not loading repositories
+      !error && // No error occurred
+      isInstalled === true && // GitHub App is installed
+      repositories.length > 0 // Repositories are available
+    ) {
+      const firstRepo = repositories[0];
+      const targetRepo = {
+        owner: firstRepo.full_name.split("/")[0],
+        repo: firstRepo.full_name.split("/")[1],
+      };
+      setSelectedRepository(targetRepo);
+      hasAutoSelectedRef.current = true;
+    }
+  }, [
+    repositories,
+    selectedRepository,
+    isLoading,
+    error,
+    isInstalled,
+    setSelectedRepository,
+  ]);
 
   const refreshRepositories = async () => {
     await checkInstallation();
