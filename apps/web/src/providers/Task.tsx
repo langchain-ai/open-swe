@@ -14,7 +14,8 @@ import {
   TaskWithContext,
   TaskWithStatus,
 } from "@/types/index";
-import { inferTaskStatusWithContext } from "@/lib/thread-utils";
+import { ThreadStatus } from "@langchain/langgraph-sdk";
+import { inferTaskStatus } from "@/lib/thread-utils";
 
 // Function to create simple, predictable task ID
 function createTaskId(threadId: string, taskIndex: number): string {
@@ -66,15 +67,17 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         const threadValues = thread.values as any;
         const plan = threadValues?.plan || [];
 
-        // Convert PlanItem[] to TaskWithStatus[] using improved status inference
+        // Use thread status directly from LangGraph SDK
+        const threadStatus = (thread.status ?? "idle") as ThreadStatus;
+
         return plan.map((planItem: any, index: number) => ({
           ...planItem,
-          status: inferTaskStatusWithContext(
+          status: inferTaskStatus(
             planItem,
             index,
             threadValues,
             threadId,
-            activeThreads,
+            threadStatus,
           ),
           repository:
             threadValues?.targetRepository?.repo ||
@@ -89,7 +92,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         return [];
       }
     },
-    [apiUrl, assistantId, activeThreads],
+    [apiUrl, assistantId],
   );
 
   const getAllTasks = useCallback(async (): Promise<TaskWithContext[]> => {
@@ -181,6 +184,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
           const thread = await client.threads.get(threadSummary.thread_id);
           const threadValues = thread.values as any;
 
+          // Use thread status directly from LangGraph SDK
+          const threadStatus = (thread.status ?? "idle") as ThreadStatus;
+
           const plan: any[] = threadValues?.plan || [];
           const proposedPlan: any[] = threadValues?.proposedPlan || [];
           const rawTasks = plan.length > 0 ? plan : proposedPlan;
@@ -209,14 +215,14 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
             const taskIndex = rawTasks.indexOf(rawTask);
 
-            allTasksWithContext.push({
+            const processedTask = {
               ...taskData,
-              status: inferTaskStatusWithContext(
+              status: inferTaskStatus(
                 taskData,
                 taskIndex,
                 threadValues,
                 threadSummary.thread_id,
-                activeThreads,
+                threadStatus,
               ),
               taskId: createTaskId(threadSummary.thread_id, taskIndex),
               threadId: threadSummary.thread_id,
@@ -234,7 +240,9 @@ export function TaskProvider({ children }: { children: ReactNode }) {
                 },
               ),
               createdAt: threadSummary.created_at,
-            });
+            };
+
+            allTasksWithContext.push(processedTask);
           });
         } catch (error) {
           console.error(
@@ -257,12 +265,16 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       console.error("Failed to fetch all tasks:", error);
       return [];
     }
-  }, [apiUrl, assistantId, activeThreads]);
+  }, [apiUrl, assistantId]);
 
   // Setup polling for real-time updates
   // TODO: improve real time status updates
   useEffect(() => {
     if (activeThreads.size > 0) {
+      // Immediately poll when threads become active
+      getAllTasks().then(setAllTasks).catch(console.error);
+
+      // Set up regular polling every 2 seconds (faster during execution)
       pollIntervalRef.current = setInterval(async () => {
         try {
           const newTasks = await getAllTasks();
@@ -288,7 +300,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           console.error("Polling error:", error);
         }
-      }, 5000);
+      }, 2000); // Faster polling during execution
     } else {
       // Stop polling when no active threads
       if (pollIntervalRef.current) {
@@ -302,7 +314,17 @@ export function TaskProvider({ children }: { children: ReactNode }) {
         clearInterval(pollIntervalRef.current);
       }
     };
-  }, [activeThreads.size]);
+  }, [activeThreads.size, getAllTasks]);
+
+  // Add a function to manually trigger status refresh
+  const refreshStatus = useCallback(async () => {
+    try {
+      const newTasks = await getAllTasks();
+      setAllTasks(newTasks);
+    } catch (error) {
+      console.error("Failed to refresh status:", error);
+    }
+  }, [getAllTasks]);
 
   useEffect(() => {
     if (!apiUrl || !assistantId) return;
@@ -315,7 +337,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
         const potentiallyActiveThreads = new Set<string>();
         tasks.forEach((task) => {
-          if (task.status === "running" || task.status === "interrupted") {
+          // Consider any non-idle thread as potentially active
+          if (
+            task.status === "busy" ||
+            task.status === "interrupted" ||
+            task.status === "error"
+          ) {
             potentiallyActiveThreads.add(task.threadId);
           }
         });
@@ -326,11 +353,12 @@ export function TaskProvider({ children }: { children: ReactNode }) {
       })
       .catch(console.error)
       .finally(() => setTasksLoading(false));
-  }, [apiUrl, assistantId]);
+  }, [apiUrl, assistantId, getAllTasks]);
 
   const value = {
     getTasks,
     getAllTasks,
+    refreshStatus,
     tasks,
     setTasks,
     allTasks,

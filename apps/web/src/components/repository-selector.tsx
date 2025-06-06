@@ -144,17 +144,21 @@ export function RepositorySelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="max-w-[340px] justify-between"
+          className="max-w-[300px] px-3"
           disabled={disabled}
         >
-          <div className="flex items-center gap-2">
-            <GitHubSVG
-              width="16"
-              height="16"
-            />
-            <span className="truncate">{selectedValue || placeholder}</span>
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <GitHubSVG
+                width="16"
+                height="16"
+              />
+              <span className="truncate text-left">
+                {selectedValue || placeholder}
+              </span>
+            </div>
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
           </div>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">

@@ -1,4 +1,5 @@
 import { Dispatch, SetStateAction } from "react";
+import { ThreadStatus } from "@langchain/langgraph-sdk";
 
 // Real task data structure from the agent
 export interface PlanItem {
@@ -8,11 +9,9 @@ export interface PlanItem {
   summary?: string;
 }
 
-export type TaskStatus = "running" | "interrupted" | "done" | "error";
-
 // Task with status extended from the agent
 export interface TaskWithStatus extends PlanItem {
-  status: TaskStatus;
+  status: ThreadStatus;
   repository?: string;
   date?: string;
 }
@@ -30,6 +29,7 @@ export interface TaskWithContext extends TaskWithStatus {
 export interface TaskContextType {
   getTasks: (threadId: string) => Promise<TaskWithStatus[]>;
   getAllTasks: () => Promise<TaskWithContext[]>;
+  refreshStatus: () => Promise<void>;
   tasks: TaskWithStatus[];
   setTasks: Dispatch<SetStateAction<TaskWithStatus[]>>;
   allTasks: TaskWithContext[];
@@ -53,5 +53,5 @@ export interface ThreadSummary {
   tasks: TaskWithContext[];
   completedTasksCount: number;
   totalTasksCount: number;
-  status: "running" | "interrupted" | "done" | "error";
+  status: ThreadStatus;
 }

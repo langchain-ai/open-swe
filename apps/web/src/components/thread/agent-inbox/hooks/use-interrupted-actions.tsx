@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END } from "@langchain/langgraph/web";
 import { useStreamContext } from "@/providers/Stream";
+import { useTasks } from "@/providers/Task";
 
 interface UseInterruptedActionsInput {
   interrupt: HumanInterrupt;
@@ -54,6 +55,7 @@ export default function useInterruptedActions({
   interrupt,
 }: UseInterruptedActionsInput): UseInterruptedActionsValue {
   const thread = useStreamContext();
+  const { refreshStatus } = useTasks();
   const [humanResponse, setHumanResponse] = useState<HumanResponseWithEdits[]>(
     [],
   );
@@ -93,6 +95,12 @@ export default function useInterruptedActions({
           },
         },
       );
+
+      // Trigger immediate status refresh when execution resumes
+      setTimeout(() => {
+        refreshStatus().catch(console.error);
+      }, 1000); // 1 second delay to allow thread status to update
+
       return true;
     } catch (e: any) {
       console.error("Error sending human response", e);

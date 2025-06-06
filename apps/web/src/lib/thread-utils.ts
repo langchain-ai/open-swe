@@ -1,63 +1,10 @@
-import {
-  ThreadSummary,
-  TaskWithContext,
-  TaskStatus,
-  PlanItem,
-} from "@/types/index";
-
-/**
- * Analyzes thread state to determine if it has an error
- */
-function hasThreadError(threadValues: any): boolean {
-  const messages = threadValues?.messages || [];
-  const recentMessages = messages.slice(-5);
-
-  return recentMessages.some((msg: any) => {
-    const content = msg.content;
-    if (typeof content === "string") {
-      return (
-        content.toLowerCase().includes("error") ||
-        content.toLowerCase().includes("failed") ||
-        content.toLowerCase().includes("exception")
-      );
-    }
-    if (Array.isArray(content)) {
-      return content.some(
-        (c: any) =>
-          c.text &&
-          (c.text.toLowerCase().includes("error") ||
-            c.text.toLowerCase().includes("failed") ||
-            c.text.toLowerCase().includes("exception")),
-      );
-    }
-    return false;
-  });
-}
-
-/**
- * Analyzes thread state to determine if it has a human interrupt
- */
-function hasThreadInterrupt(threadValues: any): boolean {
-  const messages = threadValues?.messages || [];
-  const lastMessage = messages[messages.length - 1];
-
-  if (lastMessage?.type === "ai" && lastMessage.tool_calls?.length > 0) {
-    const pendingToolCalls = lastMessage.tool_calls.some((toolCall: any) => {
-      const responseExists = messages.some(
-        (msg: any) => msg.type === "tool" && msg.tool_call_id === toolCall.id,
-      );
-      return !responseExists;
-    });
-    return pendingToolCalls;
-  }
-
-  return false;
-}
+import { ThreadSummary, TaskWithContext, PlanItem } from "@/types/index";
+import { ThreadStatus } from "@langchain/langgraph-sdk";
 
 /**
  * Determines which task is currently being executed based on plan progress
  */
-function getCurrentTaskIndex(plan: PlanItem[]): number {
+export function getCurrentTaskIndex(plan: PlanItem[]): number {
   for (let i = 0; i < plan.length; i += 1) {
     if (!plan[i].completed) {
       return i;
@@ -67,53 +14,39 @@ function getCurrentTaskIndex(plan: PlanItem[]): number {
 }
 
 /**
- * Checks if a thread is actively running by analyzing execution state
+ * Gets the current task object (first uncompleted task)
  */
-function isThreadActive(
-  threadId: string,
-  allActiveThreads: Set<string> = new Set(),
-): boolean {
-  // For now, we'll determine this based on whether the thread has active stream context
-  // This will be enhanced when we connect to the streaming infrastructure
-  return allActiveThreads.has(threadId);
+export function getCurrentTask<T extends PlanItem>(plan: T[]): T | null {
+  return (
+    plan.filter((p) => !p.completed).sort((a, b) => a.index - b.index)[0] ||
+    null
+  );
 }
 
 /**
  * Infers task status based on thread state and execution context
+ * Now primarily uses the thread status from LangGraph SDK
  */
 export function inferTaskStatus(
   task: PlanItem,
   taskIndex: number,
   threadValues: any,
   threadId: string,
-  allActiveThreads: Set<string> = new Set(),
-): TaskStatus {
-  // If task is completed, it's done
+  threadStatus: ThreadStatus = "idle",
+): ThreadStatus {
+  // If task is completed, but thread is still active, show thread status
   if (task.completed) {
-    return "done";
+    // For completed tasks, show idle unless thread has error
+    return threadStatus === "error" ? "error" : "idle";
   }
 
   const plan = threadValues?.plan || [];
   const currentTaskIndex = getCurrentTaskIndex(plan);
   const isCurrentTask = taskIndex === currentTaskIndex;
-  const hasError = hasThreadError(threadValues);
-  const hasInterrupt = hasThreadInterrupt(threadValues);
-  const isActive = isThreadActive(threadId, allActiveThreads);
 
+  // For current task, use thread status directly
   if (isCurrentTask) {
-    if (hasError) {
-      return "error";
-    }
-
-    // Check for interrupt state
-    if (hasInterrupt) {
-      return "interrupted";
-    }
-
-    // If thread is active and this is current task, it's running
-    if (isActive) {
-      return "running";
-    }
+    return threadStatus;
   }
 
   // Past tasks that aren't completed are in error state
@@ -121,49 +54,8 @@ export function inferTaskStatus(
     return "error";
   }
 
-  // Future tasks or paused current task default to interrupted
-  return "interrupted";
-}
-
-/**
- * Enhanced version that can be called with active thread tracking
- */
-export function inferTaskStatusWithContext(
-  task: PlanItem,
-  taskIndex: number,
-  threadValues: any,
-  threadId: string,
-  activeThreads: Set<string>,
-): TaskStatus {
-  return inferTaskStatus(
-    task,
-    taskIndex,
-    threadValues,
-    threadId,
-    activeThreads,
-  );
-}
-
-/**
- * Determines the overall status of a thread based on its constituent tasks
- * Priority: error > running > done > interrupted
- */
-export function determineThreadStatus(
-  tasks: TaskWithContext[],
-): "running" | "interrupted" | "done" | "error" {
-  const hasRunning = tasks.some((t) => t.status === "running");
-  const hasError = tasks.some((t) => t.status === "error");
-  const allDone = tasks.every((t) => t.status === "done");
-
-  if (hasError) {
-    return "error";
-  } else if (hasRunning) {
-    return "running";
-  } else if (allDone) {
-    return "done";
-  } else {
-    return "interrupted";
-  }
+  // Future tasks default to interrupted if thread is not idle
+  return threadStatus === "idle" ? "idle" : "interrupted";
 }
 
 /**
@@ -179,7 +71,7 @@ export function groupTasksIntoThreads(
     if (existingThread) {
       existingThread.tasks.push(task);
       existingThread.totalTasksCount += 1;
-      if (task.status === "done") {
+      if (task.status === "idle" && task.completed) {
         existingThread.completedTasksCount += 1;
       }
     } else {
@@ -197,7 +89,7 @@ export function groupTasksIntoThreads(
           }),
         createdAt: task.createdAt,
         tasks: [task],
-        completedTasksCount: task.status === "done" ? 1 : 0,
+        completedTasksCount: task.status === "idle" && task.completed ? 1 : 0,
         totalTasksCount: 1,
         status: task.status, // Will be overridden below
       });
@@ -206,9 +98,11 @@ export function groupTasksIntoThreads(
     return acc;
   }, [] as ThreadSummary[]);
 
-  // Determine overall thread status for each thread
+  // Use the status from the first task (they should all have the same thread status)
   threadSummaries.forEach((thread) => {
-    thread.status = determineThreadStatus(thread.tasks);
+    if (thread.tasks.length > 0) {
+      thread.status = thread.tasks[0].status;
+    }
   });
 
   return threadSummaries;

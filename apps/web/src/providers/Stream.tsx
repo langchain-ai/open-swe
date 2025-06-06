@@ -67,8 +67,13 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
-  const { getAllTasks, setAllTasks, addActiveThread, removeActiveThread } =
-    useTasks();
+  const {
+    getAllTasks,
+    setAllTasks,
+    addActiveThread,
+    removeActiveThread,
+    refreshStatus,
+  } = useTasks();
   const githubAccessToken =
     document.cookie
       .split("; ")
@@ -114,6 +119,10 @@ const StreamSession = ({
     if (threadId) {
       if (isLoading && !prevIsLoading.current) {
         addActiveThread(threadId);
+        // Immediately refresh status when execution starts
+        setTimeout(() => {
+          refreshStatus().catch(console.error);
+        }, 500); // Small delay to allow LangGraph to update status
       } else if (!isLoading && prevIsLoading.current) {
         setTimeout(() => {
           removeActiveThread(threadId);
@@ -129,6 +138,7 @@ const StreamSession = ({
     removeActiveThread,
     getAllTasks,
     setAllTasks,
+    refreshStatus,
   ]);
 
   return (
