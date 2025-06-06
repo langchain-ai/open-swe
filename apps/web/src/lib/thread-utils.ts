@@ -1,23 +1,23 @@
 import { ThreadSummary, TaskWithContext } from "@/types/index";
 
 /**
- * Groups an array of tasks into ThreadSummary objects
- * Each thread contains aggregated information about its tasks
+ * Function to create simple, predictable task ID
+ */
+export function createTaskId(threadId: string, taskIndex: number): string {
+  return `${threadId}-${taskIndex}`;
+}
+
+/**
+ * Groups tasks into thread summaries
  */
 export function groupTasksIntoThreads(
-  allTasks: TaskWithContext[],
+  tasks: TaskWithContext[],
 ): ThreadSummary[] {
-  const threadSummaries: ThreadSummary[] = allTasks.reduce((acc, task) => {
-    const existingThread = acc.find((t) => t.threadId === task.threadId);
+  const threadMap = new Map<string, ThreadSummary>();
 
-    if (existingThread) {
-      existingThread.tasks.push(task);
-      existingThread.totalTasksCount += 1;
-      if (task.status === "idle" && task.completed) {
-        existingThread.completedTasksCount += 1;
-      }
-    } else {
-      acc.push({
+  tasks.forEach((task) => {
+    if (!threadMap.has(task.threadId)) {
+      threadMap.set(task.threadId, {
         threadId: task.threadId,
         threadTitle:
           task.threadTitle || `Thread ${task.threadId.substring(0, 8)}`,
@@ -25,29 +25,28 @@ export function groupTasksIntoThreads(
         branch: task.branch || "main",
         date:
           task.date ||
-          new Date(task.createdAt).toLocaleDateString("en-US", {
+          new Date().toLocaleDateString("en-US", {
             month: "short",
             day: "numeric",
           }),
         createdAt: task.createdAt,
-        tasks: [task],
-        completedTasksCount: task.status === "idle" && task.completed ? 1 : 0,
-        totalTasksCount: 1,
-        status: task.status, // Will be overridden below
+        tasks: [],
+        completedTasksCount: 0,
+        totalTasksCount: 0,
+        status: task.status,
       });
     }
 
-    return acc;
-  }, [] as ThreadSummary[]);
+    const threadSummary = threadMap.get(task.threadId)!;
+    threadSummary.tasks.push(task);
+    threadSummary.totalTasksCount += 1;
 
-  // Use the status from the first task (they should all have the same thread status)
-  threadSummaries.forEach((thread) => {
-    if (thread.tasks.length > 0) {
-      thread.status = thread.tasks[0].status;
+    if (task.completed) {
+      threadSummary.completedTasksCount += 1;
     }
   });
 
-  return threadSummaries;
+  return Array.from(threadMap.values());
 }
 
 /**

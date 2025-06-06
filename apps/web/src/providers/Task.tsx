@@ -15,11 +15,7 @@ import {
   TaskWithStatus,
 } from "@/types/index";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-
-// Function to create simple, predictable task ID
-function createTaskId(threadId: string, taskIndex: number): string {
-  return `${threadId}-${taskIndex}`;
-}
+import { createTaskId } from "@/lib/thread-utils";
 
 // Tasks use the same status type as threads, so we can use thread status directly
 
