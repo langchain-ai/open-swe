@@ -1,54 +1,18 @@
-import { Sandbox } from "@e2b/code-interpreter";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import {
-  GraphState,
-  GraphConfig,
-  GraphUpdate,
-  TargetRepository,
-} from "../types.js";
-import { TIMEOUT_EXTENSION_OPT } from "../constants.js";
+import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import {
   checkoutBranch,
+  cloneRepo,
   configureGitUserInRepo,
   getBranchName,
   getRepoAbsolutePath,
   pullLatestChanges,
-} from "../utils/git/index.js";
-import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+} from "../utils/git.js";
+import { daytonaClient } from "../utils/sandbox.js";
+import { SNAPSHOT_NAME } from "../constants.js";
+import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
-
-const SANDBOX_TEMPLATE_ID = "eh0860emqx28qyxmbctu";
-
-async function cloneRepo(sandbox: Sandbox, targetRepository: TargetRepository) {
-  if (!process.env.GITHUB_PAT) {
-    throw new Error("GITHUB_PAT environment variable not set.");
-  }
-
-  try {
-    const gitCloneCommand = ["git", "clone"];
-
-    const repoUrlWithToken = `https://${process.env.GITHUB_PAT}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
-
-    if (targetRepository.branch) {
-      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
-    } else {
-      gitCloneCommand.push(repoUrlWithToken);
-    }
-
-    logger.info("Cloning repository", {
-      command: gitCloneCommand.join(" "),
-    });
-    return await sandbox.commands.run(
-      gitCloneCommand.join(" "),
-      TIMEOUT_EXTENSION_OPT,
-    );
-  } catch (e) {
-    const errorFields = getSandboxErrorFields(e);
-    logger.error("Failed to clone repository", errorFields ?? e);
-    throw e;
-  }
-}
 
 /**
  * Initializes the session. This ensures there's an active VM session, and that
@@ -60,16 +24,8 @@ export async function initialize(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  if (!config.configurable) {
-    throw new Error("Configuration object not found.");
-  }
-  const { sandboxSessionId } = state;
-  const { targetRepository } = state;
-  if (!targetRepository) {
-    throw new Error(
-      "Missing required target repository. Please provide a git repository in state or configuration.",
-    );
-  }
+  const { githubToken, githubAccessToken } = getGitHubTokensFromConfig(config);
+  const { sandboxSessionId, targetRepository } = state;
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   if (sandboxSessionId) {
@@ -78,13 +34,10 @@ export async function initialize(
         sandboxSessionId,
       });
       // Resume the sandbox if the session ID is in the config.
-      const newSandbox = await Sandbox.resume(
-        sandboxSessionId,
-        TIMEOUT_EXTENSION_OPT,
-      );
-      await pullLatestChanges(absoluteRepoDir, newSandbox);
+      const existingSandbox = await daytonaClient().get(sandboxSessionId);
+      await pullLatestChanges(absoluteRepoDir, existingSandbox);
       return {
-        sandboxSessionId: newSandbox.sandboxId,
+        sandboxSessionId: existingSandbox.id,
       };
     } catch (e) {
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
@@ -93,21 +46,25 @@ export async function initialize(
   }
 
   logger.info("Creating sandbox...");
-  const sandbox = await Sandbox.create(
-    SANDBOX_TEMPLATE_ID,
-    TIMEOUT_EXTENSION_OPT,
-  );
+  const sandbox = await daytonaClient().create({
+    image: SNAPSHOT_NAME,
+  });
 
-  const res = await cloneRepo(sandbox, targetRepository);
-  if (res.error) {
+  const res = await cloneRepo(sandbox, targetRepository, { githubToken });
+  if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
-    logger.error("Failed to clone repository", res.error);
-    throw new Error(`Failed to clone repository.\n${res.error}`);
+    logger.error("Failed to clone repository", res.result);
+    throw new Error(`Failed to clone repository.\n${res.result}`);
   }
   logger.info("Repository cloned successfully.");
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
-  await configureGitUserInRepo(absoluteRepoDir, sandbox);
+  await configureGitUserInRepo(absoluteRepoDir, sandbox, {
+    githubToken,
+    githubAccessToken,
+    owner: targetRepository.owner,
+    repo: targetRepository.repo,
+  });
   logger.info("Git user configured successfully.");
 
   const checkoutBranchRes = await checkoutBranch(
@@ -123,7 +80,7 @@ export async function initialize(
   }
 
   return {
-    sandboxSessionId: sandbox.sandboxId,
+    sandboxSessionId: sandbox.id,
     targetRepository,
   };
 }

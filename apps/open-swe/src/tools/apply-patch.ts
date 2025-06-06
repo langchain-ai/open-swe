@@ -2,11 +2,12 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { applyPatch } from "diff";
 import { GraphState } from "../types.js";
-import { Sandbox } from "@e2b/code-interpreter";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { daytonaClient } from "../utils/sandbox.js";
+import { SANDBOX_ROOT_DIR } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
@@ -19,9 +20,9 @@ const applyPatchToolSchema = z.object({
   file_path: z.string().describe("The file path to apply the diff to."),
   workdir: z
     .string()
-    .default("/home/user")
+    .default(SANDBOX_ROOT_DIR)
     .describe(
-      "The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '/home/user' as this is the root directory of the sandbox.",
+      `The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '${SANDBOX_ROOT_DIR}' as this is the root directory of the sandbox.`,
     ),
 });
 
@@ -38,7 +39,7 @@ export const applyPatchTool = tool(
 
     const { diff, file_path, workdir } = input;
 
-    const sandbox = await Sandbox.connect(sandboxSessionId);
+    const sandbox = await daytonaClient().get(sandboxSessionId);
 
     const { success: readFileSuccess, output: readFileOutput } = await readFile(
       sandbox,

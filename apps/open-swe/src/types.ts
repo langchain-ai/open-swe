@@ -343,6 +343,46 @@ export const GraphConfiguration = z.object({
           "Maximum number of context gathering actions during planning",
       },
     }),
+  /**
+   * The maximum number of tokens to generate in an individual generation.
+   * @default 10_000
+   */
+  maxTokens: z
+    .number()
+    .optional()
+    .default(() => 10_000)
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "number",
+        default: 10_000,
+        min: 1,
+        max: 64_000,
+        description:
+          "The maximum number of tokens to generate in an individual generation",
+      },
+    }),
+  /**
+   * The user's GitHub installation token. To be used to take actions on behalf of the user.
+   */
+  "x-github-installation-token": z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "hidden",
+      },
+    }),
+  /**
+   * The user's GitHub access token. To be used in requests to get information about the user.
+   */
+  "x-github-access-token": z
+    .string()
+    .optional()
+    .langgraph.metadata({
+      x_oap_ui_config: {
+        type: "hidden",
+      },
+    }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

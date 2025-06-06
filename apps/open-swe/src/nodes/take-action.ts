@@ -10,14 +10,14 @@ import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
   getRepoAbsolutePath,
-} from "../utils/git/index.js";
-import { Sandbox } from "@e2b/code-interpreter";
+} from "../utils/git.js";
 import {
   formatBadArgsError,
   zodSchemaToString,
 } from "../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../utils/truncate-outputs.js";
+import { daytonaClient } from "../utils/sandbox.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -127,7 +127,7 @@ export async function takeAction(
 
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
-  const sandbox = await Sandbox.connect(state.sandboxSessionId);
+  const sandbox = await daytonaClient().get(state.sandboxSessionId);
   const changedFiles = await getChangedFilesStatus(
     getRepoAbsolutePath(state.targetRepository),
     sandbox,

@@ -2,7 +2,7 @@ import { isAIMessage } from "@langchain/core/messages";
 import { GraphState } from "../types.js";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
-import { pauseSandbox, resumeSandbox } from "../utils/sandbox.js";
+import { stopSandbox, startSandbox } from "../utils/sandbox.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -21,7 +21,7 @@ export async function requestHelp(state: GraphState): Promise<Command> {
   if (!sandboxSessionId) {
     throw new Error("Sandbox session ID not found.");
   }
-  await pauseSandbox(sandboxSessionId);
+  await stopSandbox(sandboxSessionId);
 
   const toolCall = lastMessage.tool_calls[0];
 
@@ -52,7 +52,7 @@ export async function requestHelp(state: GraphState): Promise<Command> {
     if (typeof interruptRes.args !== "string") {
       throw new Error("Interrupt response expected to be a string.");
     }
-    await resumeSandbox(sandboxSessionId);
+    await startSandbox(sandboxSessionId);
     return new Command({
       goto: "generate-action",
       update: {

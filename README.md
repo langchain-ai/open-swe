@@ -43,32 +43,55 @@ ANTHROPIC_API_KEY=""
 OPENAI_API_KEY=""
 GOOGLE_API_KEY=""
 
-# E2B API key for accessing and modifying the code in the cloud sandbox.
-E2B_API_KEY=""
-
-# Your GitHub PAT with access to the repositories you want to modify.
-GITHUB_PAT=""
+# Daytona API key for accessing and modifying the code in the cloud sandbox.
+DAYTONA_API_KEY=""
 ```
 
 And the web `.env` file should contain the following variables:
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:2024 # Change to production URL when deployed
-NEXT_PUBLIC_ASSISTANT_ID=open-swe
+NEXT_PUBLIC_ASSISTANT_ID="open-swe"
+
+# For the GitHub OAuth flow
+GITHUB_APP_CLIENT_ID=""
+GITHUB_APP_CLIENT_SECRET=""
+GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
+
+GITHUB_APP_NAME="open-swe-dev"
+GITHUB_APP_ID=""
+GITHUB_APP_PRIVATE_KEY=""
 ```
 
-To generate the GitHub personal access token, you should:
+To get the GitHub App secrets, first create a new GitHub app (note: this is not the same as the OAuth app) in [the developer settings](https://github.com/settings/apps/new).
 
-1. Go to [GitHub settings](https://github.com/settings/personal-access-tokens)
-2. Click on `Generate new token` to generate a new fine grained token.
-3. Give the token a name & description.
-4. Choose `Only select repositories`, and select the repositories you want to give Open SWE access to.
-5. Under `Permissions`, give it `Repository permission`:
-  - `Contents` - `Read and write`
-  - `Metadata` - `Read-only` (should be auto enabled after selecting `Contents`)
-  - `Pull requests` - `Read and write`
-6. Click `Generate token` & copy the token.
-7. Paste the token into the `GITHUB_PAT` variable in the agent `.env` file.
+Give the app a name and description.
+
+Under `Callback URL`, set it to: `http://localhost:3000/api/auth/github/callback` for local development. Then, uncheck `Expire user authorization tokens`, and check `Request user authorization (OAuth) during installation`.
+
+Under `Post installation`, check `Redirect on update`.
+
+Under `Webhook`, uncheck `Active`.
+
+Under `Repository permissions`, give the app the following permissions:
+
+- `Contents` - `Read & Write`
+- `Metadata` - `Read & Write`
+- `Pull requests` - `Read & Write`
+- `Issues` - `Read & Write`
+
+Finally, under `Where can this GitHub App be installed?` ensure `Any account` is selected.
+
+After creating the app, you will be taken to the app's settings page. Copy/generate the following fields for your environment variables:
+
+`App ID` - `GITHUB_APP_ID`
+`Client ID` - `GITHUB_APP_CLIENT_ID`
+`Client secrets` - Generate a new secret key, and set it under `GITHUB_APP_CLIENT_SECRET`
+Scroll down to `Private keys`, and generate a new private key. This will download a file. Set the contents of this file under `GITHUB_APP_PRIVATE_KEY`.
+Set `GITHUB_APP_REDIRECT_URI` to `http://localhost:3000/api/auth/github/callback` for local development.
+Set `GITHUB_APP_NAME` to the name of your app.
+
+That's it! You can now authenticate users with GitHub, and generate tokens for them.
 
 ## Running the graph
 
@@ -114,3 +137,4 @@ Once you've accepted the plan, it will begin the execution flow. When the agent 
 ## Accessing Changes
 
 Open SWE will automatically create a branch whenever you create a new thread with a naming format of `open-swe/<threadId>`. Every time a file is created, modified, or deleted, the changes will be committed to this branch. You can access the changes in the repository by checking out this branch.
+
