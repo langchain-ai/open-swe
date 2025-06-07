@@ -1,3 +1,4 @@
+import path from "node:path";
 import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
@@ -13,6 +14,9 @@ import { getCurrentPlanItem } from "../utils/current-task.js";
 import { getMessageContentString } from "../utils/message/content.js";
 import { getActivePlanItems } from "../utils/task-plan.js";
 import { SANDBOX_ROOT_DIR } from "../constants.js";
+import {
+  typedUi,
+} from "@langchain/langgraph-sdk/react-ui/server";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -132,6 +136,7 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  const ui = typedUi(config);
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [shellTool, applyPatchTool, requestHumanHelpTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
@@ -152,16 +157,35 @@ export async function generateAction(
     newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
+  const messageTextContent = getMessageContentString(response.content);
   logger.info("Generated action", {
     currentTask: getCurrentPlanItem(getActivePlanItems(state.plan)).plan,
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
+    ...(messageTextContent && {
+      content: messageTextContent,
     }),
     ...(response.tool_calls?.[0] && {
       name: response.tool_calls?.[0].name,
       args: response.tool_calls?.[0].args,
     }),
   });
+
+  if (hasToolCalls) {
+    const toolCall = response.tool_calls?.[0];
+    if (toolCall?.name === "apply_patch") {
+      ui.push({ name: "apply-patch", props: {
+        file: path.join(toolCall.args.workdir || SANDBOX_ROOT_DIR, toolCall.args.file_path),
+        status: "generating",
+        diff: toolCall.args.diff,
+        reasoningText: messageTextContent
+      } }, { message: response })
+    } else if (toolCall?.name === "shell") {
+      ui.push({ name: "shell-command", props: {
+        command: `cd ${toolCall.args.workdir || SANDBOX_ROOT_DIR} && ${toolCall.args.command.join(" ")}`,
+        status: "generating",
+        reasoningText: messageTextContent
+      } }, { message: response })
+    }
+  }
 
   return {
     messages: [response],

@@ -1,4 +1,9 @@
 import "@langchain/langgraph/zod";
+import {
+  uiMessageReducer,
+  type UIMessage,
+  type RemoveUIMessage,
+} from "@langchain/langgraph-sdk/react-ui";
 import { z } from "zod";
 import {
   addMessages,
@@ -153,6 +158,12 @@ export const GraphAnnotation = z.object({
     .string()
     .default(() => "")
     .langgraph.reducer((_state, update) => update),
+  ui: z
+    .custom<UIMessage[]>()
+    .default(() => [])
+    .langgraph.reducer<(UIMessage | RemoveUIMessage)[]>((state, update) =>
+      uiMessageReducer(state, update),
+    ),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;
