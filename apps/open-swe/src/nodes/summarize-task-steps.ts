@@ -28,7 +28,7 @@ Here are all of your tasks you've completed, remaining, and the current task you
 
 You MUST adhere to the following criteria when summarizing the conversation history:
   - Include insights, and learnings you've discovered about the codebase or specific files while completing the task.
-    - You should NOT document scripts, file structure, or other context which could be categorized as 'general codebase context'. General codebase context (e.g. scripts, file structure, package managers, etc.) will be generated in a separate step. Inspect the codebase context string provided below for this information.
+    - You should NOT document scripts, file structure, or other context which could be categorized as 'general codebase context'. General codebase context is automatically included via the \`tree\` command.
   - If files were created or modified, include short summaries of the changes made.
     - What file(s) were modified/created.
     - What content was added/removed.
@@ -40,9 +40,6 @@ You MUST adhere to the following criteria when summarizing the conversation hist
   - Do not duplicate ANY information. Ensure you carefully read and understand the task summaries generated above, and do not repeat any information you've already included.
   - You do not need to include specific codebase context here, as codebase context will be generated in a separate step. Your sole task is to generate a concise summary of this specific task you just completed.
   - Ensure your summary is as concise as possible, but useful for future context.
-
-Here is the current state of the codebase context you've accumulated. Remember YOU SHOULD NOT INCLUDE ANY GENERAL CODEBASE CONTEXT IN YOUR TASK SUMMARY.
-{CODEBASE_CONTEXT}
 
 Ensure you do NOT include codebase context in your task summary, as we want to avoid including duplicate information.
 
@@ -59,55 +56,16 @@ With this in mind, please use the following conversation history to generate a c
 Conversation history:
 {CONVERSATION_HISTORY}`;
 
-const updateCodebaseContextSysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
-
-Your current task is to update the codebase context, given the recent actions taken by the agent.
-
-The codebase context should contain:
-  - Up to date information on the codebase file paths, and their contents.
-    - Do not include entire file contents, but rather high level descriptions of what a file contains, and what it does.
-  - Information on the software installed, and used in the codebase, including information such as version numbers, and dependencies.
-  - High level context about the codebase structure, and style.
-  - Any other relevant codebase information which may be useful for future context.
-  - There should be NO task specific context here. ONLY include context about the codebase. This context should be generally applicable and not tied to the specifics of the task.
-
-You have the following codebase context:
-{CODEBASE_CONTEXT}
-
-Please inspect this context, and given the rules above, please respond with a full, complete codebase context I can use for future context.
-When responding, ensure:
-  - You do not duplicate information.
-  - You remove old/stale context from the existing codebase context string if recent messages contradict it.
-  - You do NOT remove any information from the existing codebase context string if recent messages do not contradict it. We want to ensure we always have a complete picture of the codebase.
-  - You modify/combine information from the existing codebase context string if if new information is provided which warrants a change.
-
-Please be concise, clear and helpful. Omit any extraneous information. Respond ONLY with the codebase context. Do not include any additional information, or text before or after the codebase context.
-`;
-
-const updateCodebaseContextUserMessage = `Here is the task you just completed:
-{COMPLETED_TASK}
-
-The first message in the conversation history is the user's request. Messages from previously completed tasks have already been removed, in favor of task summaries.
-With this in mind, please use the following conversation history to update the codebase context to include new relevant information.
-
-Conversation history:
-{CONVERSATION_HISTORY}`;
-
 const logger = createLogger(LogLevel.INFO, "SummarizeTaskSteps");
 
-const formatPrompt = (plan: PlanItem[], codebaseContext: string): string =>
-  taskSummarySysPrompt
-    .replace(
-      "{PLAN_PROMPT}",
-      formatPlanPrompt(plan, {
-        useLastCompletedTask: true,
-        includeSummaries: true,
-      }),
-    )
-    .replace(
-      "{CODEBASE_CONTEXT}",
-      `<codebase-context>\n${codebaseContext || "No codebase context generated yet."}\n</codebase-context>`,
-    );
+const formatPrompt = (plan: PlanItem[]): string =>
+  taskSummarySysPrompt.replace(
+    "{PLAN_PROMPT}",
+    formatPlanPrompt(plan, {
+      useLastCompletedTask: true,
+      includeSummaries: true,
+    }),
+  );
 
 const formatUserMessage = (
   messages: BaseMessage[],
@@ -121,31 +79,6 @@ const formatUserMessage = (
   }
 
   return userContextMessage
-    .replace("{COMPLETED_TASK}", completedTask.plan)
-    .replace(
-      "{CONVERSATION_HISTORY}",
-      messages.map(getMessageString).join("\n"),
-    );
-};
-
-const formatCodebaseContextPrompt = (codebaseContext: string): string =>
-  updateCodebaseContextSysPrompt.replace(
-    "{CODEBASE_CONTEXT}",
-    `<codebase-context>\n${codebaseContext || "No codebase context generated yet."}\n</codebase-context>`,
-  );
-
-const formatUserCodebaseContextMessage = (
-  messages: BaseMessage[],
-  plans: PlanItem[],
-): string => {
-  const completedTask = plans.find((p) => p.completed);
-  if (!completedTask) {
-    throw new Error(
-      "No completed task found when trying to format user message for task summary.",
-    );
-  }
-
-  return updateCodebaseContextUserMessage
     .replace("{COMPLETED_TASK}", completedTask.plan)
     .replace(
       "{CONVERSATION_HISTORY}",
@@ -167,7 +100,7 @@ async function generateTaskSummaryFunc(
   const response = await model.withConfig({ tags: ["nostream"] }).invoke([
     {
       role: "system",
-      content: formatPrompt(activePlanItems, state.codebaseContext),
+      content: formatPrompt(activePlanItems),
     },
     {
       role: "user",
@@ -182,33 +115,7 @@ async function generateTaskSummaryFunc(
 }
 
 const generateTaskSummary = traceable(generateTaskSummaryFunc, {
-  name: "generate_task_summary",
-});
-
-async function updateCodebaseContextFunc(
-  state: GraphState,
-  model: ConfigurableModel,
-): Promise<string> {
-  logger.info(`Updating codebase context...`);
-  const response = await model.withConfig({ tags: ["nostream"] }).invoke([
-    {
-      role: "system",
-      content: formatCodebaseContextPrompt(state.codebaseContext),
-    },
-    {
-      role: "user",
-      content: formatUserCodebaseContextMessage(
-        state.messages,
-        getActivePlanItems(state.plan),
-      ),
-    },
-  ]);
-  const contentString = getMessageContentString(response.content);
-  return contentString;
-}
-
-const updateCodebaseContext = traceable(updateCodebaseContextFunc, {
-  name: "update_codebase_context",
+  name: "generate-task-summary",
 });
 
 export async function summarizeTaskSteps(
@@ -222,10 +129,7 @@ export async function summarizeTaskSteps(
   }
 
   const model = await loadModel(config, Task.SUMMARIZER);
-  const [taskSummary, updatedCodebaseContext] = await Promise.all([
-    generateTaskSummary(state, model),
-    updateCodebaseContext(state, model),
-  ]);
+  const taskSummary = await generateTaskSummary(state, model);
   const updatedTaskPlan = completePlanItem(
     state.plan,
     getActiveTask(state.plan).id,
@@ -250,7 +154,6 @@ export async function summarizeTaskSteps(
     const commandUpdate: GraphUpdate = {
       messages: newMessagesStateUpdate,
       plan: updatedTaskPlan,
-      codebaseContext: updatedCodebaseContext,
     };
     return new Command({
       goto: "generate-conclusion",
@@ -261,7 +164,6 @@ export async function summarizeTaskSteps(
   const commandUpdate: GraphUpdate = {
     messages: newMessagesStateUpdate,
     plan: updatedTaskPlan,
-    codebaseContext: updatedCodebaseContext,
   };
   return new Command({
     goto: "generate-action",

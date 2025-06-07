@@ -129,10 +129,6 @@ export const GraphAnnotation = z.object({
     .string()
     .default(() => "")
     .langgraph.reducer((_state, update) => update),
-  codebaseContext: z
-    .string()
-    .default(() => "")
-    .langgraph.reducer((_state, update) => update),
   /**
    * The session ID of the Sandbox to use.
    */
@@ -152,6 +148,10 @@ export const GraphAnnotation = z.object({
    */
   targetRepository: z
     .custom<TargetRepository>()
+    .langgraph.reducer((_state, update) => update),
+  codebaseTree: z
+    .string()
+    .default(() => "")
     .langgraph.reducer((_state, update) => update),
 });
 
