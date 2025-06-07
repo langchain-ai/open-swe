@@ -7,6 +7,7 @@ import {
   CopyCheck,
   ChevronLeft,
   ChevronRight,
+  ArrowUp,
 } from "lucide-react";
 import { TooltipIconButton } from "../tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
@@ -123,6 +124,7 @@ export function CommandBar({
   setIsEditing,
   handleSubmitEdit,
   handleRegenerate,
+  handleMoveToInput,
   isLoading,
 }: {
   content: string;
@@ -132,6 +134,7 @@ export function CommandBar({
   setIsEditing?: React.Dispatch<React.SetStateAction<boolean>>;
   handleSubmitEdit?: () => void;
   handleRegenerate?: () => void;
+  handleMoveToInput?: () => void;
   isLoading: boolean;
 }) {
   if (isHumanMessage && isAiMessage) {
@@ -204,6 +207,16 @@ export function CommandBar({
           <RefreshCcw />
         </TooltipIconButton>
       )}
+      {isAiMessage && !!handleMoveToInput && (
+        <TooltipIconButton
+          disabled={isLoading}
+          tooltip="Move to input"
+          variant="ghost"
+          onClick={handleMoveToInput}
+        >
+          <ArrowUp />
+        </TooltipIconButton>
+      )}
       {showEdit && (
         <TooltipIconButton
           disabled={isLoading}
@@ -219,3 +232,4 @@ export function CommandBar({
     </div>
   );
 }
+

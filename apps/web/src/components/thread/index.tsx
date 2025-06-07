@@ -27,6 +27,7 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
+import { getContentString } from "./utils";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
@@ -229,6 +230,15 @@ export function Thread() {
     });
   };
 
+  const handleMoveToInput = (message: Message) => {
+    const messageContent = getContentString(message.content);
+    if (messageContent.trim()) {
+      // Append to existing input with a newline if input already has content
+      const newInput = input.trim() ? `${input}\n\n${messageContent}` : messageContent;
+      setInput(newInput);
+    }
+  };
+
   const chatStarted = !!threadId || !!messages.length;
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
@@ -394,6 +404,7 @@ export function Thread() {
                           message={message}
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
+                          handleMoveToInput={() => handleMoveToInput(message)}
                         />
                       ),
                     )}
@@ -406,6 +417,7 @@ export function Thread() {
                         message={undefined}
                         isLoading={isLoading}
                         handleRegenerate={handleRegenerate}
+                        handleMoveToInput={undefined}
                         forceRenderInterrupt={true}
                       />
                     )}
@@ -545,3 +557,4 @@ export function Thread() {
     </div>
   );
 }
+

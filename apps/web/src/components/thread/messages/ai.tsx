@@ -69,11 +69,13 @@ export function AssistantMessage({
   message,
   isLoading,
   handleRegenerate,
+  handleMoveToInput,
   forceRenderInterrupt = false,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+  handleMoveToInput?: () => void;
   forceRenderInterrupt?: boolean;
 }) {
   const content = message?.content ?? [];
@@ -180,6 +182,7 @@ export function AssistantMessage({
                 isLoading={isLoading}
                 isAiMessage={true}
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
+                handleMoveToInput={handleMoveToInput}
               />
             </div>
           </span>
@@ -200,3 +203,4 @@ export function AssistantMessageLoading() {
     </div>
   );
 }
+
