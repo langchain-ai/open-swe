@@ -1,7 +1,6 @@
 import { validate } from "uuid";
 import { getApiKey } from "@/lib/api-key";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useQueryState } from "nuqs";
 import {
   createContext,
   useContext,
@@ -10,15 +9,33 @@ import {
   useState,
   Dispatch,
   SetStateAction,
+  useEffect,
+  useRef,
 } from "react";
 import { createClient } from "./client";
 
+// Enhanced thread with task completion info
+export interface ThreadWithTasks extends Thread {
+  threadTitle: string;
+  repository: string;
+  branch: string;
+  completedTasksCount: number;
+  totalTasksCount: number;
+  tasks: Array<{
+    index: number;
+    plan: string;
+    completed: boolean;
+    summary?: string;
+  }>;
+}
+
 interface ThreadContextType {
-  getThreads: () => Promise<Thread[]>;
-  threads: Thread[];
-  setThreads: Dispatch<SetStateAction<Thread[]>>;
+  threads: ThreadWithTasks[];
+  setThreads: Dispatch<SetStateAction<ThreadWithTasks[]>>;
   threadsLoading: boolean;
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
+  refreshThreads: () => Promise<void>;
+  getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -38,29 +55,152 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const assistantId: string | undefined =
     process.env.NEXT_PUBLIC_ASSISTANT_ID ?? "";
 
-  const [threads, setThreads] = useState<Thread[]>([]);
+  const [threads, setThreads] = useState<ThreadWithTasks[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
-  const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+  // Simple polling for active threads only
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-    const threads = await client.threads.search({
-      metadata: {
-        ...getThreadSearchMetadata(assistantId),
-      },
-      limit: 100,
+  const getThread = useCallback(
+    async (threadId: string): Promise<ThreadWithTasks | null> => {
+      if (!apiUrl || !assistantId) return null;
+      const client = createClient(apiUrl, getApiKey() ?? undefined);
+
+      try {
+        const thread = await client.threads.get(threadId);
+        return enhanceThreadWithTasks(thread);
+      } catch (error) {
+        console.error("Failed to fetch thread:", threadId, error);
+        return null;
+      }
+    },
+    [apiUrl, assistantId],
+  );
+
+  const enhanceThreadWithTasks = (thread: Thread): ThreadWithTasks => {
+    const threadValues = thread.values as any;
+    const plan: any[] = threadValues?.plan || [];
+    const proposedPlan: any[] = threadValues?.proposedPlan || [];
+    const rawTasks = plan.length > 0 ? plan : proposedPlan;
+
+    const tasks = rawTasks.map((rawTask, index) => {
+      if (typeof rawTask === "string") {
+        return {
+          index,
+          plan: rawTask,
+          completed: false,
+          summary: undefined,
+        };
+      }
+      return rawTask;
     });
 
-    return threads;
+    const completedTasksCount = tasks.filter((task) => task.completed).length;
+    const targetRepository = threadValues?.targetRepository;
+    const messages = (threadValues as any)?.messages;
+    const threadTitle =
+      messages?.[0]?.content?.[0]?.text?.substring(0, 50) + "..." ||
+      `Thread ${thread.thread_id.substring(0, 8)}`;
+
+    return {
+      ...thread,
+      threadTitle,
+      repository:
+        targetRepository?.repo ||
+        targetRepository?.name ||
+        "Unknown Repository",
+      branch: targetRepository?.branch || "main",
+      completedTasksCount,
+      totalTasksCount: tasks.length,
+      tasks,
+    };
+  };
+
+  const refreshThreads = useCallback(async (): Promise<void> => {
+    if (!apiUrl || !assistantId) return;
+
+    setThreadsLoading(true);
+    const client = createClient(apiUrl, getApiKey() ?? undefined);
+
+    try {
+      // Simple thread search - try both metadata approaches
+      const searchParams = {
+        limit: 100,
+        metadata: getThreadSearchMetadata(assistantId),
+      };
+
+      let threadsResponse = await client.threads.search(searchParams);
+
+      // If no threads found, try alternative metadata
+      if (threadsResponse.length === 0) {
+        const altMetadata = assistantId.includes("-")
+          ? { assistant_id: assistantId }
+          : { graph_id: assistantId };
+        threadsResponse = await client.threads.search({
+          limit: 100,
+          metadata: altMetadata,
+        });
+      }
+
+      // Enhance threads with task data
+      const enhancedThreads: ThreadWithTasks[] = [];
+      for (const thread of threadsResponse) {
+        try {
+          const fullThread = await client.threads.get(thread.thread_id);
+          enhancedThreads.push(enhanceThreadWithTasks(fullThread));
+        } catch (error) {
+          console.error(`Failed to enhance thread ${thread.thread_id}:`, error);
+        }
+      }
+
+      // Sort by creation date (newest first)
+      enhancedThreads.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+
+      setThreads(enhancedThreads);
+    } catch (error) {
+      console.error("Failed to fetch threads:", error);
+    } finally {
+      setThreadsLoading(false);
+    }
   }, [apiUrl, assistantId]);
 
+  // Simple polling for busy threads
+  useEffect(() => {
+    const busyThreads = threads.filter((t) => t.status === "busy");
+
+    if (busyThreads.length > 0) {
+      pollIntervalRef.current = setInterval(() => {
+        refreshThreads().catch(console.error);
+      }, 3000); // Poll every 3 seconds
+    } else {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, [threads, refreshThreads]);
+
+  // Initial load
+  useEffect(() => {
+    refreshThreads();
+  }, [refreshThreads]);
+
   const value = {
-    getThreads,
     threads,
     setThreads,
     threadsLoading,
     setThreadsLoading,
+    refreshThreads,
+    getThread,
   };
 
   return (

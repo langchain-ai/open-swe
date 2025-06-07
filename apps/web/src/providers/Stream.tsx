@@ -4,7 +4,6 @@ import React, {
   ReactNode,
   useState,
   useEffect,
-  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -18,15 +17,12 @@ import {
 import { useQueryState } from "nuqs";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
 import { useThreads } from "./Thread";
-import { useTasks } from "./Task";
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { Copy, CopyCheck, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
-
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
-
 import { StateType } from "@/types/stream";
 
 type TargetRepository = { owner: string; repo: string };
@@ -63,14 +59,7 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads } = useThreads();
-  const {
-    getAllTasks,
-    setAllTasks,
-    addActiveThread,
-    removeActiveThread,
-    refreshStatus,
-  } = useTasks();
+  const { refreshThreads, setThreads } = useThreads();
   const githubAccessToken =
     document.cookie
       .split("; ")
@@ -95,48 +84,15 @@ const StreamSession = ({
     },
     onThreadId: (id) => {
       setThreadId(id);
-      // Add thread to active tracking for real-time status updates
-      addActiveThread(id);
       // Refetch threads list when thread ID changes.
       // Wait for some seconds before fetching so we're able to get the new thread that was created.
       sleep().then(() => {
-        Promise.all([
-          getThreads().then(setThreads),
-          getAllTasks().then(setAllTasks),
-        ]).catch(console.error);
+        refreshThreads().catch(console.error);
       });
     },
   });
 
-  const isLoading = streamValue.isLoading;
-  const prevIsLoading = useRef(isLoading);
-  // TODO: improve active thread tracking implementation
-  // Track loading state changes to manage active threads
-  useEffect(() => {
-    if (threadId) {
-      if (isLoading && !prevIsLoading.current) {
-        addActiveThread(threadId);
-        // Immediately refresh status when execution starts
-        setTimeout(() => {
-          refreshStatus().catch(console.error);
-        }, 500); // Small delay to allow LangGraph to update status
-      } else if (!isLoading && prevIsLoading.current) {
-        setTimeout(() => {
-          removeActiveThread(threadId);
-          getAllTasks().then(setAllTasks).catch(console.error);
-        }, 2000); // 2 second delay
-      }
-    }
-    prevIsLoading.current = isLoading;
-  }, [
-    isLoading,
-    threadId,
-    addActiveThread,
-    removeActiveThread,
-    getAllTasks,
-    setAllTasks,
-    refreshStatus,
-  ]);
+  // Simplified: ThreadProvider now handles polling automatically for busy threads
 
   return (
     <StreamContext.Provider value={streamValue}>

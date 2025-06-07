@@ -2,12 +2,10 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Archive, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useTasks } from "@/providers/Task";
-import { ThreadSummary } from "@/types/index";
+import { useThreads, ThreadWithTasks } from "@/providers/Thread";
 import { useQueryState, parseAsString } from "nuqs";
 import { useState } from "react";
 import { ThreadItem } from "./thread-item";
-import { groupTasksIntoThreads, sortThreadsByDate } from "@/lib/thread-utils";
 
 const THREADS_PER_PAGE = 5;
 
@@ -16,12 +14,12 @@ export default function TaskList() {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
-  const { allTasks, tasksLoading } = useTasks();
+  const { threads, threadsLoading } = useThreads();
 
   const isDashboardMode = !taskId;
 
-  const handleThreadClick = (thread: ThreadSummary) => {
-    setThreadId(thread.threadId);
+  const handleThreadClick = (thread: ThreadWithTasks) => {
+    setThreadId(thread.thread_id);
     setTaskId(null);
   };
 
@@ -29,9 +27,8 @@ export default function TaskList() {
     return null;
   }
 
-  const threadSummaries = groupTasksIntoThreads(allTasks);
-  const sortedThreads = sortThreadsByDate(threadSummaries);
-
+  // Threads are already sorted by creation date in ThreadProvider
+  const sortedThreads = threads;
   const totalThreads = sortedThreads.length;
   const totalPages = Math.ceil(totalThreads / THREADS_PER_PAGE);
   const startIndex = currentPage * THREADS_PER_PAGE;
@@ -60,7 +57,7 @@ export default function TaskList() {
             value="threads"
             className="mt-0 flex-1 overflow-hidden"
           >
-            {tasksLoading ? (
+            {threadsLoading ? (
               <div className="flex h-full items-center justify-center">
                 <div className="text-center text-gray-500">
                   <Archive className="mx-auto mb-2 h-6 w-6 animate-pulse opacity-50" />
@@ -71,7 +68,7 @@ export default function TaskList() {
               <div className="space-y-4">
                 {paginatedThreads.map((thread) => (
                   <ThreadItem
-                    key={thread.threadId}
+                    key={thread.thread_id}
                     thread={thread}
                     onClick={handleThreadClick}
                     variant="dashboard"
@@ -80,36 +77,35 @@ export default function TaskList() {
 
                 {/* Pagination Controls */}
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+                  <div className="flex items-center justify-between border-t pt-4">
                     <div className="text-sm text-gray-500">
                       Showing {startIndex + 1}-
                       {Math.min(endIndex, totalThreads)} of {totalThreads}{" "}
                       threads
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center space-x-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          setCurrentPage((p) => Math.max(0, p - 1))
+                          setCurrentPage(Math.max(0, currentPage - 1))
                         }
                         disabled={currentPage === 0}
-                        className="h-8 w-8 p-0"
                       >
                         <ChevronLeft className="h-4 w-4" />
+                        Previous
                       </Button>
-                      <span className="px-3 py-1 text-sm text-gray-500">
-                        {currentPage + 1} / {totalPages}
-                      </span>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() =>
-                          setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
+                          setCurrentPage(
+                            Math.min(totalPages - 1, currentPage + 1),
+                          )
                         }
                         disabled={currentPage === totalPages - 1}
-                        className="h-8 w-8 p-0"
                       >
+                        Next
                         <ChevronRight className="h-4 w-4" />
                       </Button>
                     </div>

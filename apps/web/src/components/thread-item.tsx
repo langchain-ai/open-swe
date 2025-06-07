@@ -1,13 +1,13 @@
 "use client";
 import { Github, GitBranch, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { ThreadSummary } from "@/types/index";
+import { ThreadWithTasks } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
 
 interface ThreadItemProps {
-  thread: ThreadSummary;
-  onClick: (thread: ThreadSummary) => void;
+  thread: ThreadWithTasks;
+  onClick: (thread: ThreadWithTasks) => void;
   variant?: "sidebar" | "dashboard";
   className?: string;
 }
@@ -19,6 +19,11 @@ export function ThreadItem({
   className,
 }: ThreadItemProps) {
   const isSidebar = variant === "sidebar";
+
+  const displayDate = new Date(thread.created_at).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
   return (
     <div
@@ -64,11 +69,11 @@ export function ThreadItem({
                 {thread.branch}
               </span>
             </div>
-            {!isSidebar && <span>{thread.date}</span>}
+            {!isSidebar && <span>{displayDate}</span>}
           </div>
           {isSidebar && (
             <div className="mt-1 flex items-center gap-2 text-xs">
-              <span className="text-gray-400">{thread.date}</span>
+              <span className="text-gray-400">{displayDate}</span>
               <Badge
                 variant="outline"
                 className="px-1 py-0 text-xs"

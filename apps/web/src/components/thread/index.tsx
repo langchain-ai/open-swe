@@ -45,7 +45,7 @@ import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { BranchSelector } from "../branch-selector";
 import Link from "next/link";
 import TaskList from "../task-list";
-import { useTasks } from "@/providers/Task";
+import { useThreads } from "@/providers/Thread";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
 
@@ -94,7 +94,7 @@ export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubApp();
-  const { getAllTasks } = useTasks();
+  const { threads } = useThreads();
   const { getConfigs } = useConfigStore();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
@@ -125,16 +125,13 @@ export function Thread() {
 
   useEffect(() => {
     if (taskId && typeof window !== "undefined") {
-      getAllTasks()
-        .then((allTasks) => {
-          const selectedTask = allTasks.find((task) => task.taskId === taskId);
-          if (selectedTask && selectedTask.threadId !== threadId) {
-            _setThreadId(selectedTask.threadId);
-          }
-        })
-        .catch(console.error);
+      // TaskId format is "${threadId}-${taskIndex}", so we can extract the threadId directly
+      const taskThreadId = taskId.split("-").slice(0, -1).join("-");
+      if (taskThreadId && taskThreadId !== threadId) {
+        _setThreadId(taskThreadId);
+      }
     }
-  }, [taskId, threadId, _setThreadId, getAllTasks]);
+  }, [taskId, threadId, _setThreadId]);
 
   const [input, setInput] = useState("");
   const {
