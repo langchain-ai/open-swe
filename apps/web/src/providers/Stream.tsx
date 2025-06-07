@@ -27,12 +27,9 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 
+import { StateType } from "@/types/stream";
+
 type TargetRepository = { owner: string; repo: string };
-export type StateType = {
-  messages: Message[];
-  ui?: UIMessage[];
-  targetRepository?: TargetRepository;
-};
 
 const useTypedStream = useStream<
   StateType,

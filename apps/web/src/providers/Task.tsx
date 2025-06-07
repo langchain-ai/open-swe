@@ -206,9 +206,15 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
             const taskIndex = rawTasks.indexOf(rawTask);
 
+            // Determine individual task status based on completion and thread status
+            const getTaskStatus = (): ThreadStatus => {
+              if (taskData.completed) return "idle"; // Completed tasks are idle
+              return threadStatus; // Use thread status for incomplete tasks
+            };
+
             const processedTask = {
               ...taskData,
-              status: threadStatus,
+              status: getTaskStatus(),
               taskId: createTaskId(threadSummary.thread_id, taskIndex),
               threadId: threadSummary.thread_id,
               threadTitle,
@@ -252,7 +258,6 @@ export function TaskProvider({ children }: { children: ReactNode }) {
     }
   }, [apiUrl, assistantId]);
 
-  // Setup polling for real-time updates
   // TODO: improve real time status updates
   useEffect(() => {
     if (activeThreads.size > 0) {
