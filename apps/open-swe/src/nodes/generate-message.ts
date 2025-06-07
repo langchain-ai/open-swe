@@ -125,10 +125,7 @@ const formatPrompt = (state: GraphState): string => {
       "{CODEBASE_TREE}",
       `<codebase-tree>\n${state.codebaseTree || "No codebase tree generated yet."}\n</codebase-tree>`,
     )
-    .replaceAll(
-      "{CURRENT_WORKING_DIRECTORY}",
-      SANDBOX_ROOT_DIR,
-    );
+    .replaceAll("{CURRENT_WORKING_DIRECTORY}", SANDBOX_ROOT_DIR);
 };
 
 export async function generateAction(
