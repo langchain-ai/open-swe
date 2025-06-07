@@ -2,14 +2,7 @@ import { useState, useRef, useEffect, ChangeEvent } from "react";
 import { toast } from "sonner";
 import type { Base64ContentBlock } from "@langchain/core/messages";
 import { fileToContentBlock } from "@/lib/multimodal-utils";
-
-export const SUPPORTED_FILE_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "application/pdf",
-];
+import { SUPPORTED_FILE_TYPES } from "@/types/file-upload";
 
 interface UseFileUploadOptions {
   initialBlocks?: Base64ContentBlock[];

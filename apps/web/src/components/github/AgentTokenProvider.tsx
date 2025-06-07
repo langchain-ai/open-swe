@@ -41,7 +41,7 @@ export function AgentTokenProvider({
       setToken(data.token);
       setInstallationId(data.installation_id);
       setIsLoading(false);
-    } catch (err) {
+    } catch {
       setError("Network error when fetching token");
       setIsLoading(false);
     }

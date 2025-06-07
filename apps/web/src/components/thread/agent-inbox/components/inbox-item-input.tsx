@@ -8,6 +8,34 @@ import { MarkdownText } from "../../markdown-text";
 import { ActionRequest, HumanInterrupt } from "@langchain/langgraph/prebuilt";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+import { PlanViewer } from "@/components/plan";
+import { isPlanData, parsePlanData, getPlanKey } from "@/lib/plan-utils";
+
+interface InboxItemInputProps {
+  interruptValue: HumanInterrupt;
+  humanResponse: HumanResponseWithEdits[];
+  supportsMultipleMethods: boolean;
+  acceptAllowed: boolean;
+  hasEdited: boolean;
+  hasAddedResponse: boolean;
+  initialValues: Record<string, string>;
+
+  streaming: boolean;
+  streamFinished: boolean;
+
+  setHumanResponse: React.Dispatch<
+    React.SetStateAction<HumanResponseWithEdits[]>
+  >;
+  setSelectedSubmitType: React.Dispatch<
+    React.SetStateAction<SubmitType | undefined>
+  >;
+  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
+  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
+
+  handleSubmit: (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
+  ) => Promise<void>;
+}
 
 function ResetButton({ handleReset }: { handleReset: () => void }) {
   return (
@@ -23,6 +51,26 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
 }
 
 function ArgsRenderer({ args }: { args: Record<string, any> }) {
+  if (isPlanData(args)) {
+    const planItems = parsePlanData(args);
+    const planKey = getPlanKey(args);
+
+    if (planItems.length > 0) {
+      return (
+        <div className="flex w-full flex-col items-start gap-6">
+          <div className="flex w-full flex-col items-start gap-1">
+            <p className="text-sm leading-[18px] text-wrap text-gray-600">
+              {prettifyText(planKey || "plan")}:
+            </p>
+            <div className="w-full max-w-full rounded-xl border border-gray-200 bg-white p-4">
+              <PlanViewer planItems={planItems} />
+            </div>
+          </div>
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="flex w-full flex-col items-start gap-6">
       {Object.entries(args).map(([k, v]) => {
@@ -49,32 +97,6 @@ function ArgsRenderer({ args }: { args: Record<string, any> }) {
       })}
     </div>
   );
-}
-
-interface InboxItemInputProps {
-  interruptValue: HumanInterrupt;
-  humanResponse: HumanResponseWithEdits[];
-  supportsMultipleMethods: boolean;
-  acceptAllowed: boolean;
-  hasEdited: boolean;
-  hasAddedResponse: boolean;
-  initialValues: Record<string, string>;
-
-  streaming: boolean;
-  streamFinished: boolean;
-
-  setHumanResponse: React.Dispatch<
-    React.SetStateAction<HumanResponseWithEdits[]>
-  >;
-  setSelectedSubmitType: React.Dispatch<
-    React.SetStateAction<SubmitType | undefined>
-  >;
-  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
-  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
-
-  handleSubmit: (
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
-  ) => Promise<void>;
 }
 
 function ResponseComponent({
@@ -199,8 +221,11 @@ function EditAndOrAcceptComponent({
   ) => Promise<void>;
 }) {
   const defaultRows = React.useRef<Record<string, number>>({});
+  const [editingField, setEditingField] = React.useState<string | null>(null);
+
   const editResponse = humanResponse.find((r) => r.type === "edit");
   const acceptResponse = humanResponse.find((r) => r.type === "accept");
+
   if (
     !editResponse ||
     typeof editResponse.args !== "object" ||
@@ -217,6 +242,7 @@ function EditAndOrAcceptComponent({
     }
     return null;
   }
+
   const header = editResponse.acceptAllowed ? "Edit/Accept" : "Edit";
   let buttonText = "Submit";
   if (editResponse.acceptAllowed && !editResponse.editsMade) {
@@ -268,6 +294,12 @@ function EditAndOrAcceptComponent({
         const value = ["string", "number"].includes(typeof v)
           ? v
           : JSON.stringify(v, null);
+
+        // Check if this field contains plan data and user isn't actively editing it
+        const isFieldBeingEdited = editingField === k;
+        const fieldArgs = { [k]: v };
+        const isFieldPlanData = isPlanData(fieldArgs);
+
         // Calculate the default number of rows by the total length of the initial value divided by 30
         // or 8, whichever is greater. Stored in a ref to prevent re-rendering.
         if (
@@ -287,15 +319,46 @@ function EditAndOrAcceptComponent({
             key={`allow-edit-args--${k}-${idx}`}
           >
             <div className="flex w-full flex-col items-start gap-[6px]">
-              <p className="min-w-fit text-sm font-medium">{prettifyText(k)}</p>
-              <Textarea
-                disabled={streaming}
-                className="h-full"
-                value={value}
-                onChange={(e) => onEditChange(e.target.value, editResponse, k)}
-                onKeyDown={handleKeyDown}
-                rows={numRows}
-              />
+              <div className="flex w-full items-center justify-between">
+                <p className="min-w-fit text-sm font-medium">
+                  {prettifyText(k)}
+                </p>
+                {isFieldPlanData && !isFieldBeingEdited && (
+                  <button
+                    onClick={() => setEditingField(k)}
+                    className="rounded border border-blue-200 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                  >
+                    Edit as Text
+                  </button>
+                )}
+                {isFieldBeingEdited && (
+                  <button
+                    onClick={() => setEditingField(null)}
+                    className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+                  >
+                    Show Plan View
+                  </button>
+                )}
+              </div>
+
+              {isFieldPlanData && !isFieldBeingEdited ? (
+                // Show plan viewer for plan data when not editing
+                <div className="w-full rounded-lg border border-gray-200 bg-white p-3">
+                  <PlanViewer planItems={parsePlanData(fieldArgs)} />
+                </div>
+              ) : (
+                // Show textarea for editing or non-plan data
+                <Textarea
+                  disabled={streaming}
+                  className="h-full"
+                  value={value}
+                  onChange={(e) =>
+                    onEditChange(e.target.value, editResponse, k)
+                  }
+                  onKeyDown={handleKeyDown}
+                  rows={numRows}
+                />
+              )}
             </div>
           </div>
         );

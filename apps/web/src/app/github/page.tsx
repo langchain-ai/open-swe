@@ -25,7 +25,7 @@ export default function GitHubPage() {
             setError(errorData.error);
           }
         }
-      } catch (err) {
+      } catch {
         setError("Failed to check installation status");
       }
     };
@@ -50,7 +50,7 @@ export default function GitHubPage() {
         const errorData = await response.json();
         setError(errorData.error);
       }
-    } catch (err) {
+    } catch {
       setError("Failed to fetch repositories");
     } finally {
       setLoading(false);

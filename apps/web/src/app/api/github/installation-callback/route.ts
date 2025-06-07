@@ -13,7 +13,6 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const installationId = searchParams.get("installation_id");
-    const setupAction = searchParams.get("setup_action");
 
     // Get the return URL from cookies
     const returnTo =

@@ -1,5 +1,5 @@
 import React from "react";
-import { File, Image as ImageIcon, X as XIcon } from "lucide-react";
+import { File, X as XIcon } from "lucide-react";
 import type { Base64ContentBlock } from "@langchain/core/messages";
 import { cn } from "@/lib/utils";
 import Image from "next/image";

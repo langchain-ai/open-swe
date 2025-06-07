@@ -9,7 +9,6 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const installationId = searchParams.get("installation_id");
-    const setupAction = searchParams.get("setup_action");
 
     if (!installationId) {
       return NextResponse.redirect(

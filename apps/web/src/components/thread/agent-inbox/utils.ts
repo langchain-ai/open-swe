@@ -75,8 +75,8 @@ export function unknownToPrettyDate(input: unknown): string | undefined {
     ) {
       return format(new Date(input as string), "MM/dd/yyyy hh:mm a");
     }
-  } catch (_) {
-    // failed to parse date. no-op
+  } catch {
+    console.error("Failed to parse date", input);
   }
   return undefined;
 }
