@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "../../../open-swe/src/types";
@@ -67,13 +67,16 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   const selectedBranch = selectedBranchParam;
 
-  const setSelectedRepository = (repo: TargetRepository | null) => {
-    setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
-    if (!repo) {
-      setSelectedBranchParam(null);
-      setBranches([]);
-    }
-  };
+  const setSelectedRepository = useCallback(
+    (repo: TargetRepository | null) => {
+      setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
+      if (!repo) {
+        setSelectedBranchParam(null);
+        setBranches([]);
+      }
+    },
+    [setSelectedRepositoryParam, setSelectedBranchParam],
+  );
 
   const setSelectedBranch = (branch: string | null) => {
     setSelectedBranchParam(branch);
@@ -88,6 +91,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
       if (response.ok) {
         const data = await response.json();
+        console.log("Fetched repositories:", data.repositories);
         setRepositories(data.repositories || []);
         setIsInstalled(true);
       } else {
@@ -99,7 +103,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
           setIsInstalled(false);
         }
       }
-    } catch (err) {
+    } catch {
       setError("Failed to check GitHub App installation status");
       setIsInstalled(false);
     } finally {
@@ -107,7 +111,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   };
 
-  const fetchBranches = async () => {
+  const fetchBranches = useCallback(async () => {
     if (!selectedRepository) {
       setBranches([]);
       return;
@@ -123,20 +127,28 @@ export function useGitHubApp(): UseGitHubAppReturn {
     setBranchesError(null);
 
     try {
+      console.log(
+        `Fetching branches for ${selectedRepository.owner}/${selectedRepository.repo}`,
+      );
       const branchData = await getRepositoryBranches(
         selectedRepository.owner,
         selectedRepository.repo,
         accessToken,
       );
+      console.log(`Fetched ${branchData?.length || 0} branches:`, branchData);
       setBranches(branchData || []);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to fetch branches";
+      console.error(
+        `Error fetching branches for ${selectedRepository.owner}/${selectedRepository.repo}:`,
+        err,
+      );
       setBranchesError(errorMessage);
     } finally {
       setBranchesLoading(false);
     }
-  };
+  }, [selectedRepository]);
 
   useEffect(() => {
     checkInstallation();
@@ -149,7 +161,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranches([]);
       setSelectedBranchParam(null);
     }
-  }, [selectedRepository?.owner, selectedRepository?.repo]);
+  }, [
+    selectedRepository?.owner,
+    selectedRepository?.repo,
+    fetchBranches,
+    setSelectedBranchParam,
+  ]);
 
   // Auto-select first repository on initial page load
   useEffect(() => {

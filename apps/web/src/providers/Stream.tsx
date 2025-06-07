@@ -60,6 +60,11 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { refreshThreads, setThreads } = useThreads();
+
+  // Debug logging
+  useEffect(() => {
+    console.log("Stream provider: threadId changed to:", threadId);
+  }, [threadId]);
   const githubAccessToken =
     document.cookie
       .split("; ")

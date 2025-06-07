@@ -45,7 +45,6 @@ import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { BranchSelector } from "../branch-selector";
 import Link from "next/link";
 import TaskList from "../task-list";
-import { useThreads } from "@/providers/Thread";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
 
@@ -94,7 +93,6 @@ export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubApp();
-  const { threads } = useThreads();
   const { getConfigs } = useConfigStore();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
@@ -155,14 +153,11 @@ export function Thread() {
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
 
-    // When clearing thread (going back to dashboard), also clear task
     if (id === null) {
       setTaskId(null);
+      closeArtifact();
+      setArtifactContext({});
     }
-
-    // close artifact and reset artifact context
-    closeArtifact();
-    setArtifactContext({});
   };
 
   useEffect(() => {
@@ -173,11 +168,9 @@ export function Thread() {
     try {
       const message = (stream.error as any).message;
       if (!message || lastError.current === message) {
-        // Message has already been logged. do not modify ref, return early.
         return;
       }
 
-      // Message is defined, and it has not been logged yet. Save it, and send the error
       lastError.current = message;
       toast.error("An error occurred. Please try again.", {
         description: (
@@ -189,11 +182,10 @@ export function Thread() {
         closeButton: true,
       });
     } catch {
-      // no-op
+      console.error("Error in stream", stream.error);
     }
   }, [stream.error]);
 
-  // TODO: this should be part of the useStream hook
   const prevMessageLength = useRef(0);
   useEffect(() => {
     if (

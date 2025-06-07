@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { ThreadWithTasks } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ThreadItemProps {
   thread: ThreadWithTasks;
@@ -24,6 +25,62 @@ export function ThreadItem({
     month: "short",
     day: "numeric",
   });
+
+  // Check if thread data is still loading/incomplete
+  const isLoading =
+    !thread.threadTitle ||
+    thread.threadTitle.includes("undefined") ||
+    !thread.repository ||
+    thread.repository === "Unknown Repository" ||
+    thread.repository.includes("undefined");
+
+  if (isLoading) {
+    return (
+      <div
+        className={cn(
+          "cursor-pointer rounded-md border border-gray-200 bg-white p-3 transition-colors hover:bg-gray-50",
+          isSidebar
+            ? "hover:bg-gray-50"
+            : "rounded-lg p-4 shadow-sm transition-shadow hover:shadow-md",
+          className,
+        )}
+      >
+        <div className={cn("flex items-center gap-2", !isSidebar && "gap-3")}>
+          <div className={cn("flex-shrink-0", isSidebar ? "mt-0.5" : "mt-1")}>
+            <Skeleton
+              className={cn("rounded-full", isSidebar ? "h-3 w-3" : "h-4 w-4")}
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <Skeleton
+              className={cn("mb-2", isSidebar ? "h-3 w-20" : "h-4 w-32")}
+            />
+            <div
+              className={cn(
+                "flex items-center gap-2",
+                isSidebar ? "gap-1" : "gap-2",
+              )}
+            >
+              <Skeleton className={isSidebar ? "h-2 w-16" : "h-3 w-20"} />
+              <Skeleton className={isSidebar ? "h-2 w-2" : "h-3 w-3"} />
+              <Skeleton className={isSidebar ? "h-2 w-12" : "h-3 w-16"} />
+            </div>
+            {isSidebar && (
+              <div className="mt-1 flex items-center gap-2">
+                <Skeleton className="h-2 w-8" />
+                <Skeleton className="h-3 w-6" />
+              </div>
+            )}
+            {!isSidebar && (
+              <div className="mt-2">
+                <Skeleton className="h-3 w-24" />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -60,12 +117,12 @@ export function ThreadItem({
           >
             <div className="flex items-center gap-1">
               <Github className={isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} />
-              <span className={cn(isSidebar ? "max-w-[60px] truncate" : "")}>
+              <span className={cn(isSidebar ? "max-w-[100px] truncate" : "")}>
                 {thread.repository}
               </span>
               <span>/</span>
               <GitBranch className={isSidebar ? "h-2.5 w-2.5" : "h-3 w-3"} />
-              <span className={cn(isSidebar ? "max-w-[40px] truncate" : "")}>
+              <span className={cn(isSidebar ? "max-w-[80px] truncate" : "")}>
                 {thread.branch}
               </span>
             </div>

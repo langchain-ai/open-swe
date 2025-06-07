@@ -81,10 +81,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const threadValues = thread.values as any;
     const plan: any[] = threadValues?.plan || [];
     const proposedPlan: any[] = threadValues?.proposedPlan || [];
+
+    // Use plan if it exists (contains completion status), otherwise use proposedPlan
     const rawTasks = plan.length > 0 ? plan : proposedPlan;
 
     const tasks = rawTasks.map((rawTask, index) => {
       if (typeof rawTask === "string") {
+        // For string tasks (from proposedPlan), default to not completed
         return {
           index,
           plan: rawTask,
@@ -92,7 +95,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
           summary: undefined,
         };
       }
-      return rawTask;
+      // For object tasks (from plan), preserve existing completion status and other properties
+      return {
+        index: rawTask.index ?? index,
+        plan: rawTask.plan,
+        completed: rawTask.completed ?? false,
+        summary: rawTask.summary,
+      };
     });
 
     const completedTasksCount = tasks.filter((task) => task.completed).length;
