@@ -533,6 +533,7 @@ export async function cloneRepo(
   targetRepository: TargetRepository,
   args: {
     githubToken: string;
+    stateBranchName?: string;
   },
 ) {
   try {
@@ -541,8 +542,9 @@ export async function cloneRepo(
     // Use x-access-token format for better GitHub authentication
     const repoUrlWithToken = `https://x-access-token:${args.githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
-    if (targetRepository.branch) {
-      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
+    const branchName = args.stateBranchName || targetRepository.branch;
+    if (branchName) {
+      gitCloneCommand.push("-b", branchName, repoUrlWithToken);
     } else {
       gitCloneCommand.push(repoUrlWithToken);
     }
@@ -550,7 +552,7 @@ export async function cloneRepo(
     logger.info("Cloning repository", {
       // Don't log the full command with token for security reasons
       repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
-      branch: targetRepository.branch || "default",
+      branch: branchName,
     });
     return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
   } catch (e) {

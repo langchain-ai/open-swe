@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig, GraphState, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
@@ -12,6 +12,12 @@ import { removeLastTaskMessages } from "../utils/message/modify-array.js";
 import { Command } from "@langchain/langgraph";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
+import {
+  completePlanItem,
+  getActivePlanItems,
+  getActiveTask,
+} from "../utils/task-plan.js";
+import { getCompletedPlanItems } from "../utils/current-task.js";
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -150,8 +156,9 @@ const formatUserCodebaseContextMessage = (
 async function generateTaskSummaryFunc(
   state: GraphState,
   model: ConfigurableModel,
-): Promise<PlanItem[]> {
-  const lastCompletedTask = state.plan.findLast((p) => p.completed);
+): Promise<{ planItemIndex: number; summary: string }> {
+  const activePlanItems = getActivePlanItems(state.plan);
+  const lastCompletedTask = getCompletedPlanItems(activePlanItems).pop();
   if (!lastCompletedTask) {
     throw new Error("Unable to find last completed task.");
   }
@@ -160,26 +167,18 @@ async function generateTaskSummaryFunc(
   const response = await model.withConfig({ tags: ["nostream"] }).invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan, state.codebaseContext),
+      content: formatPrompt(activePlanItems, state.codebaseContext),
     },
     {
       role: "user",
-      content: formatUserMessage(state.messages, state.plan),
+      content: formatUserMessage(state.messages, activePlanItems),
     },
   ]);
 
-  const contentString = getMessageContentString(response.content);
-  const newPlanWithSummary = state.plan.map((p) => {
-    if (p.index !== lastCompletedTask.index) {
-      return p;
-    }
-    return {
-      ...p,
-      summary: contentString,
-    };
-  });
-
-  return newPlanWithSummary;
+  return {
+    planItemIndex: lastCompletedTask.index,
+    summary: getMessageContentString(response.content),
+  };
 }
 
 const generateTaskSummary = traceable(generateTaskSummaryFunc, {
@@ -198,7 +197,10 @@ async function updateCodebaseContextFunc(
     },
     {
       role: "user",
-      content: formatUserCodebaseContextMessage(state.messages, state.plan),
+      content: formatUserCodebaseContextMessage(
+        state.messages,
+        getActivePlanItems(state.plan),
+      ),
     },
   ]);
   const contentString = getMessageContentString(response.content);
@@ -213,16 +215,23 @@ export async function summarizeTaskSteps(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const lastCompletedTask = state.plan.findLast((p) => p.completed);
+  const activePlanItems = getActivePlanItems(state.plan);
+  const lastCompletedTask = getCompletedPlanItems(activePlanItems).pop();
   if (!lastCompletedTask) {
     throw new Error("Unable to find last completed task.");
   }
 
   const model = await loadModel(config, Task.SUMMARIZER);
-  const [updatedPlan, updatedCodebaseContext] = await Promise.all([
+  const [taskSummary, updatedCodebaseContext] = await Promise.all([
     generateTaskSummary(state, model),
     updateCodebaseContext(state, model),
   ]);
+  const updatedTaskPlan = completePlanItem(
+    state.plan,
+    getActiveTask(state.plan).id,
+    taskSummary.planItemIndex,
+    taskSummary.summary,
+  );
 
   const removedMessages = removeLastTaskMessages(state.messages);
   logger.info(`Removing ${removedMessages.length} message(s) from state.`);
@@ -236,24 +245,26 @@ export async function summarizeTaskSteps(
   });
   const newMessagesStateUpdate = [...removedMessages, condensedTaskMessage];
 
-  const allTasksCompleted = state.plan.every((p) => p.completed);
+  const allTasksCompleted = activePlanItems.every((p) => p.completed);
   if (allTasksCompleted) {
+    const commandUpdate: GraphUpdate = {
+      messages: newMessagesStateUpdate,
+      plan: updatedTaskPlan,
+      codebaseContext: updatedCodebaseContext,
+    };
     return new Command({
       goto: "generate-conclusion",
-      update: {
-        messages: newMessagesStateUpdate,
-        plan: updatedPlan,
-        codebaseContext: updatedCodebaseContext,
-      },
+      update: commandUpdate,
     });
   }
 
+  const commandUpdate: GraphUpdate = {
+    messages: newMessagesStateUpdate,
+    plan: updatedTaskPlan,
+    codebaseContext: updatedCodebaseContext,
+  };
   return new Command({
     goto: "generate-action",
-    update: {
-      messages: newMessagesStateUpdate,
-      plan: updatedPlan,
-      codebaseContext: updatedCodebaseContext,
-    },
+    update: commandUpdate,
   });
 }

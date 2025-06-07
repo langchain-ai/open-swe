@@ -50,7 +50,10 @@ export async function initialize(
     image: SNAPSHOT_NAME,
   });
 
-  const res = await cloneRepo(sandbox, targetRepository, { githubToken });
+  const res = await cloneRepo(sandbox, targetRepository, {
+    githubToken,
+    stateBranchName: state.branchName,
+  });
   if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
     logger.error("Failed to clone repository", res.result);

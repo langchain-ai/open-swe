@@ -233,6 +233,7 @@ export function Thread() {
   const hasNoAIOrToolMessages = !messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
+  const isLastMessageHuman = messages[messages.length - 1]?.type === "human";
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -398,14 +399,16 @@ export function Thread() {
                     )}
                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
                     We need to render it outside of the messages list, since there are no messages to render */}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
-                    <AssistantMessage
-                      key="interrupt-msg"
-                      message={undefined}
-                      isLoading={isLoading}
-                      handleRegenerate={handleRegenerate}
-                    />
-                  )}
+                  {(hasNoAIOrToolMessages || isLastMessageHuman) &&
+                    !!stream.interrupt && (
+                      <AssistantMessage
+                        key="interrupt-msg"
+                        message={undefined}
+                        isLoading={isLoading}
+                        handleRegenerate={handleRegenerate}
+                        forceRenderInterrupt={true}
+                      />
+                    )}
                   {isLoading && !firstTokenReceived && (
                     <AssistantMessageLoading />
                   )}

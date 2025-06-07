@@ -7,6 +7,7 @@ import { getMessageContentString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";
+import { getRepoAbsolutePath } from "../../../utils/git.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -14,29 +15,29 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 {FOLLOWUP_MESSAGE_PROMPT}
 
 You MUST adhere to the following criteria when gathering context for the plan:
-- You must ONLY take read actions to gather context. Write actions are NOT allowed.
+- Your ONLY job is to gather context for the plan.
+  - You are NOT allowed to take any write/update actions, instead you must only take read actions to gather context.
+  - All write/update actions will be taken in a later step, only after you've gathered all the necessary context.
 - Keep in mind you are only permitted to make a maximum of 6 tool calls to gather all your context. Ensure each action is of high quality, and targeted to aid in generating a plan.
 - Always use \`rg\` instead of \`grep/ls -R\` because it is much faster and respects gitignore.
   - Always use glob patterns when searching with \`rg\` for specific file types. For example, to search for all TSX files, use \`rg -i star -g **/*.tsx project-directory/\`. This is because \`rg\` does not have built in file types for every language.
 - If you determine you've gathered enough context to generate a plan, simply reply with 'done' and do NOT call any tools.
 - Not generating a tool call will be interpreted as an indication that you've gathered enough context to generate a plan.
+- The repo is already cloned, and located inside {REPO_DIRECTORY}
 
-
-The user's request is as follows. Ensure you generate your plan in accordance with the user's request.
-{USER_REQUEST}
+The user's request is the first user message in the conversation below. Ensure you generate your plan in accordance with the user's request.
 `;
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = state.messages.filter(isHumanMessage).length > 1;
-  const userRequest = getUserRequest(state.messages);
 
   return systemPrompt
     .replace(
       "{FOLLOWUP_MESSAGE_PROMPT}",
-      isFollowup ? formatFollowupMessagePrompt(state.plan, state.messages) : "",
+      isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
     )
-    .replace("{USER_REQUEST}", userRequest);
+    .replace("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository));
 }
 
 export async function generateAction(
@@ -47,6 +48,9 @@ export async function generateAction(
   const tools = [shellTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
+  const userRequest = getUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
@@ -54,6 +58,7 @@ export async function generateAction(
         role: "system",
         content: formatSystemPrompt(state),
       },
+      userRequest,
       ...state.plannerMessages,
     ]);
 

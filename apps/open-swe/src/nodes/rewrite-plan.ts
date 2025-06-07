@@ -236,7 +236,6 @@ export async function rewritePlan(
   const updatedPlanTasks = await updatePlanTasks(state, tasksToModify, model);
 
   return {
-    plan: [],
     proposedPlan: updatedPlanTasks,
   };
 }

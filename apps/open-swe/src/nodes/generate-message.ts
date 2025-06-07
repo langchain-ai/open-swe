@@ -9,8 +9,9 @@ import { getRepoAbsolutePath } from "../utils/git.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { stopSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { getCurrentTask } from "../utils/current-task.js";
+import { getCurrentPlanItem } from "../utils/current-task.js";
 import { getMessageContentString } from "../utils/message/content.js";
+import { getActivePlanItems } from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -103,9 +104,14 @@ const formatPrompt = (state: GraphState): string => {
   return systemPrompt
     .replaceAll(
       "{PLAN_PROMPT_WITH_SUMMARIES}",
-      formatPlanPrompt(state.plan, { includeSummaries: true }),
+      formatPlanPrompt(getActivePlanItems(state.plan), {
+        includeSummaries: true,
+      }),
     )
-    .replaceAll("{PLAN_PROMPT}", formatPlanPrompt(state.plan))
+    .replaceAll(
+      "{PLAN_PROMPT}",
+      formatPlanPrompt(getActivePlanItems(state.plan)),
+    )
     .replaceAll("{REPO_DIRECTORY}", repoDirectory)
     .replaceAll(
       "{PLAN_GENERATION_SUMMARY}",
@@ -142,7 +148,7 @@ export async function generateAction(
   }
 
   logger.info("Generated action", {
-    currentTask: getCurrentTask(state.plan).plan,
+    currentTask: getCurrentPlanItem(getActivePlanItems(state.plan)).plan,
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),

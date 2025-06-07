@@ -12,23 +12,13 @@ import {
 import { loadModel, Task } from "../utils/load-model.js";
 import { z } from "zod";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import {
+  getCompletedPlanItems,
+  getCurrentPlanItem,
+} from "../utils/current-task.js";
+import { getActivePlanItems } from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "DiagnoseError");
-
-/**
- * Whether or not enough errored tool calls have occurred to interrupt the graph.
- * This will return true if the last tool call was an error, and 7 of the last 10
- * tool calls have been errors.
- * @param toolMessages
- *
- * @TODO Implement this. Should interrupt after generating a diagnosis for 7 consecutive errors.
- */
-// function shouldInterruptError(toolMessages: ToolMessage[]): boolean {
-//   if (toolMessages[toolMessages.length - 1].status !== "error") {
-//     return false;
-//   }
-//   return toolMessages.slice(-10).filter((m) => m.status === "error").length >= 7;
-// }
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -77,8 +67,8 @@ const formatSystemPrompt = (
   plan: PlanItem[],
   codebaseContext: string,
 ): string => {
-  const currentTask = plan.find((p) => !p.completed);
-  const completedTasks = plan.filter((p) => p.completed);
+  const currentPlanItem = getCurrentPlanItem(plan);
+  const completedTasks = getCompletedPlanItems(plan);
 
   return systemPrompt
     .replace(
@@ -87,7 +77,7 @@ const formatSystemPrompt = (
     )
     .replace(
       "{CURRENT_TASK}",
-      `<current-task index="${currentTask?.index}">${currentTask?.plan}</current-task>`,
+      `<current-task index="${currentPlanItem.index}">${currentPlanItem.plan}</current-task>`,
     )
     .replace("{PLAN_PROMPT}", formatPlanPromptWithSummaries(completedTasks))
     .replace("{CODEBASE_CONTEXT}", codebaseContext);
@@ -123,7 +113,7 @@ export async function diagnoseError(
       role: "system",
       content: formatSystemPrompt(
         getMessageContentString(lastFailedAction.content),
-        state.plan,
+        getActivePlanItems(state.plan),
         state.codebaseContext,
       ),
     },

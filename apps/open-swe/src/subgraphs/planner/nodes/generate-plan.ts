@@ -42,7 +42,7 @@ function formatSystemPrompt(state: PlannerGraphState): string {
   return systemPrompt
     .replace(
       "{FOLLOWUP_MESSAGE_PROMPT}",
-      isFollowup ? formatFollowupMessagePrompt(state.plan, state.messages) : "",
+      isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
     )
     .replace("{USER_REQUEST}", userRequest);
 }
@@ -90,7 +90,6 @@ export async function generatePlan(
 
   return {
     proposedPlan: response.tool_calls[0].args.plan,
-    plan: [],
     ...(newSessionId && { sandboxSessionId: newSessionId }),
     // Do this so that the planner state is up to date with the tool call.
     ...(optionalToolMessage && { plannerMessages: [optionalToolMessage] }),

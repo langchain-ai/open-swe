@@ -11,10 +11,10 @@ import { z } from "zod";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
 import { getUserRequest } from "../utils/user-request.js";
-import { isHumanMessage, ToolMessage } from "@langchain/core/messages";
-import { getMessageContentString } from "../utils/message/content.js";
-import { daytonaClient } from "../utils/sandbox.js";
+import { ToolMessage } from "@langchain/core/messages";
+import { daytonaClient, deleteSandbox } from "../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
+import { getActivePlanItems } from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -107,7 +107,7 @@ export async function openPullRequest(
   const response = await modelWithTool.invoke([
     {
       role: "user",
-      content: formatPrompt(state.plan, userRequest),
+      content: formatPrompt(getActivePlanItems(state.plan), userRequest),
     },
   ]);
 
@@ -130,6 +130,12 @@ export async function openPullRequest(
     githubToken,
   });
 
+  let sandboxDeleted = false;
+  if (pr) {
+    // Delete the sandbox.
+    sandboxDeleted = await deleteSandbox(sandboxSessionId);
+  }
+
   return {
     messages: [
       response,
@@ -144,5 +150,7 @@ export async function openPullRequest(
         },
       }),
     ],
+    // If the sandbox was successfully deleted, we can remove it from the state.
+    ...(sandboxDeleted && { sandboxSessionId: undefined }),
   };
 }

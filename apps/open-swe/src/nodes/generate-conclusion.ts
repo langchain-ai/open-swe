@@ -1,8 +1,16 @@
 import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
-import { getMessageString } from "../utils/message/content.js";
+import {
+  getMessageContentString,
+  getMessageString,
+} from "../utils/message/content.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getUserRequest } from "../utils/user-request.js";
+import {
+  completeTask,
+  getActivePlanItems,
+  getActiveTask,
+} from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -42,7 +50,7 @@ Given all of this, please respond with the concise conclusion. Do not include an
   const response = await model.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan),
+      content: formatPrompt(getActivePlanItems(state.plan)),
     },
     {
       role: "user",
@@ -51,8 +59,15 @@ Given all of this, please respond with the concise conclusion. Do not include an
   ]);
 
   logger.info("✅ Successfully generated conclusion. Ending run. 👋");
+  const activeTaskId = getActiveTask(state.plan).id;
+  const updatedTaskPlan = completeTask(
+    state.plan,
+    activeTaskId,
+    getMessageContentString(response.content),
+  );
 
   return {
     messages: [response],
+    plan: updatedTaskPlan,
   };
 }

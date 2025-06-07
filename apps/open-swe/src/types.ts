@@ -27,6 +27,81 @@ export type PlanItem = {
   summary?: string;
 };
 
+export type PlanRevision = {
+  /**
+   * The revision index of the plan.
+   * This is used to track edits made to the plan by the agent or user
+   */
+  revisionIndex: number;
+  /**
+   * The plans for this task & revision.
+   */
+  plans: PlanItem[];
+  /**
+   * Timestamp when this revision was created
+   */
+  createdAt: number;
+  /**
+   * Who created this revision (agent or user)
+   */
+  createdBy: "agent" | "user";
+};
+
+export type Task = {
+  /**
+   * Unique identifier for the task
+   */
+  id: string;
+  /**
+   * The index of the user's task in chronological order
+   */
+  taskIndex: number;
+  /**
+   * The original user request that created this task
+   */
+  request: string;
+  /**
+   * When the task was created
+   */
+  createdAt: number;
+  /**
+   * Whether the task is completed
+   */
+  completed: boolean;
+  /**
+   * When the task was completed (if applicable)
+   */
+  completedAt?: number;
+  /**
+   * Overall summary of the completed task
+   */
+  summary?: string;
+  /**
+   * The plans generated for this task.
+   * Ordered by revisionIndex, with the latest revision being the active one
+   */
+  planRevisions: PlanRevision[];
+  /**
+   * Index of the currently active plan revision
+   */
+  activeRevisionIndex: number;
+  /**
+   * Optional parent task id if this task was derived from another task
+   */
+  parentTaskId?: string;
+};
+
+export type TaskPlan = {
+  /**
+   * All tasks in the system
+   */
+  tasks: Task[];
+  /**
+   * Index of the currently active task
+   */
+  activeTaskIndex: number;
+};
+
 export type TargetRepository = {
   owner: string;
   repo: string;
@@ -43,9 +118,8 @@ export const GraphAnnotation = z.object({
     .default(() => [])
     .langgraph.reducer((_state, update) => update),
   plan: z
-    .custom<PlanItem[]>()
-    .default(() => [])
-    .langgraph.reducer<PlanItem[]>((_state, update) => update),
+    .custom<TaskPlan>()
+    .langgraph.reducer<TaskPlan>((_state, update) => update),
   planChangeRequest: z
     .string()
     .nullable()
