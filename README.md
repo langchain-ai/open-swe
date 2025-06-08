@@ -1,8 +1,5 @@
 # Open SWE
 
-> [!WARNING]
-> Open SWE is under active development and is not yet ready for production use.
-
 Open SWE is an open-source cloud based coding agent.
 
 ## Usage
@@ -137,4 +134,5 @@ Once you've accepted the plan, it will begin the execution flow. When the agent 
 ## Accessing Changes
 
 Open SWE will automatically create a branch whenever you create a new thread with a naming format of `open-swe/<threadId>`. Every time a file is created, modified, or deleted, the changes will be committed to this branch. You can access the changes in the repository by checking out this branch.
+
 
