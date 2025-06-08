@@ -19,5 +19,8 @@
     "turbo": "^2.5.0",
     "typescript": "^5"
   },
+  "resolutions": {
+    "@langchain/langgraph-sdk": "^0.0.83"
+  },
   "packageManager": "yarn@3.5.1"
 }

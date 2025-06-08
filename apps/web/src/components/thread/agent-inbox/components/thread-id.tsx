@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/tooltip";
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TooltipIconButton } from "../../tooltip-icon-button";
+import { TooltipIconButton } from "../../../ui/tooltip-icon-button";
 
 export function ThreadIdTooltip({ threadId }: { threadId: string }) {
   const firstThreeChars = threadId.slice(0, 3);

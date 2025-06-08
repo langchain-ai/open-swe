@@ -18,7 +18,8 @@
   },
   "dependencies": {
     "@langchain/core": "^0.3.56",
-    "@langchain/langgraph": "^0.2.73",
+    "@langchain/langgraph": "^0.3.1",
+    "@langchain/langgraph-sdk": "^0.0.83",
     "zod": "^3.23.8"
   },
   "devDependencies": {

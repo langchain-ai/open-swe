@@ -1,13 +1,16 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
 import {
-  addMessages,
   LangGraphRunnableConfig,
-  Messages,
+  MessagesZodState,
 } from "@langchain/langgraph/web";
-import { BaseMessage } from "@langchain/core/messages";
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
+import {
+  uiMessageReducer,
+  type UIMessage,
+  type RemoveUIMessage,
+} from "@langchain/langgraph-sdk/react-ui";
 
 export type PlanItem = {
   /**
@@ -110,11 +113,7 @@ export type TargetRepository = {
   branch?: string;
 };
 
-export const GraphAnnotation = z.object({
-  messages: z
-    .custom<BaseMessage[]>()
-    .default(() => [])
-    .langgraph.reducer<Messages>((state, update) => addMessages(state, update)),
+export const GraphAnnotation = MessagesZodState.extend({
   proposedPlan: z
     .array(z.string())
     .default(() => [])
@@ -155,6 +154,14 @@ export const GraphAnnotation = z.object({
     .string()
     .default(() => "")
     .langgraph.reducer((_state, update) => update),
+    ui: z
+    .custom<UIMessage[]>()
+    .default(() => [])
+    .langgraph.reducer<(UIMessage | RemoveUIMessage)[]>((state, update) =>
+      uiMessageReducer(state, update),
+    ),
+  // TODO: Not used, but can be used in the future for Gen UI artifacts
+  context: z.record(z.string(), z.unknown())
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;

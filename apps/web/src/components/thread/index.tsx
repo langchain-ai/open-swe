@@ -13,7 +13,7 @@ import {
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
 import { LangGraphLogoSVG } from "../icons/langgraph";
-import { TooltipIconButton } from "./tooltip-icon-button";
+import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import {
   ArrowDown,
   LoaderCircle,
@@ -23,7 +23,6 @@ import {
   XIcon,
   Plus,
   Settings,
-  Github,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean, parseAsString } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -52,6 +51,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
+import { BaseMessage } from "@langchain/core/messages";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -238,7 +238,7 @@ export function Thread() {
 
     stream.submit(
       {
-        messages: [...toolMessages, newHumanMessage],
+        messages: [...toolMessages, newHumanMessage] as unknown as BaseMessage[],
         context,
         targetRepository: selectedRepository,
       },
@@ -251,7 +251,7 @@ export function Thread() {
             ...(prev.messages ?? []),
             ...toolMessages,
             newHumanMessage,
-          ],
+          ] as unknown as BaseMessage[],
         }),
         config: {
           recursion_limit: 400,

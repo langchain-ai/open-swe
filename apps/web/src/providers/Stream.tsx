@@ -18,25 +18,18 @@ import {
 import { useQueryState } from "nuqs";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
 import { useThreads } from "./Thread";
-import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Copy, CopyCheck, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
-import { StateType } from "@/types/stream";
-
-type TargetRepository = { owner: string; repo: string };
+import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 
 const useTypedStream = useStream<
-  StateType,
+GraphState,
   {
-    UpdateType: {
-      messages?: Message[] | Message | string;
-      ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-      context?: Record<string, unknown>;
-      targetRepository?: TargetRepository;
-    };
+    UpdateType: GraphUpdate;
     CustomEventType: UIMessage | RemoveUIMessage;
   }
 >;
