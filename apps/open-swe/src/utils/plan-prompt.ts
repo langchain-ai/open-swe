@@ -1,4 +1,4 @@
-import { PlanItem } from "../types.js";
+import { PlanItem } from "@open-swe/shared/open-swe/types";
 
 export const PLAN_PROMPT = `## Completed Tasks
 {COMPLETED_TASKS}

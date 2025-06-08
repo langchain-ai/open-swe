@@ -28,6 +28,7 @@
     "@langchain/langgraph-sdk": "^0.0.78",
     "@langchain/openai": "^0.5.10",
     "@octokit/rest": "^22.0.0",
+    "@open-swe/shared": "workspace:*",
     "diff": "^8.0.1",
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",

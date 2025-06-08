@@ -4,7 +4,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { sessionPlanTool } from "../../../tools/index.js";
-import { GraphConfig } from "../../../types.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { getUserRequest } from "../../../utils/user-request.js";

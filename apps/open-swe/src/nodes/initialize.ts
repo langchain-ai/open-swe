@@ -1,5 +1,9 @@
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranch,
   cloneRepo,
@@ -9,7 +13,7 @@ import {
   pullLatestChanges,
 } from "../utils/git.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { SNAPSHOT_NAME } from "../constants.js";
+import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 import { getCodebaseTree } from "../utils/tree.js";
 

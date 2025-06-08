@@ -1,4 +1,8 @@
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
   shellTool,
@@ -12,7 +16,7 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { getCurrentPlanItem } from "../utils/current-task.js";
 import { getMessageContentString } from "../utils/message/content.js";
 import { getActivePlanItems } from "../utils/task-plan.js";
-import { SANDBOX_ROOT_DIR } from "../constants.js";
+import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 

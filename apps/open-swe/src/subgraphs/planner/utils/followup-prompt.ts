@@ -1,4 +1,4 @@
-import { TaskPlan } from "../../../types.js";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 const followupMessagePrompt = `
 The user is sending a followup request for you to generate a plan for. You are provided with the following context to aid in your new plan context gathering steps:

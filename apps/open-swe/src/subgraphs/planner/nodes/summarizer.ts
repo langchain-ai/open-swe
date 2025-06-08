@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GraphConfig } from "../../../types.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";

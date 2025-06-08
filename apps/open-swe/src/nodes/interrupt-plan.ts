@@ -1,5 +1,5 @@
 import { Command, END, interrupt } from "@langchain/langgraph";
-import { GraphState, GraphUpdate } from "../types.js";
+import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,

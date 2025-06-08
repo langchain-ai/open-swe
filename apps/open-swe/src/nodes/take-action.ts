@@ -5,7 +5,7 @@ import {
 } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { applyPatchTool, shellTool } from "../tools/index.js";
-import { GraphState, GraphConfig } from "../types.js";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
