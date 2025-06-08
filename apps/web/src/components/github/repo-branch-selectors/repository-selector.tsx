@@ -24,6 +24,7 @@ interface RepositorySelectorProps {
   disabled?: boolean;
   placeholder?: string;
   buttonClassName?: string;
+  chatStarted?: boolean;
 }
 // TODO: remove this, we should use the TargetRepository type from the open-swe package
 // Convert GitHub Repository to TargetRepository format
@@ -39,6 +40,7 @@ export function RepositorySelector({
   disabled = false,
   placeholder = "Select a repository...",
   buttonClassName,
+  chatStarted = false,
 }: RepositorySelectorProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -131,6 +133,22 @@ export function RepositorySelector({
             height="16"
           />
           <span>No repositories available</span>
+        </div>
+      </Button>
+    );
+  }
+
+  if (chatStarted) {
+    return (
+      <Button
+        variant="outline"
+        className={cn("max-w-[300px] px-3", buttonClassName)}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <GitHubSVG />
+          <span className="truncate text-left">
+            {selectedValue || placeholder}
+          </span>
         </div>
       </Button>
     );

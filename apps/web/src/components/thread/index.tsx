@@ -48,6 +48,7 @@ import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
+import { GitHubSVG } from "../icons/github";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -361,37 +362,15 @@ export function Thread() {
                   </Button>
                 )}
               </div>
-              <div className="absolute top-2 right-4 flex items-center gap-2">
-                <TooltipIconButton
-                  tooltip="Tasks"
-                  variant="outline"
-                  className="w-18 py-4"
-                  size="lg"
-                  disabled
-                >
-                  <p className="text-sm">Tasks</p>
-                </TooltipIconButton>
-                <Link href="/github">
-                  <TooltipIconButton
-                    tooltip="GitHub Settings"
-                    variant="outline"
-                    className="w-24 px-3 py-4"
-                    size="lg"
-                  >
-                    <Github className="h-4 w-4" />
-                    <p className="text-sm">Settings</p>
-                  </TooltipIconButton>
-                </Link>
+              <div className="absolute top-2 right-4 flex items-center gap-2 text-gray-700">
                 <TooltipIconButton
                   tooltip="Configuration"
-                  variant="outline"
-                  className="py-4"
-                  size="lg"
+                  variant="ghost"
                   onClick={() => {
                     setConfigSidebarOpen(true);
                   }}
                 >
-                  <Settings className="h-8 w-8" />
+                  <Settings className="size-4" />
                 </TooltipIconButton>
                 <GitHubOAuthButton />
               </div>
@@ -437,39 +416,23 @@ export function Thread() {
                 </motion.button>
               </div>
 
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Link href="/github">
-                    <TooltipIconButton
-                      className="w-24 px-3 py-4"
-                      tooltip="GitHub Settings"
-                      variant="ghost"
-                      size="sm"
-                    >
-                      <Github className="mr-1 h-3 w-3" />
-                      <span className="text-sm">Settings</span>
-                    </TooltipIconButton>
-                  </Link>
-                  <TooltipIconButton
-                    tooltip="Configuration"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setConfigSidebarOpen(true);
-                    }}
-                  >
-                    <Settings className="h-4 w-4" />
-                  </TooltipIconButton>
-                  <GitHubOAuthButton />
-                </div>
+              <div className="flex items-center gap-2 text-gray-700">
+                <GitHubOAuthButton />
                 <TooltipIconButton
-                  size="lg"
-                  className="p-4"
+                  tooltip="Configuration"
+                  variant="ghost"
+                  onClick={() => {
+                    setConfigSidebarOpen(true);
+                  }}
+                >
+                  <Settings className="size-4" />
+                </TooltipIconButton>
+                <TooltipIconButton
                   tooltip="New thread"
                   variant="ghost"
                   onClick={() => setThreadId(null)}
                 >
-                  <SquarePen className="size-5" />
+                  <SquarePen className="size-4" />
                 </TooltipIconButton>
               </div>
 

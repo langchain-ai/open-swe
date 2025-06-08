@@ -22,12 +22,14 @@ interface BranchSelectorProps {
   disabled?: boolean;
   placeholder?: string;
   buttonClassName?: string;
+  chatStarted?: boolean;
 }
 
 export function BranchSelector({
   disabled = false,
   placeholder = "Select a branch...",
   buttonClassName,
+  chatStarted = false,
 }: BranchSelectorProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -134,6 +136,22 @@ export function BranchSelector({
         <span>
           No branches available {branchesError && `(${branchesError})`}
         </span>
+      </Button>
+    );
+  }
+
+  if (chatStarted) {
+    return (
+      <Button
+        variant="outline"
+        className={cn("max-w-[300px] px-3", buttonClassName)}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <GitBranch />
+          <span className="truncate text-left">
+            {selectedBranch || placeholder}
+          </span>
+        </div>
       </Button>
     );
   }
