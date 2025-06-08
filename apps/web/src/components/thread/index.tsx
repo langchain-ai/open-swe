@@ -46,6 +46,12 @@ import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { useRouter } from "next/navigation";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -544,14 +550,21 @@ export function Thread() {
                         className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
                       />
 
-                      <div className="flex items-center gap-2 p-2 pt-4">
-                        <Label
-                          htmlFor="file-input"
-                          className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
-                        >
-                          <Plus className="size-5 text-gray-600" />
-                          <span className="text-sm text-gray-600"></span>
-                        </Label>
+                      <div className="flex items-center gap-1 p-2 pt-4">
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger>
+                              <Label
+                                htmlFor="file-input"
+                                className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
+                              >
+                                <Plus className="size-4 text-gray-600" />
+                              </Label>
+                            </TooltipTrigger>
+                            <TooltipContent>Attach files</TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+
                         <input
                           id="file-input"
                           type="file"

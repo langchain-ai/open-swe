@@ -71,7 +71,8 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -89,7 +90,8 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -107,7 +109,8 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -125,7 +128,8 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -142,7 +146,8 @@ export function RepositorySelector({
     return (
       <Button
         variant="outline"
-        className={cn("max-w-[300px] px-3", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <GitHubSVG />
@@ -164,8 +169,9 @@ export function RepositorySelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn("max-w-[300px] px-3", buttonClassName)}
+          className={cn(buttonClassName)}
           disabled={disabled}
+          size="sm"
         >
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <GitHubSVG />

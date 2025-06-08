@@ -91,7 +91,8 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <GitBranch />
         <span>Select a branch</span>
@@ -104,7 +105,8 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <GitBranch />
         <span>Loading branches...</span>
@@ -117,7 +119,8 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <GitBranch />
         <span>Error loading branches</span>
@@ -130,7 +133,8 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className={cn("max-w-[340px] justify-between", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <GitBranch />
         <span>
@@ -144,7 +148,8 @@ export function BranchSelector({
     return (
       <Button
         variant="outline"
-        className={cn("max-w-[300px] px-3", buttonClassName)}
+        className={cn(buttonClassName)}
+        size="sm"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <GitBranch />
@@ -166,7 +171,8 @@ export function BranchSelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className={cn("max-w-[300px] px-3", buttonClassName)}
+          className={cn(buttonClassName)}
+          size="sm"
           disabled={disabled}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2">
