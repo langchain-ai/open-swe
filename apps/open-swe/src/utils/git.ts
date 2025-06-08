@@ -1,8 +1,8 @@
 import { Octokit } from "@octokit/rest";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
-import { GraphConfig, TargetRepository } from "../types.js";
-import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "../constants.js";
+import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 

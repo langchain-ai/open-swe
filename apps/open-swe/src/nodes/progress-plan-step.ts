@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";

@@ -1,4 +1,4 @@
-import { GraphConfig } from "../types.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 export function getGitHubTokensFromConfig(config: GraphConfig): {
   githubToken: string;

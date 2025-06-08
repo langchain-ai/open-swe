@@ -1,12 +1,12 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { Sandbox } from "@daytonaio/sdk";
-import { GraphState } from "../types.js";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "../constants.js";
+import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
 

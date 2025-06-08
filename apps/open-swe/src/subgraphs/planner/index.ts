@@ -11,7 +11,7 @@ import {
   PlannerGraphStateObj,
   PlannerGraphUpdate,
 } from "./types.js";
-import { GraphConfig, GraphConfiguration } from "../../types.js";
+import { GraphConfig, GraphConfiguration } from "@open-swe/shared/open-swe/types";
 import {
   generateAction,
   generatePlan,

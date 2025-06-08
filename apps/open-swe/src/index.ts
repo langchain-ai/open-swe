@@ -1,5 +1,5 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
-import { GraphAnnotation, GraphConfiguration, GraphState } from "./types.js";
+import { GraphAnnotation, GraphConfiguration, GraphState } from "@open-swe/shared/open-swe/types";
 import {
   initialize,
   generateAction,

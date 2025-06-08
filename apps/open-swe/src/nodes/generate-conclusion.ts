@@ -1,4 +1,4 @@
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
   getMessageContentString,

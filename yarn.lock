@@ -1918,6 +1918,7 @@ __metadata:
     "@langchain/langgraph-sdk": ^0.0.78
     "@langchain/openai": ^0.5.10
     "@octokit/rest": ^22.0.0
+    "@open-swe/shared": "workspace:*"
     "@tsconfig/recommended": ^1.0.8
     "@types/jest": ^29.5.0
     "@types/node": ^22.13.5
@@ -1936,6 +1937,29 @@ __metadata:
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     uuid: ^11.0.5
+    zod: ^3.23.8
+  languageName: unknown
+  linkType: soft
+
+"@open-swe/shared@workspace:*, @open-swe/shared@workspace:packages/shared":
+  version: 0.0.0-use.local
+  resolution: "@open-swe/shared@workspace:packages/shared"
+  dependencies:
+    "@eslint/eslintrc": ^3.1.0
+    "@eslint/js": ^9.19.0
+    "@langchain/core": ^0.3.56
+    "@langchain/langgraph": ^0.2.73
+    "@tsconfig/recommended": ^1.0.8
+    "@types/node": ^22.13.5
+    dotenv: ^16.4.7
+    eslint: ^9.19.0
+    eslint-config-prettier: ^8.8.0
+    eslint-plugin-import: ^2.27.5
+    eslint-plugin-no-instanceof: ^1.0.1
+    eslint-plugin-prettier: ^4.2.1
+    prettier: ^3.5.2
+    typescript: ~5.7.2
+    typescript-eslint: ^8.22.0
     zod: ^3.23.8
   languageName: unknown
   linkType: soft

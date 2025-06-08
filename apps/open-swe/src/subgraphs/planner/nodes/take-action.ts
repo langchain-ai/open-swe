@@ -1,6 +1,6 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { shellTool } from "../../../tools/index.js";
-import { GraphConfig } from "../../../types.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
