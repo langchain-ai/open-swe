@@ -36,6 +36,7 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
+  updateThreadTaskCount: (threadId: string, plan: any[]) => void;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -60,6 +61,33 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   // Simple polling for active threads only
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Real-time task completion count updater
+  const updateThreadTaskCount = useCallback((threadId: string, plan: any[]) => {
+    if (!threadId || !plan) return;
+
+    setThreads((currentThreads) =>
+      currentThreads.map((thread) => {
+        if (thread.thread_id === threadId) {
+          const completedTasksCount = plan.filter(
+            (task: any) => task.completed,
+          ).length;
+          return {
+            ...thread,
+            completedTasksCount,
+            totalTasksCount: plan.length,
+            tasks: plan.map((rawTask: any, index: number) => ({
+              index: rawTask.index ?? index,
+              plan: rawTask.plan,
+              completed: rawTask.completed ?? false,
+              summary: rawTask.summary,
+            })),
+          };
+        }
+        return thread;
+      }),
+    );
+  }, []);
 
   const getThread = useCallback(
     async (threadId: string): Promise<ThreadWithTasks | null> => {
@@ -210,6 +238,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
+    updateThreadTaskCount,
   };
 
   return (

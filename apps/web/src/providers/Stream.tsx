@@ -59,7 +59,7 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads, setThreads } = useThreads();
+  const { refreshThreads, setThreads, updateThreadTaskCount } = useThreads();
 
   // Debug logging
   useEffect(() => {
@@ -96,6 +96,16 @@ const StreamSession = ({
       });
     },
   });
+
+  // Listen for plan updates to update task completion counts in real-time
+  useEffect(() => {
+    if (threadId && streamValue.values) {
+      const plan = (streamValue.values as any)?.plan;
+      if (plan && Array.isArray(plan)) {
+        updateThreadTaskCount(threadId, plan);
+      }
+    }
+  }, [threadId, streamValue.values, updateThreadTaskCount]);
 
   // Simplified: ThreadProvider now handles polling automatically for busy threads
 
