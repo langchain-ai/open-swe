@@ -1,4 +1,5 @@
 "use client";
+
 import { useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";

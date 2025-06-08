@@ -3,7 +3,7 @@ import {
   isHumanMessage,
   HumanMessage,
 } from "@langchain/core/messages";
-import { getMessageContentString } from "./message/content.js";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 export function getUserRequest(
   messages: BaseMessage[],

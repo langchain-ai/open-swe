@@ -5,10 +5,8 @@ import {
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
-import {
-  getMessageContentString,
-  getMessageString,
-} from "../utils/message/content.js";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageString } from "../utils/message/content.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getUserRequest } from "../utils/user-request.js";
 import {

@@ -3,7 +3,7 @@ import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getMessageContentString } from "../../../utils/message/content.js";
+import { getMessageContentString } from "@open-swe/shared/messages";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";

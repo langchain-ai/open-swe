@@ -6,20 +6,11 @@ import {
   isHumanMessage,
   isSystemMessage,
   isToolMessage,
-  MessageContent,
   SystemMessage,
   ToolMessage,
 } from "@langchain/core/messages";
 import { ToolCall } from "@langchain/core/messages/tool";
-
-export function getMessageContentString(content: MessageContent): string {
-  if (typeof content === "string") return content;
-
-  return content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
-    .join(" ");
-}
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 export function getToolCallsString(toolCalls: ToolCall[] | undefined): string {
   if (!toolCalls?.length) return "";

@@ -626,11 +626,7 @@ export function Thread() {
                     </form>
                   </div>
 
-                  {!isTaskView && !isThreadView && (
-                    <div className="w-full max-w-3xl rounded-lg border border-gray-200 bg-white shadow-sm">
-                      <TaskList />
-                    </div>
-                  )}
+                  {!isTaskView && !isThreadView && <TaskList />}
                 </div>
               }
             />

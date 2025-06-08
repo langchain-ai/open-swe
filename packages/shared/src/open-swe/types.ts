@@ -162,7 +162,9 @@ export type GraphUpdate = Partial<GraphState>;
 
 export const GraphConfigurationMetadata: {
   [key: string]: {
-    x_open_swe_ui_config: Omit<ConfigurableFieldUIMetadata, "label"> | { type: "hidden" }
+    x_open_swe_ui_config:
+      | Omit<ConfigurableFieldUIMetadata, "label">
+      | { type: "hidden" };
   };
 } = {
   plannerModelName: {
@@ -261,7 +263,8 @@ export const GraphConfigurationMetadata: {
       default: 6,
       min: 1,
       max: 20,
-      description: "Maximum number of context gathering actions during planning",
+      description:
+        "Maximum number of context gathering actions during planning",
     },
   },
   maxTokens: {
@@ -270,7 +273,8 @@ export const GraphConfigurationMetadata: {
       default: 10_000,
       min: 1,
       max: 64_000,
-      description: "The maximum number of tokens to generate in an individual generation",
+      description:
+        "The maximum number of tokens to generate in an individual generation",
     },
   },
   "x-github-installation-token": {
@@ -350,7 +354,9 @@ export const GraphConfiguration = z.object({
   progressPlanCheckerModelName: z
     .string()
     .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.progressPlanCheckerModelName),
+    .langgraph.metadata(
+      GraphConfigurationMetadata.progressPlanCheckerModelName,
+    ),
   /**
    * The temperature to use for progress plan checking.
    * If selecting a reasoning model, this will be ignored.
@@ -359,7 +365,9 @@ export const GraphConfiguration = z.object({
   progressPlanCheckerTemperature: z
     .number()
     .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.progressPlanCheckerTemperature),
+    .langgraph.metadata(
+      GraphConfigurationMetadata.progressPlanCheckerTemperature,
+    ),
 
   /**
    * The model ID to use for summarizing the conversation history.
@@ -404,7 +412,9 @@ export const GraphConfiguration = z.object({
   "x-github-installation-token": z
     .string()
     .optional()
-    .langgraph.metadata(GraphConfigurationMetadata["x-github-installation-token"]),
+    .langgraph.metadata(
+      GraphConfigurationMetadata["x-github-installation-token"],
+    ),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */

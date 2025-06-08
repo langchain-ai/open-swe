@@ -12,8 +12,8 @@ import {
   useEffect,
 } from "react";
 import { createClient } from "./client";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
-// Enhanced thread with task completion info
 export interface ThreadWithTasks extends Thread {
   threadTitle: string;
   repository: string;
@@ -99,10 +99,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         ).length;
 
         // Extract thread title from messages if available
-        const threadTitle =
-          messages?.[0]?.content?.[0]?.text?.substring(0, 50) + "..." ||
-          targetThread.threadTitle || // Keep existing title if no new one
-          `Thread ${targetThread.thread_id.substring(0, 8)}`;
+        const firstMessageContent = messages?.[0]?.content;
+        const threadTitle = firstMessageContent
+          ? getMessageContentString(firstMessageContent)
+          : targetThread.threadTitle;
 
         const newRepository =
           targetRepository?.repo ||
@@ -216,9 +216,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const completedTasksCount = tasks.filter((task) => task.completed).length;
     const targetRepository = threadValues?.targetRepository;
     const messages = (threadValues as any)?.messages;
-    const threadTitle =
-      messages?.[0]?.content?.[0]?.text?.substring(0, 50) + "..." ||
-      `Thread ${thread.thread_id.substring(0, 8)}`;
+    const firstMessageContent = messages?.[0]?.content;
+    const threadTitle = firstMessageContent
+      ? getMessageContentString(firstMessageContent)
+      : `Thread ${thread.thread_id.substring(0, 8)}`;
 
     return {
       ...thread,
