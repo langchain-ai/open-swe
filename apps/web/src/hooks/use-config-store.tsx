@@ -4,9 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-metadata";
 
-// TODO: Update ConfigState to:
-// Replace these types with shared types from open-swe
-// Use shared config store from open-swe, instead of previous Open Agent Config Interface
+export const DEFAULT_CONFIG_KEY = "open_swe_default_config";
 
 interface ConfigState {
   configs: Record<string, any>;
@@ -99,11 +97,10 @@ export const useConfigStore = create<ConfigState>()(
         }));
       },
 
-      // Clear everything from the store
       resetStore: () => set({ configs: {} }),
     }),
     {
-      name: "ai-config-storage", // Keep the same storage key, but manage agents inside
+      name: "open-swe-config-storage",
     },
   ),
 );
