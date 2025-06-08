@@ -4,6 +4,7 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -59,7 +60,7 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads, setThreads, updateThreadTaskCount } = useThreads();
+  const { refreshThreads, setThreads, updateThreadFromStream } = useThreads();
 
   // Debug logging
   useEffect(() => {
@@ -97,17 +98,37 @@ const StreamSession = ({
     },
   });
 
-  // Listen for plan updates to update task completion counts in real-time
+  // Listen for stream updates to update all thread properties in real-time
+  // Use a ref to track the last update to prevent excessive calls
+  const lastUpdateRef = useRef<{ threadId: string; valuesHash: string } | null>(
+    null,
+  );
+
   useEffect(() => {
     if (threadId && streamValue.values) {
-      const plan = (streamValue.values as any)?.plan;
-      if (plan && Array.isArray(plan)) {
-        updateThreadTaskCount(threadId, plan);
+      // Create a simple hash of the values to detect actual changes
+      const valuesHash = JSON.stringify({
+        plan: (streamValue.values as any).plan,
+        proposedPlan: (streamValue.values as any).proposedPlan,
+        targetRepository: (streamValue.values as any).targetRepository,
+        messages: (
+          streamValue.values as any
+        ).messages?.[0]?.content?.[0]?.text?.substring(0, 50),
+      });
+
+      // Only update if thread or values actually changed
+      if (
+        !lastUpdateRef.current ||
+        lastUpdateRef.current.threadId !== threadId ||
+        lastUpdateRef.current.valuesHash !== valuesHash
+      ) {
+        lastUpdateRef.current = { threadId, valuesHash };
+        updateThreadFromStream(threadId, streamValue.values);
       }
     }
-  }, [threadId, streamValue.values, updateThreadTaskCount]);
+  }, [threadId, streamValue.values, updateThreadFromStream]);
 
-  // Simplified: ThreadProvider now handles polling automatically for busy threads
+  // Real-time updates via stream - no polling needed
 
   return (
     <StreamContext.Provider value={streamValue}>

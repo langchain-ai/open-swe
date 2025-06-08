@@ -10,7 +10,6 @@ import {
   Dispatch,
   SetStateAction,
   useEffect,
-  useRef,
 } from "react";
 import { createClient } from "./client";
 
@@ -36,7 +35,7 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
-  updateThreadTaskCount: (threadId: string, plan: any[]) => void;
+  updateThreadFromStream: (threadId: string, streamValues: any) => void;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -59,35 +58,92 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<ThreadWithTasks[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
-  // Simple polling for active threads only
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Real-time thread updater for all properties (replaces polling)
+  const updateThreadFromStream = useCallback(
+    (threadId: string, streamValues: any) => {
+      if (!threadId || !streamValues) return;
 
-  // Real-time task completion count updater
-  const updateThreadTaskCount = useCallback((threadId: string, plan: any[]) => {
-    if (!threadId || !plan) return;
+      setThreads((currentThreads) => {
+        const targetThread = currentThreads.find(
+          (t) => t.thread_id === threadId,
+        );
+        if (!targetThread) return currentThreads; // Thread not found, no update needed
 
-    setThreads((currentThreads) =>
-      currentThreads.map((thread) => {
-        if (thread.thread_id === threadId) {
-          const completedTasksCount = plan.filter(
-            (task: any) => task.completed,
-          ).length;
+        const plan: any[] = streamValues?.plan || [];
+        const proposedPlan: any[] = streamValues?.proposedPlan || [];
+        const targetRepository = streamValues?.targetRepository;
+        const messages = streamValues?.messages;
+
+        // Use plan if it exists (contains completion status), otherwise use proposedPlan
+        const rawTasks = plan.length > 0 ? plan : proposedPlan;
+
+        const tasks = rawTasks.map((rawTask: any, index: number) => {
+          if (typeof rawTask === "string") {
+            return {
+              index,
+              plan: rawTask,
+              completed: false,
+              summary: undefined,
+            };
+          }
           return {
-            ...thread,
-            completedTasksCount,
-            totalTasksCount: plan.length,
-            tasks: plan.map((rawTask: any, index: number) => ({
-              index: rawTask.index ?? index,
-              plan: rawTask.plan,
-              completed: rawTask.completed ?? false,
-              summary: rawTask.summary,
-            })),
+            index: rawTask.index ?? index,
+            plan: rawTask.plan,
+            completed: rawTask.completed ?? false,
+            summary: rawTask.summary,
           };
+        });
+
+        const completedTasksCount = tasks.filter(
+          (task) => task.completed,
+        ).length;
+
+        // Extract thread title from messages if available
+        const threadTitle =
+          messages?.[0]?.content?.[0]?.text?.substring(0, 50) + "..." ||
+          targetThread.threadTitle || // Keep existing title if no new one
+          `Thread ${targetThread.thread_id.substring(0, 8)}`;
+
+        const newRepository =
+          targetRepository?.repo ||
+          targetRepository?.name ||
+          targetThread.repository ||
+          "Unknown Repository";
+
+        const newBranch =
+          targetRepository?.branch || targetThread.branch || "main";
+
+        // Check if any values actually changed to prevent unnecessary updates
+        const hasChanges =
+          targetThread.completedTasksCount !== completedTasksCount ||
+          targetThread.totalTasksCount !== tasks.length ||
+          targetThread.threadTitle !== threadTitle ||
+          targetThread.repository !== newRepository ||
+          targetThread.branch !== newBranch ||
+          JSON.stringify(targetThread.tasks) !== JSON.stringify(tasks);
+
+        if (!hasChanges) {
+          return currentThreads; // No changes, return same array to prevent re-render
         }
-        return thread;
-      }),
-    );
-  }, []);
+
+        return currentThreads.map((thread) => {
+          if (thread.thread_id === threadId) {
+            return {
+              ...thread,
+              threadTitle,
+              repository: newRepository,
+              branch: newBranch,
+              completedTasksCount,
+              totalTasksCount: tasks.length,
+              tasks,
+            };
+          }
+          return thread;
+        });
+      });
+    },
+    [],
+  );
 
   const getThread = useCallback(
     async (threadId: string): Promise<ThreadWithTasks | null> => {
@@ -110,27 +166,52 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const plan: any[] = threadValues?.plan || [];
     const proposedPlan: any[] = threadValues?.proposedPlan || [];
 
-    // Use plan if it exists (contains completion status), otherwise use proposedPlan
-    const rawTasks = plan.length > 0 ? plan : proposedPlan;
+    // Improved logic: If plan exists, use it; otherwise use proposedPlan
+    // But also handle cases where plan exists but might be incomplete
+    let tasks: Array<{
+      index: number;
+      plan: string;
+      completed: boolean;
+      summary?: string;
+    }> = [];
 
-    const tasks = rawTasks.map((rawTask, index) => {
-      if (typeof rawTask === "string") {
-        // For string tasks (from proposedPlan), default to not completed
+    if (plan.length > 0) {
+      // Plan exists - use it as it contains completion status
+      tasks = plan.map((rawTask, index) => {
+        if (typeof rawTask === "string") {
+          return {
+            index,
+            plan: rawTask,
+            completed: false,
+            summary: undefined,
+          };
+        }
         return {
-          index,
-          plan: rawTask,
-          completed: false,
+          index: rawTask.index ?? index,
+          plan: rawTask.plan,
+          completed: rawTask.completed ?? false,
+          summary: rawTask.summary,
+        };
+      });
+    } else if (proposedPlan.length > 0) {
+      // Only proposedPlan exists - these are not started yet, so all incomplete
+      tasks = proposedPlan.map((rawTask, index) => {
+        if (typeof rawTask === "string") {
+          return {
+            index,
+            plan: rawTask,
+            completed: false,
+            summary: undefined,
+          };
+        }
+        return {
+          index: rawTask.index ?? index,
+          plan: rawTask.plan || rawTask,
+          completed: false, // ProposedPlan items are never completed
           summary: undefined,
         };
-      }
-      // For object tasks (from plan), preserve existing completion status and other properties
-      return {
-        index: rawTask.index ?? index,
-        plan: rawTask.plan,
-        completed: rawTask.completed ?? false,
-        summary: rawTask.summary,
-      };
-    });
+      });
+    }
 
     const completedTasksCount = tasks.filter((task) => task.completed).length;
     const targetRepository = threadValues?.targetRepository;
@@ -204,27 +285,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
   }, [apiUrl, assistantId]);
 
-  // Simple polling for busy threads
-  useEffect(() => {
-    const busyThreads = threads.filter((t) => t.status === "busy");
-
-    if (busyThreads.length > 0) {
-      pollIntervalRef.current = setInterval(() => {
-        refreshThreads().catch(console.error);
-      }, 3000); // Poll every 3 seconds
-    } else {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
-  }, [threads, refreshThreads]);
+  // Removed polling - now using real-time stream updates via updateThreadFromStream
 
   // Initial load
   useEffect(() => {
@@ -238,7 +299,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
-    updateThreadTaskCount,
+    updateThreadFromStream,
   };
 
   return (
