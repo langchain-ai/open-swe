@@ -7,35 +7,36 @@ import { useConfigStore } from "@/hooks/use-config-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ConfigurableFieldUIMetadata } from "@/types/configurable";
+import type {
+  ConfigurableFieldUIMetadata,
+  ConfigurableFieldUIType,
+} from "@open-swe/shared/configurable-metadata";
 import { Button } from "@/components/ui/button";
 import { PanelRightOpen } from "lucide-react";
-import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
+import { GraphConfigurationMetadata } from "@open-swe/shared/open-swe/types";
 
 /**
  * Extract configuration metadata from the GraphConfiguration Zod schema
  */
 function extractConfigurationsFromSchema(): ConfigurableFieldUIMetadata[] {
   const configurations: ConfigurableFieldUIMetadata[] = [];
-  const shape = GraphConfiguration.shape;
 
-  for (const [fieldName, fieldSchema] of Object.entries(shape)) {
-    // Skip hidden fields
-    const metadata = (fieldSchema as any)._def?.x_oap_ui_config;
-    if (!metadata || metadata.type === "hidden") {
+  for (const [label, { x_open_swe_ui_config: metadata }] of Object.entries(
+    GraphConfigurationMetadata,
+  )) {
+    if (metadata.type === "hidden") {
       continue;
     }
-
     configurations.push({
-      label: fieldName,
+      label,
       type: metadata.type,
-      description: metadata.description,
-      options: metadata.options,
       default: metadata.default,
+      description: metadata.description,
+      placeholder: metadata.placeholder,
+      options: metadata.options,
       min: metadata.min,
       max: metadata.max,
       step: metadata.step,
-      placeholder: metadata.placeholder,
     });
   }
 
@@ -62,10 +63,7 @@ export const ConfigurationSidebar = forwardRef<
   useEffect(() => {
     setLoading(true);
 
-    // Extract configurations from the GraphConfiguration Zod schema
     const actualConfigs = extractConfigurationsFromSchema();
-    console.log("actualConfigs", actualConfigs);
-    // Set Default Configs if they don't exist
     actualConfigs.forEach((config) => {
       if (configs[config.label] === undefined && config.default !== undefined) {
         updateConfig(config.label, config.default);

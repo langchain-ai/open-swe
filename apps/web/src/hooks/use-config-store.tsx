@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { ConfigurableFieldUIMetadata } from "@/types/configurable";
+import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-metadata";
 
 // TODO: Update ConfigState to:
 // Replace these types with shared types from open-swe
