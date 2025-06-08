@@ -40,15 +40,12 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { GitHubOAuthButton } from "../github/github-oauth-button";
-import { RepositorySelector } from "../github/repo-branch-selectors/repository-selector";
 import { useGitHubApp } from "@/hooks/useGitHubApp";
-import { BranchSelector } from "../github/repo-branch-selectors/branch-selector";
-import Link from "next/link";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
-import { GitHubSVG } from "../icons/github";
+import { useRouter } from "next/navigation";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -92,6 +89,7 @@ function ScrollToBottom(props: { className?: string }) {
 }
 
 export function Thread() {
+  const { push } = useRouter();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubApp();
@@ -396,7 +394,7 @@ export function Thread() {
                 </div>
                 <motion.button
                   className="flex cursor-pointer items-center gap-2"
-                  onClick={() => setThreadId(null)}
+                  onClick={() => push("/")}
                   animate={{
                     marginLeft: !chatHistoryOpen ? 48 : 0,
                   }}

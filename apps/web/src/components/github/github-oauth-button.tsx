@@ -52,6 +52,7 @@ export function GitHubOAuthButton() {
         variant="outline"
         disabled
         className="text-xs"
+        size="sm"
       >
         <GitHubSVG
           width="16"
@@ -69,6 +70,7 @@ export function GitHubOAuthButton() {
         onClick={handleLogout}
         disabled={isLoading}
         className="text-xs"
+        size="sm"
       >
         <GitHubSVG />
         {isLoading ? "Disconnecting..." : "Disconnect GitHub"}
@@ -81,7 +83,8 @@ export function GitHubOAuthButton() {
       variant="outline"
       onClick={handleLogin}
       disabled={isLoading}
-      className="p-1 text-xs"
+      className="text-xs"
+      size="sm"
     >
       <GitHubSVG />
       {isLoading ? "Connecting..." : "Connect GitHub"}
