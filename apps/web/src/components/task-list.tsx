@@ -9,7 +9,6 @@ import { ThreadItem } from "./thread-item";
 
 const THREADS_PER_PAGE = 5;
 
-// TODO: abstract out similar logic in task-list and task-list-sidebar
 export default function TaskList() {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [_threadId, setThreadId] = useQueryState("threadId", parseAsString);

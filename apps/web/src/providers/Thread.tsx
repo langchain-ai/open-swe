@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createClient } from "./client";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 export interface ThreadWithTasks extends Thread {
   threadTitle: string;
@@ -20,12 +21,8 @@ export interface ThreadWithTasks extends Thread {
   branch: string;
   completedTasksCount: number;
   totalTasksCount: number;
-  tasks: Array<{
-    index: number;
-    plan: string;
-    completed: boolean;
-    summary?: string;
-  }>;
+  tasks: TaskPlan | undefined;
+  proposedPlan: string[];
 }
 
 interface ThreadContextType {
@@ -50,6 +47,35 @@ function getThreadSearchMetadata(
   }
 }
 
+const getTaskCounts = (
+  tasks?: TaskPlan,
+): { totalTasksCount: number; completedTasksCount: number } => {
+  if (!tasks) {
+    // No tasks passed, return 0s
+    return { totalTasksCount: 0, completedTasksCount: 0 };
+  }
+  const activeTaskList = tasks.tasks.find(
+    (t) => t.taskIndex === tasks.activeTaskIndex,
+  );
+  if (!activeTaskList) {
+    // Something is wrong here. Return 0
+    return { totalTasksCount: 0, completedTasksCount: 0 };
+  }
+  const activeTaskPlans = activeTaskList.planRevisions.find(
+    (p) => p.revisionIndex === activeTaskList.activeRevisionIndex,
+  );
+  if (!activeTaskPlans) {
+    // Something is wrong here. Return 0
+    return { totalTasksCount: 0, completedTasksCount: 0 };
+  }
+
+  return {
+    totalTasksCount: activeTaskPlans.plans.length,
+    completedTasksCount: activeTaskPlans.plans.filter((p) => p.completed)
+      .length,
+  };
+};
+
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const assistantId: string | undefined =
@@ -69,34 +95,12 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         );
         if (!targetThread) return currentThreads; // Thread not found, no update needed
 
-        const plan: any[] = streamValues?.plan || [];
-        const proposedPlan: any[] = streamValues?.proposedPlan || [];
+        const plan: TaskPlan | undefined = streamValues?.plan;
+        const proposedPlan: string[] = streamValues?.proposedPlan || [];
         const targetRepository = streamValues?.targetRepository;
         const messages = streamValues?.messages;
 
-        // Use plan if it exists (contains completion status), otherwise use proposedPlan
-        const rawTasks = plan.length > 0 ? plan : proposedPlan;
-
-        const tasks = rawTasks.map((rawTask: any, index: number) => {
-          if (typeof rawTask === "string") {
-            return {
-              index,
-              plan: rawTask,
-              completed: false,
-              summary: undefined,
-            };
-          }
-          return {
-            index: rawTask.index ?? index,
-            plan: rawTask.plan,
-            completed: rawTask.completed ?? false,
-            summary: rawTask.summary,
-          };
-        });
-
-        const completedTasksCount = tasks.filter(
-          (task) => task.completed,
-        ).length;
+        const { totalTasksCount, completedTasksCount } = getTaskCounts(plan);
 
         // Extract thread title from messages if available
         const firstMessageContent = messages?.[0]?.content;
@@ -113,19 +117,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         const newBranch =
           targetRepository?.branch || targetThread.branch || "main";
 
-        // Check if any values actually changed to prevent unnecessary updates
-        const hasChanges =
-          targetThread.completedTasksCount !== completedTasksCount ||
-          targetThread.totalTasksCount !== tasks.length ||
-          targetThread.threadTitle !== threadTitle ||
-          targetThread.repository !== newRepository ||
-          targetThread.branch !== newBranch ||
-          JSON.stringify(targetThread.tasks) !== JSON.stringify(tasks);
-
-        if (!hasChanges) {
-          return currentThreads; // No changes, return same array to prevent re-render
-        }
-
         return currentThreads.map((thread) => {
           if (thread.thread_id === threadId) {
             return {
@@ -134,8 +125,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
               repository: newRepository,
               branch: newBranch,
               completedTasksCount,
-              totalTasksCount: tasks.length,
-              tasks,
+              totalTasksCount,
+              tasks: plan,
+              proposedPlan,
             };
           }
           return thread;
@@ -163,63 +155,17 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const enhanceThreadWithTasks = (thread: Thread): ThreadWithTasks => {
     const threadValues = thread.values as any;
-    const plan: any[] = threadValues?.plan || [];
-    const proposedPlan: any[] = threadValues?.proposedPlan || [];
+    const plan: TaskPlan | undefined = threadValues?.plan;
+    const proposedPlan: string[] = threadValues?.proposedPlan || [];
 
-    // Improved logic: If plan exists, use it; otherwise use proposedPlan
-    // But also handle cases where plan exists but might be incomplete
-    let tasks: Array<{
-      index: number;
-      plan: string;
-      completed: boolean;
-      summary?: string;
-    }> = [];
-
-    if (plan.length > 0) {
-      // Plan exists - use it as it contains completion status
-      tasks = plan.map((rawTask, index) => {
-        if (typeof rawTask === "string") {
-          return {
-            index,
-            plan: rawTask,
-            completed: false,
-            summary: undefined,
-          };
-        }
-        return {
-          index: rawTask.index ?? index,
-          plan: rawTask.plan,
-          completed: rawTask.completed ?? false,
-          summary: rawTask.summary,
-        };
-      });
-    } else if (proposedPlan.length > 0) {
-      // Only proposedPlan exists - these are not started yet, so all incomplete
-      tasks = proposedPlan.map((rawTask, index) => {
-        if (typeof rawTask === "string") {
-          return {
-            index,
-            plan: rawTask,
-            completed: false,
-            summary: undefined,
-          };
-        }
-        return {
-          index: rawTask.index ?? index,
-          plan: rawTask.plan || rawTask,
-          completed: false, // ProposedPlan items are never completed
-          summary: undefined,
-        };
-      });
-    }
-
-    const completedTasksCount = tasks.filter((task) => task.completed).length;
     const targetRepository = threadValues?.targetRepository;
     const messages = (threadValues as any)?.messages;
     const firstMessageContent = messages?.[0]?.content;
     const threadTitle = firstMessageContent
       ? getMessageContentString(firstMessageContent)
       : `Thread ${thread.thread_id.substring(0, 8)}`;
+
+    const { totalTasksCount, completedTasksCount } = getTaskCounts(plan);
 
     return {
       ...thread,
@@ -230,8 +176,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         "Unknown Repository",
       branch: targetRepository?.branch || "main",
       completedTasksCount,
-      totalTasksCount: tasks.length,
-      tasks,
+      totalTasksCount,
+      tasks: plan,
+      proposedPlan,
     };
   };
 

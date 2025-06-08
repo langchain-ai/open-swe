@@ -10,6 +10,7 @@
   "type": "module",
   "scripts": {
     "dev": "langgraphjs dev --no-browser --config ../../langgraph.json",
+    "clean": "rm -rf ../../.langgraph_api || true && rm -rf .turbo || true && rm -rf ./dist || true",
     "build": "tsc",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
