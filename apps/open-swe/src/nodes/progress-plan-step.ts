@@ -1,12 +1,22 @@
 import { z } from "zod";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphConfig, GraphState, PlanItem } from "../types.js";
+import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
 import { getMessageString } from "../utils/message/content.js";
-import { isHumanMessage } from "@langchain/core/messages";
 import { removeFirstHumanMessage } from "../utils/message/modify-array.js";
+import { getUserRequest } from "../utils/user-request.js";
+import {
+  completePlanItem,
+  getActivePlanItems,
+  getActiveTask,
+} from "../utils/task-plan.js";
+import {
+  getCurrentPlanItem,
+  getRemainingPlanItems,
+} from "../utils/current-task.js";
+import { ToolMessage } from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -60,8 +70,9 @@ export async function progressPlanStep(
     tool_choice: setTaskStatusTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   const conversationHistoryStr = `Here is the full conversation history after the user's request:
   
 ${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
@@ -69,12 +80,14 @@ ${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
 
+  const activePlanItems = getActivePlanItems(state.plan);
+
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan),
+      content: formatPrompt(activePlanItems),
     },
-    ...(firstUserMessage ? [firstUserMessage] : []),
+    userRequest,
     {
       role: "user",
       content: conversationHistoryStr,
@@ -91,15 +104,14 @@ Once you've determined the status of the current task, call the \`set_task_statu
   const isCompleted =
     (toolCall.args as z.infer<typeof setTaskStatusToolSchema>).task_status ===
     "completed";
-  const currentTask = state.plan.filter((p) => !p.completed)?.[0];
-  const toolMessage = {
-    role: "tool",
-    tool_call_id: toolCall.id,
+  const currentTask = getCurrentPlanItem(activePlanItems);
+  const toolMessage = new ToolMessage({
+    tool_call_id: toolCall.id ?? "",
     content: `Saved task status as ${
       toolCall.args.task_status
     } for task ${currentTask?.plan || "unknown"}`,
     name: toolCall.name,
-  };
+  });
 
   if (!isCompleted) {
     logger.info(
@@ -108,21 +120,34 @@ Once you've determined the status of the current task, call the \`set_task_statu
         reasoning: toolCall.args.reasoning,
       },
     );
+    const commandUpdate: GraphUpdate = { messages: [response, toolMessage] };
     return new Command({
       goto: "generate-action",
-      update: { messages: [response, toolMessage] },
+      update: commandUpdate,
     });
   }
 
+  // LLM marked as completed, so we need to update the plan to reflect that.
+  const updatedPlanTasks = completePlanItem(
+    state.plan,
+    getActiveTask(state.plan).id,
+    currentTask.index,
+  );
+
   // This should in theory never happen, but ensure we route properly if it does.
-  const remainingTask = state.plan.find((p) => !p.completed);
+  const remainingTask = getRemainingPlanItems(activePlanItems)?.[0];
   if (!remainingTask) {
     logger.info(
       "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );
+    const commandUpdate: GraphUpdate = {
+      messages: [response, toolMessage],
+      // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
+      plan: updatedPlanTasks,
+    };
     return new Command({
       goto: "generate-conclusion",
-      update: { messages: [response, toolMessage] },
+      update: commandUpdate,
     });
   }
 
@@ -133,19 +158,13 @@ Once you've determined the status of the current task, call the \`set_task_statu
     },
   });
 
+  const commandUpdate: GraphUpdate = {
+    messages: [response, toolMessage],
+    plan: updatedPlanTasks,
+  };
+
   return new Command({
     goto: "summarize-task-steps",
-    update: {
-      messages: [response, toolMessage],
-      plan: state.plan.map((p) => {
-        if (p.index === remainingTask.index) {
-          return {
-            ...p,
-            completed: true,
-          };
-        }
-        return p;
-      }),
-    },
+    update: commandUpdate,
   });
 }

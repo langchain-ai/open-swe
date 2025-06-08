@@ -6,7 +6,11 @@
  */
 
 import { END, START, StateGraph } from "@langchain/langgraph";
-import { PlannerGraphState, PlannerGraphStateObj } from "./types.js";
+import {
+  PlannerGraphState,
+  PlannerGraphStateObj,
+  PlannerGraphUpdate,
+} from "./types.js";
 import { GraphConfig, GraphConfiguration } from "../../types.js";
 import {
   generateAction,
@@ -14,7 +18,7 @@ import {
   summarizer,
   takeAction,
 } from "./nodes/index.js";
-import { isAIMessage } from "@langchain/core/messages";
+import { isAIMessage, RemoveMessage } from "@langchain/core/messages";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
@@ -39,12 +43,24 @@ function takeActionOrGeneratePlan(
   return "generate-plan";
 }
 
+function prepareGraphState(state: PlannerGraphState): PlannerGraphUpdate {
+  if (!state.plannerMessages?.length) return {};
+  // Remove all planning messages if we're starting a new plan
+  return {
+    plannerMessages: state.plannerMessages.map(
+      (m) => new RemoveMessage({ id: m.id ?? "" }),
+    ),
+  };
+}
+
 const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
+  .addNode("prepare-graph-state", prepareGraphState)
   .addNode("generate-plan-context-action", generateAction)
   .addNode("take-plan-action", takeAction)
   .addNode("generate-plan", generatePlan)
   .addNode("summarizer", summarizer)
-  .addEdge(START, "generate-plan-context-action")
+  .addEdge(START, "prepare-graph-state")
+  .addEdge("prepare-graph-state", "generate-plan-context-action")
   .addConditionalEdges(
     "generate-plan-context-action",
     takeActionOrGeneratePlan,

@@ -6,11 +6,9 @@ import { getCurrentTaskInput } from "@langchain/langgraph";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { SANDBOX_ROOT_DIR } from "../constants.js";
+import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
-
-const DEFAULT_COMMAND_TIMEOUT = 60_000; // 1 minute
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
@@ -28,9 +26,9 @@ const shellToolSchema = z.object({
   timeout: z
     .number()
     .optional()
-    .default(DEFAULT_COMMAND_TIMEOUT)
+    .default(TIMEOUT_SEC)
     .describe(
-      "The maximum time to wait for the command to complete in milliseconds.",
+      "The maximum time to wait for the command to complete in seconds.",
     ),
 });
 
@@ -55,7 +53,7 @@ export const shellTool = tool(
         command.join(" "),
         workdir,
         DEFAULT_ENV,
-        timeout ?? DEFAULT_COMMAND_TIMEOUT,
+        timeout ?? TIMEOUT_SEC,
       );
 
       if (response.exitCode !== 0) {

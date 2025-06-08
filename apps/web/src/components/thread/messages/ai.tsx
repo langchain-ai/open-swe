@@ -9,11 +9,9 @@ import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
-import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
-import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
+import { Interrupt } from "./interrupt";
 
 function CustomComponent({
   message,
@@ -67,40 +65,16 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
-interface InterruptProps {
-  interruptValue?: unknown;
-  isLastMessage: boolean;
-  hasNoAIOrToolMessages: boolean;
-}
-
-function Interrupt({
-  interruptValue,
-  isLastMessage,
-  hasNoAIOrToolMessages,
-}: InterruptProps) {
-  return (
-    <>
-      {isAgentInboxInterruptSchema(interruptValue) &&
-        (isLastMessage || hasNoAIOrToolMessages) && (
-          <ThreadView interrupt={interruptValue} />
-        )}
-      {interruptValue &&
-      !isAgentInboxInterruptSchema(interruptValue) &&
-      isLastMessage ? (
-        <GenericInterruptView interrupt={interruptValue} />
-      ) : null}
-    </>
-  );
-}
-
 export function AssistantMessage({
   message,
   isLoading,
   handleRegenerate,
+  forceRenderInterrupt = false,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+  forceRenderInterrupt?: boolean;
 }) {
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -140,6 +114,8 @@ export function AssistantMessage({
     return null;
   }
 
+  console.log("returning");
+
   return (
     <div className="group mr-auto flex w-full max-w-3xl items-start gap-2">
       <div className="flex w-full flex-col gap-2">
@@ -150,6 +126,7 @@ export function AssistantMessage({
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+              forceRenderInterrupt={forceRenderInterrupt}
             />
           </span>
         ) : (
@@ -184,6 +161,7 @@ export function AssistantMessage({
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
+              forceRenderInterrupt={forceRenderInterrupt}
             />
             <div
               className={cn(

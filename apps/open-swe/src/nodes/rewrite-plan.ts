@@ -1,11 +1,10 @@
 import { GraphState, GraphConfig, GraphUpdate, PlanItem } from "../types.js";
 import { loadModel, Task } from "../utils/load-model.js";
-import { isHumanMessage } from "@langchain/core/messages";
-import { getMessageContentString } from "../utils/message/content.js";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
+import { getUserRequest } from "../utils/user-request.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 
@@ -133,15 +132,12 @@ async function identifyTasksToModifyFunc(
     },
   );
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithIdentifyChangesTool.invoke([
     {
       role: "user",
       content: formatSysPromptIdentifyTasks(
-        getMessageContentString(
-          firstUserMessage?.content || "No user message found",
-        ),
+        userRequest || "No user message found",
         state.planChangeRequest,
         state.proposedPlan,
       ),
@@ -198,15 +194,12 @@ async function updatePlanTasksFunc(
     tool_choice: updatePlanTasksTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithUpdatePlanTasksTool.invoke([
     {
       role: "user",
       content: formatSysPromptRewritePlan(
-        getMessageContentString(
-          firstUserMessage?.content || "No user message found",
-        ),
+        userRequest || "No user message found",
         state.planChangeRequest,
         state.proposedPlan,
         tasksToModify,
@@ -243,7 +236,6 @@ export async function rewritePlan(
   const updatedPlanTasks = await updatePlanTasks(state, tasksToModify, model);
 
   return {
-    plan: [],
     proposedPlan: updatedPlanTasks,
   };
 }

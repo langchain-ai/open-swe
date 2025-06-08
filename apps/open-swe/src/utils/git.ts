@@ -463,6 +463,42 @@ export async function checkoutBranchAndCommit(
   return branchName;
 }
 
+async function getExistingPullRequest(
+  owner: string,
+  repo: string,
+  branchName: string,
+  githubToken: string,
+) {
+  try {
+    const octokit = new Octokit({
+      auth: githubToken,
+    });
+
+    const { data: pullRequests } = await octokit.pulls.list({
+      owner,
+      repo,
+      head: branchName,
+    });
+
+    if (pullRequests?.[0]) {
+      return pullRequests[0];
+    }
+  } catch (e) {
+    logger.error(`Failed to get existing pull request`, {
+      branch: branchName,
+      owner,
+      repo,
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+  }
+
+  return null;
+}
+
 export async function createPullRequest({
   owner,
   repo,
@@ -507,6 +543,13 @@ export async function createPullRequest({
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
     return pullRequest;
   } catch (error) {
+    if (error instanceof Error && error.message.includes("already exists")) {
+      logger.info(
+        "Pull request already exists. Getting existing pull request...",
+      );
+      return getExistingPullRequest(owner, repo, headBranch, githubToken);
+    }
+
     logger.error(`Failed to create pull request`, {
       error,
     });
@@ -545,6 +588,7 @@ export async function cloneRepo(
   targetRepository: TargetRepository,
   args: {
     githubToken: string;
+    stateBranchName?: string;
   },
 ) {
   try {
@@ -553,8 +597,9 @@ export async function cloneRepo(
     // Use x-access-token format for better GitHub authentication
     const repoUrlWithToken = `https://x-access-token:${args.githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
-    if (targetRepository.branch) {
-      gitCloneCommand.push("-b", targetRepository.branch, repoUrlWithToken);
+    const branchName = args.stateBranchName || targetRepository.branch;
+    if (branchName) {
+      gitCloneCommand.push("-b", branchName, repoUrlWithToken);
     } else {
       gitCloneCommand.push(repoUrlWithToken);
     }
@@ -562,7 +607,7 @@ export async function cloneRepo(
     logger.info("Cloning repository", {
       // Don't log the full command with token for security reasons
       repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
-      branch: targetRepository.branch || "default",
+      branch: branchName,
     });
     return await sandbox.process.executeCommand(gitCloneCommand.join(" "));
   } catch (e) {
