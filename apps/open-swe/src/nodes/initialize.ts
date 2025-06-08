@@ -75,7 +75,7 @@ export async function initialize(
 
   const checkoutBranchRes = await checkoutBranch(
     absoluteRepoDir,
-    state.branchName || getBranchName(config, targetRepository),
+    state.branchName || getBranchName(config),
     sandbox,
   );
 

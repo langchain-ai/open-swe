@@ -124,7 +124,7 @@ export async function openPullRequest(
   const pr = await createPullRequest({
     owner,
     repo,
-    headBranch: branchName ?? getBranchName(config, state.targetRepository),
+    headBranch: branchName ?? getBranchName(config),
     title,
     body,
     githubToken,

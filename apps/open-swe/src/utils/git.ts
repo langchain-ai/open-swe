@@ -19,24 +19,13 @@ export function getRepoAbsolutePath(
   return `${SANDBOX_ROOT_DIR}/${repoName}`;
 }
 
-export function getBranchName(
-  config: GraphConfig,
-  targetRepository: TargetRepository,
-): string {
-  if (!targetRepository) {
-    throw new Error("No target repository provided");
-  }
-
-  if (!targetRepository.repo) {
-    throw new Error("No repository name provided in target repository");
-  }
-
+export function getBranchName(config: GraphConfig): string {
   const threadId = config.configurable?.thread_id;
   if (!threadId) {
     throw new Error("No thread ID provided");
   }
 
-  return `${targetRepository.repo}/${threadId}`;
+  return `open-swe/${threadId}`;
 }
 
 export async function checkoutBranch(
@@ -451,8 +440,7 @@ export async function checkoutBranchAndCommit(
 ): Promise<string> {
   logger.info("Checking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-  const branchName =
-    options?.branchName || getBranchName(config, targetRepository);
+  const branchName = options?.branchName || getBranchName(config);
 
   await checkoutBranch(absoluteRepoDir, branchName, sandbox);
 
