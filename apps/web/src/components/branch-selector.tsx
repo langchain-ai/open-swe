@@ -44,19 +44,26 @@ export function BranchSelector({
       selectedRepository &&
       !branchesLoading &&
       !branchesError &&
-      branches.length > 0 &&
-      !selectedBranch
+      branches.length > 0
     ) {
-      // Try to find the repository's actual default branch first
-      const actualDefaultBranch = defaultBranch
-        ? branches.find((branch) => branch.name === defaultBranch)
-        : null;
+      // Check if the current selected branch exists in the new repository
+      const currentBranchExists =
+        selectedBranch &&
+        branches.some((branch) => branch.name === selectedBranch);
 
-      if (actualDefaultBranch) {
-        setSelectedBranch(actualDefaultBranch.name);
-      } else if (branches.length > 0) {
-        // If default branch doesn't exist in branches list, select the first available branch
-        setSelectedBranch(branches[0].name);
+      // Auto-select default branch if no branch is selected OR if the selected branch doesn't exist in this repo
+      if (!selectedBranch || !currentBranchExists) {
+        // Try to find the repository's actual default branch first
+        const actualDefaultBranch = defaultBranch
+          ? branches.find((branch) => branch.name === defaultBranch)
+          : null;
+
+        if (actualDefaultBranch) {
+          setSelectedBranch(actualDefaultBranch.name);
+        } else if (branches.length > 0) {
+          // If default branch doesn't exist in branches list, select the first available branch
+          setSelectedBranch(branches[0].name);
+        }
       }
     }
   }, [
