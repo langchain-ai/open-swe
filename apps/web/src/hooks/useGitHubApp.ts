@@ -148,7 +148,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     } finally {
       setBranchesLoading(false);
     }
-  }, [selectedRepository]);
+  }, [selectedRepository?.owner, selectedRepository?.repo]);
 
   useEffect(() => {
     checkInstallation();
@@ -161,10 +161,10 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranches([]);
       setSelectedBranchParam(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedRepository?.owner,
     selectedRepository?.repo,
-    fetchBranches,
     setSelectedBranchParam,
   ]);
 
