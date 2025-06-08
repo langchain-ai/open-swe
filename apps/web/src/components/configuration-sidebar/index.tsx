@@ -21,7 +21,7 @@ function extractConfigurationsFromSchema(): ConfigurableFieldUIMetadata[] {
 
   for (const [fieldName, fieldSchema] of Object.entries(shape)) {
     // Skip hidden fields
-    const metadata = (fieldSchema as any)._def?.metadata?.x_oap_ui_config;
+    const metadata = (fieldSchema as any)._def?.x_oap_ui_config;
     if (!metadata || metadata.type === "hidden") {
       continue;
     }
@@ -64,7 +64,7 @@ export const ConfigurationSidebar = forwardRef<
 
     // Extract configurations from the GraphConfiguration Zod schema
     const actualConfigs = extractConfigurationsFromSchema();
-
+    console.log("actualConfigs", actualConfigs);
     // Set Default Configs if they don't exist
     actualConfigs.forEach((config) => {
       if (configs[config.label] === undefined && config.default !== undefined) {

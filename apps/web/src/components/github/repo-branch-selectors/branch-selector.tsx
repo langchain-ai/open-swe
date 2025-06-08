@@ -21,11 +21,13 @@ import { GitBranch, Shield } from "lucide-react";
 interface BranchSelectorProps {
   disabled?: boolean;
   placeholder?: string;
+  buttonClassName?: string;
 }
 
 export function BranchSelector({
   disabled = false,
   placeholder = "Select a branch...",
+  buttonClassName,
 }: BranchSelectorProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -87,12 +89,10 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
-        <div className="flex items-center gap-2">
-          <GitBranch className="h-4 w-4" />
-          <span>Select a branch</span>
-        </div>
+        <GitBranch />
+        <span>Select a branch</span>
       </Button>
     );
   }
@@ -102,12 +102,10 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
-        <div className="flex items-center gap-2">
-          <GitBranch className="h-4 w-4" />
-          <span>Loading branches...</span>
-        </div>
+        <GitBranch />
+        <span>Loading branches...</span>
       </Button>
     );
   }
@@ -117,12 +115,10 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
-        <div className="flex items-center gap-2">
-          <GitBranch className="h-4 w-4" />
-          <span>Error loading branches</span>
-        </div>
+        <GitBranch />
+        <span>Error loading branches</span>
       </Button>
     );
   }
@@ -132,14 +128,12 @@ export function BranchSelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
-        <div className="flex items-center gap-2">
-          <GitBranch className="h-4 w-4" />
-          <span>
-            No branches available {branchesError && `(${branchesError})`}
-          </span>
-        </div>
+        <GitBranch />
+        <span>
+          No branches available {branchesError && `(${branchesError})`}
+        </span>
       </Button>
     );
   }
@@ -154,18 +148,16 @@ export function BranchSelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="max-w-[300px] px-3"
+          className={cn("max-w-[300px] px-3", buttonClassName)}
           disabled={disabled}
         >
-          <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <GitBranch className="h-4 w-4 shrink-0" />
-              <span className="truncate text-left">
-                {selectedBranch || placeholder}
-              </span>
-            </div>
-            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <GitBranch />
+            <span className="truncate text-left">
+              {selectedBranch || placeholder}
+            </span>
           </div>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">

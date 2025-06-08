@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
-import type { TargetRepository } from "../../../open-swe/src/types";
+import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 interface UseGitHubAppReturn {
   isInstalled: boolean | null;
@@ -91,7 +91,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
       if (response.ok) {
         const data = await response.json();
-        console.log("Fetched repositories:", data.repositories);
         setRepositories(data.repositories || []);
         setIsInstalled(true);
       } else {
@@ -127,15 +126,11 @@ export function useGitHubApp(): UseGitHubAppReturn {
     setBranchesError(null);
 
     try {
-      console.log(
-        `Fetching branches for ${selectedRepository.owner}/${selectedRepository.repo}`,
-      );
       const branchData = await getRepositoryBranches(
         selectedRepository.owner,
         selectedRepository.repo,
         accessToken,
       );
-      console.log(`Fetched ${branchData?.length || 0} branches:`, branchData);
       setBranches(branchData || []);
     } catch (err) {
       const errorMessage =

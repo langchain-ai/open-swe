@@ -39,14 +39,15 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
-import { GitHubOAuthButton } from "../github-oauth-button";
-import { RepositorySelector } from "../repository-selector";
+import { GitHubOAuthButton } from "../github/github-oauth-button";
+import { RepositorySelector } from "../github/repo-branch-selectors/repository-selector";
 import { useGitHubApp } from "@/hooks/useGitHubApp";
-import { BranchSelector } from "../branch-selector";
+import { BranchSelector } from "../github/repo-branch-selectors/branch-selector";
 import Link from "next/link";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { useConfigStore } from "@/hooks/use-config-store";
+import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -598,8 +599,7 @@ export function Thread() {
                           accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
                           className="hidden"
                         />
-                        <RepositorySelector />
-                        <BranchSelector />
+                        <RepositoryBranchSelectors />
 
                         {stream.isLoading ? (
                           <Button

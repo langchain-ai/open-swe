@@ -114,8 +114,6 @@ export function AssistantMessage({
     return null;
   }
 
-  console.log("returning");
-
   return (
     <div className="group mr-auto flex w-full max-w-3xl items-start gap-2">
       <div className="flex w-full flex-col gap-2">

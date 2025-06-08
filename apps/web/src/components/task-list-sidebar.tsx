@@ -26,7 +26,6 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
 
   // Handle thread navigation
   const handleThreadClick = (thread: ThreadWithTasks) => {
-    console.log("Sidebar: Setting threadId to:", thread.thread_id);
     setThreadId(thread.thread_id);
     setTaskId(null);
   };

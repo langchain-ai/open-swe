@@ -4,7 +4,7 @@ import {
   addMessages,
   LangGraphRunnableConfig,
   Messages,
-} from "@langchain/langgraph";
+} from "@langchain/langgraph/web";
 import { BaseMessage } from "@langchain/core/messages";
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 

@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import type { TargetRepository } from "../../../open-swe/src/types";
+import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { useGitHubApp } from "@/hooks/useGitHubApp";
 import type { Repository } from "@/utils/github";
 import { GitHubSVG } from "@/components/icons/github";
@@ -23,6 +23,7 @@ import { GitHubSVG } from "@/components/icons/github";
 interface RepositorySelectorProps {
   disabled?: boolean;
   placeholder?: string;
+  buttonClassName?: string;
 }
 // TODO: remove this, we should use the TargetRepository type from the open-swe package
 // Convert GitHub Repository to TargetRepository format
@@ -37,6 +38,7 @@ const repositoryToTarget = (repo: Repository): TargetRepository => {
 export function RepositorySelector({
   disabled = false,
   placeholder = "Select a repository...",
+  buttonClassName,
 }: RepositorySelectorProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -67,7 +69,7 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -85,7 +87,7 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -103,7 +105,7 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -121,7 +123,7 @@ export function RepositorySelector({
       <Button
         variant="outline"
         disabled
-        className="max-w-[340px] justify-between"
+        className={cn("max-w-[340px] justify-between", buttonClassName)}
       >
         <div className="flex items-center gap-2">
           <GitHubSVG
@@ -144,21 +146,16 @@ export function RepositorySelector({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className="max-w-[300px] px-3"
+          className={cn("max-w-[300px] px-3", buttonClassName)}
           disabled={disabled}
         >
-          <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <GitHubSVG
-                width="16"
-                height="16"
-              />
-              <span className="truncate text-left">
-                {selectedValue || placeholder}
-              </span>
-            </div>
-            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <GitHubSVG />
+            <span className="truncate text-left">
+              {selectedValue || placeholder}
+            </span>
           </div>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">
