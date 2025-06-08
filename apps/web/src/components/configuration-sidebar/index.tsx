@@ -10,71 +10,37 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ConfigurableFieldUIMetadata } from "@/types/configurable";
 import { Button } from "@/components/ui/button";
 import { PanelRightOpen } from "lucide-react";
+import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
 
-// Model options based on the actual GraphConfiguration schema
-const MODEL_OPTIONS = [
-  {
-    label: "Claude Sonnet 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-sonnet-4-0",
-  },
-  {
-    label: "Claude Opus 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-opus-4-0",
-  },
-  {
-    label: "Claude Sonnet 4",
-    value: "anthropic:claude-sonnet-4-0",
-  },
-  {
-    label: "Claude Opus 4",
-    value: "anthropic:claude-opus-4-0",
-  },
-  {
-    label: "Claude 3.7 Sonnet",
-    value: "anthropic:claude-3-7-sonnet-latest",
-  },
-  {
-    label: "Claude 3.5 Sonnet",
-    value: "anthropic:claude-3-5-sonnet-latest",
-  },
-  {
-    label: "o4",
-    value: "openai:o4",
-  },
-  {
-    label: "o4 mini",
-    value: "openai:o4-mini",
-  },
-  {
-    label: "o3",
-    value: "openai:o3",
-  },
-  {
-    label: "o3 mini",
-    value: "openai:o3-mini",
-  },
-  {
-    label: "GPT 4o",
-    value: "openai:gpt-4o",
-  },
-  {
-    label: "GPT 4.1",
-    value: "openai:gpt-4.1",
-  },
-  {
-    label: "Gemini 2.5 Pro Preview",
-    value: "google-genai:gemini-2.5-pro-preview-05-06",
-  },
-  {
-    label: "Gemini 2.5 Flash Preview",
-    value: "google-genai:gemini-2.5-flash-preview-05-20",
-  },
-];
+/**
+ * Extract configuration metadata from the GraphConfiguration Zod schema
+ */
+function extractConfigurationsFromSchema(): ConfigurableFieldUIMetadata[] {
+  const configurations: ConfigurableFieldUIMetadata[] = [];
+  const shape = GraphConfiguration.shape;
 
-const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
-  ({ value }) =>
-    !value.includes("extended-thinking") && !value.startsWith("openai:o"),
-);
+  for (const [fieldName, fieldSchema] of Object.entries(shape)) {
+    // Skip hidden fields
+    const metadata = (fieldSchema as any)._def?.metadata?.x_oap_ui_config;
+    if (!metadata || metadata.type === "hidden") {
+      continue;
+    }
+
+    configurations.push({
+      label: fieldName,
+      type: metadata.type,
+      description: metadata.description,
+      options: metadata.options,
+      default: metadata.default,
+      min: metadata.min,
+      max: metadata.max,
+      step: metadata.step,
+      placeholder: metadata.placeholder,
+    });
+  }
+
+  return configurations;
+}
 
 export interface AIConfigPanelProps {
   className?: string;
@@ -96,63 +62,8 @@ export const ConfigurationSidebar = forwardRef<
   useEffect(() => {
     setLoading(true);
 
-    // These match the x_oap_ui_config metadata from the GraphConfiguration schema
-    const actualConfigs: ConfigurableFieldUIMetadata[] = [
-      {
-        label: "plannerModelName",
-        type: "select",
-        description: "The model to use for planning",
-        options: MODEL_OPTIONS_NO_THINKING,
-        default: "anthropic:claude-sonnet-4-0",
-      },
-      {
-        label: "plannerContextModelName",
-        type: "select",
-        description: "The model to use for planning",
-        options: MODEL_OPTIONS,
-        default: "anthropic:claude-sonnet-4-0",
-      },
-      {
-        label: "actionGeneratorModelName",
-        type: "select",
-        description: "The model to use for action generation",
-        options: MODEL_OPTIONS,
-        default: "anthropic:claude-sonnet-4-0",
-      },
-      {
-        label: "progressPlanCheckerModelName",
-        type: "select",
-        description: "The model to use for progress plan checking",
-        options: MODEL_OPTIONS_NO_THINKING,
-        default: "anthropic:claude-sonnet-4-0",
-      },
-      {
-        label: "summarizerModelName",
-        type: "select",
-        description:
-          "The model to use for summarizing the conversation history",
-        options: MODEL_OPTIONS_NO_THINKING,
-        default: "anthropic:claude-sonnet-4-0",
-      },
-      {
-        label: "maxContextActions",
-        type: "number",
-        description:
-          "Maximum number of context gathering actions during planning",
-        min: 1,
-        max: 20,
-        default: 6,
-      },
-      {
-        label: "maxTokens",
-        type: "number",
-        description:
-          "The maximum number of tokens to generate in an individual generation",
-        min: 1,
-        max: 64000,
-        default: 10000,
-      },
-    ];
+    // Extract configurations from the GraphConfiguration Zod schema
+    const actualConfigs = extractConfigurationsFromSchema();
 
     // Set Default Configs if they don't exist
     actualConfigs.forEach((config) => {
