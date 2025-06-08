@@ -1,4 +1,8 @@
-import { GraphState, GraphConfig, GraphUpdate } from "@open-swe/shared/open-swe/types";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import {
   shellTool,

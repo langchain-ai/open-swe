@@ -1,5 +1,9 @@
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphState, GraphConfig, GraphUpdate } from "@open-swe/shared/open-swe/types";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranch,
   cloneRepo,

@@ -3,7 +3,12 @@ import {
   isToolMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  GraphState,
+  GraphUpdate,
+  PlanItem,
+} from "@open-swe/shared/open-swe/types";
 import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
 import {
   getMessageContentString,

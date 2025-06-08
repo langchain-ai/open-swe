@@ -1,5 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  GraphState,
+  GraphUpdate,
+  PlanItem,
+} from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
