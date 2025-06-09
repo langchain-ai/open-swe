@@ -10,7 +10,7 @@ interface ConfigState {
   configs: Record<string, any>;
   getConfig: (key: string) => Record<string, any>;
   getConfigs: () => Record<string, any>;
-  updateConfig: (key: string, value: any) => void;
+  updateConfig: (namespace: string, key: string, value: any) => void;
   resetConfig: (key: string) => void;
   setDefaultConfig: (
     key: string,
@@ -36,25 +36,15 @@ export const useConfigStore = create<ConfigState>()(
 
       getConfigs: () => {
         const state = get();
-        const flatConfigs: Record<string, any> = {};
-        Object.entries(state.configs).forEach(([key, configObj]) => {
-          if (
-            configObj &&
-            typeof configObj === "object" &&
-            configObj[key] !== undefined
-          ) {
-            flatConfigs[key] = configObj[key];
-          }
-        });
-        return flatConfigs;
+        return state.configs;
       },
 
-      updateConfig: (key, value) =>
+      updateConfig: (namespace: string, key: string, value: any) =>
         set((state) => ({
           configs: {
             ...state.configs,
-            [key]: {
-              ...(state.configs[key] || {}),
+            [namespace]: {
+              ...(state.configs[namespace] || {}),
               [key]: value,
             },
           },

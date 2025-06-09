@@ -4,7 +4,7 @@ import { forwardRef, ForwardedRef, useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigField } from "@/components/configuration-sidebar/config-field";
 import { ConfigSection } from "@/components/configuration-sidebar/config-section";
-import { useConfigStore } from "@/hooks/use-config-store";
+import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/use-config-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,11 +12,15 @@ import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-
 import { Button } from "@/components/ui/button";
 import { PanelRightOpen } from "lucide-react";
 import { GraphConfigurationMetadata } from "@open-swe/shared/open-swe/types";
+import { useQueryState } from "nuqs";
+import { useStreamContext } from "@/providers/Stream";
 
 /**
  * Extract configuration metadata from the GraphConfiguration Zod schema
  */
-function extractConfigurationsFromSchema(): ConfigurableFieldUIMetadata[] {
+function extractConfigurationsFromSchema(
+  configurable: Record<string, any>,
+): ConfigurableFieldUIMetadata[] {
   const configurations: ConfigurableFieldUIMetadata[] = [];
 
   for (const [label, { x_open_swe_ui_config: metadata }] of Object.entries(
@@ -28,7 +32,7 @@ function extractConfigurationsFromSchema(): ConfigurableFieldUIMetadata[] {
     configurations.push({
       label,
       type: metadata.type,
-      default: metadata.default,
+      default: configurable[label] || metadata.default,
       description: metadata.description,
       placeholder: metadata.placeholder,
       options: metadata.options,
@@ -52,6 +56,9 @@ export const ConfigurationSidebar = forwardRef<
   AIConfigPanelProps
 >(({ className, open, onClose }, ref: ForwardedRef<HTMLDivElement>) => {
   const { configs, updateConfig } = useConfigStore();
+  const stream = useStreamContext();
+
+  const [threadId] = useQueryState("threadId");
 
   const [configurations, setConfigurations] = useState<
     ConfigurableFieldUIMetadata[]
@@ -60,17 +67,38 @@ export const ConfigurationSidebar = forwardRef<
 
   useEffect(() => {
     setLoading(true);
+    const configKey = threadId || DEFAULT_CONFIG_KEY;
 
-    const actualConfigs = extractConfigurationsFromSchema();
-    actualConfigs.forEach((config) => {
-      if (configs[config.label] === undefined && config.default !== undefined) {
-        updateConfig(config.label, config.default);
-      }
-    });
+    if (threadId) {
+      stream.client.threads.get(threadId).then((t) => {
+        if (
+          !("config" in t) ||
+          !(t as any).config ||
+          !(t as any).config.configurable
+        ) {
+          console.error("Thread does not have config key", t);
+          return;
+        }
 
-    setConfigurations(actualConfigs);
+        const actualConfigs = extractConfigurationsFromSchema(
+          (t.config as any).configurable,
+        );
+        actualConfigs.forEach((c) => {
+          // Always update the config store with either the default values, or the values from the thread.
+          updateConfig(configKey, c.label, c.default);
+        });
+
+        setConfigurations(actualConfigs);
+      });
+    } else {
+      const actualConfigs = extractConfigurationsFromSchema({});
+      actualConfigs.forEach((c) => {
+        updateConfig(configKey, c.label, c.default);
+      });
+      setConfigurations(actualConfigs);
+    }
     setLoading(false);
-  }, [configs, updateConfig]);
+  }, [threadId]);
 
   return (
     <div

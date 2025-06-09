@@ -42,7 +42,7 @@ import { GitHubOAuthButton } from "../github/github-oauth-button";
 import { useGitHubApp } from "@/hooks/useGitHubApp";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
-import { useConfigStore } from "@/hooks/use-config-store";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { useRouter } from "next/navigation";
 import {
@@ -101,7 +101,7 @@ export function Thread() {
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubApp();
-  const { getConfigs } = useConfigStore();
+  const { getConfig } = useConfigStore();
   const {
     taskPlan,
     handleTaskChange,
@@ -269,7 +269,7 @@ export function Thread() {
         config: {
           recursion_limit: 400,
           configurable: {
-            ...getConfigs(),
+            ...getConfig(threadId || DEFAULT_CONFIG_KEY),
           },
         },
         metadata: {
@@ -294,7 +294,7 @@ export function Thread() {
       config: {
         recursion_limit: 400,
         configurable: {
-          ...getConfigs(),
+          ...getConfig(threadId || DEFAULT_CONFIG_KEY),
         },
       },
       metadata: {

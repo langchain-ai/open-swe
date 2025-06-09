@@ -13,12 +13,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { useConfigStore } from "@/hooks/use-config-store";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import _ from "lodash";
 import { cn } from "@/lib/utils";
+import { useQueryState } from "nuqs";
 
 interface Option {
   label: string;
@@ -62,6 +63,8 @@ export function ConfigField({
   value: externalValue, // TODO: Rename to avoid conflict
   setValue: externalSetValue, // TODO: Rename to avoid conflict
 }: ConfigFieldProps) {
+  const [threadId] = useQueryState("threadId");
+  const configKey = threadId || DEFAULT_CONFIG_KEY;
   const store = useConfigStore();
   const [jsonError, setJsonError] = useState<string | null>(null);
 
@@ -70,14 +73,14 @@ export function ConfigField({
 
   const currentValue = isExternallyManaged
     ? externalValue
-    : store.configs[id]?.[id];
+    : store.configs[configKey]?.[id];
 
   const handleChange = (newValue: any) => {
     setJsonError(null);
     if (isExternallyManaged && externalSetValue) {
       externalSetValue(newValue);
     } else {
-      store.updateConfig(id, newValue);
+      store.updateConfig(configKey, id, newValue);
     }
   };
 
@@ -97,7 +100,7 @@ export function ConfigField({
       if (isExternallyManaged && externalSetValue) {
         externalSetValue(jsonString);
       } else {
-        store.updateConfig(id, jsonString);
+        store.updateConfig(configKey, id, jsonString);
       }
       setJsonError("Invalid JSON format");
     }
