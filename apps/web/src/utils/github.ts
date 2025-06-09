@@ -77,6 +77,85 @@ export async function getInstallationRepositories(
 }
 
 /**
+ * Fetches branches for a specific repository using OAuth access token
+ */
+export async function getRepositoryBranches(
+  owner: string,
+  repo: string,
+  accessToken: string,
+): Promise<Branch[]> {
+  const allBranches: Branch[] = [];
+  let page = 1;
+  const perPage = 100; // Maximum allowed by GitHub API
+
+  // First, get repository info to ensure we have the default branch
+  const repoResponse = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE-Agent",
+      },
+    },
+  );
+
+  let defaultBranch: string | null = null;
+  if (repoResponse.ok) {
+    const repoData = await repoResponse.json();
+    defaultBranch = repoData.default_branch;
+  }
+
+  // Fetch all branches with pagination
+  while (true) {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "OpenSWE-Agent",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`Failed to fetch branches: ${JSON.stringify(errorData)}`);
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data) || data.length === 0) {
+      break;
+    }
+
+    allBranches.push(...data);
+
+    // If we got less than the requested amount, we've reached the end
+    if (data.length < perPage) {
+      break;
+    }
+
+    page++;
+  }
+
+  // Ensure default branch is at the beginning if it exists
+  if (defaultBranch) {
+    const defaultBranchIndex = allBranches.findIndex(
+      (branch) => branch.name === defaultBranch,
+    );
+    if (defaultBranchIndex > 0) {
+      const defaultBranchData = allBranches[defaultBranchIndex];
+      allBranches.splice(defaultBranchIndex, 1);
+      allBranches.unshift(defaultBranchData);
+    }
+  }
+
+  return allBranches;
+}
+
+/**
  * Repository interface representing GitHub repository data
  */
 export interface Repository {
@@ -94,4 +173,16 @@ export interface Repository {
     triage: boolean;
     pull: boolean;
   };
+}
+
+/**
+ * Branch interface representing GitHub branch data
+ */
+export interface Branch {
+  name: string;
+  commit: {
+    sha: string;
+    url: string;
+  };
+  protected: boolean;
 }

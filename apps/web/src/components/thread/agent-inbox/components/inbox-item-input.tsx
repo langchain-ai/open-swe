@@ -8,6 +8,34 @@ import { MarkdownText } from "../../markdown-text";
 import { ActionRequest, HumanInterrupt } from "@langchain/langgraph/prebuilt";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+import { PlanViewer } from "@/components/plan";
+import { isPlanData, parsePlanData, getPlanKey } from "@/lib/plan-utils";
+
+interface InboxItemInputProps {
+  interruptValue: HumanInterrupt;
+  humanResponse: HumanResponseWithEdits[];
+  supportsMultipleMethods: boolean;
+  acceptAllowed: boolean;
+  hasEdited: boolean;
+  hasAddedResponse: boolean;
+  initialValues: Record<string, string>;
+
+  streaming: boolean;
+  streamFinished: boolean;
+
+  setHumanResponse: React.Dispatch<
+    React.SetStateAction<HumanResponseWithEdits[]>
+  >;
+  setSelectedSubmitType: React.Dispatch<
+    React.SetStateAction<SubmitType | undefined>
+  >;
+  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
+  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
+
+  handleSubmit: (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
+  ) => Promise<void>;
+}
 
 function ResetButton({ handleReset }: { handleReset: () => void }) {
   return (
@@ -22,7 +50,36 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
   );
 }
 
-function ArgsRenderer({ args }: { args: Record<string, any> }) {
+function ArgsRenderer({
+  args,
+  actionName,
+}: {
+  args: Record<string, any>;
+  actionName: string;
+}) {
+  if (isPlanData(args, actionName)) {
+    const planItems = parsePlanData(args);
+    const planKey = getPlanKey(args);
+
+    if (planItems.length > 0) {
+      return (
+        <div className="flex w-full flex-col items-start gap-6">
+          <div className="flex w-full flex-col items-start gap-1">
+            <p className="text-sm leading-[18px] text-wrap text-gray-600">
+              {prettifyText(planKey || "plan")}:
+            </p>
+            <div className="w-full max-w-full rounded-xl border border-gray-200 bg-white p-4">
+              <PlanViewer
+                planItems={planItems}
+                isProposedPlan
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+  }
+
   return (
     <div className="flex w-full flex-col items-start gap-6">
       {Object.entries(args).map(([k, v]) => {
@@ -49,32 +106,6 @@ function ArgsRenderer({ args }: { args: Record<string, any> }) {
       })}
     </div>
   );
-}
-
-interface InboxItemInputProps {
-  interruptValue: HumanInterrupt;
-  humanResponse: HumanResponseWithEdits[];
-  supportsMultipleMethods: boolean;
-  acceptAllowed: boolean;
-  hasEdited: boolean;
-  hasAddedResponse: boolean;
-  initialValues: Record<string, string>;
-
-  streaming: boolean;
-  streamFinished: boolean;
-
-  setHumanResponse: React.Dispatch<
-    React.SetStateAction<HumanResponseWithEdits[]>
-  >;
-  setSelectedSubmitType: React.Dispatch<
-    React.SetStateAction<SubmitType | undefined>
-  >;
-  setHasAddedResponse: React.Dispatch<React.SetStateAction<boolean>>;
-  setHasEdited: React.Dispatch<React.SetStateAction<boolean>>;
-
-  handleSubmit: (
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
-  ) => Promise<void>;
 }
 
 function ResponseComponent({
@@ -120,7 +151,10 @@ function ResponseComponent({
       </div>
 
       {showArgsInResponse && (
-        <ArgsRenderer args={interruptValue.action_request.args} />
+        <ArgsRenderer
+          args={interruptValue.action_request.args}
+          actionName={interruptValue.action_request.action}
+        />
       )}
 
       <div className="flex w-full flex-col items-start gap-[6px]">
@@ -152,10 +186,12 @@ const Response = React.memo(ResponseComponent);
 function AcceptComponent({
   streaming,
   actionRequestArgs,
+  actionName,
   handleSubmit,
 }: {
   streaming: boolean;
   actionRequestArgs: Record<string, any>;
+  actionName: string;
   handleSubmit: (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
   ) => Promise<void>;
@@ -163,7 +199,10 @@ function AcceptComponent({
   return (
     <div className="flex w-full flex-col items-start gap-4 rounded-lg border-[1px] border-gray-300 p-6">
       {actionRequestArgs && Object.keys(actionRequestArgs).length > 0 && (
-        <ArgsRenderer args={actionRequestArgs} />
+        <ArgsRenderer
+          args={actionRequestArgs}
+          actionName={actionName}
+        />
       )}
       <Button
         variant="brand"
@@ -199,8 +238,13 @@ function EditAndOrAcceptComponent({
   ) => Promise<void>;
 }) {
   const defaultRows = React.useRef<Record<string, number>>({});
+  const [editingField, setEditingField] = React.useState<string | null>(null);
+
   const editResponse = humanResponse.find((r) => r.type === "edit");
   const acceptResponse = humanResponse.find((r) => r.type === "accept");
+
+  const actionName = interruptValue.action_request.action;
+
   if (
     !editResponse ||
     typeof editResponse.args !== "object" ||
@@ -209,6 +253,7 @@ function EditAndOrAcceptComponent({
     if (acceptResponse) {
       return (
         <AcceptComponent
+          actionName={actionName}
           actionRequestArgs={interruptValue.action_request.args}
           streaming={streaming}
           handleSubmit={handleSubmit}
@@ -217,6 +262,7 @@ function EditAndOrAcceptComponent({
     }
     return null;
   }
+
   const header = editResponse.acceptAllowed ? "Edit/Accept" : "Edit";
   let buttonText = "Submit";
   if (editResponse.acceptAllowed && !editResponse.editsMade) {
@@ -268,6 +314,12 @@ function EditAndOrAcceptComponent({
         const value = ["string", "number"].includes(typeof v)
           ? v
           : JSON.stringify(v, null);
+
+        // Check if this field contains plan data and user isn't actively editing it
+        const isFieldBeingEdited = editingField === k;
+        const fieldArgs = { [k]: v };
+        const isFieldPlanData = isPlanData(fieldArgs, actionName);
+
         // Calculate the default number of rows by the total length of the initial value divided by 30
         // or 8, whichever is greater. Stored in a ref to prevent re-rendering.
         if (
@@ -287,15 +339,49 @@ function EditAndOrAcceptComponent({
             key={`allow-edit-args--${k}-${idx}`}
           >
             <div className="flex w-full flex-col items-start gap-[6px]">
-              <p className="min-w-fit text-sm font-medium">{prettifyText(k)}</p>
-              <Textarea
-                disabled={streaming}
-                className="h-full"
-                value={value}
-                onChange={(e) => onEditChange(e.target.value, editResponse, k)}
-                onKeyDown={handleKeyDown}
-                rows={numRows}
-              />
+              <div className="flex w-full items-center justify-between">
+                <p className="min-w-fit text-sm font-medium">
+                  {prettifyText(k)}
+                </p>
+                {isFieldPlanData && !isFieldBeingEdited && (
+                  <button
+                    onClick={() => setEditingField(k)}
+                    className="rounded border border-blue-200 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 hover:text-blue-800"
+                  >
+                    Edit as Text
+                  </button>
+                )}
+                {isFieldBeingEdited && (
+                  <button
+                    onClick={() => setEditingField(null)}
+                    className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+                  >
+                    Show Plan View
+                  </button>
+                )}
+              </div>
+
+              {isFieldPlanData && !isFieldBeingEdited ? (
+                // Show plan viewer for plan data when not editing
+                <div className="w-full rounded-lg border border-gray-200 bg-white p-3">
+                  <PlanViewer
+                    planItems={parsePlanData(fieldArgs)}
+                    isProposedPlan
+                  />
+                </div>
+              ) : (
+                // Show textarea for editing or non-plan data
+                <Textarea
+                  disabled={streaming}
+                  className="h-full"
+                  value={value}
+                  onChange={(e) =>
+                    onEditChange(e.target.value, editResponse, k)
+                  }
+                  onKeyDown={handleKeyDown}
+                  rows={numRows}
+                />
+              )}
             </div>
           </div>
         );
@@ -338,6 +424,7 @@ export function InboxItemInput({
     hasArgs && !isEditAllowed && !acceptAllowed && isResponseAllowed;
   const showArgsOutsideActionCards =
     hasArgs && !showArgsInResponse && !isEditAllowed && !acceptAllowed;
+  const actionName = interruptValue.action_request.action;
 
   const onEditChange = (
     change: string | string[],
@@ -493,7 +580,10 @@ export function InboxItemInput({
   return (
     <div className="flex w-full flex-col items-start justify-start gap-2">
       {showArgsOutsideActionCards && (
-        <ArgsRenderer args={interruptValue.action_request.args} />
+        <ArgsRenderer
+          args={interruptValue.action_request.args}
+          actionName={actionName}
+        />
       )}
 
       <div className="flex w-full flex-col items-start gap-2">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useGitHubApp } from "@/hooks/useGitHubApp";
-import { InstallAppButton } from "./InstallAppButton";
+import { InstallAppButton } from "./install-app-button";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 

@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import { BaseMessage } from "@langchain/core/messages";
 
 function EditableContent({
   value,
@@ -54,7 +55,7 @@ export function HumanMessage({
 
     const newMessage: Message = { type: "human", content: value };
     thread.submit(
-      { messages: [newMessage] },
+      { messages: [newMessage] as unknown as BaseMessage[] },
       {
         checkpoint: parentCheckpoint,
         streamMode: ["values"],
@@ -64,7 +65,10 @@ export function HumanMessage({
 
           return {
             ...values,
-            messages: [...(values.messages ?? []), newMessage],
+            messages: [
+              ...(values.messages ?? []),
+              newMessage,
+            ] as unknown as BaseMessage[],
           };
         },
         config: {

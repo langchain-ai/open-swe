@@ -1,11 +1,19 @@
-import { isHumanMessage } from "@langchain/core/messages";
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
-import { loadModel, Task } from "../utils/load-model.js";
 import {
-  getMessageContentString,
-  getMessageString,
-} from "../utils/message/content.js";
+  GraphConfig,
+  GraphState,
+  GraphUpdate,
+  PlanItem,
+} from "@open-swe/shared/open-swe/types";
+import { loadModel, Task } from "../utils/load-model.js";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageString } from "../utils/message/content.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { getUserRequest } from "../utils/user-request.js";
+import {
+  completeTask,
+  getActivePlanItems,
+  getActiveTask,
+} from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -31,10 +39,9 @@ export async function generateConclusion(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-
+  const userRequest = getUserRequest(state.messages);
   const userMessage = `The user's initial request is as follows:
-${getMessageContentString(firstUserMessage?.content || "No user message found")}
+${userRequest || "No user message found"}
 
 The conversation history is as follows:
 ${state.messages.map(getMessageString).join("\n")}
@@ -46,7 +53,7 @@ Given all of this, please respond with the concise conclusion. Do not include an
   const response = await model.invoke([
     {
       role: "system",
-      content: formatPrompt(state.plan),
+      content: formatPrompt(getActivePlanItems(state.plan)),
     },
     {
       role: "user",
@@ -55,8 +62,15 @@ Given all of this, please respond with the concise conclusion. Do not include an
   ]);
 
   logger.info("✅ Successfully generated conclusion. Ending run. 👋");
+  const activeTaskId = getActiveTask(state.plan).id;
+  const updatedTaskPlan = completeTask(
+    state.plan,
+    activeTaskId,
+    getMessageContentString(response.content),
+  );
 
   return {
     messages: [response],
+    plan: updatedTaskPlan,
   };
 }

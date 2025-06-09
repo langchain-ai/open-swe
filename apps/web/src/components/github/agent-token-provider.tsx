@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { CopyIcon, CheckIcon, RefreshCwIcon } from "lucide-react";
-import { InstallAppButton } from "./InstallAppButton";
+import { InstallAppButton } from "./install-app-button";
 
 interface AgentTokenProviderProps {
   className?: string;
@@ -41,7 +41,7 @@ export function AgentTokenProvider({
       setToken(data.token);
       setInstallationId(data.installation_id);
       setIsLoading(false);
-    } catch (err) {
+    } catch {
       setError("Network error when fetching token");
       setIsLoading(false);
     }

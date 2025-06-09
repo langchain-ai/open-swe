@@ -1,5 +1,9 @@
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { GraphState, GraphConfig, GraphUpdate } from "../types.js";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranch,
   cloneRepo,
@@ -9,8 +13,9 @@ import {
   pullLatestChanges,
 } from "../utils/git.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { SNAPSHOT_NAME } from "../constants.js";
+import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
+import { getCodebaseTree } from "../utils/tree.js";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
@@ -36,8 +41,10 @@ export async function initialize(
       // Resume the sandbox if the session ID is in the config.
       const existingSandbox = await daytonaClient().get(sandboxSessionId);
       await pullLatestChanges(absoluteRepoDir, existingSandbox);
+      const codebaseTree = await getCodebaseTree(existingSandbox.id);
       return {
         sandboxSessionId: existingSandbox.id,
+        codebaseTree,
       };
     } catch (e) {
       // Error thrown, log it and continue. Will create a new sandbox session since the resumption failed.
@@ -50,7 +57,10 @@ export async function initialize(
     image: SNAPSHOT_NAME,
   });
 
-  const res = await cloneRepo(sandbox, targetRepository, { githubToken });
+  const res = await cloneRepo(sandbox, targetRepository, {
+    githubToken,
+    stateBranchName: state.branchName,
+  });
   if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
     logger.error("Failed to clone repository", res.result);
@@ -79,8 +89,11 @@ export async function initialize(
     throw new Error("Failed to checkout branch");
   }
 
+  const codebaseTree = await getCodebaseTree(sandbox.id);
+
   return {
     sandboxSessionId: sandbox.id,
     targetRepository,
+    codebaseTree,
   };
 }

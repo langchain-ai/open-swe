@@ -1,5 +1,5 @@
-import { isAIMessage } from "@langchain/core/messages";
-import { GraphState } from "../types.js";
+import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
 import { stopSandbox, startSandbox } from "../utils/sandbox.js";
@@ -53,18 +53,18 @@ export async function requestHelp(state: GraphState): Promise<Command> {
       throw new Error("Interrupt response expected to be a string.");
     }
     await startSandbox(sandboxSessionId);
+    const commandUpdate: GraphUpdate = {
+      messages: [
+        new ToolMessage({
+          tool_call_id: toolCall.id ?? "",
+          content: `Human response: ${interruptRes.args}`,
+          status: "success",
+        }),
+      ],
+    };
     return new Command({
       goto: "generate-action",
-      update: {
-        messages: [
-          {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: `Human response: ${interruptRes.args}`,
-            status: "success",
-          },
-        ],
-      },
+      update: commandUpdate,
     });
   }
 

@@ -1,4 +1,7 @@
 import { Daytona, Sandbox, SandboxState } from "@daytonaio/sdk";
+import { createLogger, LogLevel } from "./logger.js";
+
+const logger = createLogger(LogLevel.INFO, "Sandbox");
 
 // Singleton instance of Daytona
 let daytonaInstance: Daytona | null = null;
@@ -49,4 +52,25 @@ export async function startSandbox(sandboxSessionId: string): Promise<Sandbox> {
     await daytonaClient().start(sandbox);
   }
   return sandbox;
+}
+
+/**
+ * Deletes the sandbox.
+ * @param sandboxSessionId The ID of the sandbox to delete.
+ * @returns True if the sandbox was deleted, false if it failed to delete.
+ */
+export async function deleteSandbox(
+  sandboxSessionId: string,
+): Promise<boolean> {
+  try {
+    const sandbox = await daytonaClient().get(sandboxSessionId);
+    await daytonaClient().delete(sandbox);
+    return true;
+  } catch (error) {
+    logger.error("Failed to delete sandbox", {
+      sandboxSessionId,
+      error,
+    });
+    return false;
+  }
 }

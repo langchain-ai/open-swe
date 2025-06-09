@@ -4,6 +4,7 @@ import React, {
   ReactNode,
   useState,
   useEffect,
+  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
@@ -17,30 +18,18 @@ import {
 import { useQueryState } from "nuqs";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
 import { useThreads } from "./Thread";
-import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
+import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Copy, CopyCheck, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
-
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
-
-type TargetRepository = { owner: string; repo: string };
-export type StateType = {
-  messages: Message[];
-  ui?: UIMessage[];
-  targetRepository?: TargetRepository;
-};
+import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 
 const useTypedStream = useStream<
-  StateType,
+  GraphState,
   {
-    UpdateType: {
-      messages?: Message[] | Message | string;
-      ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-      context?: Record<string, unknown>;
-      targetRepository?: TargetRepository;
-    };
+    UpdateType: GraphUpdate;
     CustomEventType: UIMessage | RemoveUIMessage;
   }
 >;
@@ -64,7 +53,8 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { getThreads, setThreads } = useThreads();
+  const { refreshThreads, setThreads, updateThreadFromStream } = useThreads();
+
   const githubAccessToken =
     document.cookie
       .split("; ")
@@ -73,6 +63,7 @@ const StreamSession = ({
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
+    reconnectOnMount: true,
     threadId: threadId ?? null,
     defaultHeaders: {
       "x-github-installation-token": githubToken,
@@ -90,9 +81,43 @@ const StreamSession = ({
       setThreadId(id);
       // Refetch threads list when thread ID changes.
       // Wait for some seconds before fetching so we're able to get the new thread that was created.
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      sleep().then(() => {
+        refreshThreads().catch(console.error);
+      });
     },
   });
+
+  // Listen for stream updates to update all thread properties in real-time
+  // Use a ref to track the last update to prevent excessive calls
+  const lastUpdateRef = useRef<{ threadId: string; valuesHash: string } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (threadId && streamValue.values) {
+      // Create a simple hash of the values to detect actual changes
+      const valuesHash = JSON.stringify({
+        plan: (streamValue.values as any).plan,
+        proposedPlan: (streamValue.values as any).proposedPlan,
+        targetRepository: (streamValue.values as any).targetRepository,
+        messages: (
+          streamValue.values as any
+        ).messages?.[0]?.content?.[0]?.text?.substring(0, 50),
+      });
+
+      // Only update if thread or values actually changed
+      if (
+        !lastUpdateRef.current ||
+        lastUpdateRef.current.threadId !== threadId ||
+        lastUpdateRef.current.valuesHash !== valuesHash
+      ) {
+        lastUpdateRef.current = { threadId, valuesHash };
+        updateThreadFromStream(threadId, streamValue.values);
+      }
+    }
+  }, [threadId, streamValue.values, updateThreadFromStream]);
+
+  // Real-time updates via stream - no polling needed
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -113,12 +138,23 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Initialize from localStorage to prevent modal flash
   const [hasGitHubAppInstalled, setHasGitHubAppInstalled] = useState<
     boolean | null
-  >(null);
+  >(() => {
+    if (typeof window === "undefined") return null;
+    const cached = localStorage.getItem("github_app_installed");
+    return cached === "true" ? true : cached === "false" ? false : null;
+  });
+
   const [isCheckingAppInstallation, setIsCheckingAppInstallation] =
     useState(false);
-  const { token: githubToken, fetchToken: fetchGitHubToken } = useGitHubToken();
+  const {
+    token: githubToken,
+    fetchToken: fetchGitHubToken,
+    isLoading: isTokenLoading,
+  } = useGitHubToken();
 
   useEffect(() => {
     checkAuthStatus();
@@ -126,9 +162,24 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     if (isAuth) {
-      checkGitHubAppInstallation();
+      // Check if we already have cached installation status
+      const cachedInstallationStatus = localStorage.getItem(
+        "github_app_installed",
+      );
+      if (cachedInstallationStatus === "true") {
+        setHasGitHubAppInstalled(true);
+        // Fetch token if we don't have one yet
+        if (!githubToken && !isTokenLoading) {
+          fetchGitHubToken();
+        }
+      } else if (cachedInstallationStatus === "false") {
+        setHasGitHubAppInstalled(false);
+      } else {
+        // Only check installation if we don't have cached status
+        checkGitHubAppInstallation();
+      }
     }
-  }, [isAuth]);
+  }, [isAuth, githubToken, isTokenLoading]);
 
   const checkAuthStatus = async () => {
     try {
@@ -147,20 +198,24 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       const response = await fetch("/api/github/repositories");
       if (response.ok) {
         setHasGitHubAppInstalled(true);
+        localStorage.setItem("github_app_installed", "true");
         // If the app is installed, fetch a token
         await fetchGitHubToken();
       } else {
         const errorData = await response.json();
         if (errorData.error.includes("installation")) {
           setHasGitHubAppInstalled(false);
+          localStorage.setItem("github_app_installed", "false");
         } else {
           // If there's a different error, we'll assume the app is not installed
           setHasGitHubAppInstalled(false);
+          localStorage.setItem("github_app_installed", "false");
         }
       }
     } catch (error) {
       console.error("Error checking GitHub App installation:", error);
       setHasGitHubAppInstalled(false);
+      localStorage.setItem("github_app_installed", "false");
     } finally {
       setIsCheckingAppInstallation(false);
     }
@@ -173,6 +228,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const handleInstallGitHubApp = () => {
     setIsLoading(true);
+    // Clear cached status so we check again after installation
+    localStorage.removeItem("github_app_installed");
     window.location.href = "/api/github/installation";
   };
 
@@ -271,7 +328,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   }
 
   // Step 2: GitHub App Installation (only show if authenticated but app not installed)
-  if ((isAuth && hasGitHubAppInstalled === false) || !githubToken) {
+  // Only show modal if we've definitively determined the app is not installed
+  // Don't show while we're still loading or have cached positive status
+  if (isAuth && hasGitHubAppInstalled === false && !isTokenLoading) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -314,6 +373,27 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
                 ? "Loading..."
                 : "Install GitHub App"}
             </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Only render StreamSession when we have a valid token
+  if (!githubToken) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center p-4">
+        <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
+          <div className="flex flex-col gap-4 border-b p-6">
+            <div className="flex flex-col items-start gap-2">
+              <LangGraphLogoSVG className="h-7" />
+              <h1 className="text-xl font-semibold tracking-tight">
+                Loading...
+              </h1>
+            </div>
+            <p className="text-muted-foreground">
+              Setting up your GitHub integration...
+            </p>
           </div>
         </div>
       </div>

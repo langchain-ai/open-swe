@@ -1,4 +1,9 @@
-import { GraphConfig, GraphState, GraphUpdate, PlanItem } from "../types.js";
+import {
+  GraphConfig,
+  GraphState,
+  GraphUpdate,
+  PlanItem,
+} from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   createPullRequest,
@@ -10,10 +15,11 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { z } from "zod";
 import { loadModel, Task } from "../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
-import { isHumanMessage, ToolMessage } from "@langchain/core/messages";
-import { getMessageContentString } from "../utils/message/content.js";
-import { daytonaClient } from "../utils/sandbox.js";
+import { getUserRequest } from "../utils/user-request.js";
+import { ToolMessage } from "@langchain/core/messages";
+import { daytonaClient, deleteSandbox } from "../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
+import { getActivePlanItems } from "../utils/task-plan.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -102,20 +108,11 @@ export async function openPullRequest(
     tool_choice: openPrTool.name,
   });
 
-  const firstUserMessage = state.messages.find(isHumanMessage);
-  if (!firstUserMessage) {
-    throw new Error(
-      "Failed to open pull request: No user message found in state.",
-    );
-  }
-
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithTool.invoke([
     {
       role: "user",
-      content: formatPrompt(
-        state.plan,
-        getMessageContentString(firstUserMessage.content),
-      ),
+      content: formatPrompt(getActivePlanItems(state.plan), userRequest),
     },
   ]);
 
@@ -138,6 +135,12 @@ export async function openPullRequest(
     githubToken,
   });
 
+  let sandboxDeleted = false;
+  if (pr) {
+    // Delete the sandbox.
+    sandboxDeleted = await deleteSandbox(sandboxSessionId);
+  }
+
   return {
     messages: [
       response,
@@ -152,5 +155,7 @@ export async function openPullRequest(
         },
       }),
     ],
+    // If the sandbox was successfully deleted, we can remove it from the state.
+    ...(sandboxDeleted && { sandboxSessionId: undefined }),
   };
 }

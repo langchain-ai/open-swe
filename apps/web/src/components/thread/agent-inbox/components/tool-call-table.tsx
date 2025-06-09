@@ -29,7 +29,7 @@ export function ToolCallTable({ toolCall }: { toolCall: ToolCall }) {
 
             try {
               valueStr = valueStr || JSON.stringify(value, null);
-            } catch (_) {
+            } catch {
               // failed to stringify, just assign an empty string
               valueStr = "";
             }
