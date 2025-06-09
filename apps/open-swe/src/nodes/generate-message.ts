@@ -8,6 +8,7 @@ import {
   shellTool,
   applyPatchTool,
   requestHumanHelpTool,
+  updatePlanTool,
 } from "../tools/index.js";
 import { getRepoAbsolutePath } from "../utils/git.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
@@ -66,6 +67,9 @@ You MUST adhere to the following criteria when executing the task:
   - If the package manager fails to install, or you have issues installing dependencies, do not try to use a different package manager. Instead, skip installing dependencies.
 - If you are lacking enough context to complete the user's task, you may call the \`request_human_help\` tool to request help from the human.
   - This tool should only be used if you have already tried to gather all the context you need, and are still unable to complete the user's task.
+- If you determine your current plan is not appropriate, or you need to update/remove/add steps to your plan, you may call the \`update_plan\` tool.
+  - This tool should only be called to make major changes, such as removing a task, or adding new tasks. For small changes, you do not necessarily need to call this tool, and can instead just act on those small updates.
+  - The \`update_plan\` tool can only update/remove/add plans to the list of tasks which are not yet completed (this includes the current task).
 - If completing the user's task requires writing or modifying files:
     - Your code and final answer should follow these *CODING GUIDELINES*:
         - Avoid writing to files which you have not already read.
@@ -137,7 +141,12 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [shellTool, applyPatchTool, requestHumanHelpTool];
+  const tools = [
+    shellTool,
+    applyPatchTool,
+    requestHumanHelpTool,
+    updatePlanTool,
+  ];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
 
   const response = await modelWithTools.invoke([

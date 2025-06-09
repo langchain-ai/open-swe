@@ -16,6 +16,7 @@ import {
   openPullRequest,
   diagnoseError,
   requestHelp,
+  updatePlan,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { plannerGraph } from "./subgraphs/index.js";
@@ -26,11 +27,11 @@ import { plannerGraph } from "./subgraphs/index.js";
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"open-pr" | "take-action" | "request-help"} The next node to execute, or END if the process should stop.
+ * @returns {"open-pr" | "take-action" | "request-help" | "update-plan"} The next node to execute, or END if the process should stop.
  */
 async function routeGeneratedAction(
   state: GraphState,
-): Promise<"open-pr" | "take-action" | "request-help"> {
+): Promise<"open-pr" | "take-action" | "request-help" | "update-plan"> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 
@@ -39,6 +40,9 @@ async function routeGeneratedAction(
     const toolCall = lastMessage.tool_calls[0];
     if (toolCall.name === "request_human_help") {
       return "request-help";
+    }
+    if (toolCall.name === "update_plan") {
+      return "update-plan";
     }
 
     return "take-action";
@@ -59,6 +63,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("take-action", takeAction, {
     ends: ["progress-plan-step", "diagnose-error"],
   })
+  .addNode("update-plan", updatePlan)
   .addNode("progress-plan-step", progressPlanStep, {
     ends: ["summarize-task-steps", "generate-action", "generate-conclusion"],
   })
@@ -80,7 +85,9 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     "take-action",
     "request-help",
     "open-pr",
+    "update-plan",
   ])
+  .addEdge("update-plan", "generate-action")
   .addEdge("generate-conclusion", "open-pr")
   .addEdge("diagnose-error", "generate-action")
   .addEdge("open-pr", END);
