@@ -64,7 +64,9 @@ export const shellTool = tool(
           error_result: response,
           input,
         });
-        throw new Error(`Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`)
+        throw new Error(
+          `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
+        );
       }
 
       return {
@@ -78,7 +80,9 @@ export const shellTool = tool(
           input,
           error: errorFields,
         });
-        throw new Error(`Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`)
+        throw new Error(
+          `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`,
+        );
       }
 
       logger.error(

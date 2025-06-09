@@ -50,7 +50,7 @@ export const applyPatchTool = tool(
     );
     if (!readFileSuccess) {
       logger.error(readFileOutput);
-      throw new Error(readFileOutput)
+      throw new Error(readFileOutput);
     }
 
     let patchedContent: string | false;
@@ -82,7 +82,9 @@ export const applyPatchTool = tool(
             : { error: e }),
         });
         const errMessage = e instanceof Error ? e.message : "Unknown error";
-        throw new Error(`FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`);
+        throw new Error(
+          `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'.\n\nError: ${errMessage}`,
+        );
       }
     }
 
@@ -90,8 +92,9 @@ export const applyPatchTool = tool(
       logger.error(
         `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
       );
-      throw new Error(`FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`);
-
+      throw new Error(
+        `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
+      );
     }
 
     const { success: writeFileSuccess, output: writeFileOutput } =
@@ -102,7 +105,7 @@ export const applyPatchTool = tool(
       logger.error("Failed to write file", {
         writeFileOutput,
       });
-      throw new Error(writeFileOutput)
+      throw new Error(writeFileOutput);
     }
 
     let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
