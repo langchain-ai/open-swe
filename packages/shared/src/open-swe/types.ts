@@ -154,14 +154,14 @@ export const GraphAnnotation = MessagesZodState.extend({
     .string()
     .default(() => "")
     .langgraph.reducer((_state, update) => update),
-    ui: z
+  ui: z
     .custom<UIMessage[]>()
     .default(() => [])
     .langgraph.reducer<(UIMessage | RemoveUIMessage)[]>((state, update) =>
       uiMessageReducer(state, update),
     ),
   // TODO: Not used, but can be used in the future for Gen UI artifacts
-  context: z.record(z.string(), z.unknown())
+  context: z.record(z.string(), z.unknown()),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;

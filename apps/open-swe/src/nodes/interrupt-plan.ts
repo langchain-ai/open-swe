@@ -8,7 +8,10 @@ import {
 import { startSandbox } from "../utils/sandbox.js";
 import { createNewTask } from "../utils/task-plan.js";
 import { getUserRequest } from "../utils/user-request.js";
-import { PLAN_INTERRUPT_ACTION_TITLE, PLAN_INTERRUPT_DELIMITER } from "@open-swe/shared/constants";
+import {
+  PLAN_INTERRUPT_ACTION_TITLE,
+  PLAN_INTERRUPT_DELIMITER,
+} from "@open-swe/shared/constants";
 
 export async function interruptPlan(state: GraphState): Promise<Command> {
   const { proposedPlan } = state;
