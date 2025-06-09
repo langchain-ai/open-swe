@@ -97,7 +97,7 @@ export function ProgressBar({
   return (
     <div
       className={cn(
-        "mt-10 mr-12 max-w-5/12 rounded-md border border-gray-200 bg-white shadow-sm md:max-w-8/12",
+        "w-full rounded-md border border-gray-200 bg-white shadow-sm",
         className,
       )}
     >

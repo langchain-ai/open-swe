@@ -580,34 +580,6 @@ export function TasksSidebar({
   );
 }
 
-// Single Plan Component (keeping for compatibility)
-export function Plan({
-  planVersions,
-  title = "Agent Plan",
-  isLatestRequestAndPlan = false,
-  onVersionChange,
-  onEditTask,
-  onAddTask,
-  onDeleteTask,
-  onReorderTasks,
-}: any) {
-  // Implementation remains the same as before
-  return <div>Plan component - use TasksSidebar instead</div>;
-}
-
-// Multi-Request Plan Component
-export function MultiRequestPlan({
-  requests,
-  onRequestChange,
-  onVersionChange,
-  onEditTask,
-  onAddTask,
-  onDeleteTask,
-  onReorderTasks,
-}: any) {
-  return <div>MultiRequestPlan component - use TaskPlanView instead</div>;
-}
-
 // Main TaskPlan View Component
 export function TaskPlanView({
   taskPlan,

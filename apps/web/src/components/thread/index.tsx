@@ -433,7 +433,7 @@ export function Thread() {
                 </motion.button>
               </div>
 
-              <div className="col-span-6 mx-auto flex w-3xl">
+              <div className="col-span-6 mx-auto flex w-sm justify-center md:w-md lg:w-lg xl:w-xl">
                 {taskPlan && (
                   <TaskPlanView
                     taskPlan={taskPlan}
