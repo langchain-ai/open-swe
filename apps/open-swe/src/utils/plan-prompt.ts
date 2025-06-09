@@ -1,4 +1,4 @@
-import { PlanItem } from "../types.js";
+import { PlanItem } from "@open-swe/shared/open-swe/types";
 
 export const PLAN_PROMPT = `## Completed Tasks
 {COMPLETED_TASKS}
@@ -76,7 +76,7 @@ export function formatPlanPromptWithSummaries(plan: PlanItem[]): string {
   return plan
     .map(
       (p) =>
-        `<task index="${p.index}">\n${p.plan}\n  <task-summary>\n${p.summary || "No task summary found"}\n  </task-summary>\n</task>`,
+        `<${p.completed ? "completed-" : ""}task index="${p.index}">\n${p.plan}\n  <task-summary>\n${p.summary || "No task summary found"}\n  </task-summary>\n</${p.completed ? "completed-" : ""}task>`,
     )
     .join("\n");
 }

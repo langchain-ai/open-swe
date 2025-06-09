@@ -17,9 +17,7 @@
     "format:check": "prettier --check .",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.test\\.ts$ --testPathIgnorePatterns=\\.int\\.test\\.ts$",
     "test:int": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.int\\.test\\.ts$",
-    "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000",
-    "run:e2e": "npx tsx scripts/run-e2e.ts",
-    "run:from-plan": "npx tsx scripts/run-from-plan.ts"
+    "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000"
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.18.1",
@@ -30,6 +28,7 @@
     "@langchain/langgraph-sdk": "^0.0.78",
     "@langchain/openai": "^0.5.10",
     "@octokit/rest": "^22.0.0",
+    "@open-swe/shared": "workspace:*",
     "diff": "^8.0.1",
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",

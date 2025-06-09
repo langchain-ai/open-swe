@@ -1,11 +1,13 @@
 import { Command, END, interrupt } from "@langchain/langgraph";
-import { GraphState } from "../types.js";
+import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
 import { startSandbox } from "../utils/sandbox.js";
+import { createNewTask } from "../utils/task-plan.js";
+import { getUserRequest } from "../utils/user-request.js";
 
 export async function interruptPlan(state: GraphState): Promise<Command> {
   const { proposedPlan } = state;
@@ -35,21 +37,27 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
     throw new Error("No sandbox session ID found.");
   }
 
+  const userRequest = getUserRequest(state.messages);
+
   if (interruptRes.type === "accept") {
     const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
 
     // Plan was accepted, route to the generate-action node to start taking actions.
+    const planItems = proposedPlan.map((p, index) => ({
+      index,
+      plan: p,
+      completed: false,
+    }));
+
+    const newTaskPlan = createNewTask(userRequest, planItems, state.plan);
+
+    const commandUpdate: GraphUpdate = {
+      plan: newTaskPlan,
+      sandboxSessionId: newSandboxSessionId,
+    };
     return new Command({
       goto: "generate-action",
-      update: {
-        plan: proposedPlan.map((p, index) => ({
-          index,
-          plan: p,
-          completed: false,
-          summary: undefined,
-        })),
-        sandboxSessionId: newSandboxSessionId,
-      },
+      update: commandUpdate,
     });
   }
 
@@ -60,27 +68,33 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(":::")
       .map((step: string) => step.trim());
+
+    const planItems = editedPlan.map((p: string, index: number) => ({
+      index,
+      plan: p,
+      completed: false,
+    }));
+
+    const newTaskPlan = createNewTask(userRequest, planItems, state.plan);
+
+    const commandUpdate: GraphUpdate = {
+      plan: newTaskPlan,
+      sandboxSessionId: newSandboxSessionId,
+    };
     return new Command({
       goto: "generate-action",
-      update: {
-        plan: editedPlan.map((p: string, index: number) => ({
-          index,
-          plan: p,
-          completed: false,
-          summary: undefined,
-        })),
-        sandboxSessionId: newSandboxSessionId,
-      },
+      update: commandUpdate,
     });
   }
 
   if (interruptRes.type === "response") {
     // Plan was responded to, route to the rewrite plan node.
+    const commandUpdate: GraphUpdate = {
+      planChangeRequest: interruptRes.args as string,
+    };
     return new Command({
       goto: "rewrite-plan",
-      update: {
-        planChangeRequest: interruptRes.args as string,
-      },
+      update: commandUpdate,
     });
   }
 

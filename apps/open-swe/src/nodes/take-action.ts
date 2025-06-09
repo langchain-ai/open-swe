@@ -5,7 +5,7 @@ import {
 } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { applyPatchTool, shellTool } from "../tools/index.js";
-import { GraphState, GraphConfig } from "../types.js";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -18,6 +18,7 @@ import {
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../utils/truncate-outputs.js";
 import { daytonaClient } from "../utils/sandbox.js";
+import { getCodebaseTree } from "../utils/tree.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -154,11 +155,15 @@ export async function takeAction(
         isToolMessage(m) && !m.additional_kwargs?.is_diagnosis,
     ),
   );
+
+  const codebaseTree = await getCodebaseTree();
+
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
     update: {
       messages: [toolMessage],
       ...(branchName && { branchName }),
+      codebaseTree,
     },
   });
 }

@@ -1,5 +1,5 @@
 import { initChatModel } from "langchain/chat_models/universal";
-import { GraphConfig } from "../types.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 export enum Task {
   PLANNER = "planner",
