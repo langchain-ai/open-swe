@@ -1,3 +1,5 @@
+import { v4 as uuidv4 } from "uuid";
+import path from "node:path";
 import {
   GraphState,
   GraphConfig,
@@ -16,7 +18,9 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { getCurrentPlanItem } from "../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "../utils/task-plan.js";
+import { typedUi } from "@langchain/langgraph-sdk/react-ui/server";
 import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
+import { AIMessage } from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -136,6 +140,19 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  const ui = typedUi(config);
+  const uiMessageId = uuidv4();
+  const aiMessageId = uuidv4();
+  ui.push({
+    id: uiMessageId,
+    name: "action-step",
+    props: {
+      status: "loading",
+    },
+    metadata: {
+      message_id: aiMessageId,
+    },
+  });
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [shellTool, applyPatchTool, requestHumanHelpTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
@@ -156,10 +173,11 @@ export async function generateAction(
     newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
+  const messageTextContent = getMessageContentString(response.content);
   logger.info("Generated action", {
     currentTask: getCurrentPlanItem(getActivePlanItems(state.plan)).plan,
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
+    ...(messageTextContent && {
+      content: messageTextContent,
     }),
     ...(response.tool_calls?.[0] && {
       name: response.tool_calls?.[0].name,
@@ -167,8 +185,49 @@ export async function generateAction(
     }),
   });
 
+  const toolCall = response.tool_calls?.[0];
+  if (toolCall) {
+    if (toolCall.name === "apply_patch") {
+      ui.push({
+        id: uiMessageId,
+        name: "action-step",
+        props: {
+          actionType: "apply-patch",
+          status: "generating",
+          reasoningText: messageTextContent,
+          file: path.join(
+            toolCall.args.workdir || SANDBOX_ROOT_DIR,
+            toolCall.args.file_path,
+          ),
+          diff: toolCall.args.diff,
+        },
+      });
+    } else if (toolCall.name === "shell") {
+      ui.push({
+        id: uiMessageId,
+        name: "action-step",
+        props: {
+          actionType: "shell",
+          status: "generating",
+          reasoningText: messageTextContent,
+          workdir: toolCall.args.workdir || SANDBOX_ROOT_DIR,
+          command: toolCall.args.command.join(" "),
+        },
+      });
+    }
+  }
+
   return {
-    messages: [response],
+    messages: [
+      new AIMessage({
+        id: aiMessageId,
+        ...response,
+        additional_kwargs: {
+          ...response.additional_kwargs,
+          gen_ui_id: uiMessageId,
+        },
+      }),
+    ],
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
   };
 }

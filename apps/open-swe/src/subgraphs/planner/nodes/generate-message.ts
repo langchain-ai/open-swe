@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { shellTool } from "../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
@@ -5,10 +6,11 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { isHumanMessage } from "@langchain/core/messages";
+import { AIMessage, isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";
 import { getRepoAbsolutePath } from "../../../utils/git.js";
 import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
+import { typedUi } from "@langchain/langgraph-sdk/react-ui/server";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -56,6 +58,20 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
+  const ui = typedUi(config);
+  const uiMessageId = uuidv4();
+  const aiMessageId = uuidv4();
+  ui.push({
+    id: uiMessageId,
+    name: "action-step",
+    props: {
+      status: "loading",
+    },
+    metadata: {
+      message_id: aiMessageId,
+    },
+  });
+
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [shellTool];
   const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
@@ -74,17 +90,51 @@ export async function generateAction(
       ...state.plannerMessages,
     ]);
 
+  const messageTextContent = getMessageContentString(response.content);
+  const toolCall = response.tool_calls?.[0];
   logger.info("Generated planning message", {
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
+    ...(messageTextContent && {
+      content: messageTextContent,
     }),
-    ...(response.tool_calls?.[0] && {
-      name: response.tool_calls?.[0].name,
-      args: response.tool_calls?.[0].args,
+    ...(toolCall && {
+      name: toolCall.name,
+      args: toolCall.args,
     }),
   });
 
+  if (toolCall && toolCall.name === "shell") {
+    ui.push({
+      id: uiMessageId,
+      name: "action-step",
+      props: {
+        actionType: "shell",
+        status: "generating",
+        reasoningText: messageTextContent,
+        workdir: toolCall.args.workdir || SANDBOX_ROOT_DIR,
+        command: toolCall.args.command.join(" "),
+      },
+    });
+  } else {
+    ui.push({
+      id: uiMessageId,
+      name: "action-step",
+      props: {
+        status: "done",
+        reasoningText: messageTextContent,
+      },
+    });
+  }
+
   return {
-    plannerMessages: [response],
+    plannerMessages: [
+      new AIMessage({
+        id: aiMessageId,
+        ...response,
+        additional_kwargs: {
+          ...response.additional_kwargs,
+          gen_ui_id: uiMessageId,
+        },
+      }),
+    ],
   };
 }

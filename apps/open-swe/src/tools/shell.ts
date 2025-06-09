@@ -2,11 +2,13 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { Sandbox } from "@daytonaio/sdk";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { getCurrentTaskInput } from "@langchain/langgraph";
+import { getConfig, getCurrentTaskInput } from "@langchain/langgraph";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { getGenUIMessageIdAndContent } from "../utils/get-gen-ui-message-id.js";
+import { typedUi } from "@langchain/langgraph-sdk/react-ui/server";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
 
@@ -34,21 +36,26 @@ const shellToolSchema = z.object({
 
 export const shellTool = tool(
   async (input): Promise<{ result: string; status: "success" | "error" }> => {
-    let sandbox: Sandbox | undefined;
-    try {
-      const state = getCurrentTaskInput<GraphState>();
-      const { sandboxSessionId } = state;
-      if (!sandboxSessionId) {
-        logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
-          input,
-        });
-        throw new Error(
-          "FAILED TO RUN COMMAND: No sandbox session ID provided",
-        );
-      }
+    const { command, workdir, timeout } = input;
 
+    let sandbox: Sandbox | undefined;
+    const state = getCurrentTaskInput<GraphState>();
+    const { sandboxSessionId } = state;
+    if (!sandboxSessionId) {
+      logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
+        input,
+      });
+      throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
+    }
+
+    const {
+      id: genUIMessageId,
+      content: lastMessageContent,
+      aiMessageId,
+    } = getGenUIMessageIdAndContent(state);
+    const ui = typedUi(getConfig());
+    try {
       sandbox = await daytonaClient().get(sandboxSessionId);
-      const { command, workdir, timeout } = input;
       const response = await sandbox.process.executeCommand(
         command.join(" "),
         workdir,
@@ -62,11 +69,44 @@ export const shellTool = tool(
           error_result: response,
           input,
         });
+        ui.push({
+          id: genUIMessageId,
+          name: "action-step",
+          props: {
+            actionType: "shell",
+            status: "done",
+            success: false,
+            command: command.join(" "),
+            workdir,
+            output: response.result,
+            errorCode: response.exitCode,
+            reasoningText: lastMessageContent,
+          },
+          metadata: {
+            ai_message_id: aiMessageId,
+          },
+        });
         throw new Error(
           `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
         );
       }
 
+      ui.push({
+        id: genUIMessageId,
+        name: "action-step",
+        props: {
+          actionType: "shell",
+          status: "done",
+          success: true,
+          command: command.join(" "),
+          workdir,
+          output: response.result,
+          reasoningText: lastMessageContent,
+        },
+        metadata: {
+          ai_message_id: aiMessageId,
+        },
+      });
       return {
         result: response.result,
         status: "success",
@@ -74,27 +114,56 @@ export const shellTool = tool(
     } catch (e) {
       const errorFields = getSandboxErrorFields(e);
       if (errorFields) {
+        const errorMessage = `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`;
         logger.error("Failed to run command", {
           input,
           error: errorFields,
         });
-        throw new Error(
-          `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`,
-        );
+        ui.push({
+          id: genUIMessageId,
+          name: "action-step",
+          props: {
+            actionType: "shell",
+            status: "done",
+            success: false,
+            command: command.join(" "),
+            workdir,
+            output: errorFields.result,
+            errorCode: errorFields.exitCode,
+            reasoningText: lastMessageContent,
+          },
+          metadata: {
+            ai_message_id: aiMessageId,
+          },
+        });
+        throw new Error(errorMessage);
       }
 
-      logger.error(
+      const errorMessage =
         "Failed to run command: " +
-          (e instanceof Error ? e.message : "Unknown error"),
-        {
-          error: e,
-          input,
+        (e instanceof Error ? e.message : "Unknown error");
+      logger.error(errorMessage, {
+        error: e,
+        input,
+      });
+      ui.push({
+        id: genUIMessageId,
+        name: "action-step",
+        props: {
+          actionType: "shell",
+          status: "done",
+          success: false,
+          command: command.join(" "),
+          workdir,
+          output: errorMessage,
+          errorCode: undefined,
+          reasoningText: lastMessageContent,
         },
-      );
-      throw new Error(
-        "FAILED TO RUN COMMAND: " +
-          (e instanceof Error ? e.message : "Unknown error"),
-      );
+        metadata: {
+          ai_message_id: aiMessageId,
+        },
+      });
+      throw new Error(errorMessage);
     }
   },
   {

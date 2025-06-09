@@ -4,42 +4,12 @@ import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
-import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
-import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import { useArtifact } from "../artifact";
 import { Interrupt } from "./interrupt";
-
-function CustomComponent({
-  message,
-  thread,
-}: {
-  message: Message;
-  thread: ReturnType<typeof useStreamContext>;
-}) {
-  const artifact = useArtifact();
-  const { values } = useStreamContext();
-  const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id,
-  );
-
-  if (!customComponents?.length) return null;
-  return (
-    <Fragment key={message.id}>
-      {customComponents.map((customComponent) => (
-        <LoadExternalComponent
-          key={customComponent.id}
-          stream={thread}
-          message={customComponent}
-          meta={{ ui: customComponent, artifact }}
-        />
-      ))}
-    </Fragment>
-  );
-}
+import { CustomComponent } from "./custom";
 
 function parseAnthropicStreamedToolCalls(
   content: MessageContentComplex[],
@@ -113,8 +83,6 @@ export function AssistantMessage({
   if (isToolResult && hideToolCalls) {
     return null;
   }
-
-  console.log("returning");
 
   return (
     <div className="group mr-auto flex w-full max-w-3xl items-start gap-2">

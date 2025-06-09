@@ -3,11 +3,13 @@ import { z } from "zod";
 import { applyPatch } from "diff";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
-import { getCurrentTaskInput } from "@langchain/langgraph";
+import { getConfig, getCurrentTaskInput } from "@langchain/langgraph";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
+import { typedUi } from "@langchain/langgraph-sdk/react-ui/server";
+import { getGenUIMessageIdAndContent } from "../utils/get-gen-ui-message-id.js";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
@@ -37,6 +39,13 @@ export const applyPatchTool = tool(
       throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
     }
 
+    const {
+      id: genUIMessageId,
+      content: lastMessageContent,
+      aiMessageId,
+    } = getGenUIMessageIdAndContent(state);
+    const ui = typedUi(getConfig());
+
     const { diff, file_path, workdir } = input;
 
     const sandbox = await daytonaClient().get(sandboxSessionId);
@@ -50,6 +59,22 @@ export const applyPatchTool = tool(
     );
     if (!readFileSuccess) {
       logger.error(readFileOutput);
+      ui.push({
+        id: genUIMessageId,
+        name: "action-step",
+        props: {
+          actionType: "apply-patch",
+          status: "done",
+          success: false,
+          file: file_path,
+          diff,
+          errorMessage: readFileOutput,
+          reasoningText: lastMessageContent,
+        },
+        metadata: {
+          ai_message_id: aiMessageId,
+        },
+      });
       throw new Error(readFileOutput);
     }
 
@@ -89,12 +114,25 @@ export const applyPatchTool = tool(
     }
 
     if (patchedContent === false) {
-      logger.error(
-        `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
-      );
-      throw new Error(
-        `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`,
-      );
+      const patchApplyError = `FAILED TO APPLY PATCH: The diff could not be applied to file '${file_path}'. This may be due to an invalid diff format or conflicting changes with the file's current content. Original content length: ${readFileOutput.length}, Diff: ${diff.substring(0, 100)}...`;
+      logger.error(patchApplyError);
+      ui.push({
+        id: genUIMessageId,
+        name: "action-step",
+        props: {
+          actionType: "apply-patch",
+          status: "done",
+          success: false,
+          file: file_path,
+          diff,
+          errorMessage: patchApplyError,
+          reasoningText: lastMessageContent,
+        },
+        metadata: {
+          ai_message_id: aiMessageId,
+        },
+      });
+      throw new Error(patchApplyError);
     }
 
     const { success: writeFileSuccess, output: writeFileOutput } =
@@ -104,6 +142,22 @@ export const applyPatchTool = tool(
     if (!writeFileSuccess) {
       logger.error("Failed to write file", {
         writeFileOutput,
+      });
+      ui.push({
+        id: genUIMessageId,
+        name: "action-step",
+        props: {
+          actionType: "apply-patch",
+          status: "done",
+          success: false,
+          file: file_path,
+          diff,
+          errorMessage: writeFileOutput,
+          reasoningText: lastMessageContent,
+        },
+        metadata: {
+          ai_message_id: aiMessageId,
+        },
       });
       throw new Error(writeFileOutput);
     }
@@ -116,6 +170,22 @@ export const applyPatchTool = tool(
         `\nHere is the error that was thrown when your generated diff was applied:\n<apply-diff-error>\n${errorApplyingPatchMessage}\n</apply-diff-error>` +
         `\nThe diff which was applied is:\n<fixed-diff>\n${fixedDiff}\n</fixed-diff>`;
     }
+    ui.push({
+      id: genUIMessageId,
+      name: "action-step",
+      props: {
+        actionType: "apply-patch",
+        status: "done",
+        success: true,
+        file: file_path,
+        diff,
+        ...(fixedDiff ? { fixedDiff } : {}),
+        reasoningText: lastMessageContent,
+      },
+      metadata: {
+        ai_message_id: aiMessageId,
+      },
+    });
     return {
       result: resultMessage,
       status: "success",
