@@ -1,5 +1,4 @@
 import { validate } from "uuid";
-import { getApiKey } from "@/lib/api-key";
 import { Thread } from "@langchain/langgraph-sdk";
 import {
   createContext,
@@ -140,7 +139,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const getThread = useCallback(
     async (threadId: string): Promise<ThreadWithTasks | null> => {
       if (!apiUrl || !assistantId) return null;
-      const client = createClient(apiUrl, getApiKey() ?? undefined);
+      const client = createClient(apiUrl);
 
       try {
         const thread = await client.threads.get(threadId);
@@ -186,7 +185,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     if (!apiUrl || !assistantId) return;
 
     setThreadsLoading(true);
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    const client = createClient(apiUrl);
 
     try {
       // Simple thread search - try both metadata approaches

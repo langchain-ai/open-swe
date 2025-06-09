@@ -8,6 +8,7 @@ import {
 import { startSandbox } from "../utils/sandbox.js";
 import { createNewTask } from "../utils/task-plan.js";
 import { getUserRequest } from "../utils/user-request.js";
+import { PLAN_INTERRUPT_ACTION_TITLE, PLAN_INTERRUPT_DELIMITER } from "@open-swe/shared/constants";
 
 export async function interruptPlan(state: GraphState): Promise<Command> {
   const { proposedPlan } = state;
@@ -17,9 +18,9 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
 
   const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
     action_request: {
-      action: "Approve/Edit Plan",
+      action: PLAN_INTERRUPT_ACTION_TITLE,
       args: {
-        plan: proposedPlan.join("\n:::\n"),
+        plan: proposedPlan.join(`\n${PLAN_INTERRUPT_DELIMITER}\n`),
       },
     },
     config: {
@@ -29,7 +30,7 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
       allow_ignore: true,
     },
     description: `A new plan has been generated for your request. Please review it and either approve it, edit it, respond to it, or ignore it. Responses will be passed to an LLM where it will rewrite then plan.
-    If editing the plan, ensure each step in the plan is separated by ":::".`,
+    If editing the plan, ensure each step in the plan is separated by "${PLAN_INTERRUPT_DELIMITER}".`,
   })[0];
 
   if (!state.sandboxSessionId) {
@@ -66,7 +67,7 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
 
     // Plan was edited, route to the generate-action node to start taking actions.
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
-      .split(":::")
+      .split(PLAN_INTERRUPT_DELIMITER)
       .map((step: string) => step.trim());
 
     const planItems = editedPlan.map((p: string, index: number) => ({

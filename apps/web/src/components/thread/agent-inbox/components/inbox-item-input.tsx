@@ -50,8 +50,14 @@ function ResetButton({ handleReset }: { handleReset: () => void }) {
   );
 }
 
-function ArgsRenderer({ args }: { args: Record<string, any> }) {
-  if (isPlanData(args)) {
+function ArgsRenderer({
+  args,
+  actionName,
+}: {
+  args: Record<string, any>;
+  actionName: string;
+}) {
+  if (isPlanData(args, actionName)) {
     const planItems = parsePlanData(args);
     const planKey = getPlanKey(args);
 
@@ -63,7 +69,10 @@ function ArgsRenderer({ args }: { args: Record<string, any> }) {
               {prettifyText(planKey || "plan")}:
             </p>
             <div className="w-full max-w-full rounded-xl border border-gray-200 bg-white p-4">
-              <PlanViewer planItems={planItems} />
+              <PlanViewer
+                planItems={planItems}
+                isProposedPlan
+              />
             </div>
           </div>
         </div>
@@ -142,7 +151,10 @@ function ResponseComponent({
       </div>
 
       {showArgsInResponse && (
-        <ArgsRenderer args={interruptValue.action_request.args} />
+        <ArgsRenderer
+          args={interruptValue.action_request.args}
+          actionName={interruptValue.action_request.action}
+        />
       )}
 
       <div className="flex w-full flex-col items-start gap-[6px]">
@@ -174,10 +186,12 @@ const Response = React.memo(ResponseComponent);
 function AcceptComponent({
   streaming,
   actionRequestArgs,
+  actionName,
   handleSubmit,
 }: {
   streaming: boolean;
   actionRequestArgs: Record<string, any>;
+  actionName: string;
   handleSubmit: (
     e: React.MouseEvent<HTMLButtonElement, MouseEvent> | React.KeyboardEvent,
   ) => Promise<void>;
@@ -185,7 +199,10 @@ function AcceptComponent({
   return (
     <div className="flex w-full flex-col items-start gap-4 rounded-lg border-[1px] border-gray-300 p-6">
       {actionRequestArgs && Object.keys(actionRequestArgs).length > 0 && (
-        <ArgsRenderer args={actionRequestArgs} />
+        <ArgsRenderer
+          args={actionRequestArgs}
+          actionName={actionName}
+        />
       )}
       <Button
         variant="brand"
@@ -226,6 +243,8 @@ function EditAndOrAcceptComponent({
   const editResponse = humanResponse.find((r) => r.type === "edit");
   const acceptResponse = humanResponse.find((r) => r.type === "accept");
 
+  const actionName = interruptValue.action_request.action;
+
   if (
     !editResponse ||
     typeof editResponse.args !== "object" ||
@@ -234,6 +253,7 @@ function EditAndOrAcceptComponent({
     if (acceptResponse) {
       return (
         <AcceptComponent
+          actionName={actionName}
           actionRequestArgs={interruptValue.action_request.args}
           streaming={streaming}
           handleSubmit={handleSubmit}
@@ -298,7 +318,7 @@ function EditAndOrAcceptComponent({
         // Check if this field contains plan data and user isn't actively editing it
         const isFieldBeingEdited = editingField === k;
         const fieldArgs = { [k]: v };
-        const isFieldPlanData = isPlanData(fieldArgs);
+        const isFieldPlanData = isPlanData(fieldArgs, actionName);
 
         // Calculate the default number of rows by the total length of the initial value divided by 30
         // or 8, whichever is greater. Stored in a ref to prevent re-rendering.
@@ -344,7 +364,10 @@ function EditAndOrAcceptComponent({
               {isFieldPlanData && !isFieldBeingEdited ? (
                 // Show plan viewer for plan data when not editing
                 <div className="w-full rounded-lg border border-gray-200 bg-white p-3">
-                  <PlanViewer planItems={parsePlanData(fieldArgs)} />
+                  <PlanViewer
+                    planItems={parsePlanData(fieldArgs)}
+                    isProposedPlan
+                  />
                 </div>
               ) : (
                 // Show textarea for editing or non-plan data
@@ -401,6 +424,7 @@ export function InboxItemInput({
     hasArgs && !isEditAllowed && !acceptAllowed && isResponseAllowed;
   const showArgsOutsideActionCards =
     hasArgs && !showArgsInResponse && !isEditAllowed && !acceptAllowed;
+  const actionName = interruptValue.action_request.action;
 
   const onEditChange = (
     change: string | string[],
@@ -556,7 +580,10 @@ export function InboxItemInput({
   return (
     <div className="flex w-full flex-col items-start justify-start gap-2">
       {showArgsOutsideActionCards && (
-        <ArgsRenderer args={interruptValue.action_request.args} />
+        <ArgsRenderer
+          args={interruptValue.action_request.args}
+          actionName={actionName}
+        />
       )}
 
       <div className="flex w-full flex-col items-start gap-2">

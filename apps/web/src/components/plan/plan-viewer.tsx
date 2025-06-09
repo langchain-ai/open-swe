@@ -1,13 +1,18 @@
 import { Check, Clock, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PlanItem } from "@/types";
+import { PlanItem } from "@open-swe/shared/open-swe/types";
 
 interface PlanViewerProps {
   planItems: PlanItem[];
   className?: string;
+  isProposedPlan?: boolean;
 }
 
-export function PlanViewer({ planItems, className }: PlanViewerProps) {
+export function PlanViewer({
+  planItems,
+  className,
+  isProposedPlan,
+}: PlanViewerProps) {
   const currentTaskIndex = planItems
     .filter((item) => !item.completed)
     .reduce(
@@ -16,6 +21,7 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
     );
 
   const getTaskStatus = (item: PlanItem) => {
+    if (isProposedPlan) return "proposed";
     if (item.completed) return "completed";
     if (item.index === currentTaskIndex) return "current";
     return "remaining";
@@ -24,17 +30,21 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
   return (
     <div className={cn("w-full space-y-3", className)}>
       <div className="mb-4 flex items-center gap-2">
-        <h3 className="text-sm font-medium text-gray-900">Execution Plan</h3>
-        <span className="text-xs text-gray-500">
-          {planItems.filter((item) => item.completed).length} of{" "}
-          {planItems.length} completed
-        </span>
+        <h3 className="text-sm font-medium text-gray-900">
+          {isProposedPlan ? "Proposed" : "Execution"} Plan
+        </h3>
+        {!isProposedPlan && (
+          <span className="text-xs text-gray-500">
+            {planItems.filter((item) => item.completed).length} of{" "}
+            {planItems.length} completed
+          </span>
+        )}
       </div>
 
       <div className="space-y-2">
         {planItems
           .sort((a, b) => a.index - b.index)
-          .map((item, idx) => {
+          .map((item) => {
             const status = getTaskStatus(item);
 
             return (
@@ -45,7 +55,10 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
                   {
                     "border-green-200 bg-green-50": status === "completed",
                     "border-blue-200 bg-blue-50": status === "current",
-                    "border-gray-200 bg-gray-50": status === "remaining",
+                    "border-gray-200 bg-gray-50": [
+                      "remaining",
+                      "proposed",
+                    ].includes(status),
                   },
                 )}
               >
@@ -57,7 +70,7 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
                   {status === "current" && (
                     <Play className="h-4 w-4 text-blue-600" />
                   )}
-                  {status === "remaining" && (
+                  {["remaining", "proposed"].includes(status) && (
                     <Clock className="h-4 w-4 text-gray-400" />
                   )}
                 </div>
@@ -78,13 +91,19 @@ export function PlanViewer({ planItems, className }: PlanViewerProps) {
                         Done
                       </span>
                     )}
+                    {status === "proposed" && (
+                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+                        Proposed
+                      </span>
+                    )}
                   </div>
 
                   <p
                     className={cn("text-sm leading-relaxed", {
                       "text-gray-900": status === "current",
                       "text-gray-600":
-                        status === "completed" || status === "remaining",
+                        status === "completed" ||
+                        ["remaining", "proposed"].includes(status),
                     })}
                   >
                     {item.plan}

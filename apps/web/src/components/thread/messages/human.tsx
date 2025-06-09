@@ -65,7 +65,10 @@ export function HumanMessage({
 
           return {
             ...values,
-            messages: [...(values.messages ?? []), newMessage] as unknown as BaseMessage[],
+            messages: [
+              ...(values.messages ?? []),
+              newMessage,
+            ] as unknown as BaseMessage[],
           };
         },
         config: {

@@ -1,16 +1,9 @@
 import { Dispatch, SetStateAction } from "react";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-
-// Real task data structure from the agent
-export interface PlanItem {
-  index: number;
-  plan: string;
-  completed: boolean;
-  summary?: string;
-}
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 // Task with status extended from the agent
-export interface TaskWithStatus extends PlanItem {
+export interface TaskWithStatus extends TaskPlan {
   status: ThreadStatus;
   repository?: string;
   date?: string;

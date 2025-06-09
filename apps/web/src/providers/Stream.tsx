@@ -27,7 +27,7 @@ import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 
 const useTypedStream = useStream<
-GraphState,
+  GraphState,
   {
     UpdateType: GraphUpdate;
     CustomEventType: UIMessage | RemoveUIMessage;

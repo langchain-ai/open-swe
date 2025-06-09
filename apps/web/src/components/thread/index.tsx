@@ -238,7 +238,10 @@ export function Thread() {
 
     stream.submit(
       {
-        messages: [...toolMessages, newHumanMessage] as unknown as BaseMessage[],
+        messages: [
+          ...toolMessages,
+          newHumanMessage,
+        ] as unknown as BaseMessage[],
         context,
         targetRepository: selectedRepository,
       },
