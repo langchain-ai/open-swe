@@ -46,28 +46,23 @@ export function ThreadItem({
       >
         <div className="flex items-start gap-1.5">
           <div className="min-w-0 flex-1">
-            {/* Line 1: Status Indicator Skeleton + Title Skeleton */}
             <div className="flex items-center gap-1.5">
               <Skeleton className="h-3 w-3 rounded-full" />
               <Skeleton className="h-3 w-24" />
             </div>
 
-            {/* Line 2: Repo/Branch Skeleton + Date Skeleton */}
             <div className="mt-1 flex items-center gap-1 text-xs">
               <Skeleton className="h-3 w-3" /> {/* GitHub icon placeholder */}
               <Skeleton className="h-3 w-16" /> {/* Repo */}
               <Skeleton className="ml-0.5 h-2.5 w-2.5" />{" "}
-              {/* Branch icon placeholder */}
               <Skeleton className="ml-0.5 h-3 w-12" /> {/* Branch */}
               <Skeleton className="ml-auto h-3 w-10" /> {/* Date */}
             </div>
 
-            {/* Line 3: Tasks Badge Skeleton */}
             <div className="mt-1">
               <Skeleton className="h-4 w-20 rounded" />
             </div>
           </div>
-          {/* ArrowRight skeleton is usually omitted */}
         </div>
       </div>
     );

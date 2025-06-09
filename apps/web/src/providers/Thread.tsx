@@ -48,11 +48,20 @@ function getThreadSearchMetadata(
 
 const getTaskCounts = (
   tasks?: TaskPlan,
+  proposedPlan?: string[],
 ): { totalTasksCount: number; completedTasksCount: number } => {
+  if (proposedPlan && !tasks) {
+    return {
+      totalTasksCount: proposedPlan.length,
+      completedTasksCount: 0,
+    };
+  }
+
   if (!tasks) {
     // No tasks passed, return 0s
     return { totalTasksCount: 0, completedTasksCount: 0 };
   }
+
   const activeTaskList = tasks.tasks.find(
     (t) => t.taskIndex === tasks.activeTaskIndex,
   );
@@ -60,6 +69,7 @@ const getTaskCounts = (
     // Something is wrong here. Return 0
     return { totalTasksCount: 0, completedTasksCount: 0 };
   }
+
   const activeTaskPlans = activeTaskList.planRevisions.find(
     (p) => p.revisionIndex === activeTaskList.activeRevisionIndex,
   );
@@ -99,7 +109,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         const targetRepository = streamValues?.targetRepository;
         const messages = streamValues?.messages;
 
-        const { totalTasksCount, completedTasksCount } = getTaskCounts(plan);
+        const { totalTasksCount, completedTasksCount } = getTaskCounts(
+          plan,
+          proposedPlan,
+        );
 
         // Extract thread title from messages if available
         const firstMessageContent = messages?.[0]?.content;
@@ -164,7 +177,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       ? getMessageContentString(firstMessageContent)
       : `Thread ${thread.thread_id.substring(0, 8)}`;
 
-    const { totalTasksCount, completedTasksCount } = getTaskCounts(plan);
+    const { totalTasksCount, completedTasksCount } = getTaskCounts(
+      plan,
+      proposedPlan,
+    );
 
     return {
       ...thread,
