@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubSVG } from "./icons/github";
+import { useQueryState } from "nuqs";
 
 interface ThreadItemProps {
   thread: ThreadWithTasks;
@@ -21,6 +22,8 @@ export function ThreadItem({
   variant = "dashboard",
   className,
 }: ThreadItemProps) {
+  const [threadId] = useQueryState("threadId");
+  const isSelected = thread.thread_id === threadId;
   const isSidebar = variant === "sidebar";
 
   const displayDate = new Date(thread.created_at).toLocaleDateString("en-US", {
@@ -72,9 +75,14 @@ export function ThreadItem({
     <div
       className={cn(
         "group cursor-pointer rounded-md border border-gray-200 bg-inherit p-2 shadow-sm transition-colors hover:bg-gray-50 hover:shadow-md",
+        isSelected && "border-primary",
         className,
       )}
-      onClick={() => onClick(thread)}
+      onClick={() => {
+        if (!isSelected) {
+          onClick(thread);
+        }
+      }}
     >
       <div className="flex items-start gap-1.5">
         <div className="flex w-full min-w-0 flex-col gap-1">
