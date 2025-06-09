@@ -1,4 +1,4 @@
-import { END, START, StateGraph } from "@langchain/langgraph";
+import { END, Send, START, StateGraph } from "@langchain/langgraph";
 import {
   GraphAnnotation,
   GraphConfiguration,
@@ -27,11 +27,11 @@ import { plannerGraph } from "./subgraphs/index.js";
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"open-pr" | "take-action" | "request-help" | "update-plan"} The next node to execute, or END if the process should stop.
+ * @returns {"open-pr" | "take-action" | "request-help" | Send} The next node to execute, or END if the process should stop.
  */
 async function routeGeneratedAction(
   state: GraphState,
-): Promise<"open-pr" | "take-action" | "request-help" | "update-plan"> {
+): Promise<"open-pr" | "take-action" | "request-help" | Send> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 
@@ -41,8 +41,16 @@ async function routeGeneratedAction(
     if (toolCall.name === "request_human_help") {
       return "request-help";
     }
-    if (toolCall.name === "update_plan") {
-      return "update-plan";
+
+    if (
+      toolCall.name === "update_plan" &&
+      "update_plan_reasoning" in toolCall.args &&
+      typeof toolCall.args?.update_plan_reasoning === "string"
+    ) {
+      // Need to return a `Send` here so that we can update the state to include the plan change request.
+      return new Send("update-plan", {
+        planChangeRequest: toolCall.args?.update_plan_reasoning,
+      });
     }
 
     return "take-action";

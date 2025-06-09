@@ -14,6 +14,9 @@ import {
 } from "@langchain/core/messages";
 import { getMessageString } from "../utils/message/content.js";
 import { formatPlanPrompt } from "../utils/plan-prompt.js";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
 const systemPrompt = `You are operating as an agentic coding assistant built by LangChain. You've decided that the current plan you're working through needs to be updated.
 To aid in this process, you've generated some reasoning and additional context into which plan steps you should update, remove, or whether to add new step(s).
@@ -97,6 +100,11 @@ export async function updatePlan(
   }
   const updatePlanToolCallId = lastMessage.tool_calls[0].id;
 
+  logger.info("Updating plan", {
+    updatePlanToolCallId,
+    planChangeRequest: state.planChangeRequest,
+  });
+
   const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools([updatePlanTool], {
     tool_choice: updatePlanTool.name,
@@ -168,5 +176,6 @@ export async function updatePlan(
       }),
     ],
     plan: newTaskPlan,
+    planChangeRequest: null,
   };
 }
