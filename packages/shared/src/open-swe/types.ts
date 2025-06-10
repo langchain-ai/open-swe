@@ -111,6 +111,7 @@ export type TargetRepository = {
   owner: string;
   repo: string;
   branch?: string;
+  baseCommit?: string;
 };
 
 export const GraphAnnotation = MessagesZodState.extend({
@@ -437,3 +438,4 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
+
