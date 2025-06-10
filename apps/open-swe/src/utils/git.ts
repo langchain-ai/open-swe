@@ -598,38 +598,42 @@ export async function cloneRepo(
       branch: branchName,
       baseCommit: targetRepository.baseCommit,
     });
-    
-    const cloneResult = await sandbox.process.executeCommand(gitCloneCommand.join(" "));
-    
+
+    const cloneResult = await sandbox.process.executeCommand(
+      gitCloneCommand.join(" "),
+    );
+
     // If a baseCommit is specified, checkout that commit after cloning
     if (targetRepository.baseCommit && cloneResult.exitCode === 0) {
       const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-      
+
       logger.info("Checking out base commit", {
         baseCommit: targetRepository.baseCommit,
         repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
       });
-      
+
       const checkoutResult = await sandbox.process.executeCommand(
         `git checkout ${targetRepository.baseCommit}`,
         absoluteRepoDir,
         undefined,
         TIMEOUT_SEC,
       );
-      
+
       if (checkoutResult.exitCode !== 0) {
         logger.error("Failed to checkout base commit", {
           baseCommit: targetRepository.baseCommit,
           checkoutResult,
         });
-        throw new Error(`Failed to checkout base commit ${targetRepository.baseCommit}: ${checkoutResult.result}`);
+        throw new Error(
+          `Failed to checkout base commit ${targetRepository.baseCommit}: ${checkoutResult.result}`,
+        );
       }
-      
+
       logger.info("Successfully checked out base commit", {
         baseCommit: targetRepository.baseCommit,
       });
     }
-    
+
     return cloneResult;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
@@ -637,4 +641,3 @@ export async function cloneRepo(
     throw e;
   }
 }
-
