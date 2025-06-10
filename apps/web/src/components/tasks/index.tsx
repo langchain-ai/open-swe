@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -462,11 +463,11 @@ export function TasksSidebar({
                                 className={cn(
                                   "rounded-full px-2 py-1 text-xs",
                                   state === "completed" &&
-                                    "bg-green-100 text-green-700",
+                                  "bg-green-100 text-green-700",
                                   state === "current" &&
-                                    "bg-blue-100 text-blue-700",
+                                  "bg-blue-100 text-blue-700",
                                   state === "remaining" &&
-                                    "bg-gray-100 text-gray-700",
+                                  "bg-gray-100 text-gray-700",
                                 )}
                               >
                                 {state === "completed"
