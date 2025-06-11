@@ -185,6 +185,19 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [selectedRepository?.owner, selectedRepository?.repo]);
 
+  // Load more functions
+  const loadMoreRepositories = useCallback(async () => {
+    if (repositoriesHasMore && !repositoriesLoadingMore) {
+      await checkInstallation(repositoriesPage + 1, true);
+    }
+  }, [repositoriesHasMore, repositoriesLoadingMore, repositoriesPage]);
+
+  const loadMoreBranches = useCallback(async () => {
+    if (branchesHasMore && !branchesLoadingMore) {
+      await fetchBranches(branchesPage + 1, true);
+    }
+  }, [branchesHasMore, branchesLoadingMore, branchesPage, fetchBranches]);
+
   useEffect(() => {
     checkInstallation();
   }, []);
@@ -192,6 +205,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
   useEffect(() => {
     if (selectedRepository) {
       fetchBranches();
+      // Reset branch pagination when repository changes
+      setBranchesPage(1);
     } else {
       setBranches([]);
       setSelectedBranchParam(null);
@@ -231,10 +246,16 @@ export function useGitHubApp(): UseGitHubAppReturn {
   ]);
 
   const refreshRepositories = async () => {
+    // Reset pagination state on refresh
+    setRepositoriesPage(1);
+    setRepositoriesHasMore(false);
     await checkInstallation();
   };
 
   const refreshBranches = async () => {
+    // Reset pagination state on refresh
+    setBranchesPage(1);
+    setBranchesHasMore(false);
     await fetchBranches();
   };
 
@@ -264,6 +285,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
 
