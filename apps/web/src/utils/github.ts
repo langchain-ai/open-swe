@@ -2,7 +2,9 @@ import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 import * as jwt from "jsonwebtoken";
 
 function getBaseApiUrl(): string {
-  let baseApiUrl = new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api").href;
+  let baseApiUrl = new URL(
+    process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api",
+  ).href;
   baseApiUrl = baseApiUrl.endsWith("/") ? baseApiUrl : `${baseApiUrl}/`;
   return baseApiUrl;
 }
@@ -95,7 +97,7 @@ export async function getRepositoryBranches(
   const perPage = 100; // Maximum allowed by GitHub API
 
   // First, get repository info to ensure we have the default branch
-  
+
   const repoResponse = await fetch(
     `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
     {

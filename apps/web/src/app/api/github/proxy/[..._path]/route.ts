@@ -4,9 +4,14 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
 
 const GITHUB_API_URL = "https://api.github.com";
 
-async function handler(req: NextRequest, { params }: { params: { _path: string[] } }) {
+async function handler(
+  req: NextRequest,
+  { params }: { params: { _path: string[] } },
+) {
   const { _path } = await params;
-  const installationIdCookie = req.cookies.get(GITHUB_INSTALLATION_ID_COOKIE)?.value;
+  const installationIdCookie = req.cookies.get(
+    GITHUB_INSTALLATION_ID_COOKIE,
+  )?.value;
 
   if (!installationIdCookie) {
     return NextResponse.json(
@@ -27,7 +32,11 @@ async function handler(req: NextRequest, { params }: { params: { _path: string[]
   }
 
   try {
-    const token = await getInstallationToken(installationIdCookie, appId, privateAppKey);
+    const token = await getInstallationToken(
+      installationIdCookie,
+      appId,
+      privateAppKey,
+    );
 
     const targetPath = _path.join("/");
     const targetUrl = new URL(`${GITHUB_API_URL}/${targetPath}`);
@@ -44,11 +53,12 @@ async function handler(req: NextRequest, { params }: { params: { _path: string[]
     const response = await fetch(targetUrl.toString(), {
       method: req.method,
       headers: headers,
-      body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
+      body:
+        req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
     });
 
     const responseHeaders = new Headers(response.headers);
-    responseHeaders.delete('Content-Encoding'); // Prevent ERR_CONTENT_DECODING_FAILED error.
+    responseHeaders.delete("Content-Encoding"); // Prevent ERR_CONTENT_DECODING_FAILED error.
 
     return new NextResponse(response.body, {
       status: response.status,
@@ -57,8 +67,12 @@ async function handler(req: NextRequest, { params }: { params: { _path: string[]
     });
   } catch (error) {
     console.error("Error in GitHub proxy:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: "Failed to proxy request to GitHub", details: errorMessage }, { status: 500 });
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    return NextResponse.json(
+      { error: "Failed to proxy request to GitHub", details: errorMessage },
+      { status: 500 },
+    );
   }
 }
 

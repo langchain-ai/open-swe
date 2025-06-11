@@ -12,7 +12,8 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
     disableWarningLog: true,
     headers: (req) => {
       return {
-        [GITHUB_TOKEN_COOKIE]: req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "",
+        [GITHUB_TOKEN_COOKIE]:
+          req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "",
       };
     },
   });
