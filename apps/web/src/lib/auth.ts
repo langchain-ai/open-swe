@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Prefix the access token with `x-` so that it's included in requests to the LangGraph server.
 export const GITHUB_TOKEN_COOKIE = "x-github_access_token";
+export const GITHUB_INSTALLATION_TOKEN_COOKIE = "x-github_installation_token";
 export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";

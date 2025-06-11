@@ -1,3 +1,4 @@
+import { GITHUB_TOKEN_COOKIE } from "@/lib/auth";
 import * as jwt from "jsonwebtoken";
 
 /**
@@ -185,4 +186,15 @@ export interface Branch {
     url: string;
   };
   protected: boolean;
+}
+
+// Helper function to get GitHub OAuth access token from cookies
+export function getGitHubAccessToken(): string | null {
+  if (typeof document === "undefined") return null;
+
+  const cookies = document.cookie.split("; ");
+  const tokenCookie = cookies.find((row) =>
+    row.startsWith(`${GITHUB_TOKEN_COOKIE}=`),
+  );
+  return tokenCookie ? tokenCookie.split("=")[1] : null;
 }

@@ -7,7 +7,6 @@ import React, {
   useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { type Message } from "@langchain/langgraph-sdk";
 import {
   uiMessageReducer,
   isUIMessage,
@@ -25,6 +24,8 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
+import { getGitHubAccessToken } from "@/utils/github";
+import { GITHUB_INSTALLATION_TOKEN_COOKIE, GITHUB_TOKEN_COOKIE } from "@/lib/auth";
 
 const useTypedStream = useStream<
   GraphState,
@@ -53,21 +54,17 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads, setThreads, updateThreadFromStream } = useThreads();
+  const { refreshThreads, updateThreadFromStream } = useThreads();
 
-  const githubAccessToken =
-    document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("x-github_access_token="))
-      ?.split("=")[1] || "";
+  const githubAccessToken = getGitHubAccessToken();
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
     threadId: threadId ?? null,
     defaultHeaders: {
-      "x-github-installation-token": githubToken,
-      "x-github-access-token": githubAccessToken,
+      [GITHUB_INSTALLATION_TOKEN_COOKIE]: githubToken,
+      [GITHUB_TOKEN_COOKIE]: githubAccessToken,
     },
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {

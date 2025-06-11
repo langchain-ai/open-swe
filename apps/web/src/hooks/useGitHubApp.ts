@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryState } from "nuqs";
-import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
+import { Repository, getRepositoryBranches, Branch, getGitHubAccessToken } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 interface UseGitHubAppReturn {
@@ -18,17 +18,6 @@ interface UseGitHubAppReturn {
   setSelectedBranch: (branch: string | null) => void;
   refreshBranches: () => Promise<void>;
   defaultBranch: string | null;
-}
-
-// Helper function to get GitHub OAuth access token from cookies
-function getGitHubAccessToken(): string | null {
-  if (typeof document === "undefined") return null;
-
-  const cookies = document.cookie.split("; ");
-  const tokenCookie = cookies.find((row) =>
-    row.startsWith("x-github_access_token="),
-  );
-  return tokenCookie ? tokenCookie.split("=")[1] : null;
 }
 
 export function useGitHubApp(): UseGitHubAppReturn {

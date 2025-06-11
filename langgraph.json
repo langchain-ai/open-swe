@@ -4,6 +4,9 @@
     "open_swe": "./apps/open-swe/src/index.ts:graph"
   },
   "env": "./apps/open-swe/.env",
-  "dependencies": ["./apps/open-swe"]
+  "dependencies": ["./apps/open-swe"],
+  "auth": {
+    "path": "./apps/open-swe/src/security/auth.ts:auth"
+  }
 }
  
