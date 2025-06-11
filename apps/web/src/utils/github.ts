@@ -76,7 +76,6 @@ export async function getInstallationRepositories(
         "User-Agent": "YourAppName",
       },
     });
-  );
 
   if (!response.ok) {
     const errorData = await response.json();
@@ -202,5 +201,6 @@ export interface Branch {
   };
   protected: boolean;
 }
+
 
 
