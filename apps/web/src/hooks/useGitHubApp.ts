@@ -4,30 +4,62 @@ import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 interface UseGitHubAppReturn {
+  // Installation and general state
   isInstalled: boolean | null;
   isLoading: boolean;
   error: string | null;
+  
+  // Repository state and pagination
   repositories: Repository[];
+  repositoriesPage: number;
+  repositoriesHasMore: boolean;
+  repositoriesLoadingMore: boolean;
   refreshRepositories: () => Promise<void>;
+  loadMoreRepositories: () => Promise<void>;
+  
+  // Repository selection
   selectedRepository: TargetRepository | null;
   setSelectedRepository: (repo: TargetRepository | null) => void;
+  
+  // Branch state and pagination
   branches: Branch[];
+  branchesPage: number;
+  branchesHasMore: boolean;
   branchesLoading: boolean;
+  branchesLoadingMore: boolean;
   branchesError: string | null;
+  loadMoreBranches: () => Promise<void>;
+  
+  // Branch selection
   selectedBranch: string | null;
   setSelectedBranch: (branch: string | null) => void;
   refreshBranches: () => Promise<void>;
+  
+  // Repository metadata
   defaultBranch: string | null;
 }
 
 export function useGitHubApp(): UseGitHubAppReturn {
+  // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Repository state and pagination
   const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [repositoriesPage, setRepositoriesPage] = useState(1);
+  const [repositoriesHasMore, setRepositoriesHasMore] = useState(false);
+  const [repositoriesLoadingMore, setRepositoriesLoadingMore] = useState(false);
+  
+  // Branch state and pagination
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [branchesPage, setBranchesPage] = useState(1);
+  const [branchesHasMore, setBranchesHasMore] = useState(false);
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesLoadingMore, setBranchesLoadingMore] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
+  
+  // URL state management
   const [selectedRepositoryParam, setSelectedRepositoryParam] =
     useQueryState("repo");
   const [selectedBranchParam, setSelectedBranchParam] = useQueryState("branch");
@@ -206,3 +238,4 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
