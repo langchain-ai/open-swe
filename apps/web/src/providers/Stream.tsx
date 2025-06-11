@@ -24,7 +24,6 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
-import { getGitHubAccessToken } from "@/utils/github";
 
 const useTypedStream = useStream<
   GraphState,
@@ -55,7 +54,6 @@ const StreamSession = ({
   const [threadId, setThreadId] = useQueryState("threadId");
   const { refreshThreads, updateThreadFromStream } = useThreads();
 
-  const githubAccessToken = getGitHubAccessToken();
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,

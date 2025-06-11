@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQueryState } from "nuqs";
-import {
-  Repository,
-  getRepositoryBranches,
-  Branch,
-  getGitHubAccessToken,
-} from "@/utils/github";
+import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 interface UseGitHubAppReturn {
