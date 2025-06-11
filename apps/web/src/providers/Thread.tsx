@@ -14,6 +14,7 @@ import {
 import { createClient } from "./client";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { useThreadPolling } from "@/hooks/useThreadPolling";
 
 export interface ThreadWithTasks extends Thread {
   threadTitle: string;
@@ -36,6 +37,7 @@ interface ThreadContextType {
   selectedThread: ThreadWithTasks | null;
   setSelectedThread: (thread: ThreadWithTasks | null) => void;
   isPending: boolean;
+  recentlyUpdatedThreads: Set<string>;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -108,6 +110,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     null,
   );
   const [isPending, startTransition] = useTransition();
+  const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
+    Set<string>
+  >(new Set());
 
   const updateThreadFromStream = useCallback(
     (threadId: string, streamValues: any) => {
@@ -282,6 +287,50 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Polling callbacks
+  const handlePollingUpdate = useCallback(
+    (updatedThreads: ThreadWithTasks[], changedThreadIds: string[]) => {
+      // Update threads state
+      setThreads((currentThreads) => {
+        const updatedMap = new Map(updatedThreads.map((t) => [t.thread_id, t]));
+        return currentThreads.map(
+          (thread) => updatedMap.get(thread.thread_id) || thread,
+        );
+      });
+
+      // Mark threads as recently updated for animations
+      setRecentlyUpdatedThreads(new Set(changedThreadIds));
+
+      // Clear animation state after 1 second
+      setTimeout(() => {
+        setRecentlyUpdatedThreads(new Set());
+      }, 1000);
+    },
+    [],
+  );
+
+  const handlePollComplete = useCallback(() => {
+    if (process.env.NODE_ENV === "development") {
+      console.log("🔄 Thread polling completed");
+    }
+  }, []);
+
+  const handlePollError = useCallback((error: string) => {
+    if (process.env.NODE_ENV === "development") {
+      console.error("❌ Thread polling error:", error);
+    }
+  }, []);
+
+  // Initialize polling
+  useThreadPolling({
+    threads,
+    getThread,
+    onUpdate: handlePollingUpdate,
+    onPollComplete: handlePollComplete,
+    onError: handlePollError,
+    enabled: process.env.NODE_ENV === "development", // Only enable in development for now
+  });
+
   const value = {
     threads,
     setThreads,
@@ -293,6 +342,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     selectedThread,
     setSelectedThread,
     isPending,
+    recentlyUpdatedThreads,
   };
 
   return (

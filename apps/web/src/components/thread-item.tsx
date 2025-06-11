@@ -22,9 +22,10 @@ export const ThreadItem = memo(function ThreadItem({
   className,
 }: ThreadItemProps) {
   const [threadId] = useQueryState("threadId");
-  const { selectedThread } = useThreads();
+  const { selectedThread, recentlyUpdatedThreads } = useThreads();
   const isSelected = thread.thread_id === threadId;
   const isSidebar = variant === "sidebar";
+  const isRecentlyUpdated = recentlyUpdatedThreads.has(thread.thread_id);
 
   // Use selectedThread data when available for the current thread
   const displayThread = useMemo(() => {
@@ -87,6 +88,7 @@ export const ThreadItem = memo(function ThreadItem({
       className={cn(
         "group cursor-pointer rounded-md border border-gray-200 bg-inherit p-2 shadow-sm transition-colors hover:bg-gray-50 hover:shadow-md",
         isSelected && "border-primary",
+        isRecentlyUpdated && "animate-pulse border-blue-200",
         className,
       )}
       onClick={() => {
