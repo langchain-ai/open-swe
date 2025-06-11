@@ -70,31 +70,77 @@ const getTaskCounts = (
     };
   }
 
-  if (!tasks) {
-    // No tasks passed, return 0s
+  if (!tasks || !tasks.tasks || tasks.tasks.length === 0) {
+    console.log("📊 getTaskCounts: No tasks found, returning default counts");
     return defaultCounts;
   }
 
-  const activeTaskList = tasks.tasks.find(
-    (t) => t.taskIndex === tasks.activeTaskIndex,
+  // Access the nested structure: tasks.tasks[activeTaskIndex].planRevisions[activeRevisionIndex].plans
+  const activeTaskIndex = tasks.activeTaskIndex;
+  const activeTask = tasks.tasks[activeTaskIndex];
+
+  console.log(
+    "📊 getTaskCounts: activeTaskIndex =",
+    activeTaskIndex,
+    "activeTask =",
+    activeTask,
   );
-  if (!activeTaskList) {
-    // Something is wrong here. Return 0
+
+  if (
+    !activeTask ||
+    !activeTask.planRevisions ||
+    activeTask.planRevisions.length === 0
+  ) {
+    console.log("📊 getTaskCounts: No active task or plan revisions found");
     return defaultCounts;
   }
 
-  const activeTaskPlans = activeTaskList.planRevisions.find(
-    (p) => p.revisionIndex === activeTaskList.activeRevisionIndex,
+  const activeRevisionIndex = activeTask.activeRevisionIndex;
+  const activeRevision = activeTask.planRevisions[activeRevisionIndex];
+
+  console.log(
+    "📊 getTaskCounts: activeRevisionIndex =",
+    activeRevisionIndex,
+    "activeRevision =",
+    activeRevision,
   );
-  if (!activeTaskPlans) {
-    // Something is wrong here. Return 0
+
+  if (
+    !activeRevision ||
+    !activeRevision.plans ||
+    activeRevision.plans.length === 0
+  ) {
+    console.log("📊 getTaskCounts: No active revision or plans found");
     return defaultCounts;
   }
+
+  const plans = activeRevision.plans;
+  console.log(
+    "📊 getTaskCounts: plans =",
+    plans.map((p) => ({ index: p.index, completed: p.completed })),
+  );
+
+  // Find the index of the first plan that is not completed
+  // The number of completed tasks equals the index of the first incomplete task
+  const firstIncompleteIndex = plans.findIndex((p) => !p.completed);
+
+  // If all tasks are completed, use the total length
+  // If some tasks are incomplete, use the index of the first incomplete task
+  const completedTasksCount =
+    firstIncompleteIndex === -1 ? plans.length : firstIncompleteIndex;
+
+  console.log(
+    "📊 getTaskCounts: firstIncompleteIndex =",
+    firstIncompleteIndex,
+    "completedTasksCount =",
+    completedTasksCount,
+    "totalTasksCount =",
+    plans.length,
+  );
 
   return {
-    totalTasksCount: activeTaskPlans.plans.length,
-    completedTasksCount: activeTaskPlans.plans.filter((p) => p.completed)
-      .length,
+    totalTasksCount: plans.length,
+    completedTasksCount,
   };
 };
 
@@ -119,8 +165,150 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       const client = createClient(apiUrl);
 
       try {
+        console.log(
+          `🌐 Polling API request for thread: ${threadId.substring(0, 8)}`,
+        );
+
         const thread = await client.threads.get(threadId);
-        return enhanceThreadWithTasks(thread);
+
+        // Get the comprehensive state data which contains the plan
+        let stateData = null;
+        if (
+          "getState" in client.threads &&
+          typeof client.threads.getState === "function"
+        ) {
+          try {
+            console.log(`🎯 Getting state for ${threadId.substring(0, 8)}`);
+            stateData = await (client.threads as any).getState(threadId);
+            console.log(`📊 Thread state via getState:`, stateData);
+          } catch (stateError) {
+            console.log(`❌ getState failed:`, stateError);
+          }
+        }
+
+        // Use state data for plan information, fallback to thread values
+        const stateValues = stateData?.values;
+        const threadValues = thread.values as any;
+        const plan = stateValues?.plan || threadValues?.plan;
+
+        console.log(`📋 Plan data source for ${threadId.substring(0, 8)}:`, {
+          hasStateData: !!stateData,
+          hasStateValues: !!stateValues,
+          hasStatePlan: !!stateValues?.plan,
+          hasThreadPlan: !!threadValues?.plan,
+          usingStatePlan: !!stateValues?.plan,
+          structure: stateValues?.plan
+            ? "state.values.plan"
+            : "thread.values.plan",
+        });
+        if (plan) {
+          console.log(
+            `📋 Raw plan structure for ${threadId.substring(0, 8)}:`,
+            {
+              activeTaskIndex: plan.activeTaskIndex,
+              tasksLength: plan.tasks?.length,
+              planStructure: {
+                hasTasks: !!plan.tasks,
+                tasksCount: plan.tasks?.length || 0,
+              },
+            },
+          );
+
+          // Follow exact nesting: values.plan.tasks[activeTaskIndex].planRevisions[activeRevisionIndex].plans
+          if (
+            plan.tasks &&
+            plan.tasks.length > 0 &&
+            typeof plan.activeTaskIndex === "number"
+          ) {
+            const activeTaskIndex = plan.activeTaskIndex;
+            const activeTask = plan.tasks[activeTaskIndex];
+
+            console.log(`📋 Active task for ${threadId.substring(0, 8)}:`, {
+              activeTaskIndex,
+              activeTask: activeTask
+                ? {
+                    id: activeTask.id,
+                    taskIndex: activeTask.taskIndex,
+                    activeRevisionIndex: activeTask.activeRevisionIndex,
+                    planRevisionsLength: activeTask.planRevisions?.length,
+                  }
+                : null,
+            });
+
+            if (
+              activeTask &&
+              activeTask.planRevisions &&
+              typeof activeTask.activeRevisionIndex === "number"
+            ) {
+              const activeRevisionIndex = activeTask.activeRevisionIndex;
+              const activeRevision =
+                activeTask.planRevisions[activeRevisionIndex];
+
+              console.log(
+                `📋 Active revision for ${threadId.substring(0, 8)}:`,
+                {
+                  activeRevisionIndex,
+                  hasRevision: !!activeRevision,
+                  plansLength: activeRevision?.plans?.length || 0,
+                },
+              );
+
+              if (
+                activeRevision &&
+                activeRevision.plans &&
+                Array.isArray(activeRevision.plans)
+              ) {
+                const plans = activeRevision.plans;
+                const firstIncompleteIndex = plans.findIndex(
+                  (p: any) => !p.completed,
+                );
+                const completedTasksCount =
+                  firstIncompleteIndex === -1
+                    ? plans.length
+                    : firstIncompleteIndex;
+
+                console.log(
+                  `✅ Task completion analysis for ${threadId.substring(0, 8)}:`,
+                  {
+                    pathAccessed: `values.plan.tasks[${activeTaskIndex}].planRevisions[${activeRevisionIndex}].plans`,
+                    totalPlans: plans.length,
+                    firstIncompleteIndex,
+                    completedTasksCount,
+                    planStatuses: plans.map((p: any) => ({
+                      index: p.index,
+                      completed: p.completed,
+                    })),
+                    detailedPlans: plans.map((p: any) => ({
+                      index: p.index,
+                      completed: p.completed,
+                      planPreview: p.plan
+                        ? p.plan.substring(0, 50) + "..."
+                        : "No plan text",
+                    })),
+                  },
+                );
+              } else {
+                console.log(
+                  `❌ No plans found in revision for ${threadId.substring(0, 8)}`,
+                );
+              }
+            } else {
+              console.log(
+                `❌ No active revision found for ${threadId.substring(0, 8)}`,
+              );
+            }
+          } else {
+            console.log(
+              `❌ No valid tasks found for ${threadId.substring(0, 8)}`,
+            );
+          }
+        } else {
+          console.log(
+            `❌ No plan found in thread values for ${threadId.substring(0, 8)}`,
+          );
+        }
+
+        return enhanceThreadWithTasks(thread, stateData);
       } catch (error) {
         console.error("Failed to fetch thread:", threadId, error);
         return null;
@@ -129,13 +317,21 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     [apiUrl, assistantId],
   );
 
-  const enhanceThreadWithTasks = (thread: Thread): ThreadWithTasks => {
+  const enhanceThreadWithTasks = (
+    thread: Thread,
+    stateData?: any,
+  ): ThreadWithTasks => {
+    const stateValues = stateData?.values;
     const threadValues = thread.values as any;
-    const plan: TaskPlan | undefined = threadValues?.plan;
-    const proposedPlan: string[] = threadValues?.proposedPlan || [];
 
-    const targetRepository = threadValues?.targetRepository;
-    const messages = (threadValues as any)?.messages;
+    // Prefer state data over thread data for plan information
+    const plan: TaskPlan | undefined = stateValues?.plan || threadValues?.plan;
+    const proposedPlan: string[] =
+      stateValues?.proposedPlan || threadValues?.proposedPlan || [];
+
+    const targetRepository =
+      stateValues?.targetRepository || threadValues?.targetRepository;
+    const messages = stateValues?.messages || threadValues?.messages;
     const firstMessageContent = messages?.[0]?.content;
     const threadTitle = firstMessageContent
       ? getMessageContentString(firstMessageContent)
@@ -192,7 +388,26 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       for (const thread of threadsResponse) {
         try {
           const fullThread = await client.threads.get(thread.thread_id);
-          enhancedThreads.push(enhanceThreadWithTasks(fullThread));
+
+          // Get state data for comprehensive plan information
+          let stateData = null;
+          if (
+            "getState" in client.threads &&
+            typeof client.threads.getState === "function"
+          ) {
+            try {
+              stateData = await (client.threads as any).getState(
+                thread.thread_id,
+              );
+            } catch (stateError) {
+              console.log(
+                `Failed to get state for thread ${thread.thread_id}:`,
+                stateError,
+              );
+            }
+          }
+
+          enhancedThreads.push(enhanceThreadWithTasks(fullThread, stateData));
         } catch (error) {
           console.error(`Failed to enhance thread ${thread.thread_id}:`, error);
         }
