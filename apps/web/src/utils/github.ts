@@ -100,8 +100,6 @@ export async function getRepositoryBranches(
   owner: string,
   repo: string,
 ): Promise<Branch[]> {
-  const allBranches: Branch[] = [];
-  let page = 1;
   const perPage = 100; // Maximum allowed by GitHub API
 
   // First, get repository info to ensure we have the default branch
@@ -122,37 +120,27 @@ export async function getRepositoryBranches(
     defaultBranch = repoData.default_branch;
   }
 
-  // Fetch all branches with pagination
-  while (true) {
-    const response = await fetch(
-      `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
-      {
-        headers: {
-          Accept: "application/vnd.github.v3+json",
-          "User-Agent": "OpenSWE-Agent",
-        },
+  // Fetch first 100 branches only
+  const response = await fetch(
+    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=1`,
+    {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE-Agent",
       },
-    );
+    },
+  );
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(`Failed to fetch branches: ${JSON.stringify(errorData)}`);
-    }
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`Failed to fetch branches: ${JSON.stringify(errorData)}`);
+  }
 
-    const data = await response.json();
+  const data = await response.json();
+  const allBranches: Branch[] = Array.isArray(data) ? data : [];
 
-    if (!Array.isArray(data) || data.length === 0) {
-      break;
-    }
-
-    allBranches.push(...data);
-
-    // If we got less than the requested amount, we've reached the end
-    if (data.length < perPage) {
-      break;
-    }
-
-    page++;
+  if (allBranches.length === 0) {
+    return [];
   }
 
   // Ensure default branch is at the beginning if it exists
@@ -201,6 +189,7 @@ export interface Branch {
   };
   protected: boolean;
 }
+
 
 
 
