@@ -13,7 +13,7 @@ import {
 } from "react";
 import { createClient } from "./client";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan, GraphState } from "@open-swe/shared/open-swe/types";
 import { useThreadPolling } from "@/hooks/useThreadPolling";
 
 export interface ThreadWithTasks extends Thread {
@@ -33,8 +33,6 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
-  selectedThread: ThreadWithTasks | null;
-  setSelectedThread: (thread: ThreadWithTasks | null) => void;
   isPending: boolean;
   recentlyUpdatedThreads: Set<string>;
   handleThreadClick: (
@@ -77,7 +75,9 @@ const getTaskCounts = (
     return defaultCounts;
   }
   const activeTaskIndex = tasks.activeTaskIndex;
-  const activeTask = tasks.tasks[activeTaskIndex];
+  const activeTask = tasks.tasks.find(
+    (task) => task.taskIndex === activeTaskIndex,
+  );
 
   if (
     !activeTask ||
@@ -88,7 +88,9 @@ const getTaskCounts = (
   }
 
   const activeRevisionIndex = activeTask.activeRevisionIndex;
-  const activeRevision = activeTask.planRevisions[activeRevisionIndex];
+  const activeRevision = activeTask.planRevisions.find(
+    (revision) => revision.revisionIndex === activeRevisionIndex,
+  );
 
   if (
     !activeRevision ||
@@ -111,6 +113,10 @@ const getTaskCounts = (
   };
 };
 
+interface ThreadsClientWithState {
+  getState(threadId: string): Promise<{ values: GraphState }>;
+}
+
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const assistantId: string | undefined =
@@ -118,9 +124,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<ThreadWithTasks[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
-  const [selectedThread, setSelectedThread] = useState<ThreadWithTasks | null>(
-    null,
-  );
   const [isPending, startTransition] = useTransition();
   const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
     Set<string>
@@ -135,17 +138,15 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         const thread = await client.threads.get(threadId);
 
         // Get the comprehensive state data which contains the plan
-        let stateData = null;
+        let stateData: { values: GraphState } | null = null;
 
         try {
-          stateData = await (client.threads as any).getState(threadId);
+          stateData = await (client.threads as ThreadsClientWithState).getState(
+            threadId,
+          );
         } catch (stateError) {
           console.error("Failed to get state data:", stateError);
         }
-
-        const stateValues = stateData?.values;
-        const threadValues = thread.values as any;
-        const plan = stateValues?.plan || threadValues?.plan;
 
         return enhanceThreadWithTasks(thread, stateData);
       } catch (error) {
@@ -158,10 +159,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const enhanceThreadWithTasks = (
     thread: Thread,
-    stateData?: any,
+    stateData?: { values: GraphState } | null,
   ): ThreadWithTasks => {
     const stateValues = stateData?.values;
-    const threadValues = thread.values as any;
+    const threadValues = thread.values as GraphState;
 
     const plan: TaskPlan | undefined = stateValues?.plan || threadValues?.plan;
     const proposedPlan: string[] =
@@ -183,10 +184,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     return {
       ...thread,
       threadTitle,
-      repository:
-        targetRepository?.repo ||
-        targetRepository?.name ||
-        "Unknown Repository",
+      repository: targetRepository?.repo || "Unknown Repository",
       branch: targetRepository?.branch || "main",
       completedTasksCount,
       totalTasksCount,
@@ -224,15 +222,15 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         try {
           const fullThread = await client.threads.get(thread.thread_id);
 
-          let stateData = null;
+          let stateData: { values: GraphState } | null = null;
           if (
             "getState" in client.threads &&
             typeof client.threads.getState === "function"
           ) {
             try {
-              stateData = await (client.threads as any).getState(
-                thread.thread_id,
-              );
+              stateData = await (
+                client.threads as ThreadsClientWithState
+              ).getState(thread.thread_id);
             } catch (stateError) {
               console.error("Failed to get state data:", stateError);
             }
@@ -260,12 +258,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshThreads();
   }, [refreshThreads]);
-
-  useEffect(() => {
-    return () => {
-      setSelectedThread(null);
-    };
-  }, []);
 
   const handlePollingUpdate = useCallback(
     (updatedThreads: ThreadWithTasks[], changedThreadIds: string[]) => {
@@ -302,11 +294,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       if (currentThreadId === thread.thread_id || isPending) return;
 
       startTransition(() => {
-        setSelectedThread(thread);
         setThreadId(thread.thread_id);
       });
     },
-    [setSelectedThread, isPending],
+    [isPending],
   );
 
   const value = {
@@ -316,8 +307,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
-    selectedThread,
-    setSelectedThread,
     isPending,
     recentlyUpdatedThreads,
     handleThreadClick,
