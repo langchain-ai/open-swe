@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Archive,
   ChevronLeft,
@@ -9,12 +8,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useThreads, ThreadWithTasks } from "@/providers/Thread";
 import { useQueryState, parseAsString } from "nuqs";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";
 
-const THREADS_PER_PAGE = 10; // More threads per page in sidebar
+const THREADS_PER_PAGE = 10;
 
-// TODO: Clarify Language about Threads and Tasks in the TaskListSidebar component
 interface TaskListSidebarProps {
   onCollapse?: () => void;
 }
@@ -23,15 +21,15 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
-  const { threads, threadsLoading } = useThreads();
+  const { threads, threadsLoading, handleThreadClick } = useThreads();
 
-  // Handle thread navigation
-  const handleThreadClick = (thread: ThreadWithTasks) => {
-    setThreadId(thread.thread_id);
-    setTaskId(null);
-  };
-
-  // Sort threads by creation date (newest first) - already done in provider
+  const onThreadClick = useCallback(
+    (thread: ThreadWithTasks) => {
+      handleThreadClick(thread, threadId, setThreadId);
+    },
+    [handleThreadClick, threadId, setThreadId],
+  );
+  // Sort threads by creation date (newest first) TODO use provider (already done there)
   const sortedThreads = threads;
   const totalThreads = sortedThreads.length;
   const totalPages = Math.ceil(totalThreads / THREADS_PER_PAGE);
@@ -77,7 +75,7 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
                 <ThreadItem
                   key={thread.thread_id}
                   thread={thread}
-                  onClick={handleThreadClick}
+                  onClick={onThreadClick}
                   variant="sidebar"
                 />
               ))}

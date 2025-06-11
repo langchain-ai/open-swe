@@ -4,7 +4,6 @@ import React, {
   ReactNode,
   useState,
   useEffect,
-  useRef,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import {
@@ -52,8 +51,7 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads, updateThreadFromStream } = useThreads();
-
+  const { refreshThreads, setThreads } = useThreads();
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
@@ -69,45 +67,12 @@ const StreamSession = ({
     },
     onThreadId: (id) => {
       setThreadId(id);
-      // Refetch threads list when thread ID changes.
-      // Wait for some seconds before fetching so we're able to get the new thread that was created.
+
       sleep().then(() => {
         refreshThreads().catch(console.error);
       });
     },
   });
-
-  // Listen for stream updates to update all thread properties in real-time
-  // Use a ref to track the last update to prevent excessive calls
-  const lastUpdateRef = useRef<{ threadId: string; valuesHash: string } | null>(
-    null,
-  );
-
-  useEffect(() => {
-    if (threadId && streamValue.values) {
-      // Create a simple hash of the values to detect actual changes
-      const valuesHash = JSON.stringify({
-        plan: (streamValue.values as any).plan,
-        proposedPlan: (streamValue.values as any).proposedPlan,
-        targetRepository: (streamValue.values as any).targetRepository,
-        messages: (
-          streamValue.values as any
-        ).messages?.[0]?.content?.[0]?.text?.substring(0, 50),
-      });
-
-      // Only update if thread or values actually changed
-      if (
-        !lastUpdateRef.current ||
-        lastUpdateRef.current.threadId !== threadId ||
-        lastUpdateRef.current.valuesHash !== valuesHash
-      ) {
-        lastUpdateRef.current = { threadId, valuesHash };
-        updateThreadFromStream(threadId, streamValue.values);
-      }
-    }
-  }, [threadId, streamValue.values, updateThreadFromStream]);
-
-  // Real-time updates via stream - no polling needed
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -129,7 +94,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Initialize from localStorage to prevent modal flash
   const [hasGitHubAppInstalled, setHasGitHubAppInstalled] = useState<
     boolean | null
   >(() => {
@@ -152,7 +116,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     if (isAuth) {
-      // Check if we already have cached installation status
       const cachedInstallationStatus = localStorage.getItem(
         "github_app_installed",
       );
@@ -165,7 +128,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       } else if (cachedInstallationStatus === "false") {
         setHasGitHubAppInstalled(false);
       } else {
-        // Only check installation if we don't have cached status
         checkGitHubAppInstallation();
       }
     }
@@ -189,7 +151,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       if (response.ok) {
         setHasGitHubAppInstalled(true);
         localStorage.setItem("github_app_installed", "true");
-        // If the app is installed, fetch a token
+
         await fetchGitHubToken();
       } else {
         const errorData = await response.json();
@@ -197,7 +159,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
           setHasGitHubAppInstalled(false);
           localStorage.setItem("github_app_installed", "false");
         } else {
-          // If there's a different error, we'll assume the app is not installed
           setHasGitHubAppInstalled(false);
           localStorage.setItem("github_app_installed", "false");
         }
@@ -218,7 +179,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const handleInstallGitHubApp = () => {
     setIsLoading(true);
-    // Clear cached status so we check again after installation
+
     localStorage.removeItem("github_app_installed");
     window.location.href = "/api/github/installation";
   };
@@ -401,7 +362,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
-// Create a custom hook to use the context
 export const useStreamContext = (): StreamContextType => {
   const context = useContext(StreamContext);
   if (context === undefined) {
