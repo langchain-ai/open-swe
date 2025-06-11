@@ -15,7 +15,7 @@ async function handler(
 
   if (!installationIdCookie) {
     return NextResponse.json(
-      { error: "installation_id query parameter is required" },
+      { error: `"${GITHUB_INSTALLATION_ID_COOKIE}" cookie is required` },
       { status: 400 },
     );
   }
@@ -26,7 +26,7 @@ async function handler(
   if (!appId || !privateAppKey) {
     console.error("GitHub App ID or Private App Key is not configured.");
     return NextResponse.json(
-      { error: "Server configuration error" },
+      { error: `Missing required environment variables.` },
       { status: 500 },
     );
   }
