@@ -4,11 +4,8 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
 
 const GITHUB_API_URL = "https://api.github.com";
 
-async function handler(
-  req: NextRequest,
-  { params }: { params: { _path: string[] } },
-) {
-  const { _path } = await params;
+async function handler(req: NextRequest) {
+  const path = req.nextUrl.pathname.replace(/^\/api\/github\/proxy\//, "");
   const installationIdCookie = req.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,
   )?.value;
@@ -38,8 +35,7 @@ async function handler(
       privateAppKey,
     );
 
-    const targetPath = _path.join("/");
-    const targetUrl = new URL(`${GITHUB_API_URL}/${targetPath}`);
+    const targetUrl = new URL(`${GITHUB_API_URL}/${path}`);
 
     const headers = new Headers();
     headers.set("Authorization", `Bearer ${token}`);
