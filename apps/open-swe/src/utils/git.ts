@@ -492,17 +492,17 @@ export async function createPullRequest({
   headBranch,
   title,
   body = "",
-  githubToken,
+  githubAccessToken,
 }: {
   owner: string;
   repo: string;
   headBranch: string;
   title: string;
   body?: string;
-  githubToken: string;
+  githubAccessToken: string;
 }) {
   const octokit = new Octokit({
-    auth: githubToken,
+    auth: githubAccessToken,
   });
 
   try {
@@ -534,7 +534,7 @@ export async function createPullRequest({
       logger.info(
         "Pull request already exists. Getting existing pull request...",
       );
-      return getExistingPullRequest(owner, repo, headBranch, githubToken);
+      return getExistingPullRequest(owner, repo, headBranch, githubAccessToken);
     }
 
     logger.error(`Failed to create pull request`, {
