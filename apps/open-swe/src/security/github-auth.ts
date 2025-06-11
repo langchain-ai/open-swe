@@ -1,5 +1,8 @@
 import { Octokit } from "@octokit/rest";
 import { Endpoints } from "@octokit/types";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "GithubAuth");
 
 export type GithubUser = Endpoints["GET /user"]["response"]["data"];
 
@@ -10,7 +13,7 @@ export type GithubUser = Endpoints["GET /user"]["response"]["data"];
  * @returns A promise that resolves with the user object if valid and a member, otherwise undefined.
  */
 export async function verifyGithubUser(
-  accessToken: string
+  accessToken: string,
 ): Promise<GithubUser | undefined> {
   if (!accessToken) {
     return undefined;
@@ -23,8 +26,8 @@ export async function verifyGithubUser(
     const { data: user } = await octokit.users.getAuthenticated();
 
     if (!user || !user.login) {
-      console.error(
-        "GitHub token is invalid or user information could not be retrieved."
+      logger.error(
+        "GitHub token is invalid or user information could not be retrieved.",
       );
       return undefined;
     }
@@ -40,15 +43,15 @@ export async function verifyGithubUser(
     const isMember = orgs.some((org) => org.login === "langchain-ai");
 
     if (!isMember) {
-      console.log(
-        `User ${username} is not a member of the 'langchain-ai' organization.`
+      logger.info(
+        `User ${username} is not a member of the 'langchain-ai' organization.`,
       );
       return undefined;
     }
 
     return user;
   } catch (error) {
-    console.error("An error occurred during GitHub user verification:", error);
+    logger.error("An error occurred during GitHub user verification:", error);
     return undefined;
   }
 }

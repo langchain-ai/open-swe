@@ -25,7 +25,10 @@ import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import { getGitHubAccessToken } from "@/utils/github";
-import { GITHUB_INSTALLATION_TOKEN_COOKIE, GITHUB_TOKEN_COOKIE } from "@/lib/auth";
+import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_TOKEN_COOKIE,
+} from "@/lib/auth";
 
 const useTypedStream = useStream<
   GraphState,

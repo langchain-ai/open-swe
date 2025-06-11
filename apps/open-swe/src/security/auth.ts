@@ -1,5 +1,8 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
 import { verifyGithubUser, GithubUser } from "./github-auth.js";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "LangGraphAuth");
 
 const STUDIO_USER_ID = "langgraph-studio-user";
 
@@ -41,7 +44,7 @@ export const auth = new Auth()
     for (const [key, value] of Object.entries(request.headers)) {
       headersObj[key] = value;
     }
-    console.log("[auth] Incoming request", {
+    logger.info("[auth] Incoming request", {
       url: request.url,
       method: request.method,
       headers: headersObj,
@@ -49,7 +52,9 @@ export const auth = new Auth()
     // Parse Authorization header
     const accessToken = request.headers.get("x-github_access_token");
     if (!accessToken) {
-      throw new HTTPException(401, { message: "GitHub access token header missing" });
+      throw new HTTPException(401, {
+        message: "GitHub access token header missing",
+      });
     }
 
     // Validate GitHub access token
