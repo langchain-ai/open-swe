@@ -1,5 +1,4 @@
 "use client";
-
 import {
   Archive,
   ChevronLeft,
@@ -9,12 +8,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useThreads, ThreadWithTasks } from "@/providers/Thread";
 import { useQueryState, parseAsString } from "nuqs";
-import { useState, useCallback, startTransition } from "react";
+import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";
 
-const THREADS_PER_PAGE = 10; // More threads per page in sidebar
+const THREADS_PER_PAGE = 10;
 
-// TODO: Clarify Language about Threads and Tasks in the TaskListSidebar component
 interface TaskListSidebarProps {
   onCollapse?: () => void;
 }
@@ -23,23 +21,15 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
-  const { threads, threadsLoading, setSelectedThread, isPending } =
-    useThreads();
+  const { threads, threadsLoading, handleThreadClick } = useThreads();
 
-  // Handle thread navigation with enhanced click handler
-  const handleThreadClick = useCallback(
+  const onThreadClick = useCallback(
     (thread: ThreadWithTasks) => {
-      // Prevent double-clicks and clicks on already selected thread
-      if (threadId === thread.thread_id || isPending) return;
-
-      startTransition(() => {
-        setSelectedThread(thread); // Fresh data immediately
-        setThreadId(thread.thread_id);
-      });
+      handleThreadClick(thread, threadId, setThreadId);
     },
-    [setThreadId, setSelectedThread, threadId, isPending],
+    [handleThreadClick, threadId, setThreadId],
   );
-  // Sort threads by creation date (newest first) - already done in provider
+  // Sort threads by creation date (newest first) TODO use provider (already done there)
   const sortedThreads = threads;
   const totalThreads = sortedThreads.length;
   const totalPages = Math.ceil(totalThreads / THREADS_PER_PAGE);
@@ -85,7 +75,7 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
                 <ThreadItem
                   key={thread.thread_id}
                   thread={thread}
-                  onClick={handleThreadClick}
+                  onClick={onThreadClick}
                   variant="sidebar"
                 />
               ))}

@@ -4,7 +4,6 @@ import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
 import { ThreadWithTasks, useThreads } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { GitHubSVG } from "./icons/github";
 import { useQueryState } from "nuqs";
 
@@ -27,12 +26,11 @@ export const ThreadItem = memo(function ThreadItem({
   const isSidebar = variant === "sidebar";
   const isRecentlyUpdated = recentlyUpdatedThreads.has(thread.thread_id);
 
-  // Use selectedThread data when available for the current thread
   const displayThread = useMemo(() => {
     if (selectedThread && selectedThread.thread_id === thread.thread_id) {
-      return selectedThread; // Use fresh click data
+      return selectedThread;
     }
-    return thread; // Fall back to props safely
+    return thread;
   }, [thread, selectedThread]);
 
   const displayDate = new Date(displayThread.created_at).toLocaleDateString(
@@ -43,52 +41,12 @@ export const ThreadItem = memo(function ThreadItem({
     },
   );
 
-  // Check if thread data is still loading/incomplete
-  const isLoading =
-    !displayThread.threadTitle ||
-    displayThread.threadTitle.includes("undefined") ||
-    !displayThread.repository ||
-    displayThread.repository === "Unknown Repository" ||
-    displayThread.repository.includes("undefined");
-
-  if (isLoading) {
-    return (
-      <div
-        className={cn(
-          "rounded-md border border-gray-200 bg-inherit p-1.5 shadow-sm",
-          className,
-        )}
-      >
-        <div className="flex items-start gap-1.5">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <Skeleton className="h-3 w-3 rounded-full" />
-              <Skeleton className="h-3 w-24" />
-            </div>
-
-            <div className="mt-1 flex items-center gap-1 text-xs">
-              <Skeleton className="h-3 w-3" /> {/* GitHub icon placeholder */}
-              <Skeleton className="h-3 w-16" /> {/* Repo */}
-              <Skeleton className="ml-0.5 h-2.5 w-2.5" />{" "}
-              <Skeleton className="ml-0.5 h-3 w-12" /> {/* Branch */}
-              <Skeleton className="ml-auto h-3 w-10" /> {/* Date */}
-            </div>
-
-            <div className="mt-1">
-              <Skeleton className="h-4 w-20 rounded" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className={cn(
         "group cursor-pointer rounded-md border border-gray-200 bg-inherit p-2 shadow-sm transition-colors hover:bg-gray-50 hover:shadow-md",
         isSelected && "border-primary",
-        isRecentlyUpdated && "animate-pulse border-blue-200",
+        isRecentlyUpdated && "animate-pulse border-blue-200 bg-blue-50",
         className,
       )}
       onClick={() => {

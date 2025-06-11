@@ -77,15 +77,12 @@ const StreamSession = ({
     },
     onThreadId: (id) => {
       setThreadId(id);
-      // Refetch threads list when thread ID changes.
-      // Wait for some seconds before fetching so we're able to get the new thread that was created.
+
       sleep().then(() => {
         refreshThreads().catch(console.error);
       });
     },
   });
-
-  // Thread updates now handled by polling system for consistency across tabs
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -107,7 +104,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Initialize from localStorage to prevent modal flash
   const [hasGitHubAppInstalled, setHasGitHubAppInstalled] = useState<
     boolean | null
   >(() => {
@@ -130,7 +126,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     if (isAuth) {
-      // Check if we already have cached installation status
       const cachedInstallationStatus = localStorage.getItem(
         "github_app_installed",
       );
@@ -143,7 +138,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       } else if (cachedInstallationStatus === "false") {
         setHasGitHubAppInstalled(false);
       } else {
-        // Only check installation if we don't have cached status
         checkGitHubAppInstallation();
       }
     }
@@ -167,7 +161,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       if (response.ok) {
         setHasGitHubAppInstalled(true);
         localStorage.setItem("github_app_installed", "true");
-        // If the app is installed, fetch a token
+
         await fetchGitHubToken();
       } else {
         const errorData = await response.json();
@@ -175,7 +169,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
           setHasGitHubAppInstalled(false);
           localStorage.setItem("github_app_installed", "false");
         } else {
-          // If there's a different error, we'll assume the app is not installed
           setHasGitHubAppInstalled(false);
           localStorage.setItem("github_app_installed", "false");
         }
@@ -196,7 +189,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   const handleInstallGitHubApp = () => {
     setIsLoading(true);
-    // Clear cached status so we check again after installation
+
     localStorage.removeItem("github_app_installed");
     window.location.href = "/api/github/installation";
   };
@@ -379,7 +372,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   );
 };
 
-// Create a custom hook to use the context
 export const useStreamContext = (): StreamContextType => {
   const context = useContext(StreamContext);
   if (context === undefined) {

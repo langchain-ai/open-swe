@@ -37,6 +37,11 @@ interface ThreadContextType {
   setSelectedThread: (thread: ThreadWithTasks | null) => void;
   isPending: boolean;
   recentlyUpdatedThreads: Set<string>;
+  handleThreadClick: (
+    thread: ThreadWithTasks,
+    currentThreadId: string | null,
+    setThreadId: (id: string) => void,
+  ) => void;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -56,13 +61,11 @@ const getTaskCounts = (
   proposedPlan?: string[],
   existingCounts?: { totalTasksCount: number; completedTasksCount: number },
 ): { totalTasksCount: number; completedTasksCount: number } => {
-  // Default to existing counts to prevent zero-flashing during loading states
   const defaultCounts = existingCounts || {
     totalTasksCount: 0,
     completedTasksCount: 0,
   };
 
-  // If we have proposed plans but no tasks yet (initial state)
   if (proposedPlan && proposedPlan.length > 0 && !tasks) {
     return {
       totalTasksCount: proposedPlan.length,
@@ -73,8 +76,6 @@ const getTaskCounts = (
   if (!tasks || !tasks.tasks || tasks.tasks.length === 0) {
     return defaultCounts;
   }
-
-  // Access the nested structure: tasks.tasks[activeTaskIndex].planRevisions[activeRevisionIndex].plans
   const activeTaskIndex = tasks.activeTaskIndex;
   const activeTask = tasks.tasks[activeTaskIndex];
 
@@ -99,12 +100,8 @@ const getTaskCounts = (
 
   const plans = activeRevision.plans;
 
-  // Find the index of the first plan that is not completed
-  // The number of completed tasks equals the index of the first incomplete task
   const firstIncompleteIndex = plans.findIndex((p) => !p.completed);
 
-  // If all tasks are completed, use the total length
-  // If some tasks are incomplete, use the index of the first incomplete task
   const completedTasksCount =
     firstIncompleteIndex === -1 ? plans.length : firstIncompleteIndex;
 
@@ -139,18 +136,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
         // Get the comprehensive state data which contains the plan
         let stateData = null;
-        if (
-          "getState" in client.threads &&
-          typeof client.threads.getState === "function"
-        ) {
-          try {
-            stateData = await (client.threads as any).getState(threadId);
-          } catch (stateError) {
-            // Silently continue if getState fails
-          }
+
+        try {
+          stateData = await (client.threads as any).getState(threadId);
+        } catch (stateError) {
+          console.error("Failed to get state data:", stateError);
         }
 
-        // Use state data for plan information, fallback to thread values
         const stateValues = stateData?.values;
         const threadValues = thread.values as any;
         const plan = stateValues?.plan || threadValues?.plan;
@@ -171,7 +163,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const stateValues = stateData?.values;
     const threadValues = thread.values as any;
 
-    // Prefer state data over thread data for plan information
     const plan: TaskPlan | undefined = stateValues?.plan || threadValues?.plan;
     const proposedPlan: string[] =
       stateValues?.proposedPlan || threadValues?.proposedPlan || [];
@@ -211,7 +202,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     const client = createClient(apiUrl);
 
     try {
-      // Simple thread search - try both metadata approaches
       const searchParams = {
         limit: 100,
         metadata: getThreadSearchMetadata(assistantId),
@@ -219,7 +209,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
       let threadsResponse = await client.threads.search(searchParams);
 
-      // If no threads found, try alternative metadata
       if (threadsResponse.length === 0) {
         const altMetadata = assistantId.includes("-")
           ? { assistant_id: assistantId }
@@ -230,13 +219,11 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      // Enhance threads with task data
       const enhancedThreads: ThreadWithTasks[] = [];
       for (const thread of threadsResponse) {
         try {
           const fullThread = await client.threads.get(thread.thread_id);
 
-          // Get state data for comprehensive plan information
           let stateData = null;
           if (
             "getState" in client.threads &&
@@ -247,7 +234,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
                 thread.thread_id,
               );
             } catch (stateError) {
-              // Silently continue if getState fails
+              console.error("Failed to get state data:", stateError);
             }
           }
 
@@ -257,7 +244,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Sort by creation date (newest first)
       enhancedThreads.sort(
         (a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -271,25 +257,18 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
   }, [apiUrl, assistantId]);
 
-  // Now using polling-only approach for consistent cross-tab updates
-
-  // Initial load
   useEffect(() => {
     refreshThreads();
   }, [refreshThreads]);
 
-  // Clear selectedThread when navigating to different threads or away from threads
   useEffect(() => {
     return () => {
-      // Cleanup selectedThread when ThreadProvider unmounts or context changes
       setSelectedThread(null);
     };
   }, []);
 
-  // Polling callbacks
   const handlePollingUpdate = useCallback(
     (updatedThreads: ThreadWithTasks[], changedThreadIds: string[]) => {
-      // Update threads state
       setThreads((currentThreads) => {
         const updatedMap = new Map(updatedThreads.map((t) => [t.thread_id, t]));
         return currentThreads.map(
@@ -297,10 +276,8 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         );
       });
 
-      // Mark threads as recently updated for animations
       setRecentlyUpdatedThreads(new Set(changedThreadIds));
 
-      // Clear animation state after 1 second
       setTimeout(() => {
         setRecentlyUpdatedThreads(new Set());
       }, 1000);
@@ -308,26 +285,29 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const handlePollComplete = useCallback(() => {
-    // Polling completed silently
-  }, []);
-
-  const handlePollError = useCallback((error: string) => {
-    // Handle polling errors silently in production
-    if (process.env.NODE_ENV === "development") {
-      console.error("Thread polling error:", error);
-    }
-  }, []);
-
   // Initialize polling
   useThreadPolling({
     threads,
     getThread,
     onUpdate: handlePollingUpdate,
-    onPollComplete: handlePollComplete,
-    onError: handlePollError,
-    enabled: true, // Always enabled now that it's our primary update mechanism
+    enabled: true,
   });
+
+  const handleThreadClick = useCallback(
+    (
+      thread: ThreadWithTasks,
+      currentThreadId: string | null,
+      setThreadId: (id: string) => void,
+    ) => {
+      if (currentThreadId === thread.thread_id || isPending) return;
+
+      startTransition(() => {
+        setSelectedThread(thread);
+        setThreadId(thread.thread_id);
+      });
+    },
+    [setSelectedThread, isPending],
+  );
 
   const value = {
     threads,
@@ -340,6 +320,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setSelectedThread,
     isPending,
     recentlyUpdatedThreads,
+    handleThreadClick,
   };
 
   return (

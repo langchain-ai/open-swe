@@ -9,8 +9,7 @@ interface UseThreadPollingProps {
     updatedThreads: ThreadWithTasks[],
     changedThreadIds: string[],
   ) => void;
-  onPollComplete: () => void;
-  onError: (error: string) => void;
+
   enabled?: boolean;
 }
 
@@ -18,8 +17,6 @@ export function useThreadPolling({
   threads,
   getThread,
   onUpdate,
-  onPollComplete,
-  onError,
   enabled = true,
 }: UseThreadPollingProps) {
   const pollerRef = useRef<ThreadPoller | null>(null);
@@ -28,15 +25,11 @@ export function useThreadPolling({
     if (!enabled) return;
 
     const config: PollConfig = {
-      interval: 1000, // 1 second for near real-time
+      interval: 15000,
       onUpdate,
-      onPollComplete,
-      onError,
     };
 
-    const getThreadsFn = () => threads;
-
-    pollerRef.current = new ThreadPoller(config, getThreadsFn, getThread);
+    pollerRef.current = new ThreadPoller(config, threads, getThread);
     pollerRef.current.start();
 
     return () => {
@@ -45,7 +38,7 @@ export function useThreadPolling({
         pollerRef.current = null;
       }
     };
-  }, [threads, getThread, onUpdate, onPollComplete, onError, enabled]);
+  }, [threads, getThread, onUpdate, enabled]);
 
   return {
     start: () => pollerRef.current?.start(),

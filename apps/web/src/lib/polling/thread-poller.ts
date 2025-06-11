@@ -1,41 +1,27 @@
 import { ThreadWithTasks } from "@/providers/Thread";
 
-// Future thread status filtering capability
-export type ThreadStatus =
-  | "idle"
-  | "busy"
-  | "error"
-  | "interrupted"
-  | "completed";
-
-export interface ThreadFilter {
-  statuses?: ThreadStatus[];
-}
-
 export interface PollConfig {
   interval: number;
   onUpdate: (
     updatedThreads: ThreadWithTasks[],
     changedThreadIds: string[],
   ) => void;
-  onPollComplete: () => void;
-  onError: (error: string) => void;
 }
 
 export class ThreadPoller {
   private config: PollConfig;
   private isPolling: boolean = false;
   private intervalId: NodeJS.Timeout | null = null;
-  private getThreadsFn: () => ThreadWithTasks[];
+  private threads: ThreadWithTasks[];
   private getThreadFn: (threadId: string) => Promise<ThreadWithTasks | null>;
 
   constructor(
     config: PollConfig,
-    getThreadsFn: () => ThreadWithTasks[],
+    threads: ThreadWithTasks[],
     getThreadFn: (threadId: string) => Promise<ThreadWithTasks | null>,
   ) {
     this.config = config;
-    this.getThreadsFn = getThreadsFn;
+    this.threads = threads;
     this.getThreadFn = getThreadFn;
   }
 
@@ -60,56 +46,35 @@ export class ThreadPoller {
 
   private async pollThreads(): Promise<void> {
     try {
-      const currentThreads = this.getThreadsFn();
+      const currentThreads = this.threads;
 
-      // Poll first 10 threads only (matches sidebar pagination)
       const threadsToPool = currentThreads.slice(0, 10);
       const updatedThreads: ThreadWithTasks[] = [];
       const changedThreadIds: string[] = [];
       const errors: string[] = [];
 
-      // Poll each thread individually
       for (const currentThread of threadsToPool) {
         try {
           const updatedThread = await this.getThreadFn(currentThread.thread_id);
           if (updatedThread) {
             updatedThreads.push(updatedThread);
 
-            // Check if thread has changed
             if (this.hasThreadChanged(currentThread, updatedThread)) {
               changedThreadIds.push(updatedThread.thread_id);
-
-              // Debug: Log task count changes
-              if (
-                currentThread.completedTasksCount !==
-                updatedThread.completedTasksCount
-              ) {
-                console.log(
-                  `🔢 Task count changed for ${updatedThread.thread_id.substring(0, 8)}: ${currentThread.completedTasksCount} → ${updatedThread.completedTasksCount}`,
-                );
-              }
             }
           }
         } catch (error) {
           errors.push(`Thread ${currentThread.thread_id}: ${error}`);
-          // Continue polling other threads
-          updatedThreads.push(currentThread); // Keep existing data
+
+          updatedThreads.push(currentThread);
         }
       }
 
-      // Report errors if any
-      if (errors.length > 0) {
-        this.config.onError(`Polling errors: ${errors.join(", ")}`);
-      }
-
-      // Update threads if we have any changes
       if (changedThreadIds.length > 0) {
         this.config.onUpdate(updatedThreads, changedThreadIds);
       }
-
-      this.config.onPollComplete();
     } catch (error) {
-      this.config.onError(`Polling failed: ${error}`);
+      console.error("Thread polling error:", error);
     }
   }
 
@@ -117,7 +82,6 @@ export class ThreadPoller {
     current: ThreadWithTasks,
     updated: ThreadWithTasks,
   ): boolean {
-    // Compare key fields that might change
     return (
       current.completedTasksCount !== updated.completedTasksCount ||
       current.totalTasksCount !== updated.totalTasksCount ||
