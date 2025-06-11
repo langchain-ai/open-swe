@@ -71,9 +71,17 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch repositories accessible to this installation
-    let repositoryData: { repositories: Repository[]; hasMore: boolean; totalCount: number };
+    let repositoryData: {
+      repositories: Repository[];
+      hasMore: boolean;
+      totalCount: number;
+    };
     try {
-      repositoryData = await getInstallationRepositories(installationToken, page, perPage);
+      repositoryData = await getInstallationRepositories(
+        installationToken,
+        page,
+        perPage,
+      );
     } catch (error) {
       console.error("Failed to fetch repositories:", error);
       return NextResponse.json(
@@ -111,4 +119,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

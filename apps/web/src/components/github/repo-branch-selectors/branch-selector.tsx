@@ -236,15 +236,13 @@ export function BranchSelector({
                 })}
             </CommandGroup>
             {branchesHasMore && (
-              <CommandGroup>
-                <CommandItem
-                  onSelect={loadMoreBranches}
-                  disabled={branchesLoadingMore}
-                  className="justify-center"
-                >
-                  {branchesLoadingMore ? "Loading more..." : "Load more"}
-                </CommandItem>
-              </CommandGroup>
+              <Button
+                onSelect={loadMoreBranches}
+                disabled={branchesLoadingMore}
+                className="justify-center"
+              >
+                {branchesLoadingMore ? "Loading more..." : "Load more"}
+              </Button>
             )}
           </CommandList>
         </Command>

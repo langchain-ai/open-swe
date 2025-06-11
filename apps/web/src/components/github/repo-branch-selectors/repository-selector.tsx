@@ -214,18 +214,18 @@ export function RepositorySelector({
               })}
             </CommandGroup>
             {repositoriesHasMore && (
-              <CommandGroup>
-                <CommandItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    loadMoreRepositories();
-                  }}
-                  disabled={repositoriesLoadingMore}
-                  className="justify-center"
-                >
-                  {repositoriesLoadingMore ? "Loading more..." : "Load more repositories"}
-                </CommandItem>
-              </CommandGroup>
+              <Button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  await loadMoreRepositories();
+                }}
+                disabled={repositoriesLoadingMore}
+                className="justify-center"
+              >
+                {repositoriesLoadingMore
+                  ? "Loading more..."
+                  : "Load more repositories"}
+              </Button>
             )}
           </CommandList>
         </Command>
@@ -233,4 +233,3 @@ export function RepositorySelector({
     </Popover>
   );
 }
-

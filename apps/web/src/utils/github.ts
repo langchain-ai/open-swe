@@ -64,18 +64,22 @@ export async function getInstallationRepositories(
   installationToken: string,
   page: number = 1,
   perPage: number = 100,
-): Promise<{ repositories: Repository[]; hasMore: boolean; totalCount: number }> {
+): Promise<{
+  repositories: Repository[];
+  hasMore: boolean;
+  totalCount: number;
+}> {
   const url = new URL("https://api.github.com/installation/repositories");
   url.searchParams.set("page", page.toString());
   url.searchParams.set("per_page", perPage.toString());
 
   const response = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${installationToken}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "YourAppName",
-      },
-    });
+    headers: {
+      Authorization: `Bearer ${installationToken}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "YourAppName",
+    },
+  });
 
   if (!response.ok) {
     const errorData = await response.json();
@@ -85,7 +89,7 @@ export async function getInstallationRepositories(
   }
 
   const data = await response.json();
-  
+
   return {
     repositories: data.repositories,
     hasMore: data.repositories.length === perPage,
@@ -102,7 +106,6 @@ export async function getRepositoryBranches(
   page: number = 1,
   perPage: number = 100,
 ): Promise<{ branches: Branch[]; hasMore: boolean; totalCount?: number }> {
-
   // First, get repository info to ensure we have the default branch
 
   const repoResponse = await fetch(
@@ -193,8 +196,3 @@ export interface Branch {
   };
   protected: boolean;
 }
-
-
-
-
-
