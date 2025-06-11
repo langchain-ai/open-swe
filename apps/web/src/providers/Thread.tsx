@@ -102,20 +102,13 @@ const getTaskCounts = (
 
   const plans = activeRevision.plans;
 
-  const firstIncompleteIndex = plans.findIndex((p) => !p.completed);
-
-  const completedTasksCount =
-    firstIncompleteIndex === -1 ? plans.length : firstIncompleteIndex;
+  const completedTasksCount = plans.filter((p) => p.completed)?.length || 0;
 
   return {
     totalTasksCount: plans.length,
     completedTasksCount,
   };
 };
-
-interface ThreadsClientWithState {
-  getState(threadId: string): Promise<{ values: GraphState }>;
-}
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -141,9 +134,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         let stateData: { values: GraphState } | null = null;
 
         try {
-          stateData = await (client.threads as ThreadsClientWithState).getState(
-            threadId,
-          );
+          stateData = await client.threads.getState(threadId);
         } catch (stateError) {
           console.error("Failed to get state data:", stateError);
         }
@@ -223,17 +214,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
           const fullThread = await client.threads.get(thread.thread_id);
 
           let stateData: { values: GraphState } | null = null;
-          if (
-            "getState" in client.threads &&
-            typeof client.threads.getState === "function"
-          ) {
-            try {
-              stateData = await (
-                client.threads as ThreadsClientWithState
-              ).getState(thread.thread_id);
-            } catch (stateError) {
-              console.error("Failed to get state data:", stateError);
-            }
+          try {
+            stateData = await client.threads.getState(thread.thread_id);
+          } catch (stateError) {
+            console.error("Failed to get state data:", stateError);
           }
 
           enhancedThreads.push(enhanceThreadWithTasks(fullThread, stateData));
