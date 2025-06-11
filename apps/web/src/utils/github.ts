@@ -70,13 +70,12 @@ export async function getInstallationRepositories(
   url.searchParams.set("per_page", perPage.toString());
 
   const response = await fetch(url.toString(), {
-    {
       headers: {
         Authorization: `Bearer ${installationToken}`,
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "YourAppName",
       },
-    }
+    });
   );
 
   if (!response.ok) {
@@ -203,4 +202,5 @@ export interface Branch {
   };
   protected: boolean;
 }
+
 
