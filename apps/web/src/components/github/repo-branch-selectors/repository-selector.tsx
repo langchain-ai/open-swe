@@ -50,6 +50,9 @@ export function RepositorySelector({
     isLoading,
     error,
     isInstalled,
+    repositoriesHasMore,
+    repositoriesLoadingMore,
+    loadMoreRepositories,
   } = useGitHubApp();
 
   const handleSelect = (repositoryKey: string) => {
@@ -210,9 +213,24 @@ export function RepositorySelector({
                 );
               })}
             </CommandGroup>
+            {repositoriesHasMore && (
+              <CommandGroup>
+                <CommandItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    loadMoreRepositories();
+                  }}
+                  disabled={repositoriesLoadingMore}
+                  className="justify-center"
+                >
+                  {repositoriesLoadingMore ? "Loading more..." : "Load more repositories"}
+                </CommandItem>
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
     </Popover>
   );
 }
+
