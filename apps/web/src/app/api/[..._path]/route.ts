@@ -6,7 +6,7 @@ import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
   initApiPassthrough({
-    apiUrl: process.env.LANGGRAPH_API_URL,
+    apiUrl: process.env.LANGGRAPH_API_URL ?? "",
     runtime: "edge", // default
     disableWarningLog: true,
     headers: (req) => {
