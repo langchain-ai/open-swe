@@ -21,6 +21,7 @@ import {
   PanelRightClose,
   SquarePen,
   XIcon,
+  File,
   Plus,
   Settings,
 } from "lucide-react";
@@ -655,3 +656,4 @@ export function Thread() {
     </div>
   );
 }
+
