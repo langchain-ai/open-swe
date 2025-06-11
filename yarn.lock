@@ -2267,6 +2267,7 @@ __metadata:
     langsmith: ^0.3.29
     prettier: ^3.5.2
     ts-jest: ^29.1.0
+    turbo: ^2.5.0
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     uuid: ^11.0.5
