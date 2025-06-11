@@ -39,6 +39,9 @@ export function BranchSelector({
     selectedBranch,
     setSelectedBranch,
     selectedRepository,
+    branchesHasMore,
+    branchesLoadingMore,
+    loadMoreBranches,
     defaultBranch,
   } = useGitHubApp();
 
@@ -232,6 +235,17 @@ export function BranchSelector({
                   );
                 })}
             </CommandGroup>
+            {branchesHasMore && (
+              <CommandGroup>
+                <CommandItem
+                  onSelect={loadMoreBranches}
+                  disabled={branchesLoadingMore}
+                  className="justify-center"
+                >
+                  {branchesLoadingMore ? "Loading more..." : "Load more"}
+                </CommandItem>
+              </CommandGroup>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>
