@@ -28,7 +28,7 @@ export function useThreadPolling({
     if (!enabled) return;
 
     const config: PollConfig = {
-      interval: 2000, // 2 seconds hardcoded
+      interval: 1000, // 1 second for near real-time
       onUpdate,
       onPollComplete,
       onError,

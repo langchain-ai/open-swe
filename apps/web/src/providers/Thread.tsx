@@ -33,7 +33,6 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
-  updateThreadFromStream: (threadId: string, streamValues: any) => void;
   selectedThread: ThreadWithTasks | null;
   setSelectedThread: (thread: ThreadWithTasks | null) => void;
   isPending: boolean;
@@ -113,65 +112,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
     Set<string>
   >(new Set());
-
-  const updateThreadFromStream = useCallback(
-    (threadId: string, streamValues: any) => {
-      if (!threadId || !streamValues) return;
-
-      setThreads((currentThreads) => {
-        const targetThread = currentThreads.find(
-          (t) => t.thread_id === threadId,
-        );
-        if (!targetThread) return currentThreads; // Thread not found, no update needed
-
-        const plan: TaskPlan | undefined = streamValues?.plan;
-        const proposedPlan: string[] = streamValues?.proposedPlan || [];
-        const targetRepository = streamValues?.targetRepository;
-        const messages = streamValues?.messages;
-
-        const { totalTasksCount, completedTasksCount } = getTaskCounts(
-          plan,
-          proposedPlan,
-          {
-            totalTasksCount: targetThread.totalTasksCount,
-            completedTasksCount: targetThread.completedTasksCount,
-          },
-        );
-
-        // Extract thread title from messages if available
-        const firstMessageContent = messages?.[0]?.content;
-        const threadTitle = firstMessageContent
-          ? getMessageContentString(firstMessageContent)
-          : targetThread.threadTitle;
-
-        const newRepository =
-          targetRepository?.repo ||
-          targetRepository?.name ||
-          targetThread.repository ||
-          "Unknown Repository";
-
-        const newBranch =
-          targetRepository?.branch || targetThread.branch || "main";
-
-        return currentThreads.map((thread) => {
-          if (thread.thread_id === threadId) {
-            return {
-              ...thread,
-              threadTitle,
-              repository: newRepository,
-              branch: newBranch,
-              completedTasksCount,
-              totalTasksCount,
-              tasks: plan,
-              proposedPlan,
-            };
-          }
-          return thread;
-        });
-      });
-    },
-    [],
-  );
 
   const getThread = useCallback(
     async (threadId: string): Promise<ThreadWithTasks | null> => {
@@ -272,7 +212,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
   }, [apiUrl, assistantId]);
 
-  // Removed polling - now using real-time stream updates via updateThreadFromStream
+  // Now using polling-only approach for consistent cross-tab updates
 
   // Initial load
   useEffect(() => {
@@ -328,7 +268,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     onUpdate: handlePollingUpdate,
     onPollComplete: handlePollComplete,
     onError: handlePollError,
-    enabled: process.env.NODE_ENV === "development", // Only enable in development for now
+    enabled: true, // Always enabled now that it's our primary update mechanism
   });
 
   const value = {
@@ -338,7 +278,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
-    updateThreadFromStream,
     selectedThread,
     setSelectedThread,
     isPending,

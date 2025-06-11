@@ -78,6 +78,16 @@ export class ThreadPoller {
             // Check if thread has changed
             if (this.hasThreadChanged(currentThread, updatedThread)) {
               changedThreadIds.push(updatedThread.thread_id);
+
+              // Debug: Log task count changes
+              if (
+                currentThread.completedTasksCount !==
+                updatedThread.completedTasksCount
+              ) {
+                console.log(
+                  `🔢 Task count changed for ${updatedThread.thread_id.substring(0, 8)}: ${currentThread.completedTasksCount} → ${updatedThread.completedTasksCount}`,
+                );
+              }
             }
           }
         } catch (error) {
