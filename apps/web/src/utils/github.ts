@@ -99,8 +99,9 @@ export async function getInstallationRepositories(
 export async function getRepositoryBranches(
   owner: string,
   repo: string,
-): Promise<Branch[]> {
-  const perPage = 100; // Maximum allowed by GitHub API
+  page: number = 1,
+  perPage: number = 100,
+): Promise<{ branches: Branch[]; hasMore: boolean; totalCount?: number }> {
 
   // First, get repository info to ensure we have the default branch
 
@@ -122,7 +123,7 @@ export async function getRepositoryBranches(
 
   // Fetch first 100 branches only
   const response = await fetch(
-    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=1`,
+    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
     {
       headers: {
         Accept: "application/vnd.github.v3+json",
@@ -137,25 +138,28 @@ export async function getRepositoryBranches(
   }
 
   const data = await response.json();
-  const allBranches: Branch[] = Array.isArray(data) ? data : [];
+  const branches: Branch[] = Array.isArray(data) ? data : [];
 
-  if (allBranches.length === 0) {
-    return [];
+  if (branches.length === 0) {
+    return { branches: [], hasMore: false };
   }
 
   // Ensure default branch is at the beginning if it exists
-  if (defaultBranch) {
-    const defaultBranchIndex = allBranches.findIndex(
+  if (defaultBranch && page === 1) {
+    const defaultBranchIndex = branches.findIndex(
       (branch) => branch.name === defaultBranch,
     );
     if (defaultBranchIndex > 0) {
-      const defaultBranchData = allBranches[defaultBranchIndex];
-      allBranches.splice(defaultBranchIndex, 1);
-      allBranches.unshift(defaultBranchData);
+      const defaultBranchData = branches[defaultBranchIndex];
+      branches.splice(defaultBranchIndex, 1);
+      branches.unshift(defaultBranchData);
     }
   }
 
-  return allBranches;
+  return {
+    branches,
+    hasMore: branches.length === perPage,
+  };
 }
 
 /**
@@ -189,6 +193,7 @@ export interface Branch {
   };
   protected: boolean;
 }
+
 
 
 
