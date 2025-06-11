@@ -62,16 +62,21 @@ export async function getInstallationToken(
  */
 export async function getInstallationRepositories(
   installationToken: string,
-): Promise<Repository[]> {
-  const response = await fetch(
-    "https://api.github.com/installation/repositories",
+  page: number = 1,
+  perPage: number = 100,
+): Promise<{ repositories: Repository[]; hasMore: boolean; totalCount: number }> {
+  const url = new URL("https://api.github.com/installation/repositories");
+  url.searchParams.set("page", page.toString());
+  url.searchParams.set("per_page", perPage.toString());
+
+  const response = await fetch(url.toString(), {
     {
       headers: {
         Authorization: `Bearer ${installationToken}`,
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "YourAppName",
       },
-    },
+    }
   );
 
   if (!response.ok) {
@@ -82,7 +87,12 @@ export async function getInstallationRepositories(
   }
 
   const data = await response.json();
-  return data.repositories;
+  
+  return {
+    repositories: data.repositories,
+    hasMore: data.repositories.length === perPage,
+    totalCount: data.total_count,
+  };
 }
 
 /**
@@ -193,3 +203,4 @@ export interface Branch {
   };
   protected: boolean;
 }
+
