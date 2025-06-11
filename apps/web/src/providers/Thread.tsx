@@ -71,7 +71,6 @@ const getTaskCounts = (
   }
 
   if (!tasks || !tasks.tasks || tasks.tasks.length === 0) {
-    console.log("📊 getTaskCounts: No tasks found, returning default counts");
     return defaultCounts;
   }
 
@@ -79,46 +78,26 @@ const getTaskCounts = (
   const activeTaskIndex = tasks.activeTaskIndex;
   const activeTask = tasks.tasks[activeTaskIndex];
 
-  console.log(
-    "📊 getTaskCounts: activeTaskIndex =",
-    activeTaskIndex,
-    "activeTask =",
-    activeTask,
-  );
-
   if (
     !activeTask ||
     !activeTask.planRevisions ||
     activeTask.planRevisions.length === 0
   ) {
-    console.log("📊 getTaskCounts: No active task or plan revisions found");
     return defaultCounts;
   }
 
   const activeRevisionIndex = activeTask.activeRevisionIndex;
   const activeRevision = activeTask.planRevisions[activeRevisionIndex];
 
-  console.log(
-    "📊 getTaskCounts: activeRevisionIndex =",
-    activeRevisionIndex,
-    "activeRevision =",
-    activeRevision,
-  );
-
   if (
     !activeRevision ||
     !activeRevision.plans ||
     activeRevision.plans.length === 0
   ) {
-    console.log("📊 getTaskCounts: No active revision or plans found");
     return defaultCounts;
   }
 
   const plans = activeRevision.plans;
-  console.log(
-    "📊 getTaskCounts: plans =",
-    plans.map((p) => ({ index: p.index, completed: p.completed })),
-  );
 
   // Find the index of the first plan that is not completed
   // The number of completed tasks equals the index of the first incomplete task
@@ -128,15 +107,6 @@ const getTaskCounts = (
   // If some tasks are incomplete, use the index of the first incomplete task
   const completedTasksCount =
     firstIncompleteIndex === -1 ? plans.length : firstIncompleteIndex;
-
-  console.log(
-    "📊 getTaskCounts: firstIncompleteIndex =",
-    firstIncompleteIndex,
-    "completedTasksCount =",
-    completedTasksCount,
-    "totalTasksCount =",
-    plans.length,
-  );
 
   return {
     totalTasksCount: plans.length,
@@ -165,10 +135,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       const client = createClient(apiUrl);
 
       try {
-        console.log(
-          `🌐 Polling API request for thread: ${threadId.substring(0, 8)}`,
-        );
-
         const thread = await client.threads.get(threadId);
 
         // Get the comprehensive state data which contains the plan
@@ -178,11 +144,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
           typeof client.threads.getState === "function"
         ) {
           try {
-            console.log(`🎯 Getting state for ${threadId.substring(0, 8)}`);
             stateData = await (client.threads as any).getState(threadId);
-            console.log(`📊 Thread state via getState:`, stateData);
           } catch (stateError) {
-            console.log(`❌ getState failed:`, stateError);
+            // Silently continue if getState fails
           }
         }
 
@@ -190,123 +154,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         const stateValues = stateData?.values;
         const threadValues = thread.values as any;
         const plan = stateValues?.plan || threadValues?.plan;
-
-        console.log(`📋 Plan data source for ${threadId.substring(0, 8)}:`, {
-          hasStateData: !!stateData,
-          hasStateValues: !!stateValues,
-          hasStatePlan: !!stateValues?.plan,
-          hasThreadPlan: !!threadValues?.plan,
-          usingStatePlan: !!stateValues?.plan,
-          structure: stateValues?.plan
-            ? "state.values.plan"
-            : "thread.values.plan",
-        });
-        if (plan) {
-          console.log(
-            `📋 Raw plan structure for ${threadId.substring(0, 8)}:`,
-            {
-              activeTaskIndex: plan.activeTaskIndex,
-              tasksLength: plan.tasks?.length,
-              planStructure: {
-                hasTasks: !!plan.tasks,
-                tasksCount: plan.tasks?.length || 0,
-              },
-            },
-          );
-
-          // Follow exact nesting: values.plan.tasks[activeTaskIndex].planRevisions[activeRevisionIndex].plans
-          if (
-            plan.tasks &&
-            plan.tasks.length > 0 &&
-            typeof plan.activeTaskIndex === "number"
-          ) {
-            const activeTaskIndex = plan.activeTaskIndex;
-            const activeTask = plan.tasks[activeTaskIndex];
-
-            console.log(`📋 Active task for ${threadId.substring(0, 8)}:`, {
-              activeTaskIndex,
-              activeTask: activeTask
-                ? {
-                    id: activeTask.id,
-                    taskIndex: activeTask.taskIndex,
-                    activeRevisionIndex: activeTask.activeRevisionIndex,
-                    planRevisionsLength: activeTask.planRevisions?.length,
-                  }
-                : null,
-            });
-
-            if (
-              activeTask &&
-              activeTask.planRevisions &&
-              typeof activeTask.activeRevisionIndex === "number"
-            ) {
-              const activeRevisionIndex = activeTask.activeRevisionIndex;
-              const activeRevision =
-                activeTask.planRevisions[activeRevisionIndex];
-
-              console.log(
-                `📋 Active revision for ${threadId.substring(0, 8)}:`,
-                {
-                  activeRevisionIndex,
-                  hasRevision: !!activeRevision,
-                  plansLength: activeRevision?.plans?.length || 0,
-                },
-              );
-
-              if (
-                activeRevision &&
-                activeRevision.plans &&
-                Array.isArray(activeRevision.plans)
-              ) {
-                const plans = activeRevision.plans;
-                const firstIncompleteIndex = plans.findIndex(
-                  (p: any) => !p.completed,
-                );
-                const completedTasksCount =
-                  firstIncompleteIndex === -1
-                    ? plans.length
-                    : firstIncompleteIndex;
-
-                console.log(
-                  `✅ Task completion analysis for ${threadId.substring(0, 8)}:`,
-                  {
-                    pathAccessed: `values.plan.tasks[${activeTaskIndex}].planRevisions[${activeRevisionIndex}].plans`,
-                    totalPlans: plans.length,
-                    firstIncompleteIndex,
-                    completedTasksCount,
-                    planStatuses: plans.map((p: any) => ({
-                      index: p.index,
-                      completed: p.completed,
-                    })),
-                    detailedPlans: plans.map((p: any) => ({
-                      index: p.index,
-                      completed: p.completed,
-                      planPreview: p.plan
-                        ? p.plan.substring(0, 50) + "..."
-                        : "No plan text",
-                    })),
-                  },
-                );
-              } else {
-                console.log(
-                  `❌ No plans found in revision for ${threadId.substring(0, 8)}`,
-                );
-              }
-            } else {
-              console.log(
-                `❌ No active revision found for ${threadId.substring(0, 8)}`,
-              );
-            }
-          } else {
-            console.log(
-              `❌ No valid tasks found for ${threadId.substring(0, 8)}`,
-            );
-          }
-        } else {
-          console.log(
-            `❌ No plan found in thread values for ${threadId.substring(0, 8)}`,
-          );
-        }
 
         return enhanceThreadWithTasks(thread, stateData);
       } catch (error) {
@@ -400,10 +247,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
                 thread.thread_id,
               );
             } catch (stateError) {
-              console.log(
-                `Failed to get state for thread ${thread.thread_id}:`,
-                stateError,
-              );
+              // Silently continue if getState fails
             }
           }
 
@@ -465,14 +309,13 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   );
 
   const handlePollComplete = useCallback(() => {
-    if (process.env.NODE_ENV === "development") {
-      console.log("🔄 Thread polling completed");
-    }
+    // Polling completed silently
   }, []);
 
   const handlePollError = useCallback((error: string) => {
+    // Handle polling errors silently in production
     if (process.env.NODE_ENV === "development") {
-      console.error("❌ Thread polling error:", error);
+      console.error("Thread polling error:", error);
     }
   }, []);
 
