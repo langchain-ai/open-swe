@@ -110,12 +110,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
       return;
     }
 
-    const accessToken = getGitHubAccessToken();
-    if (!accessToken) {
-      setBranchesError("GitHub access token not found");
-      return;
-    }
-
     setBranchesLoading(true);
     setBranchesError(null);
 
@@ -123,7 +117,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
       const branchData = await getRepositoryBranches(
         selectedRepository.owner,
         selectedRepository.repo,
-        accessToken,
       );
       setBranches(branchData || []);
     } catch (err) {

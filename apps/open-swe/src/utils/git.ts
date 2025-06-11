@@ -214,13 +214,12 @@ export async function configureGitUserInRepo(
   absoluteRepoDir: string,
   sandbox: Sandbox,
   args: {
-    githubToken: string;
     githubAccessToken: string;
     owner: string;
     repo: string;
   },
 ): Promise<void> {
-  const { githubToken, githubAccessToken, owner, repo } = args;
+  const { githubAccessToken, owner, repo } = args;
   let needsGitConfig = false;
   try {
     const nameCheck = await sandbox.process.executeCommand(
@@ -262,7 +261,7 @@ export async function configureGitUserInRepo(
   try {
     // Set the remote URL with the token using the provided owner and repo
     const setRemoteOutput = await sandbox.process.executeCommand(
-      `git remote set-url origin https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`,
+      `git remote set-url origin https://x-access-token:${githubAccessToken}@github.com/${owner}/${repo}.git`,
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
@@ -575,7 +574,7 @@ export async function cloneRepo(
   sandbox: Sandbox,
   targetRepository: TargetRepository,
   args: {
-    githubToken: string;
+    githubAccessToken: string;
     stateBranchName?: string;
   },
 ) {
@@ -583,7 +582,7 @@ export async function cloneRepo(
     const gitCloneCommand = ["git", "clone"];
 
     // Use x-access-token format for better GitHub authentication
-    const repoUrlWithToken = `https://x-access-token:${args.githubToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+    const repoUrlWithToken = `https://x-access-token:${args.githubAccessToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
     const branchName = args.stateBranchName || targetRepository.branch;
     if (branchName) {

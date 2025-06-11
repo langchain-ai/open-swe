@@ -1,8 +1,6 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
 import { verifyGithubUser, GithubUser } from "./github-auth.js";
-import { createLogger, LogLevel } from "../utils/logger.js";
-
-const logger = createLogger(LogLevel.INFO, "LangGraphAuth");
+import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 
 const STUDIO_USER_ID = "langgraph-studio-user";
 
@@ -40,17 +38,8 @@ export const auth = new Auth()
         display_name: "CORS Preflight",
       };
     }
-    const headersObj: Record<string, string> = {};
-    for (const [key, value] of Object.entries(request.headers)) {
-      headersObj[key] = value;
-    }
-    logger.info("[auth] Incoming request", {
-      url: request.url,
-      method: request.method,
-      headers: headersObj,
-    });
     // Parse Authorization header
-    const accessToken = request.headers.get("x-github_access_token");
+    const accessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
     if (!accessToken) {
       throw new HTTPException(401, {
         message: "GitHub access token header missing",

@@ -1,5 +1,11 @@
-import { GITHUB_TOKEN_COOKIE } from "@/lib/auth";
+import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 import * as jwt from "jsonwebtoken";
+
+function getBaseApiUrl(): string {
+  let baseApiUrl = new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api").href;
+  baseApiUrl = baseApiUrl.endsWith("/") ? baseApiUrl : `${baseApiUrl}/`;
+  return baseApiUrl;
+}
 
 /**
  * Generates a JWT for GitHub App authentication
@@ -83,18 +89,17 @@ export async function getInstallationRepositories(
 export async function getRepositoryBranches(
   owner: string,
   repo: string,
-  accessToken: string,
 ): Promise<Branch[]> {
   const allBranches: Branch[] = [];
   let page = 1;
   const perPage = 100; // Maximum allowed by GitHub API
 
   // First, get repository info to ensure we have the default branch
+  
   const repoResponse = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}`,
+    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "OpenSWE-Agent",
       },
@@ -110,10 +115,9 @@ export async function getRepositoryBranches(
   // Fetch all branches with pagination
   while (true) {
     const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
+      `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
           Accept: "application/vnd.github.v3+json",
           "User-Agent": "OpenSWE-Agent",
         },
