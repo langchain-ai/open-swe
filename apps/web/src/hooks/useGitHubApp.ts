@@ -94,6 +94,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
       if (!repo) {
         setSelectedBranchParam(null);
         setBranches([]);
+        setBranchesPage(1);
+        setBranchesHasMore(false);
       }
     },
     [setSelectedRepositoryParam, setSelectedBranchParam],
@@ -103,16 +105,26 @@ export function useGitHubApp(): UseGitHubAppReturn {
     setSelectedBranchParam(branch);
   };
 
-  const checkInstallation = async () => {
-    setIsLoading(true);
+  const checkInstallation = async (page: number = 1, append: boolean = false) => {
+    if (!append) setIsLoading(true);
+    if (append) setRepositoriesLoadingMore(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/github/repositories");
+      const response = await fetch(`/api/github/repositories?page=${page}`);
 
       if (response.ok) {
         const data = await response.json();
-        setRepositories(data.repositories || []);
+        const newRepositories = data.repositories || [];
+        
+        if (append) {
+          setRepositories(prev => [...prev, ...newRepositories]);
+        } else {
+          setRepositories(newRepositories);
+        }
+        
+        setRepositoriesPage(data.pagination?.page || page);
+        setRepositoriesHasMore(data.pagination?.hasMore || false);
         setIsInstalled(true);
       } else {
         const errorData = await response.json();
@@ -127,7 +139,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setError("Failed to check GitHub App installation status");
       setIsInstalled(false);
     } finally {
-      setIsLoading(false);
+      if (!append) setIsLoading(false);
+      if (append) setRepositoriesLoadingMore(false);
     }
   };
 
@@ -238,4 +251,5 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
