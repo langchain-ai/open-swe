@@ -21,9 +21,8 @@ import {
   PanelRightClose,
   SquarePen,
   XIcon,
-  File,
-  Plus,
   Settings,
+  FilePlus2,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean, parseAsString } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -585,7 +584,7 @@ export function Thread() {
                                 htmlFor="file-input"
                                 className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
                               >
-                                <File className="size-4 text-gray-600" />
+                                <FilePlus2 className="size-4 text-gray-600" />
                               </Label>
                             </TooltipTrigger>
                             <TooltipContent>Attach files</TooltipContent>
