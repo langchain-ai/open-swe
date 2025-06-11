@@ -144,21 +144,33 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   };
 
-  const fetchBranches = useCallback(async () => {
+  const fetchBranches = useCallback(async (page: number = 1, append: boolean = false) => {
     if (!selectedRepository) {
       setBranches([]);
+      setBranchesPage(1);
+      setBranchesHasMore(false);
       return;
     }
 
-    setBranchesLoading(true);
+    if (!append) setBranchesLoading(true);
+    if (append) setBranchesLoadingMore(true);
     setBranchesError(null);
 
     try {
       const branchData = await getRepositoryBranches(
         selectedRepository.owner,
         selectedRepository.repo,
+        page,
       );
-      setBranches(branchData || []);
+      
+      if (append) {
+        setBranches(prev => [...prev, ...branchData.branches]);
+      } else {
+        setBranches(branchData.branches);
+      }
+      
+      setBranchesPage(page);
+      setBranchesHasMore(branchData.hasMore);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to fetch branches";
@@ -168,7 +180,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
       );
       setBranchesError(errorMessage);
     } finally {
-      setBranchesLoading(false);
+      if (!append) setBranchesLoading(false);
+      if (append) setBranchesLoadingMore(false);
     }
   }, [selectedRepository?.owner, selectedRepository?.repo]);
 
@@ -251,5 +264,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
