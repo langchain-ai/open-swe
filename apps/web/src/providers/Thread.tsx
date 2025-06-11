@@ -272,7 +272,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
       setTimeout(() => {
         setRecentlyUpdatedThreads(new Set());
-      }, 1000);
+      }, 2000);
     },
     [],
   );
@@ -291,13 +291,11 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
       currentThreadId: string | null,
       setThreadId: (id: string) => void,
     ) => {
-      if (currentThreadId === thread.thread_id || isPending) return;
+      if (currentThreadId === thread.thread_id) return;
 
-      startTransition(() => {
-        setThreadId(thread.thread_id);
-      });
+      setThreadId(thread.thread_id);
     },
-    [isPending],
+    [],
   );
 
   const value = {
