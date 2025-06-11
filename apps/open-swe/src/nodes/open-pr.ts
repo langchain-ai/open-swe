@@ -72,7 +72,7 @@ export async function openPullRequest(
       "Failed to open pull request: No sandbox session ID found in state.",
     );
   }
-  const { githubToken } = getGitHubTokensFromConfig(config);
+  const { githubAccessToken } = getGitHubTokensFromConfig(config);
 
   const sandbox = await daytonaClient().get(sandboxSessionId);
 
@@ -132,7 +132,7 @@ export async function openPullRequest(
     headBranch: branchName ?? getBranchName(config),
     title,
     body,
-    githubToken,
+    githubAccessToken,
   });
 
   let sandboxDeleted = false;

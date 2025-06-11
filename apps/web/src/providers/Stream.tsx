@@ -52,21 +52,11 @@ const StreamSession = ({
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { refreshThreads, setThreads } = useThreads();
-
-  const githubAccessToken =
-    document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("x-github_access_token="))
-      ?.split("=")[1] || "";
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
     threadId: threadId ?? null,
-    defaultHeaders: {
-      "x-github-installation-token": githubToken,
-      "x-github-access-token": githubAccessToken,
-    },
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {
@@ -141,7 +131,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
         checkGitHubAppInstallation();
       }
     }
-  }, [isAuth, githubToken, isTokenLoading]);
+  }, [isAuth, githubToken]);
 
   const checkAuthStatus = async () => {
     try {

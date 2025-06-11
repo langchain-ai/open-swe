@@ -1,10 +1,10 @@
 import {
   GITHUB_INSTALLATION_RETURN_TO_COOKIE,
   GITHUB_INSTALLATION_STATE_COOKIE,
-  GITHUB_TOKEN_COOKIE,
 } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 
 /**
  * Initiates the GitHub App installation flow

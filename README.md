@@ -50,7 +50,9 @@ DAYTONA_API_KEY=""
 And the web `.env` file should contain the following variables:
 
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:2024 # Change to production URL when deployed
+# Change to production URLs when deployed
+NEXT_PUBLIC_API_URL="http://localhost:3000/api"
+LANGGRAPH_API_URL="http://localhost:2024"
 NEXT_PUBLIC_ASSISTANT_ID="open-swe"
 
 # For the GitHub OAuth flow
@@ -137,14 +139,3 @@ Once you've accepted the plan, it will begin the execution flow. When the agent 
 ## Accessing Changes
 
 Open SWE will automatically create a branch whenever you create a new thread with a naming format of `open-swe/<threadId>`. Every time a file is created, modified, or deleted, the changes will be committed to this branch. You can access the changes in the repository by checking out this branch.
-
-
-
-## Install Daytona CLI 
-```bash 
-# Mac os
-brew install daytonaio/cli/daytona
-# Windows
-powershell -Command "irm https://get.daytona.io/windows | iex"
-
-```

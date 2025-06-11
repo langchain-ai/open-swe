@@ -1,10 +1,10 @@
 import {
   GITHUB_AUTH_STATE_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
-  GITHUB_TOKEN_COOKIE,
   GITHUB_TOKEN_TYPE_COOKIE,
 } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 
 export async function GET(request: NextRequest) {
   try {
@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
 
     // Set token cookies directly on the response
     response.cookies.set(GITHUB_TOKEN_COOKIE, tokenData.access_token, {
-      // httpOnly: true,
+      httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 30, // 30 days

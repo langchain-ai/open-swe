@@ -11,6 +11,7 @@ import {
   type UIMessage,
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
+import { GITHUB_TOKEN_COOKIE } from "../constants.js";
 
 export type PlanItem = {
   /**
@@ -285,12 +286,7 @@ export const GraphConfigurationMetadata: {
         "The maximum number of tokens to generate in an individual generation",
     },
   },
-  "x-github-installation-token": {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  "x-github-access-token": {
+  [GITHUB_TOKEN_COOKIE]: {
     x_open_swe_ui_config: {
       type: "hidden",
     },
@@ -415,21 +411,12 @@ export const GraphConfiguration = z.object({
     .default(() => 10_000)
     .langgraph.metadata(GraphConfigurationMetadata.maxTokens),
   /**
-   * The user's GitHub installation token. To be used to take actions on behalf of the user.
-   */
-  "x-github-installation-token": z
-    .string()
-    .optional()
-    .langgraph.metadata(
-      GraphConfigurationMetadata["x-github-installation-token"],
-    ),
-  /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */
-  "x-github-access-token": z
+  [GITHUB_TOKEN_COOKIE]: z
     .string()
     .optional()
-    .langgraph.metadata(GraphConfigurationMetadata["x-github-access-token"]),
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_TOKEN_COOKIE]),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

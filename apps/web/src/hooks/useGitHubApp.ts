@@ -20,17 +20,6 @@ interface UseGitHubAppReturn {
   defaultBranch: string | null;
 }
 
-// Helper function to get GitHub OAuth access token from cookies
-function getGitHubAccessToken(): string | null {
-  if (typeof document === "undefined") return null;
-
-  const cookies = document.cookie.split("; ");
-  const tokenCookie = cookies.find((row) =>
-    row.startsWith("x-github_access_token="),
-  );
-  return tokenCookie ? tokenCookie.split("=")[1] : null;
-}
-
 export function useGitHubApp(): UseGitHubAppReturn {
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -116,12 +105,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
       return;
     }
 
-    const accessToken = getGitHubAccessToken();
-    if (!accessToken) {
-      setBranchesError("GitHub access token not found");
-      return;
-    }
-
     setBranchesLoading(true);
     setBranchesError(null);
 
@@ -129,7 +112,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
       const branchData = await getRepositoryBranches(
         selectedRepository.owner,
         selectedRepository.repo,
-        accessToken,
       );
       setBranches(branchData || []);
     } catch (err) {
