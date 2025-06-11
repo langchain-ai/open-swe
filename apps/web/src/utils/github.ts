@@ -1,4 +1,3 @@
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 import * as jwt from "jsonwebtoken";
 
 function getBaseApiUrl(): string {
@@ -41,7 +40,7 @@ export async function getInstallationToken(
       headers: {
         Authorization: `Bearer ${jwtToken}`,
         Accept: "application/vnd.github.v3+json",
-        "User-Agent": "YourAppName",
+        "User-Agent": "OpenSWE-Agent",
       },
     },
   );
@@ -155,6 +154,25 @@ export async function getRepositoryBranches(
     if (defaultBranchIndex > 0) {
       const defaultBranchData = branches[defaultBranchIndex];
       branches.splice(defaultBranchIndex, 1);
+      branches.unshift(defaultBranchData);
+    } else {
+      // Need to fetch default branch
+      const defaultBranchResponse = await fetch(
+        `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches/${defaultBranch}`,
+        {
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "OpenSWE-Agent",
+          },
+        },
+      );
+      if (!defaultBranchResponse.ok) {
+        const errorData = await defaultBranchResponse.json();
+        throw new Error(
+          `Failed to fetch default branch: ${JSON.stringify(errorData)}`,
+        );
+      }
+      const defaultBranchData = await defaultBranchResponse.json();
       branches.unshift(defaultBranchData);
     }
   }
