@@ -269,22 +269,42 @@ export function useGitHubApp(): UseGitHubAppReturn {
     : null;
 
   return {
+    // Installation and general state
     isInstalled,
     isLoading,
     error,
+    
+    // Repository state and pagination
     repositories,
+    repositoriesPage,
+    repositoriesHasMore,
+    repositoriesLoadingMore,
     refreshRepositories,
+    loadMoreRepositories,
+    
+    // Repository selection
     selectedRepository,
     setSelectedRepository,
+    
+    // Branch state and pagination
     branches,
+    branchesPage,
+    branchesHasMore,
     branchesLoading,
+    branchesLoadingMore,
     branchesError,
+    loadMoreBranches,
+    
+    // Branch selection
     selectedBranch,
     setSelectedBranch,
     refreshBranches,
+    
+    // Repository metadata
     defaultBranch,
   };
 }
+
 
 
 
