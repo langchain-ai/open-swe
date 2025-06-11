@@ -585,7 +585,7 @@ export function Thread() {
                                 htmlFor="file-input"
                                 className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
                               >
-                                <Plus className="size-4 text-gray-600" />
+                                <File className="size-4 text-gray-600" />
                               </Label>
                             </TooltipTrigger>
                             <TooltipContent>Attach files</TooltipContent>
@@ -656,4 +656,5 @@ export function Thread() {
     </div>
   );
 }
+
 
