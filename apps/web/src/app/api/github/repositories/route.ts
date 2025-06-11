@@ -8,7 +8,7 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
 
 /**
  * Fetches repositories accessible to the GitHub App installation
- * Requires a valid GitHub installation ID in the cookies
+ * Requires a valid GitHub installation ID in the cookies. Supports pagination via 'page' query parameter.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -24,6 +24,19 @@ export async function GET(request: NextRequest) {
             "GitHub installation ID not found. Please install the app first.",
         },
         { status: 401 },
+      );
+    }
+
+    // Get pagination parameters from query string
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get("page") || "1", 10);
+    const perPage = 100; // Fixed at 100 repositories per page
+
+    // Validate page parameter
+    if (page < 1 || isNaN(page)) {
+      return NextResponse.json(
+        { error: "Invalid page parameter. Must be a positive integer." },
+        { status: 400 },
       );
     }
 
@@ -58,9 +71,9 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch repositories accessible to this installation
-    let repositories: Repository[];
+    let repositoryData: { repositories: Repository[]; hasMore: boolean; totalCount: number };
     try {
-      repositories = await getInstallationRepositories(installationToken);
+      repositoryData = await getInstallationRepositories(installationToken, page, perPage);
     } catch (error) {
       console.error("Failed to fetch repositories:", error);
       return NextResponse.json(
@@ -70,7 +83,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Transform the response to include only the data we need
-    const transformedRepos = repositories.map((repo) => ({
+    const transformedRepos = repositoryData.repositories.map((repo) => ({
       id: repo.id,
       name: repo.name,
       full_name: repo.full_name,
@@ -81,7 +94,15 @@ export async function GET(request: NextRequest) {
       permissions: repo.permissions,
     }));
 
-    return NextResponse.json({ repositories: transformedRepos });
+    return NextResponse.json({
+      repositories: transformedRepos,
+      pagination: {
+        page,
+        perPage,
+        hasMore: repositoryData.hasMore,
+        totalCount: repositoryData.totalCount,
+      },
+    });
   } catch (error) {
     console.error("Error fetching GitHub repositories:", error);
     return NextResponse.json(
@@ -90,3 +111,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
