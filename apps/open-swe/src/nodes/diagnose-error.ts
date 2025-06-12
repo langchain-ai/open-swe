@@ -19,7 +19,7 @@ import {
   getCompletedPlanItems,
   getCurrentPlanItem,
 } from "../utils/current-task.js";
-import { getActivePlanItems } from "../utils/task-plan.js";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
 const logger = createLogger(LogLevel.INFO, "DiagnoseError");
 

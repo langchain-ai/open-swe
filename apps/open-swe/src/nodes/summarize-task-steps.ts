@@ -19,7 +19,7 @@ import {
   completePlanItem,
   getActivePlanItems,
   getActiveTask,
-} from "../utils/task-plan.js";
+} from "@open-swe/shared/open-swe/tasks";
 import { getCompletedPlanItems } from "../utils/current-task.js";
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.

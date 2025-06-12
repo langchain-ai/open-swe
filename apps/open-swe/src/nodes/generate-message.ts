@@ -16,7 +16,7 @@ import { stopSandbox } from "../utils/sandbox.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getCurrentPlanItem } from "../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { getActivePlanItems } from "../utils/task-plan.js";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");

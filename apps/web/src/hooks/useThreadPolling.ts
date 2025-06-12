@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { ThreadPoller, PollConfig } from "@/lib/polling/thread-poller";
-import { ThreadWithTasks } from "@/providers/Thread";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { Thread } from "@langchain/langgraph-sdk";
 
 interface UseThreadPollingProps {
-  threads: ThreadWithTasks[];
-  getThread: (threadId: string) => Promise<ThreadWithTasks | null>;
+  threads: Thread<GraphState>[];
+  getThread: (threadId: string) => Promise<Thread<GraphState> | null>;
   onUpdate: (
-    updatedThreads: ThreadWithTasks[],
+    updatedThreads: Thread<GraphState>[],
     changedThreadIds: string[],
   ) => void;
 

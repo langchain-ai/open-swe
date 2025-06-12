@@ -6,7 +6,7 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../utils/load-model.js";
 import { z } from "zod";
-import { getActiveTask, updateTaskPlanItems } from "../utils/task-plan.js";
+import { getActiveTask, updateTaskPlanItems } from "@open-swe/shared/open-swe/tasks";
 import {
   BaseMessage,
   isAIMessage,

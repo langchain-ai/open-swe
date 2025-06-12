@@ -16,7 +16,7 @@ import {
   completePlanItem,
   getActivePlanItems,
   getActiveTask,
-} from "../utils/task-plan.js";
+} from "@open-swe/shared/open-swe/tasks";
 import {
   getCurrentPlanItem,
   getRemainingPlanItems,

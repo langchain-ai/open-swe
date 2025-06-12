@@ -6,10 +6,12 @@ import {
   PanelRightOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useThreads, ThreadWithTasks } from "@/providers/Thread";
+import { useThreads } from "@/providers/Thread";
 import { useQueryState, parseAsString } from "nuqs";
 import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";
+import { Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 
 const THREADS_PER_PAGE = 10;
 
@@ -18,13 +20,12 @@ interface TaskListSidebarProps {
 }
 
 export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
-  const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
   const { threads, threadsLoading, handleThreadClick } = useThreads();
 
   const onThreadClick = useCallback(
-    (thread: ThreadWithTasks) => {
+    (thread: Thread<GraphState>) => {
       handleThreadClick(thread, threadId, setThreadId);
     },
     [handleThreadClick, threadId, setThreadId],

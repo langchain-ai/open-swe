@@ -19,7 +19,7 @@ import { getUserRequest } from "../utils/user-request.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { daytonaClient, deleteSandbox } from "../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
-import { getActivePlanItems } from "../utils/task-plan.js";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 

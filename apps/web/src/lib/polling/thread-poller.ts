@@ -1,9 +1,11 @@
-import { ThreadWithTasks } from "@/providers/Thread";
+import { Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { getThreadTasks, getThreadTitle } from "../thread";
 
 export interface PollConfig {
   interval: number;
   onUpdate: (
-    updatedThreads: ThreadWithTasks[],
+    updatedThreads: Thread<GraphState>[],
     changedThreadIds: string[],
   ) => void;
 }
@@ -12,13 +14,13 @@ export class ThreadPoller {
   private config: PollConfig;
   private isPolling: boolean = false;
   private intervalId: NodeJS.Timeout | null = null;
-  private threads: ThreadWithTasks[];
-  private getThreadFn: (threadId: string) => Promise<ThreadWithTasks | null>;
+  private threads: Thread<GraphState>[];
+  private getThreadFn: (threadId: string) => Promise<Thread<GraphState> | null>;
 
   constructor(
     config: PollConfig,
-    threads: ThreadWithTasks[],
-    getThreadFn: (threadId: string) => Promise<ThreadWithTasks | null>,
+    threads: Thread<GraphState>[],
+    getThreadFn: (threadId: string) => Promise<Thread<GraphState> | null>,
   ) {
     this.config = config;
     this.threads = threads;
@@ -49,7 +51,7 @@ export class ThreadPoller {
       const currentThreads = this.threads;
 
       const threadsToPool = currentThreads.slice(0, 10);
-      const updatedThreads: ThreadWithTasks[] = [];
+      const updatedThreads: Thread<GraphState>[] = [];
       const changedThreadIds: string[] = [];
       const errors: string[] = [];
 
@@ -79,19 +81,23 @@ export class ThreadPoller {
   }
 
   private hasThreadChanged(
-    current: ThreadWithTasks,
-    updated: ThreadWithTasks,
+    current: Thread<GraphState>,
+    updated: Thread<GraphState>,
   ): boolean {
+    const currentTaskCounts = getThreadTasks(current);
+    const updatedTaskCounts = getThreadTasks(updated);
+    const currentTargetRepo = current.values?.targetRepository;
+    const updatedTargetRepo = updated.values?.targetRepository;
     return (
-      current.completedTasksCount !== updated.completedTasksCount ||
-      current.totalTasksCount !== updated.totalTasksCount ||
+      currentTaskCounts.completedTasks !== updatedTaskCounts.completedTasks ||
+      currentTaskCounts.totalTasks !== updatedTaskCounts.totalTasks ||
       current.status !== updated.status ||
-      current.threadTitle !== updated.threadTitle ||
-      current.repository !== updated.repository ||
-      current.branch !== updated.branch ||
-      JSON.stringify(current.tasks) !== JSON.stringify(updated.tasks) ||
-      JSON.stringify(current.proposedPlan) !==
-        JSON.stringify(updated.proposedPlan)
+      getThreadTitle(current) !== getThreadTitle(updated) ||
+      currentTargetRepo.repo !== updatedTargetRepo.repo ||
+      currentTargetRepo.branch !== updatedTargetRepo.branch ||
+      JSON.stringify(current.values?.plan) !== JSON.stringify(updated.values?.plan) ||
+      JSON.stringify(current.values?.proposedPlan) !==
+        JSON.stringify(updated.values?.proposedPlan)
     );
   }
 }

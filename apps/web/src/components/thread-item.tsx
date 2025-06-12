@@ -1,21 +1,23 @@
 "use client";
 import { memo } from "react";
 import {
-  formatDistanceToNow,
   differenceInHours,
   differenceInMinutes,
   format,
 } from "date-fns";
 import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
-import { ThreadWithTasks, useThreads } from "@/providers/Thread";
+import { useThreads } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
 import { GitHubSVG } from "./icons/github";
 import { useQueryState } from "nuqs";
+import { Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { getThreadTasks, getThreadTitle } from "@/lib/thread";
 
 interface ThreadItemProps {
-  thread: ThreadWithTasks;
-  onClick: (thread: ThreadWithTasks) => void;
+  thread: Thread<GraphState>;
+  onClick: (thread: Thread<GraphState>) => void;
   variant?: "sidebar" | "dashboard";
   className?: string;
 }
@@ -55,6 +57,8 @@ export const ThreadItem = memo(function ThreadItem({
 
   const displayDate = formatRelativeDate(thread.created_at);
 
+  const { totalTasks, completedTasks } = getThreadTasks(thread);
+
   return (
     <div
       className={cn(
@@ -74,7 +78,7 @@ export const ThreadItem = memo(function ThreadItem({
           <div className="flex w-full items-center gap-1.5">
             <StatusIndicator status={thread.status} />
             <h4 className="w-full truncate text-xs leading-tight font-medium text-gray-900">
-              {thread.threadTitle}
+              {getThreadTitle(thread)}
             </h4>
           </div>
 
@@ -85,10 +89,10 @@ export const ThreadItem = memo(function ThreadItem({
                 height="16"
                 className="flex-shrink-0"
               />
-              <span className="max-w-[90px] truncate">{thread.repository}</span>
+              <span className="max-w-[90px] truncate">{thread.values.targetRepository.repo}</span>
               <span>/</span>
               <GitBranch className="size-2.5 flex-shrink-0" />
-              <span className="max-w-[70px] truncate">{thread.branch}</span>
+              <span className="max-w-[70px] truncate">{thread.values.targetRepository.branch}</span>
             </div>
 
             <span>•</span>
@@ -101,7 +105,7 @@ export const ThreadItem = memo(function ThreadItem({
                 <div className="ml-1 flex items-center gap-1">
                   <ListTodo className="size-4 flex-shrink-0" />
                   <span>
-                    {thread.completedTasksCount}/{thread.totalTasksCount} tasks
+                    {completedTasks}/{totalTasks} tasks
                   </span>
                 </div>
               </>
@@ -111,7 +115,7 @@ export const ThreadItem = memo(function ThreadItem({
             <div className="flex items-center gap-1 text-xs text-gray-500">
               <ListTodo className="size-4 flex-shrink-0" />
               <span>
-                {thread.completedTasksCount}/{thread.totalTasksCount} tasks
+                {completedTasks}/{totalTasks} tasks
               </span>
             </div>
           )}

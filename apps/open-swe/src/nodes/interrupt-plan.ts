@@ -6,7 +6,7 @@ import {
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
 import { startSandbox } from "../utils/sandbox.js";
-import { createNewTask } from "../utils/task-plan.js";
+import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../utils/user-request.js";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,

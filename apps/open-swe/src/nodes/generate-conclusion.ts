@@ -13,7 +13,7 @@ import {
   completeTask,
   getActivePlanItems,
   getActiveTask,
-} from "../utils/task-plan.js";
+} from "@open-swe/shared/open-swe/tasks";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
