@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { GitBranch, Shield } from "lucide-react";
 
@@ -43,6 +43,9 @@ export function BranchSelector({
     branchesLoadingMore,
     loadMoreBranches,
     defaultBranch,
+    fetchBranches,
+    setBranchesPage,
+    setBranches,
   } = useGitHubApp();
 
   // Auto-select default branch when repository changes and branches are loaded

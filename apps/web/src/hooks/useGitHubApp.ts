@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
@@ -29,6 +29,9 @@ interface UseGitHubAppReturn {
   branchesLoadingMore: boolean;
   branchesError: string | null;
   loadMoreBranches: () => Promise<void>;
+  fetchBranches: () => Promise<void>;
+  setBranchesPage: (page: number) => void;
+  setBranches: (branches: Branch[]) => void;
 
   // Branch selection
   selectedBranch: string | null;
@@ -67,24 +70,37 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Track if auto-selection has been attempted to prevent re-triggering
   const hasAutoSelectedRef = useRef(false);
 
-  const selectedRepository = selectedRepositoryParam
-    ? (() => {
-        try {
-          // Parse "owner/repo" format instead of JSON
-          const parts = selectedRepositoryParam.split("/");
-          if (parts.length === 2) {
-            return {
-              owner: parts[0],
-              repo: parts[1],
-              branch: selectedBranchParam || undefined,
-            } as TargetRepository;
-          }
-          return null;
-        } catch {
-          return null;
-        }
-      })()
-    : null;
+  const selectedRepository = useMemo(() => {
+    if (!selectedRepositoryParam) return null;
+    try {
+      // Parse "owner/repo" format instead of JSON
+      const parts = selectedRepositoryParam.split("/");
+      if (parts.length === 2) {
+        return {
+          owner: parts[0],
+          repo: parts[1],
+          branch: selectedBranchParam || undefined,
+        } as TargetRepository;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, [selectedRepositoryParam, selectedBranchParam]);
+
+  const fetchingBranches = useRef(false);
+  useEffect(() => {
+    if (selectedRepository && !branchesLoading && !fetchingBranches.current) {
+      fetchingBranches.current = true;
+      console.log("FETCHING!!");
+      fetchBranches();
+      // Reset branch pagination when repository changes
+      setBranchesPage(1);
+    } else {
+      setBranches([]);
+      setSelectedBranchParam(null);
+    }
+  }, [selectedRepository]);
 
   const selectedBranch = selectedBranchParam;
 
@@ -214,22 +230,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     checkInstallation();
   }, []);
 
-  useEffect(() => {
-    if (selectedRepository) {
-      fetchBranches();
-      // Reset branch pagination when repository changes
-      setBranchesPage(1);
-    } else {
-      setBranches([]);
-      setSelectedBranchParam(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    selectedRepository?.owner,
-    selectedRepository?.repo,
-    setSelectedBranchParam,
-  ]);
-
   // Auto-select first repository on initial page load
   useEffect(() => {
     if (
@@ -306,11 +306,14 @@ export function useGitHubApp(): UseGitHubAppReturn {
     branchesLoadingMore,
     branchesError,
     loadMoreBranches,
+    fetchBranches,
 
     // Branch selection
     selectedBranch,
     setSelectedBranch,
     refreshBranches,
+    setBranchesPage,
+    setBranches,
 
     // Repository metadata
     defaultBranch,
