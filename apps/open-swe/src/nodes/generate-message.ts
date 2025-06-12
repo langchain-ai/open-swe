@@ -154,7 +154,7 @@ export async function generateAction(
       role: "system",
       content: formatPrompt(state),
     },
-    ...state.messages,
+    ...state.internal_messages,
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;
@@ -178,6 +178,7 @@ export async function generateAction(
 
   return {
     messages: [response],
+    internal_messages: [response],
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
   };
 }

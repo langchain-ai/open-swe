@@ -50,7 +50,7 @@ export async function summarizer(
     tool_choice: condenseContextTool.name,
   });
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internal_messages);
   const conversationHistoryStr = `Here is the full conversation history:
 
 ${state.plannerMessages.map(getMessageString).join("\n")}`;
@@ -72,6 +72,7 @@ ${state.plannerMessages.map(getMessageString).join("\n")}`;
   }
 
   return {
+    messages: [response],
     planContextSummary: toolCall.args.context,
   };
 }

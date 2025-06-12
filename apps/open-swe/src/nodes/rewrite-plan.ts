@@ -137,7 +137,7 @@ async function identifyTasksToModifyFunc(
     },
   );
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internal_messages);
   const response = await modelWithIdentifyChangesTool.invoke([
     {
       role: "user",
@@ -199,7 +199,7 @@ async function updatePlanTasksFunc(
     tool_choice: updatePlanTasksTool.name,
   });
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internal_messages);
   const response = await modelWithUpdatePlanTasksTool.invoke([
     {
       role: "user",

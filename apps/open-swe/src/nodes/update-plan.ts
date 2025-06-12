@@ -88,7 +88,8 @@ export async function updatePlan(
   if (!state.planChangeRequest) {
     throw new Error("No plan change request found.");
   }
-  const lastMessage = state.messages[state.messages.length - 1];
+  const lastMessage =
+    state.internal_messages[state.internal_messages.length - 1];
   if (
     !lastMessage ||
     !isAIMessage(lastMessage) ||
@@ -124,7 +125,7 @@ export async function updatePlan(
     state.planChangeRequest,
     activePlanItems,
   );
-  const userMessage = formatUserMessage(state.messages);
+  const userMessage = formatUserMessage(state.internal_messages);
 
   const response = await modelWithTools.invoke([
     {
@@ -160,21 +161,21 @@ export async function updatePlan(
     newPlanItems,
     "agent",
   );
+  const toolMessage = new ToolMessage({
+    tool_call_id: updatePlanToolCallId,
+    content:
+      "Successfully updated the plan. The complete updated plan items are as follow:\n\n" +
+      newPlanItems
+        .map(
+          (p) =>
+            `<plan-item completed="${p.completed}" index="${p.index}">${p.plan}</plan-item>`,
+        )
+        .join("\n"),
+  });
 
   return {
-    messages: [
-      new ToolMessage({
-        tool_call_id: updatePlanToolCallId,
-        content:
-          "Successfully updated the plan. The complete updated plan items are as follow:\n\n" +
-          newPlanItems
-            .map(
-              (p) =>
-                `<plan-item completed="${p.completed}" index="${p.index}">${p.plan}</plan-item>`,
-            )
-            .join("\n"),
-      }),
-    ],
+    messages: [toolMessage],
+    internal_messages: [toolMessage],
     plan: newTaskPlan,
     planChangeRequest: null,
   };

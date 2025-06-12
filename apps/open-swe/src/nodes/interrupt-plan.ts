@@ -41,7 +41,7 @@ export async function interruptPlan(state: GraphState): Promise<Command> {
     throw new Error("No sandbox session ID found.");
   }
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internal_messages);
 
   if (interruptRes.type === "accept") {
     const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;

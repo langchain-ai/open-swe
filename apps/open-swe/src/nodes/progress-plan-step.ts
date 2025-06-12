@@ -75,12 +75,12 @@ export async function progressPlanStep(
     tool_choice: setTaskStatusTool.name,
   });
 
-  const userRequest = getUserRequest(state.messages, {
+  const userRequest = getUserRequest(state.internal_messages, {
     returnFullMessage: true,
   });
   const conversationHistoryStr = `Here is the full conversation history after the user's request:
   
-${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
+${removeFirstHumanMessage(state.internal_messages).map(getMessageString).join("\n")}
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
@@ -118,6 +118,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
     name: toolCall.name,
   });
 
+  const newMessages = [response, toolMessage];
+
   if (!isCompleted) {
     logger.info(
       "Current task has not been completed. Progressing to the next action.",
@@ -125,7 +127,10 @@ Once you've determined the status of the current task, call the \`set_task_statu
         reasoning: toolCall.args.reasoning,
       },
     );
-    const commandUpdate: GraphUpdate = { messages: [response, toolMessage] };
+    const commandUpdate: GraphUpdate = {
+      messages: newMessages,
+      internal_messages: newMessages,
+    };
     return new Command({
       goto: "generate-action",
       update: commandUpdate,
@@ -146,7 +151,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
       "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );
     const commandUpdate: GraphUpdate = {
-      messages: [response, toolMessage],
+      messages: newMessages,
+      internal_messages: newMessages,
       // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
       plan: updatedPlanTasks,
     };
@@ -164,7 +170,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
   });
 
   const commandUpdate: GraphUpdate = {
-    messages: [response, toolMessage],
+    messages: newMessages,
+    internal_messages: newMessages,
     plan: updatedPlanTasks,
   };
 
