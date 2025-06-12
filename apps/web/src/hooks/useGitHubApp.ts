@@ -145,6 +145,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const setSelectedRepository = useCallback(
     (repo: TargetRepository | null) => {
       setSelectedRepositoryParam(repo ? `${repo.owner}/${repo.repo}` : null);
+      // Persist to localStorage whenever repository is selected
+      saveRepositoryToLocalStorage(repo);
+      
       if (!repo) {
         setSelectedBranchParam(null);
         setBranches([]);
@@ -423,5 +426,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
