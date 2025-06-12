@@ -24,7 +24,9 @@ const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 const formatPrompt = (state: GraphState): string => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
   const activePlanItems = getActivePlanItems(state.plan);
-  const currentPlanItem = activePlanItems.filter((p) => !p.completed).sort((a, b) => a.index - b.index)[0];
+  const currentPlanItem = activePlanItems
+    .filter((p) => !p.completed)
+    .sort((a, b) => a.index - b.index)[0];
   const systemPrompt = loadPrompt("anthropic_gen_anthropic_style");
   return systemPrompt
     .replaceAll(
