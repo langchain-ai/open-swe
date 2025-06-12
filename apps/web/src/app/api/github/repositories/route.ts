@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     // Get pagination parameters from query string
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1", 10);
-    const perPage = 100; // Fixed at 100 repositories per page
+    const perPage = 30; // Fixed at 30 repositories per page
 
     // Validate page parameter
     if (page < 1 || isNaN(page)) {

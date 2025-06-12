@@ -104,8 +104,6 @@ export function Thread() {
   const { getConfig } = useConfigStore();
   const {
     taskPlan,
-    handleTaskChange,
-    handleRevisionChange,
     handleEditPlanItem,
     handleAddPlanItem,
     handleDeletePlanItem,
@@ -437,8 +435,8 @@ export function Thread() {
                 {taskPlan && (
                   <TaskPlanView
                     taskPlan={taskPlan}
-                    onTaskChange={handleTaskChange}
-                    onRevisionChange={handleRevisionChange}
+                    onTaskChange={() => {}}
+                    onRevisionChange={() => {}}
                     onEditPlanItem={handleEditPlanItem}
                     onAddPlanItem={handleAddPlanItem}
                     onDeletePlanItem={handleDeletePlanItem}

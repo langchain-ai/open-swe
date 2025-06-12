@@ -14,14 +14,6 @@ export function useTaskPlan() {
     }
   }, [values?.plan]);
 
-  const handleTaskChange = (taskId: string) => {
-    console.log(`Switched to task: ${taskId}`);
-  };
-
-  const handleRevisionChange = (taskId: string, revisionIndex: number) => {
-    console.log(`Task ${taskId} switched to revision ${revisionIndex}`);
-  };
-
   const handleEditPlanItem = (
     taskId: string,
     planItemIndex: number,
@@ -52,9 +44,6 @@ export function useTaskPlan() {
         }),
       };
     });
-    console.log(
-      `Edited plan item ${planItemIndex} in task ${taskId}: ${newPlan}`,
-    );
   };
 
   const handleAddPlanItem = (taskId: string, plan: string) => {
@@ -89,7 +78,6 @@ export function useTaskPlan() {
         }),
       };
     });
-    console.log(`Added new plan item to task ${taskId}: ${plan}`);
   };
 
   const handleDeletePlanItem = (taskId: string, planItemIndex: number) => {
@@ -116,13 +104,10 @@ export function useTaskPlan() {
         }),
       };
     });
-    console.log(`Deleted plan item ${planItemIndex} from task ${taskId}`);
   };
 
   return {
     taskPlan,
-    handleTaskChange,
-    handleRevisionChange,
     handleEditPlanItem,
     handleAddPlanItem,
     handleDeletePlanItem,

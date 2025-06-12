@@ -37,6 +37,11 @@ async function handler(req: NextRequest) {
 
     const targetUrl = new URL(`${GITHUB_API_URL}/${path}`);
 
+    // Forward query parameters from the original request
+    req.nextUrl.searchParams.forEach((value, key) => {
+      targetUrl.searchParams.append(key, value);
+    });
+
     const headers = new Headers();
     headers.set("Authorization", `Bearer ${token}`);
     headers.set("Accept", "application/vnd.github.v3+json");

@@ -235,16 +235,17 @@ export function BranchSelector({
                   );
                 })}
             </CommandGroup>
-            {branchesHasMore && (
-              <Button
-                onSelect={loadMoreBranches}
-                disabled={branchesLoadingMore}
-                className="justify-center"
-              >
-                {branchesLoadingMore ? "Loading more..." : "Load more"}
-              </Button>
-            )}
           </CommandList>
+          {branchesHasMore && (
+            <Button
+              onClick={loadMoreBranches}
+              disabled={branchesLoadingMore}
+              className="mx-auto my-2 flex"
+              variant="outline"
+            >
+              {branchesLoadingMore ? "Loading more..." : "Load more"}
+            </Button>
+          )}
         </Command>
       </PopoverContent>
     </Popover>

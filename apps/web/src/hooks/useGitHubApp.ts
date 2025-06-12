@@ -168,7 +168,13 @@ export function useGitHubApp(): UseGitHubAppReturn {
         );
 
         if (append) {
-          setBranches((prev) => [...prev, ...branchData.branches]);
+          setBranches((prev) => {
+            // Avoid adding duplicates
+            const newBranches = branchData.branches.filter(
+              (branch) => !prev.some((b) => b.name === branch.name),
+            );
+            return [...prev, ...newBranches];
+          });
         } else {
           setBranches(branchData.branches);
         }

@@ -62,7 +62,7 @@ export async function getInstallationToken(
 export async function getInstallationRepositories(
   installationToken: string,
   page: number = 1,
-  perPage: number = 100,
+  perPage: number = 30,
 ): Promise<{
   repositories: Repository[];
   hasMore: boolean;
@@ -103,7 +103,7 @@ export async function getRepositoryBranches(
   owner: string,
   repo: string,
   page: number = 1,
-  perPage: number = 100,
+  perPage: number = 30,
 ): Promise<{ branches: Branch[]; hasMore: boolean; totalCount?: number }> {
   // First, get repository info to ensure we have the default branch
 
@@ -123,7 +123,7 @@ export async function getRepositoryBranches(
     defaultBranch = repoData.default_branch;
   }
 
-  // Fetch first 100 branches only
+  // Fetch first 30 branches only
   const response = await fetch(
     `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches?per_page=${perPage}&page=${page}`,
     {
@@ -179,7 +179,8 @@ export async function getRepositoryBranches(
 
   return {
     branches,
-    hasMore: branches.length === perPage,
+    hasMore: branches.length >= perPage,
+    totalCount: branches.length,
   };
 }
 
