@@ -53,9 +53,12 @@ export function HumanMessage({
   const handleSubmitEdit = () => {
     setIsEditing(false);
 
-    const newMessage: Message = { type: "human", content: value };
+    const newMessage = {
+      type: "human",
+      content: value,
+    } as unknown as BaseMessage;
     thread.submit(
-      { messages: [newMessage] as unknown as BaseMessage[] },
+      { messages: [newMessage], internal_messages: [newMessage] },
       {
         checkpoint: parentCheckpoint,
         streamMode: ["values"],
