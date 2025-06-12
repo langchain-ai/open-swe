@@ -3,6 +3,43 @@ import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
+// Local storage key for selected repository
+const SELECTED_REPO_STORAGE_KEY = "selected-repository";
+
+// Local storage utility functions
+const saveRepositoryToLocalStorage = (repo: TargetRepository | null) => {
+  try {
+    if (repo) {
+      localStorage.setItem(SELECTED_REPO_STORAGE_KEY, JSON.stringify(repo));
+    } else {
+      localStorage.removeItem(SELECTED_REPO_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.warn("Failed to save repository to localStorage:", error);
+  }
+};
+
+const getRepositoryFromLocalStorage = (): TargetRepository | null => {
+  try {
+    const stored = localStorage.getItem(SELECTED_REPO_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      // Validate the structure
+      if (parsed && typeof parsed.owner === 'string' && typeof parsed.repo === 'string') {
+        return {
+          owner: parsed.owner,
+          repo: parsed.repo,
+          // Don't restore branch from localStorage as per requirements
+        };
+      }
+    }
+    return null;
+  } catch (error) {
+    console.warn("Failed to retrieve repository from localStorage:", error);
+    return null;
+  }
+};
+
 interface UseGitHubAppReturn {
   // Installation and general state
   isInstalled: boolean | null;
@@ -316,3 +353,4 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
