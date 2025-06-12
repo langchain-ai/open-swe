@@ -1,10 +1,6 @@
 "use client";
 import { memo } from "react";
-import {
-  differenceInHours,
-  differenceInMinutes,
-  format,
-} from "date-fns";
+import { differenceInHours, differenceInMinutes, format } from "date-fns";
 import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
 import { useThreads } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
@@ -89,10 +85,14 @@ export const ThreadItem = memo(function ThreadItem({
                 height="16"
                 className="flex-shrink-0"
               />
-              <span className="max-w-[90px] truncate">{thread.values.targetRepository.repo}</span>
+              <span className="max-w-[90px] truncate">
+                {thread.values.targetRepository.repo}
+              </span>
               <span>/</span>
               <GitBranch className="size-2.5 flex-shrink-0" />
-              <span className="max-w-[70px] truncate">{thread.values.targetRepository.branch}</span>
+              <span className="max-w-[70px] truncate">
+                {thread.values.targetRepository.branch}
+              </span>
             </div>
 
             <span>•</span>

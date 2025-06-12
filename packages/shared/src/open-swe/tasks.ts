@@ -1,10 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import {
-  PlanItem,
-  Task,
-  TaskPlan,
-  PlanRevision,
-} from "./types.js";
+import { PlanItem, Task, TaskPlan, PlanRevision } from "./types.js";
 
 /**
  * Creates a new task with the provided plan items.

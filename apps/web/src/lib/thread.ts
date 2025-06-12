@@ -12,12 +12,15 @@ export function getThreadTitle(thread: Thread<GraphState>): string {
   return threadTitle;
 }
 
-export function getThreadTasks(thread: Thread<GraphState>): { totalTasks: number, completedTasks: number } {
+export function getThreadTasks(thread: Thread<GraphState>): {
+  totalTasks: number;
+  completedTasks: number;
+} {
   if (!thread.values.plan) {
     return {
       totalTasks: 0,
       completedTasks: 0,
-    }
+    };
   }
   const activePlanItems = getActivePlanItems(thread.values.plan);
   const totalTasks = activePlanItems.length;
@@ -25,5 +28,5 @@ export function getThreadTasks(thread: Thread<GraphState>): { totalTasks: number
   return {
     totalTasks,
     completedTasks,
-  }
+  };
 }

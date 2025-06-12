@@ -95,7 +95,8 @@ export class ThreadPoller {
       getThreadTitle(current) !== getThreadTitle(updated) ||
       currentTargetRepo.repo !== updatedTargetRepo.repo ||
       currentTargetRepo.branch !== updatedTargetRepo.branch ||
-      JSON.stringify(current.values?.plan) !== JSON.stringify(updated.values?.plan) ||
+      JSON.stringify(current.values?.plan) !==
+        JSON.stringify(updated.values?.plan) ||
       JSON.stringify(current.values?.proposedPlan) !==
         JSON.stringify(updated.values?.proposedPlan)
     );

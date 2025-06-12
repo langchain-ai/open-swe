@@ -139,7 +139,8 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         metadata: getThreadSearchMetadata(assistantId),
       };
 
-      let threadsResponse = await client.threads.search<GraphState>(searchParams);
+      let threadsResponse =
+        await client.threads.search<GraphState>(searchParams);
 
       if (threadsResponse.length === 0) {
         const altMetadata = assistantId.includes("-")
