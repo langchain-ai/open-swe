@@ -61,7 +61,7 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
       </div>
 
       <div className="flex-1 overflow-hidden">
-        {threadsLoading ? (
+        {threadsLoading && threads.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center text-gray-500">
               <Archive className="mx-auto mb-2 h-5 w-5 animate-pulse opacity-50" />
@@ -123,3 +123,4 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
     </div>
   );
 }
+
