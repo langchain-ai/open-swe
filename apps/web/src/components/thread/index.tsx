@@ -45,6 +45,7 @@ import { ConfigurationSidebar } from "../configuration-sidebar";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { useRouter } from "next/navigation";
+import { OpenPRButton } from "../github/open-pr-button";
 import {
   Tooltip,
   TooltipContent,
@@ -447,6 +448,7 @@ export function Thread() {
 
               <div className="col-span-2 flex items-center justify-end gap-2 text-gray-700">
                 <GitHubOAuthButton />
+                <OpenPRButton />
                 <TooltipIconButton
                   tooltip="Configuration"
                   variant="ghost"
@@ -654,4 +656,5 @@ export function Thread() {
     </div>
   );
 }
+
 
