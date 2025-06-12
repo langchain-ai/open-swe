@@ -435,8 +435,8 @@ export function Thread() {
                 {taskPlan && (
                   <TaskPlanView
                     taskPlan={taskPlan}
-                    onTaskChange={() => { }}
-                    onRevisionChange={() => { }}
+                    onTaskChange={() => {}}
+                    onRevisionChange={() => {}}
                     onEditPlanItem={handleEditPlanItem}
                     onAddPlanItem={handleAddPlanItem}
                     onDeletePlanItem={handleDeletePlanItem}
