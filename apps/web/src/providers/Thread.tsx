@@ -9,10 +9,9 @@ import {
   Dispatch,
   SetStateAction,
   useEffect,
-  useTransition,
 } from "react";
 import { createClient } from "./client";
-import { TaskPlan, GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 import { useThreadPolling } from "@/hooks/useThreadPolling";
 
 interface ThreadContextType {
@@ -22,7 +21,6 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<Thread<GraphState> | null>;
-  isPending: boolean;
   recentlyUpdatedThreads: Set<string>;
   handleThreadClick: (
     thread: Thread<GraphState>,
@@ -43,62 +41,6 @@ function getThreadSearchMetadata(
   }
 }
 
-const getTaskCounts = (
-  tasks?: TaskPlan,
-  proposedPlan?: string[],
-  existingCounts?: { totalTasksCount: number; completedTasksCount: number },
-): { totalTasksCount: number; completedTasksCount: number } => {
-  const defaultCounts = existingCounts || {
-    totalTasksCount: 0,
-    completedTasksCount: 0,
-  };
-
-  if (proposedPlan && proposedPlan.length > 0 && !tasks) {
-    return {
-      totalTasksCount: proposedPlan.length,
-      completedTasksCount: 0,
-    };
-  }
-
-  if (!tasks || !tasks.tasks || tasks.tasks.length === 0) {
-    return defaultCounts;
-  }
-  const activeTaskIndex = tasks.activeTaskIndex;
-  const activeTask = tasks.tasks.find(
-    (task) => task.taskIndex === activeTaskIndex,
-  );
-
-  if (
-    !activeTask ||
-    !activeTask.planRevisions ||
-    activeTask.planRevisions.length === 0
-  ) {
-    return defaultCounts;
-  }
-
-  const activeRevisionIndex = activeTask.activeRevisionIndex;
-  const activeRevision = activeTask.planRevisions.find(
-    (revision) => revision.revisionIndex === activeRevisionIndex,
-  );
-
-  if (
-    !activeRevision ||
-    !activeRevision.plans ||
-    activeRevision.plans.length === 0
-  ) {
-    return defaultCounts;
-  }
-
-  const plans = activeRevision.plans;
-
-  const completedTasksCount = plans.filter((p) => p.completed)?.length || 0;
-
-  return {
-    totalTasksCount: plans.length,
-    completedTasksCount,
-  };
-};
-
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const assistantId: string | undefined =
@@ -106,7 +48,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<Thread<GraphState>[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
     Set<string>
   >(new Set());
@@ -215,7 +156,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
-    isPending,
     recentlyUpdatedThreads,
     handleThreadClick,
   };

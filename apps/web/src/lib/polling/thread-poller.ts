@@ -55,7 +55,7 @@ export class ThreadPoller {
       const changedThreadIds: string[] = [];
       const errors: string[] = [];
 
-      for (const currentThread of threadsToPool) {
+      const pollUpdatePromise = Promise.allSettled(threadsToPool.map(async (currentThread) => {
         try {
           const updatedThread = await this.getThreadFn(currentThread.thread_id);
           if (updatedThread) {
@@ -67,10 +67,11 @@ export class ThreadPoller {
           }
         } catch (error) {
           errors.push(`Thread ${currentThread.thread_id}: ${error}`);
-
           updatedThreads.push(currentThread);
         }
-      }
+      }));
+
+      await pollUpdatePromise;
 
       if (changedThreadIds.length > 0) {
         this.config.onUpdate(updatedThreads, changedThreadIds);
