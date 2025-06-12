@@ -30,27 +30,11 @@ interface TasksSidebarProps {
   taskPlan: TaskPlan;
   className?: string;
   onTaskChange?: (taskId: string) => void;
-  onRevisionChange?: (taskId: string, revisionIndex: number) => void;
-  onEditPlanItem?: (
-    taskId: string,
-    planItemIndex: number,
-    newPlan: string,
-  ) => void;
-  onAddPlanItem?: (taskId: string, plan: string) => void;
-  onDeletePlanItem?: (taskId: string, planItemIndex: number) => void;
 }
 
 interface TaskPlanViewProps {
   taskPlan: TaskPlan;
   onTaskChange?: (taskId: string) => void;
-  onRevisionChange?: (taskId: string, revisionIndex: number) => void;
-  onEditPlanItem?: (
-    taskId: string,
-    planItemIndex: number,
-    newPlan: string,
-  ) => void;
-  onAddPlanItem?: (taskId: string, plan: string) => void;
-  onDeletePlanItem?: (taskId: string, planItemIndex: number) => void;
 }
 
 type FilterType = "all" | "completed" | "current" | "pending";
@@ -61,7 +45,6 @@ export function TasksSidebar({
   onClose,
   taskPlan,
   onTaskChange,
-  onRevisionChange,
 }: TasksSidebarProps) {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(
     taskPlan.activeTaskIndex,
@@ -106,15 +89,6 @@ export function TasksSidebar({
     return true;
   });
 
-  const isPlanItemEditable = (item: PlanItem) => {
-    return (
-      isLatestTask &&
-      isLatestRevision &&
-      !item.completed &&
-      item.index !== currentPlanItemIndex
-    );
-  };
-
   const getItemState = (
     item: PlanItem,
   ): "completed" | "current" | "remaining" => {
@@ -138,7 +112,6 @@ export function TasksSidebar({
     if (currentRevisionIndex > 0) {
       const newIndex = currentRevisionIndex - 1;
       setCurrentRevisionIndex(newIndex);
-      onRevisionChange?.(currentTask.id, newIndex);
       setExpandedSummaries(new Set());
     }
   };
@@ -147,7 +120,6 @@ export function TasksSidebar({
     if (currentRevisionIndex < currentTask.planRevisions.length - 1) {
       const newIndex = currentRevisionIndex + 1;
       setCurrentRevisionIndex(newIndex);
-      onRevisionChange?.(currentTask.id, newIndex);
       setExpandedSummaries(new Set());
     }
   };
@@ -155,7 +127,6 @@ export function TasksSidebar({
   const goToLatestRevision = () => {
     const latestIndex = currentTask.activeRevisionIndex;
     setCurrentRevisionIndex(latestIndex);
-    onRevisionChange?.(currentTask.id, latestIndex);
     setExpandedSummaries(new Set());
   };
 
@@ -426,11 +397,7 @@ export function TasksSidebar({
 }
 
 // Main TaskPlan View Component
-export function TaskPlanView({
-  taskPlan,
-  onTaskChange,
-  onRevisionChange,
-}: TaskPlanViewProps) {
+export function TaskPlanView({ taskPlan, onTaskChange }: TaskPlanViewProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   if (taskPlan.tasks.length === 0) {
@@ -457,7 +424,6 @@ export function TaskPlanView({
         onClose={() => setIsSidebarOpen(false)}
         taskPlan={taskPlan}
         onTaskChange={onTaskChange}
-        onRevisionChange={onRevisionChange}
       />
     </>
   );
