@@ -30,7 +30,7 @@ import TaskListSidebar from "../task-list-sidebar";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
-import { useFileUpload } from "@/hooks/use-file-upload";
+import { useFileUpload } from "@/hooks/useFileUpload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
 import {
   useArtifactOpen,
@@ -42,7 +42,7 @@ import { GitHubOAuthButton } from "../github/github-oauth-button";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
-import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { useRouter } from "next/navigation";
 import { OpenPRButton } from "../github/open-pr-button";
@@ -54,7 +54,7 @@ import {
 } from "../ui/tooltip";
 import { BaseMessage } from "@langchain/core/messages";
 import { TaskPlanView } from "../tasks";
-import { useTaskPlan } from "../tasks/use-task-plan";
+import { useTaskPlan } from "../tasks/useTaskPlan";
 
 function StickyToBottomContent(props: {
   content: ReactNode;

@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";

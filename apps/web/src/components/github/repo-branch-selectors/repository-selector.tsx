@@ -25,6 +25,7 @@ interface RepositorySelectorProps {
   placeholder?: string;
   buttonClassName?: string;
   chatStarted?: boolean;
+  streamTargetRepository?: TargetRepository;
 }
 // TODO: remove this, we should use the TargetRepository type from the open-swe package
 // Convert GitHub Repository to TargetRepository format
@@ -41,6 +42,7 @@ export function RepositorySelector({
   placeholder = "Select a repository...",
   buttonClassName,
   chatStarted = false,
+  streamTargetRepository,
 }: RepositorySelectorProps) {
   const [open, setOpen] = useState(false);
   const {
@@ -68,6 +70,12 @@ export function RepositorySelector({
   const selectedValue = selectedRepository
     ? `${selectedRepository.owner}/${selectedRepository.repo}`
     : undefined;
+
+  // When chatStarted and streamTargetRepository is available, use it for display
+  const displayValue =
+    chatStarted && streamTargetRepository
+      ? `${streamTargetRepository.owner}/${streamTargetRepository.repo}`
+      : selectedValue;
 
   if (isLoading) {
     return (
@@ -155,7 +163,7 @@ export function RepositorySelector({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <GitHubSVG />
           <span className="truncate text-left">
-            {selectedValue || placeholder}
+            {displayValue || placeholder}
           </span>
         </div>
       </Button>
