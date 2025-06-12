@@ -435,7 +435,6 @@ export function Thread() {
                   <TaskPlanView
                     taskPlan={taskPlan}
                     onTaskChange={() => {}}
-                    onRevisionChange={() => {}}
                   />
                 )}
               </div>
