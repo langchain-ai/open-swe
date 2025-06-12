@@ -2,6 +2,8 @@ import "@langchain/langgraph/zod";
 import { z } from "zod";
 import {
   LangGraphRunnableConfig,
+  Messages,
+  messagesStateReducer,
   MessagesZodState,
 } from "@langchain/langgraph/web";
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
@@ -12,6 +14,8 @@ import {
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
 import { GITHUB_TOKEN_COOKIE } from "../constants.js";
+import { withLangGraph } from "@langchain/langgraph/zod";
+import { BaseMessage } from "@langchain/core/messages";
 
 export type PlanItem = {
   /**
@@ -116,6 +120,24 @@ export type TargetRepository = {
 };
 
 export const GraphAnnotation = MessagesZodState.extend({
+  /**
+   * The internal messages. These are the messages which are
+   * passed to the LLM, truncated, removed etc. The main `messages`
+   * key is never modified to persist the content show on the client.
+   */
+  internalMessages: withLangGraph<BaseMessage[], Messages>(
+    z.custom<BaseMessage[]>(),
+    {
+      reducer: {
+        schema: z.custom<Messages>(),
+        fn: messagesStateReducer,
+      },
+      jsonSchemaExtra: {
+        langgraph_type: "messages",
+      },
+      default: () => [],
+    },
+  ),
   proposedPlan: z
     .array(z.string())
     .default(() => [])

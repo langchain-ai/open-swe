@@ -246,12 +246,14 @@ export function Thread() {
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
 
+    const newMessages = [
+      ...toolMessages,
+      newHumanMessage,
+    ] as unknown as BaseMessage[];
     stream.submit(
       {
-        messages: [
-          ...toolMessages,
-          newHumanMessage,
-        ] as unknown as BaseMessage[],
+        messages: newMessages,
+        internalMessages: newMessages,
         context,
         targetRepository: selectedRepository,
       },

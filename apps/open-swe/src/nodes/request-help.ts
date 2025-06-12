@@ -13,7 +13,7 @@ ${helpRequest}
 };
 
 export async function requestHelp(state: GraphState): Promise<Command> {
-  const lastMessage = state.messages[state.messages.length - 1];
+  const lastMessage = state.internalMessages[state.internalMessages.length - 1];
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
   }
@@ -53,14 +53,14 @@ export async function requestHelp(state: GraphState): Promise<Command> {
       throw new Error("Interrupt response expected to be a string.");
     }
     await startSandbox(sandboxSessionId);
+    const toolMessage = new ToolMessage({
+      tool_call_id: toolCall.id ?? "",
+      content: `Human response: ${interruptRes.args}`,
+      status: "success",
+    });
     const commandUpdate: GraphUpdate = {
-      messages: [
-        new ToolMessage({
-          tool_call_id: toolCall.id ?? "",
-          content: `Human response: ${interruptRes.args}`,
-          status: "success",
-        }),
-      ],
+      messages: [toolMessage],
+      internalMessages: [toolMessage],
     };
     return new Command({
       goto: "generate-action",

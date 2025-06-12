@@ -39,12 +39,12 @@ export async function generateConclusion(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const userMessage = `The user's initial request is as follows:
 ${userRequest || "No user message found"}
 
 The conversation history is as follows:
-${state.messages.map(getMessageString).join("\n")}
+${state.internalMessages.map(getMessageString).join("\n")}
 
 Given all of this, please respond with the concise conclusion. Do not include any additional text besides the conclusion.`;
 
@@ -71,6 +71,7 @@ Given all of this, please respond with the concise conclusion. Do not include an
 
   return {
     messages: [response],
+    internalMessages: [response],
     plan: updatedTaskPlan,
   };
 }

@@ -106,9 +106,10 @@ export async function openPullRequest(
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const response = await modelWithTool.invoke([
     {
       role: "user",
@@ -141,20 +142,23 @@ export async function openPullRequest(
     sandboxDeleted = await deleteSandbox(sandboxSessionId);
   }
 
+  const newMessages = [
+    response,
+    new ToolMessage({
+      tool_call_id: toolCall.id ?? "",
+      content: pr
+        ? `Created pull request: ${pr.html_url}`
+        : "Failed to create pull request.",
+      name: toolCall.name,
+      additional_kwargs: {
+        pull_request: pr,
+      },
+    }),
+  ];
+
   return {
-    messages: [
-      response,
-      new ToolMessage({
-        tool_call_id: toolCall.id ?? "",
-        content: pr
-          ? `Created pull request: ${pr.html_url}`
-          : "Failed to create pull request.",
-        name: toolCall.name,
-        additional_kwargs: {
-          pull_request: pr,
-        },
-      }),
-    ],
+    messages: newMessages,
+    internalMessages: newMessages,
     // If the sandbox was successfully deleted, we can remove it from the state.
     ...(sandboxDeleted && { sandboxSessionId: undefined }),
   };

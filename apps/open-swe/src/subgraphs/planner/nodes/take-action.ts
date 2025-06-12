@@ -34,17 +34,21 @@ export async function takeAction(
 
   if (!tool) {
     logger.error(`Unknown tool: ${toolCall.name}`);
+    const toolMessage = new ToolMessage({
+      tool_call_id: toolCall.id ?? "",
+      content: `Unknown tool: ${toolCall.name}`,
+      name: toolCall.name,
+      status: "error",
+    });
     return {
-      plannerMessages: [
-        new ToolMessage({
-          tool_call_id: toolCall.id ?? "",
-          content: `Unknown tool: ${toolCall.name}`,
-          name: toolCall.name,
-          status: "error",
-        }),
-      ],
+      messages: [toolMessage],
+      plannerMessages: [toolMessage],
     };
   }
+
+  logger.info("Executing planner tool action", {
+    ...toolCall,
+  });
 
   let result = "";
   let toolCallStatus: "success" | "error" = "success";
@@ -86,7 +90,13 @@ export async function takeAction(
     status: toolCallStatus,
   });
 
+  logger.info("Completed planner tool action", {
+    tool_call_id: toolCall.id,
+    status: toolCallStatus,
+  });
+
   return {
+    messages: [toolMessage],
     plannerMessages: [toolMessage],
   };
 }

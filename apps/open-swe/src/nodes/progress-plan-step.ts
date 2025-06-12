@@ -73,14 +73,15 @@ export async function progressPlanStep(
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
   const modelWithTools = model.bindTools([setTaskStatusTool], {
     tool_choice: setTaskStatusTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.messages, {
+  const userRequest = getUserRequest(state.internalMessages, {
     returnFullMessage: true,
   });
   const conversationHistoryStr = `Here is the full conversation history after the user's request:
   
-${removeFirstHumanMessage(state.messages).map(getMessageString).join("\n")}
+${removeFirstHumanMessage(state.internalMessages).map(getMessageString).join("\n")}
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
@@ -118,6 +119,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
     name: toolCall.name,
   });
 
+  const newMessages = [response, toolMessage];
+
   if (!isCompleted) {
     logger.info(
       "Current task has not been completed. Progressing to the next action.",
@@ -125,7 +128,10 @@ Once you've determined the status of the current task, call the \`set_task_statu
         reasoning: toolCall.args.reasoning,
       },
     );
-    const commandUpdate: GraphUpdate = { messages: [response, toolMessage] };
+    const commandUpdate: GraphUpdate = {
+      messages: newMessages,
+      internalMessages: newMessages,
+    };
     return new Command({
       goto: "generate-action",
       update: commandUpdate,
@@ -146,7 +152,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
       "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );
     const commandUpdate: GraphUpdate = {
-      messages: [response, toolMessage],
+      messages: newMessages,
+      internalMessages: newMessages,
       // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
       plan: updatedPlanTasks,
     };
@@ -164,7 +171,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
   });
 
   const commandUpdate: GraphUpdate = {
-    messages: [response, toolMessage],
+    messages: newMessages,
+    internalMessages: newMessages,
     plan: updatedPlanTasks,
   };
 
