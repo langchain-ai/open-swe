@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
+import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 // Local storage key for selected repository
@@ -106,6 +107,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   // Track if auto-selection has been attempted to prevent re-triggering
   const hasAutoSelectedRef = useRef(false);
+
+  // Track if we've attempted to load from localStorage
+  const hasCheckedLocalStorageRef = useRef(false);
 
   const selectedRepository = useMemo(() => {
     if (!selectedRepositoryParam) return null;
@@ -264,6 +268,69 @@ export function useGitHubApp(): UseGitHubAppReturn {
     checkInstallation();
   }, []);
 
+  // Check local storage and validate stored repository on initial load
+  useEffect(() => {
+    if (
+      !hasCheckedLocalStorageRef.current && // Haven't checked localStorage yet
+      !selectedRepository && // No repo currently selected
+      !isLoading && // Not loading repositories
+      !error && // No error occurred
+      isInstalled === true && // GitHub App is installed
+      repositories.length > 0 // Repositories are available
+    ) {
+      hasCheckedLocalStorageRef.current = true;
+      
+      const storedRepo = getRepositoryFromLocalStorage();
+      if (storedRepo) {
+        // Check if the stored repository exists in the current response
+        const existsInResponse = repositories.some(
+          (repo) => repo.full_name === `${storedRepo.owner}/${storedRepo.repo}`
+        );
+        
+        if (existsInResponse) {
+          // Repository exists in current response, use it
+          setSelectedRepository(storedRepo);
+          hasAutoSelectedRef.current = true;
+        } else {
+          // Repository not in current response, try to fetch it specifically
+          const fetchSpecificRepo = async () => {
+            try {
+              const specificRepo = await getRepository(storedRepo.owner, storedRepo.repo);
+              if (specificRepo) {
+                // Repository exists, use it
+                setSelectedRepository(storedRepo);
+                hasAutoSelectedRef.current = true;
+              } else {
+                // Repository doesn't exist, fall back to first repo and update localStorage
+                const firstRepo = repositories[0];
+                const targetRepo = {
+                  owner: firstRepo.full_name.split("/")[0],
+                  repo: firstRepo.full_name.split("/")[1],
+                };
+                setSelectedRepository(targetRepo);
+                saveRepositoryToLocalStorage(targetRepo);
+                hasAutoSelectedRef.current = true;
+              }
+            } catch (error) {
+              console.warn("Failed to fetch specific repository:", error);
+              // Fall back to first repo and update localStorage
+              const firstRepo = repositories[0];
+              const targetRepo = {
+                owner: firstRepo.full_name.split("/")[0],
+                repo: firstRepo.full_name.split("/")[1],
+              };
+              setSelectedRepository(targetRepo);
+              saveRepositoryToLocalStorage(targetRepo);
+              hasAutoSelectedRef.current = true;
+            }
+          };
+          
+          fetchSpecificRepo();
+        }
+      }
+    }
+  }, [repositories, selectedRepository, isLoading, error, isInstalled, setSelectedRepository]);
+
   // Auto-select first repository on initial page load
   useEffect(() => {
     if (
@@ -273,6 +340,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       !error && // No error occurred
       isInstalled === true && // GitHub App is installed
       repositories.length > 0 // Repositories are available
+      && hasCheckedLocalStorageRef.current // Only after localStorage check is complete
     ) {
       const firstRepo = repositories[0];
       const targetRepo = {
@@ -280,6 +348,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
         repo: firstRepo.full_name.split("/")[1],
       };
       setSelectedRepository(targetRepo);
+      saveRepositoryToLocalStorage(targetRepo);
       hasAutoSelectedRef.current = true;
     }
   }, [
@@ -289,6 +358,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     error,
     isInstalled,
     setSelectedRepository,
+    hasCheckedLocalStorageRef.current,
   ]);
 
   const refreshRepositories = async () => {
@@ -353,4 +423,5 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
