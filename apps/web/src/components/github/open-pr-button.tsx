@@ -42,7 +42,6 @@ export function OpenPRButton() {
     }).then((pr) => {
       if (!pr) return;
       setPullRequest(pr);
-      console.log("found PR", pr);
       if (pr.merged_at) {
         setPrState("merged");
       } else if (pr.draft) {
