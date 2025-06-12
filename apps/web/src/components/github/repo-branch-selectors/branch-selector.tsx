@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitBranch, Shield } from "lucide-react";
-import { TargetRepository } from "@open-swe/shared/src/open-swe/types";
+import { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 interface BranchSelectorProps {
   disabled?: boolean;
