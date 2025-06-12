@@ -72,10 +72,10 @@ export function RepositorySelector({
     : undefined;
 
   // When chatStarted and streamTargetRepository is available, use it for display
-  const displayValue = chatStarted && streamTargetRepository
-    ? `${streamTargetRepository.owner}/${streamTargetRepository.repo}`
-    : selectedValue;
-
+  const displayValue =
+    chatStarted && streamTargetRepository
+      ? `${streamTargetRepository.owner}/${streamTargetRepository.repo}`
+      : selectedValue;
 
   if (isLoading) {
     return (
@@ -242,4 +242,3 @@ export function RepositorySelector({
     </Popover>
   );
 }
-

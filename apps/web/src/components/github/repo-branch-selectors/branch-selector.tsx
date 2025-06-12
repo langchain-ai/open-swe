@@ -151,9 +151,10 @@ export function BranchSelector({
   }
 
   // Determine the display value - prioritize stream data when chatStarted and available
-  const displayValue = chatStarted && streamTargetRepository?.branch 
-    ? streamTargetRepository.branch 
-    : selectedBranch;
+  const displayValue =
+    chatStarted && streamTargetRepository?.branch
+      ? streamTargetRepository.branch
+      : selectedBranch;
 
   if (chatStarted) {
     return (
@@ -264,4 +265,3 @@ export function BranchSelector({
     </Popover>
   );
 }
-

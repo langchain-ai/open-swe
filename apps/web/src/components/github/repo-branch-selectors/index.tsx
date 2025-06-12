@@ -13,8 +13,8 @@ export function RepositoryBranchSelectors() {
 
   // Access stream context when chat has started
   const stream = useStreamContext();
-  const streamTargetRepository = chatStarted 
-    ? stream?.values?.targetRepository 
+  const streamTargetRepository = chatStarted
+    ? stream?.values?.targetRepository
     : undefined;
 
   return (
@@ -38,4 +38,3 @@ export function RepositoryBranchSelectors() {
     </div>
   );
 }
-
