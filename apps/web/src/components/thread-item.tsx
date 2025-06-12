@@ -1,6 +1,11 @@
 "use client";
 import { memo } from "react";
-import { formatDistanceToNow, differenceInHours, differenceInMinutes, format } from "date-fns";
+import {
+  formatDistanceToNow,
+  differenceInHours,
+  differenceInMinutes,
+  format,
+} from "date-fns";
 import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
 import { ThreadWithTasks, useThreads } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
@@ -18,22 +23,22 @@ interface ThreadItemProps {
 function formatRelativeDate(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
-  
+
   const minutesAgo = differenceInMinutes(now, date);
   const hoursAgo = differenceInHours(now, date);
-  
+
   // Within the last hour - show minutes ago
   if (minutesAgo < 60) {
     return `${minutesAgo} min ago`;
   }
-  
+
   // Between 1-24 hours ago - show hours ago
   if (hoursAgo < 24) {
-    return `${hoursAgo} hour${hoursAgo === 1 ? '' : 's'} ago`;
+    return `${hoursAgo} hour${hoursAgo === 1 ? "" : "s"} ago`;
   }
-  
+
   // More than 24 hours ago - show month, day format
-  return format(date, 'MMM do');
+  return format(date, "MMM do");
 }
 
 export const ThreadItem = memo(function ThreadItem({
@@ -120,6 +125,3 @@ export const ThreadItem = memo(function ThreadItem({
     </div>
   );
 });
-
-
-
