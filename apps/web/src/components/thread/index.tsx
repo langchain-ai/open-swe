@@ -458,13 +458,6 @@ export function Thread() {
                 >
                   <Settings className="size-4" />
                 </TooltipIconButton>
-                <TooltipIconButton
-                  tooltip="New thread"
-                  variant="ghost"
-                  onClick={() => setThreadId(null)}
-                >
-                  <SquarePen className="size-4" />
-                </TooltipIconButton>
               </div>
 
               <div className="from-background to-background/0 absolute inset-x-0 top-full h-5 bg-gradient-to-b" />
@@ -583,9 +576,9 @@ export function Thread() {
                             <TooltipTrigger>
                               <Label
                                 htmlFor="file-input"
-                                className="mr-1 ml-2 flex cursor-pointer items-center gap-2"
+                                className="mx-1 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border-[1px] border-gray-300 bg-inherit text-gray-500 hover:text-gray-700"
                               >
-                                <FilePlus2 className="size-4 text-gray-600" />
+                                <FilePlus2 className="size-4" />
                               </Label>
                             </TooltipTrigger>
                             <TooltipContent>Attach files</TooltipContent>
@@ -601,6 +594,16 @@ export function Thread() {
                           className="hidden"
                         />
                         <RepositoryBranchSelectors />
+                        {chatStarted && (
+                          <TooltipIconButton
+                            tooltip="New thread"
+                            variant="outline"
+                            onClick={() => setThreadId(null)}
+                            className="ml-1 h-8 w-8 rounded-full border-gray-300 bg-inherit text-gray-500 hover:text-gray-700"
+                          >
+                            <SquarePen className="size-4" />
+                          </TooltipIconButton>
+                        )}
 
                         {stream.isLoading ? (
                           <Button
@@ -608,7 +611,7 @@ export function Thread() {
                             onClick={() => stream.stop()}
                             className="ml-auto"
                           >
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                            <LoaderCircle className="size-4 animate-spin" />
                             Cancel
                           </Button>
                         ) : (
