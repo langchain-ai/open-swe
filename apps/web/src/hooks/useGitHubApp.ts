@@ -275,31 +275,27 @@ export function useGitHubApp(): UseGitHubAppReturn {
     checkInstallation();
   }, []);
 
-  // Check local storage and validate stored repository on initial load
   useEffect(() => {
     if (
-      !hasCheckedLocalStorageRef.current && // Haven't checked localStorage yet
-      !selectedRepository && // No repo currently selected
-      !isLoading && // Not loading repositories
-      !error && // No error occurred
-      isInstalled === true && // GitHub App is installed
-      repositories.length > 0 // Repositories are available
+      !hasCheckedLocalStorageRef.current &&
+      !selectedRepository &&
+      !isLoading &&
+      !error &&
+      isInstalled === true &&
+      repositories.length > 0
     ) {
       hasCheckedLocalStorageRef.current = true;
 
       const storedRepo = getRepositoryFromLocalStorage();
       if (storedRepo) {
-        // Check if the stored repository exists in the current response
         const existsInResponse = repositories.some(
           (repo) => repo.full_name === `${storedRepo.owner}/${storedRepo.repo}`,
         );
 
         if (existsInResponse) {
-          // Repository exists in current response, use it
           setSelectedRepository(storedRepo);
           hasAutoSelectedRef.current = true;
         } else {
-          // Repository not in current response, try to fetch it specifically
           const fetchSpecificRepo = async () => {
             try {
               const specificRepo = await getRepository(
@@ -307,11 +303,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
                 storedRepo.repo,
               );
               if (specificRepo) {
-                // Repository exists, use it
                 setSelectedRepository(storedRepo);
                 hasAutoSelectedRef.current = true;
               } else {
-                // Repository doesn't exist, fall back to first repo and update localStorage
                 const firstRepo = repositories[0];
                 const targetRepo = {
                   owner: firstRepo.full_name.split("/")[0],
@@ -323,7 +317,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
               }
             } catch (error) {
               console.warn("Failed to fetch specific repository:", error);
-              // Fall back to first repo and update localStorage
               const firstRepo = repositories[0];
               const targetRepo = {
                 owner: firstRepo.full_name.split("/")[0],
