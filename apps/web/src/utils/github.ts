@@ -184,6 +184,9 @@ export async function getRepositoryBranches(
   };
 }
 
+/**
+ * Fetches a specific repository using OAuth access token
+ */
 export async function getRepository(owner: string, repo: string) {
   const response = await fetch(
     `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,

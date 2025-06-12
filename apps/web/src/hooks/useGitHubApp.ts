@@ -4,10 +4,8 @@ import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 
-// Local storage key for selected repository
 const SELECTED_REPO_STORAGE_KEY = "selected-repository";
 
-// Local storage utility functions
 const saveRepositoryToLocalStorage = (repo: TargetRepository | null) => {
   try {
     if (repo) {
@@ -25,7 +23,6 @@ const getRepositoryFromLocalStorage = (): TargetRepository | null => {
     const stored = localStorage.getItem(SELECTED_REPO_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      // Validate the structure
       if (
         parsed &&
         typeof parsed.owner === "string" &&
@@ -34,7 +31,7 @@ const getRepositoryFromLocalStorage = (): TargetRepository | null => {
         return {
           owner: parsed.owner,
           repo: parsed.repo,
-          // Don't restore branch from localStorage as per requirements
+          // Don't restore branch from localStorage
         };
       }
     }
