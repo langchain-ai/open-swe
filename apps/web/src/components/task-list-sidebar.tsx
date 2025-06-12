@@ -123,4 +123,3 @@ export default function TaskListSidebar({ onCollapse }: TaskListSidebarProps) {
     </div>
   );
 }
-
