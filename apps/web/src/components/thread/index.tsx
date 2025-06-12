@@ -103,12 +103,7 @@ export function Thread() {
   const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubAppProvider();
   const { getConfig } = useConfigStore();
-  const {
-    taskPlan,
-    handleEditPlanItem,
-    handleAddPlanItem,
-    handleDeletePlanItem,
-  } = useTaskPlan();
+  const { taskPlan } = useTaskPlan();
 
   const [threadId, _setThreadId] = useQueryState("threadId");
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
@@ -441,9 +436,6 @@ export function Thread() {
                     taskPlan={taskPlan}
                     onTaskChange={() => {}}
                     onRevisionChange={() => {}}
-                    onEditPlanItem={handleEditPlanItem}
-                    onAddPlanItem={handleAddPlanItem}
-                    onDeletePlanItem={handleDeletePlanItem}
                   />
                 )}
               </div>
