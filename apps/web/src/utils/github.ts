@@ -249,8 +249,12 @@ export async function getPullRequest(inputs: {
   headBranch: string;
 }) {
   try {
+    const queryParams = new URLSearchParams();
+    queryParams.set("base", inputs.baseBranch);
+    queryParams.set("head", inputs.headBranch);
+    queryParams.set("state", "all");
     const response = await fetch(
-      `${getBaseApiUrl()}github/proxy/repos/${inputs.owner}/${inputs.repo}/pulls?base=${inputs.baseBranch}&head=${inputs.headBranch}`,
+      `${getBaseApiUrl()}github/proxy/repos/${inputs.owner}/${inputs.repo}/pulls?${queryParams.toString()}`,
       {
         headers: {
           Accept: "application/vnd.github.v3+json",

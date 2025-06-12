@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
+import { LogOut } from "lucide-react";
+import { TooltipIconButton } from "../ui/tooltip-icon-button";
 
 export function GitHubOAuthButton() {
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
@@ -67,16 +69,15 @@ export function GitHubOAuthButton() {
 
   if (isAuth) {
     return (
-      <Button
-        variant="outline"
+      <TooltipIconButton
+        tooltip="Logout"
         onClick={handleLogout}
         disabled={isLoading}
         className="text-xs"
         size="sm"
       >
-        <GitHubSVG />
-        {isLoading ? "Disconnecting..." : "Disconnect GitHub"}
-      </Button>
+        <LogOut className="size-4" />
+      </TooltipIconButton>
     );
   }
 

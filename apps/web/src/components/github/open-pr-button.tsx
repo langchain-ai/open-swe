@@ -70,6 +70,7 @@ export function OpenPRButton() {
         "text-gray-500 hover:text-gray-600": prState === "draft",
         "text-[#8957e5] hover:text-[#7847d1]": prState === "merged",
       })}
+      size="sm"
     >
       {prState === "merged" && <GitMerge className="size-4" />}
       {prState === "draft" && <GitPullRequestDraft className="size-4" />}
