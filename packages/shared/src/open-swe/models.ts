@@ -1,20 +1,20 @@
 export const MODEL_OPTIONS = [
-  {
-    label: "Claude Sonnet 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-sonnet-4-0",
-  },
-  {
-    label: "Claude Opus 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-opus-4-0",
-  },
+  // {
+  //   label: "Claude Sonnet 4 (Extended Thinking)",
+  //   value: "anthropic:extended-thinking:claude-sonnet-4-0",
+  // },
+  // {
+  //   label: "Claude Opus 4 (Extended Thinking)",
+  //   value: "anthropic:extended-thinking:claude-opus-4-0",
+  // },
   {
     label: "Claude Sonnet 4",
     value: "anthropic:claude-sonnet-4-0",
   },
-  {
-    label: "Claude Opus 4",
-    value: "anthropic:claude-opus-4-0",
-  },
+  // {
+  //   label: "Claude Opus 4",
+  //   value: "anthropic:claude-opus-4-0",
+  // },
   {
     label: "Claude 3.7 Sonnet",
     value: "anthropic:claude-3-7-sonnet-latest",
@@ -23,10 +23,10 @@ export const MODEL_OPTIONS = [
     label: "Claude 3.5 Sonnet",
     value: "anthropic:claude-3-5-sonnet-latest",
   },
-  {
-    label: "o4",
-    value: "openai:o4",
-  },
+  // {
+  //   label: "o4",
+  //   value: "openai:o4",
+  // },
   {
     label: "o4 mini",
     value: "openai:o4-mini",
