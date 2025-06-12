@@ -4,7 +4,7 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
 export function getThreadTitle(thread: Thread<GraphState>): string {
-  const messages = thread?.values.messages;
+  const messages = thread?.values?.messages;
   if (!messages?.length || !messages[0]?.content) {
     return `Thread ${thread.thread_id.substring(0, 8)}`;
   }
@@ -16,7 +16,7 @@ export function getThreadTasks(thread: Thread<GraphState>): {
   totalTasks: number;
   completedTasks: number;
 } {
-  if (!thread.values.plan) {
+  if (!thread.values || !thread.values?.plan) {
     return {
       totalTasks: 0,
       completedTasks: 0,

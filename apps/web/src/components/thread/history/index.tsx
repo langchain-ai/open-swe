@@ -32,10 +32,10 @@ function ThreadList({
           typeof t.values === "object" &&
           t.values &&
           "messages" in t.values &&
-          Array.isArray(t.values.messages) &&
-          t.values.messages?.length > 0
+          Array.isArray(t.values?.messages) &&
+          t.values?.messages?.length > 0
         ) {
-          const firstMessage = t.values.messages[0];
+          const firstMessage = t.values?.messages[0];
           itemText = getContentString(firstMessage.content);
         }
         return (

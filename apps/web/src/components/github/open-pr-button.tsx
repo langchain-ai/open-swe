@@ -23,10 +23,11 @@ export function OpenPRButton() {
 
   useEffect(() => {
     const baseBranch =
-      stream.values.targetRepository?.branch ??
-      stream.values.targetRepository?.baseCommit ??
+      stream.values?.targetRepository?.branch ??
+      stream.values?.targetRepository?.baseCommit ??
       branch;
     if (
+      !stream.values ||
       !stream.values.branchName ||
       !stream.values.targetRepository ||
       !baseBranch
@@ -49,7 +50,7 @@ export function OpenPRButton() {
         setPrState(pr.state);
       }
     });
-  }, [stream.values?.branchName, stream.values.targetRepository, branch]);
+  }, [stream.values?.branchName, stream.values?.targetRepository, branch]);
 
   if (!pullRequest) {
     return null;

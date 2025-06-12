@@ -86,12 +86,12 @@ export const ThreadItem = memo(function ThreadItem({
                 className="flex-shrink-0"
               />
               <span className="max-w-[90px] truncate">
-                {thread.values.targetRepository.repo}
+                {thread.values?.targetRepository?.repo || "x"}
               </span>
               <span>/</span>
               <GitBranch className="size-2.5 flex-shrink-0" />
               <span className="max-w-[70px] truncate">
-                {thread.values.targetRepository.branch}
+                {thread.values?.targetRepository?.branch || "x"}
               </span>
             </div>
 
