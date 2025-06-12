@@ -214,18 +214,19 @@ export function RepositorySelector({
               })}
             </CommandGroup>
             {repositoriesHasMore && (
-              <Button
-                onClick={async (e) => {
-                  e.preventDefault();
-                  await loadMoreRepositories();
-                }}
-                disabled={repositoriesLoadingMore}
-                className="justify-center"
-              >
-                {repositoriesLoadingMore
-                  ? "Loading more..."
-                  : "Load more repositories"}
-              </Button>
+              <CommandGroup>
+                <CommandItem
+                  onSelect={() => {
+                    loadMoreRepositories();
+                  }}
+                  disabled={repositoriesLoadingMore}
+                  className="justify-center"
+                >
+                  {repositoriesLoadingMore
+                    ? "Loading more..."
+                    : "Load more repositories"}
+                </CommandItem>
+              </CommandGroup>
             )}
           </CommandList>
         </Command>
