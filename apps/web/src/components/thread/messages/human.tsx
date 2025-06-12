@@ -58,7 +58,7 @@ export function HumanMessage({
       content: value,
     } as unknown as BaseMessage;
     thread.submit(
-      { messages: [newMessage], internal_messages: [newMessage] },
+      { messages: [newMessage], internalMessages: [newMessage] },
       {
         checkpoint: parentCheckpoint,
         streamMode: ["values"],

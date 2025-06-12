@@ -106,9 +106,10 @@ export async function openPullRequest(
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internal_messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const response = await modelWithTool.invoke([
     {
       role: "user",
@@ -157,7 +158,7 @@ export async function openPullRequest(
 
   return {
     messages: newMessages,
-    internal_messages: newMessages,
+    internalMessages: newMessages,
     // If the sandbox was successfully deleted, we can remove it from the state.
     ...(sandboxDeleted && { sandboxSessionId: undefined }),
   };

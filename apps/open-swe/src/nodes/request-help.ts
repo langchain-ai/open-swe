@@ -13,8 +13,7 @@ ${helpRequest}
 };
 
 export async function requestHelp(state: GraphState): Promise<Command> {
-  const lastMessage =
-    state.internal_messages[state.internal_messages.length - 1];
+  const lastMessage = state.internalMessages[state.internalMessages.length - 1];
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
   }
@@ -61,7 +60,7 @@ export async function requestHelp(state: GraphState): Promise<Command> {
     });
     const commandUpdate: GraphUpdate = {
       messages: [toolMessage],
-      internal_messages: [toolMessage],
+      internalMessages: [toolMessage],
     };
     return new Command({
       goto: "generate-action",

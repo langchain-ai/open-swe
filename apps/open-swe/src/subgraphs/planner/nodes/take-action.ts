@@ -46,6 +46,10 @@ export async function takeAction(
     };
   }
 
+  logger.info("Executing planner tool action", {
+    ...toolCall,
+  });
+
   let result = "";
   let toolCallStatus: "success" | "error" = "success";
   try {
@@ -83,6 +87,11 @@ export async function takeAction(
     tool_call_id: toolCall.id ?? "",
     content: truncateOutput(result),
     name: toolCall.name,
+    status: toolCallStatus,
+  });
+
+  logger.info("Completed planner tool action", {
+    tool_call_id: toolCall.id,
     status: toolCallStatus,
   });
 

@@ -1,14 +1,24 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
-import { addMessages, Messages } from "@langchain/langgraph";
+import { Messages, messagesStateReducer } from "@langchain/langgraph";
 import { BaseMessage } from "@langchain/core/messages";
 import { GraphAnnotation } from "@open-swe/shared/open-swe/types";
+import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const PlannerGraphStateObj = GraphAnnotation.extend({
-  plannerMessages: z
-    .custom<BaseMessage[]>()
-    .default(() => [])
-    .langgraph.reducer<Messages>((state, update) => addMessages(state, update)),
+  plannerMessages: withLangGraph<BaseMessage[], Messages>(
+    z.custom<BaseMessage[]>(),
+    {
+      reducer: {
+        schema: z.custom<Messages>(),
+        fn: messagesStateReducer,
+      },
+      jsonSchemaExtra: {
+        langgraph_type: "messages",
+      },
+      default: () => [],
+    },
+  ),
 });
 
 export type PlannerGraphState = z.infer<typeof PlannerGraphStateObj>;

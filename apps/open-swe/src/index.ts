@@ -32,8 +32,8 @@ import { plannerGraph } from "./subgraphs/index.js";
 async function routeGeneratedAction(
   state: GraphState,
 ): Promise<"open-pr" | "take-action" | "request-help" | Send> {
-  const { internal_messages } = state;
-  const lastMessage = internal_messages[internal_messages.length - 1];
+  const { internalMessages } = state;
+  const lastMessage = internalMessages[internalMessages.length - 1];
 
   // If the message is an AI message, and it has tool calls, we should take action.
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.length) {

@@ -101,7 +101,7 @@ export async function diagnoseError(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const lastFailedAction = state.internal_messages.findLast(
+  const lastFailedAction = state.internalMessages.findLast(
     (m) => isToolMessage(m) && m.status === "error",
   );
   if (!lastFailedAction?.content) {
@@ -113,6 +113,7 @@ export async function diagnoseError(
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([diagnoseErrorTool], {
     tool_choice: diagnoseErrorTool.name,
+    parallel_tool_calls: false,
   });
 
   const response = await modelWithTools.invoke([
@@ -126,7 +127,7 @@ export async function diagnoseError(
     },
     {
       role: "user",
-      content: formatUserPrompt(state.internal_messages),
+      content: formatUserPrompt(state.internalMessages),
     },
   ]);
 
@@ -153,6 +154,6 @@ export async function diagnoseError(
 
   return {
     messages: [response, toolMessage],
-    internal_messages: [response, toolMessage],
+    internalMessages: [response, toolMessage],
   };
 }

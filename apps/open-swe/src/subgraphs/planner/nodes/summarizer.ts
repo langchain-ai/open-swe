@@ -48,9 +48,10 @@ export async function summarizer(
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([condenseContextTool], {
     tool_choice: condenseContextTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internal_messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const conversationHistoryStr = `Here is the full conversation history:
 
 ${state.plannerMessages.map(getMessageString).join("\n")}`;

@@ -147,14 +147,17 @@ export async function generateAction(
     requestHumanHelpTool,
     updatePlanTool,
   ];
-  const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
+  const modelWithTools = model.bindTools(tools, {
+    tool_choice: "auto",
+    parallel_tool_calls: false,
+  });
 
   const response = await modelWithTools.invoke([
     {
       role: "system",
       content: formatPrompt(state),
     },
-    ...state.internal_messages,
+    ...state.internalMessages,
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;
@@ -178,7 +181,7 @@ export async function generateAction(
 
   return {
     messages: [response],
-    internal_messages: [response],
+    internalMessages: [response],
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
   };
 }

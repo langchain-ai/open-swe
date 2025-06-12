@@ -47,8 +47,7 @@ export async function takeAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const lastMessage =
-    state.internal_messages[state.internal_messages.length - 1];
+  const lastMessage = state.internalMessages[state.internalMessages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
@@ -79,7 +78,7 @@ export async function takeAction(
       goto: "progress-plan-step",
       update: {
         messages: [toolMessage],
-        internal_messages: [toolMessage],
+        internalMessages: [toolMessage],
       },
     });
   }
@@ -151,7 +150,7 @@ export async function takeAction(
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError(
-    [...state.internal_messages, toolMessage].filter(
+    [...state.internalMessages, toolMessage].filter(
       (m): m is ToolMessage =>
         isToolMessage(m) && !m.additional_kwargs?.is_diagnosis,
     ),
@@ -163,7 +162,7 @@ export async function takeAction(
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
     update: {
       messages: [toolMessage],
-      internal_messages: [toolMessage],
+      internalMessages: [toolMessage],
       ...(branchName && { branchName }),
       codebaseTree,
     },

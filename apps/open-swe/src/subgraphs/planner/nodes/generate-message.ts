@@ -37,7 +37,7 @@ The user's request is the first user message in the conversation below. Ensure y
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.internal_messages.filter(isHumanMessage).length > 1;
+  const isFollowup = state.internalMessages.filter(isHumanMessage).length > 1;
 
   return systemPrompt
     .replace(
@@ -58,11 +58,15 @@ export async function generateAction(
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [shellTool];
-  const modelWithTools = model.bindTools(tools, { tool_choice: "auto" });
+  const modelWithTools = model.bindTools(tools, {
+    tool_choice: "auto",
+    parallel_tool_calls: false,
+  });
 
-  const userRequest = getUserRequest(state.internal_messages, {
+  const userRequest = getUserRequest(state.internalMessages, {
     returnFullMessage: true,
   });
+
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([

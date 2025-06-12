@@ -88,8 +88,7 @@ export async function updatePlan(
   if (!state.planChangeRequest) {
     throw new Error("No plan change request found.");
   }
-  const lastMessage =
-    state.internal_messages[state.internal_messages.length - 1];
+  const lastMessage = state.internalMessages[state.internalMessages.length - 1];
   if (
     !lastMessage ||
     !isAIMessage(lastMessage) ||
@@ -109,6 +108,7 @@ export async function updatePlan(
   const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools([updatePlanTool], {
     tool_choice: updatePlanTool.name,
+    parallel_tool_calls: false,
   });
 
   const activeTask = getActiveTask(state.plan);
@@ -125,7 +125,7 @@ export async function updatePlan(
     state.planChangeRequest,
     activePlanItems,
   );
-  const userMessage = formatUserMessage(state.internal_messages);
+  const userMessage = formatUserMessage(state.internalMessages);
 
   const response = await modelWithTools.invoke([
     {
@@ -175,7 +175,7 @@ export async function updatePlan(
 
   return {
     messages: [toolMessage],
-    internal_messages: [toolMessage],
+    internalMessages: [toolMessage],
     plan: newTaskPlan,
     planChangeRequest: null,
   };

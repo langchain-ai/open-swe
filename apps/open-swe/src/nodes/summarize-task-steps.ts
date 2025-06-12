@@ -107,7 +107,7 @@ async function generateTaskSummaryFunc(
     },
     {
       role: "user",
-      content: formatUserMessage(state.internal_messages, activePlanItems),
+      content: formatUserMessage(state.internalMessages, activePlanItems),
     },
   ]);
 
@@ -140,7 +140,7 @@ export async function summarizeTaskSteps(
     taskSummary.summary,
   );
 
-  const removedMessages = removeLastTaskMessages(state.internal_messages);
+  const removedMessages = removeLastTaskMessages(state.internalMessages);
   logger.info(`Removing ${removedMessages.length} message(s) from state.`);
 
   const condensedTaskMessage = new AIMessage({
@@ -156,7 +156,7 @@ export async function summarizeTaskSteps(
   if (allTasksCompleted) {
     const commandUpdate: GraphUpdate = {
       messages: [condensedTaskMessage],
-      internal_messages: newMessagesStateUpdate,
+      internalMessages: newMessagesStateUpdate,
       plan: updatedTaskPlan,
     };
     return new Command({
@@ -167,7 +167,7 @@ export async function summarizeTaskSteps(
 
   const commandUpdate: GraphUpdate = {
     messages: [condensedTaskMessage],
-    internal_messages: newMessagesStateUpdate,
+    internalMessages: newMessagesStateUpdate,
     plan: updatedTaskPlan,
   };
   return new Command({

@@ -134,10 +134,11 @@ async function identifyTasksToModifyFunc(
     {
       // The model should always call the tool when identifying plan changes.
       tool_choice: identifyPlanChangesTool.name,
+      parallel_tool_calls: false,
     },
   );
 
-  const userRequest = getUserRequest(state.internal_messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const response = await modelWithIdentifyChangesTool.invoke([
     {
       role: "user",
@@ -197,9 +198,10 @@ async function updatePlanTasksFunc(
   const modelWithUpdatePlanTasksTool = model.bindTools([updatePlanTasksTool], {
     // The model should always call the tool when identifying plan changes.
     tool_choice: updatePlanTasksTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internal_messages);
+  const userRequest = getUserRequest(state.internalMessages);
   const response = await modelWithUpdatePlanTasksTool.invoke([
     {
       role: "user",

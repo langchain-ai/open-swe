@@ -73,14 +73,15 @@ export async function progressPlanStep(
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
   const modelWithTools = model.bindTools([setTaskStatusTool], {
     tool_choice: setTaskStatusTool.name,
+    parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internal_messages, {
+  const userRequest = getUserRequest(state.internalMessages, {
     returnFullMessage: true,
   });
   const conversationHistoryStr = `Here is the full conversation history after the user's request:
   
-${removeFirstHumanMessage(state.internal_messages).map(getMessageString).join("\n")}
+${removeFirstHumanMessage(state.internalMessages).map(getMessageString).join("\n")}
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
@@ -129,7 +130,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
     );
     const commandUpdate: GraphUpdate = {
       messages: newMessages,
-      internal_messages: newMessages,
+      internalMessages: newMessages,
     };
     return new Command({
       goto: "generate-action",
@@ -152,7 +153,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
     );
     const commandUpdate: GraphUpdate = {
       messages: newMessages,
-      internal_messages: newMessages,
+      internalMessages: newMessages,
       // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
       plan: updatedPlanTasks,
     };
@@ -171,7 +172,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
 
   const commandUpdate: GraphUpdate = {
     messages: newMessages,
-    internal_messages: newMessages,
+    internalMessages: newMessages,
     plan: updatedPlanTasks,
   };
 

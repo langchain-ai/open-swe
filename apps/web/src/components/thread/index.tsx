@@ -253,7 +253,7 @@ export function Thread() {
     stream.submit(
       {
         messages: newMessages,
-        internal_messages: newMessages,
+        internalMessages: newMessages,
         context,
         targetRepository: selectedRepository,
       },

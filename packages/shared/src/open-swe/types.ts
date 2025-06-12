@@ -125,7 +125,7 @@ export const GraphAnnotation = MessagesZodState.extend({
    * passed to the LLM, truncated, removed etc. The main `messages`
    * key is never modified to persist the content show on the client.
    */
-  internal_messages: withLangGraph<BaseMessage[], Messages>(
+  internalMessages: withLangGraph<BaseMessage[], Messages>(
     z.custom<BaseMessage[]>(),
     {
       reducer: {

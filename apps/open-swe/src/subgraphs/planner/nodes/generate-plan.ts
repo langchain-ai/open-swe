@@ -36,8 +36,8 @@ The user's request is as follows. Ensure you generate your plan in accordance wi
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.internal_messages.filter(isHumanMessage).length > 1;
-  const userRequest = getUserRequest(state.internal_messages);
+  const isFollowup = state.internalMessages.filter(isHumanMessage).length > 1;
+  const userRequest = getUserRequest(state.internalMessages);
 
   return systemPrompt
     .replace(
@@ -54,6 +54,7 @@ export async function generatePlan(
   const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
+    parallel_tool_calls: false,
   });
 
   let optionalToolMessage: ToolMessage | undefined;
