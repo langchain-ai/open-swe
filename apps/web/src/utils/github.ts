@@ -185,6 +185,29 @@ export async function getRepositoryBranches(
 }
 
 /**
+ * Fetches a specific repository using OAuth access token
+ */
+export async function getRepository(owner: string, repo: string) {
+  const response = await fetch(
+    `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
+    {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "OpenSWE-Agent",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`Failed to fetch repository: ${JSON.stringify(errorData)}`);
+  }
+
+  const data = await response.json();
+  return data;
+}
+
+/**
  * Repository interface representing GitHub repository data
  */
 export interface Repository {
