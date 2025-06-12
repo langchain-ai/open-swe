@@ -15,7 +15,6 @@ import { cn } from "@/lib/utils";
 
 export function OpenPRButton() {
   const stream = useStreamContext();
-  // Get query parameters
   const [branch] = useQueryState("branch");
   const [prState, setPrState] = useState<
     "open" | "closed" | "draft" | "merged"

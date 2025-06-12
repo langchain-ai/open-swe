@@ -239,6 +239,9 @@ export interface Branch {
   protected: boolean;
 }
 
+/**
+ * Fetches a pull request for a specific repository using OAuth access token
+ */
 export async function getPullRequest(inputs: {
   owner: string;
   repo: string;
