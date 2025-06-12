@@ -1,8 +1,6 @@
 "use client";
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,10 +13,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronLeft,
-  Edit2,
-  Save,
-  Plus,
-  Trash2,
   Clock,
   Filter,
   PanelLeftClose,
@@ -36,27 +30,11 @@ interface TasksSidebarProps {
   taskPlan: TaskPlan;
   className?: string;
   onTaskChange?: (taskId: string) => void;
-  onRevisionChange?: (taskId: string, revisionIndex: number) => void;
-  onEditPlanItem?: (
-    taskId: string,
-    planItemIndex: number,
-    newPlan: string,
-  ) => void;
-  onAddPlanItem?: (taskId: string, plan: string) => void;
-  onDeletePlanItem?: (taskId: string, planItemIndex: number) => void;
 }
 
 interface TaskPlanViewProps {
   taskPlan: TaskPlan;
   onTaskChange?: (taskId: string) => void;
-  onRevisionChange?: (taskId: string, revisionIndex: number) => void;
-  onEditPlanItem?: (
-    taskId: string,
-    planItemIndex: number,
-    newPlan: string,
-  ) => void;
-  onAddPlanItem?: (taskId: string, plan: string) => void;
-  onDeletePlanItem?: (taskId: string, planItemIndex: number) => void;
 }
 
 type FilterType = "all" | "completed" | "current" | "pending";
@@ -67,10 +45,6 @@ export function TasksSidebar({
   onClose,
   taskPlan,
   onTaskChange,
-  onRevisionChange,
-  onEditPlanItem,
-  onAddPlanItem,
-  onDeletePlanItem,
 }: TasksSidebarProps) {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(
     taskPlan.activeTaskIndex,
@@ -79,10 +53,6 @@ export function TasksSidebar({
   const [expandedSummaries, setExpandedSummaries] = useState<Set<number>>(
     new Set(),
   );
-  const [editingPlanItem, setEditingPlanItem] = useState<number | null>(null);
-  const [editingText, setEditingText] = useState("");
-  const [newPlanItemText, setNewPlanItemText] = useState("");
-  const [showAddPlanItem, setShowAddPlanItem] = useState(false);
   const [filter, setFilter] = useState<FilterType>("all");
 
   const currentTask = taskPlan.tasks[currentTaskIndex];
@@ -94,7 +64,6 @@ export function TasksSidebar({
     if (currentTask?.planRevisions) {
       setCurrentRevisionIndex(currentTask.activeRevisionIndex);
       setExpandedSummaries(new Set());
-      setEditingPlanItem(null);
     }
   }, [currentTask]);
 
@@ -120,15 +89,6 @@ export function TasksSidebar({
     return true;
   });
 
-  const isPlanItemEditable = (item: PlanItem) => {
-    return (
-      isLatestTask &&
-      isLatestRevision &&
-      !item.completed &&
-      item.index !== currentPlanItemIndex
-    );
-  };
-
   const getItemState = (
     item: PlanItem,
   ): "completed" | "current" | "remaining" => {
@@ -148,34 +108,11 @@ export function TasksSidebar({
     }
   };
 
-  const startEditing = (item: PlanItem) => {
-    setEditingPlanItem(item.index);
-    setEditingText(item.plan);
-  };
-
-  const saveEdit = () => {
-    if (editingPlanItem !== null && editingText.trim()) {
-      onEditPlanItem?.(currentTask.id, editingPlanItem, editingText.trim());
-      setEditingPlanItem(null);
-      setEditingText("");
-    }
-  };
-
-  const addNewPlanItem = () => {
-    if (newPlanItemText.trim()) {
-      onAddPlanItem?.(currentTask.id, newPlanItemText.trim());
-      setNewPlanItemText("");
-      setShowAddPlanItem(false);
-    }
-  };
-
   const goToPreviousRevision = () => {
     if (currentRevisionIndex > 0) {
       const newIndex = currentRevisionIndex - 1;
       setCurrentRevisionIndex(newIndex);
-      onRevisionChange?.(currentTask.id, newIndex);
       setExpandedSummaries(new Set());
-      setEditingPlanItem(null);
     }
   };
 
@@ -183,18 +120,14 @@ export function TasksSidebar({
     if (currentRevisionIndex < currentTask.planRevisions.length - 1) {
       const newIndex = currentRevisionIndex + 1;
       setCurrentRevisionIndex(newIndex);
-      onRevisionChange?.(currentTask.id, newIndex);
       setExpandedSummaries(new Set());
-      setEditingPlanItem(null);
     }
   };
 
   const goToLatestRevision = () => {
     const latestIndex = currentTask.activeRevisionIndex;
     setCurrentRevisionIndex(latestIndex);
-    onRevisionChange?.(currentTask.id, latestIndex);
     setExpandedSummaries(new Set());
-    setEditingPlanItem(null);
   };
 
   const formatDate = (timestamp: number) => {
@@ -353,12 +286,6 @@ export function TasksSidebar({
                 <option value="pending">Pending</option>
               </select>
             </div>
-
-            {isLatestTask && isLatestRevision && (
-              <span className="rounded bg-green-50 px-2 py-1 text-xs text-green-600">
-                Editable
-              </span>
-            )}
           </div>
         </div>
 
@@ -373,8 +300,6 @@ export function TasksSidebar({
               filteredItems.map((item) => {
                 const state = getItemState(item);
                 const isExpanded = expandedSummaries.has(item.index);
-                const isEditing = editingPlanItem === item.index;
-                const editable = isPlanItemEditable(item);
 
                 return (
                   <div
@@ -392,188 +317,78 @@ export function TasksSidebar({
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        {isEditing ? (
-                          <div className="space-y-2">
-                            <Textarea
-                              value={editingText}
-                              onChange={(e) => setEditingText(e.target.value)}
-                              className="min-h-[60px] text-sm"
-                              placeholder="Enter plan item description..."
-                            />
-                            <div className="flex items-center gap-2">
-                              <Button
-                                size="sm"
-                                onClick={saveEdit}
-                                className="h-7 text-xs"
-                              >
-                                <Save className="mr-1 h-3 w-3" />
-                                Save
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setEditingPlanItem(null);
-                                  setEditingText("");
-                                }}
-                                className="h-7 text-xs"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
+                        <>
+                          <div className="mb-1 flex items-start justify-between gap-2">
+                            <p className="text-sm leading-relaxed text-gray-900">
+                              {item.plan}
+                            </p>
                           </div>
-                        ) : (
-                          <>
-                            <div className="mb-1 flex items-start justify-between gap-2">
-                              <p className="text-sm leading-relaxed text-gray-900">
-                                {item.plan}
-                              </p>
-                              {editable && (
-                                <div className="flex flex-shrink-0 items-center gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => startEditing(item)}
-                                    className="h-6 w-6 p-0"
-                                  >
-                                    <Edit2 className="h-3 w-3" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() =>
-                                      onDeletePlanItem?.(
-                                        currentTask.id,
-                                        item.index,
-                                      )
-                                    }
-                                    className="h-6 w-6 p-0 text-red-500"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-500">
+                              Plan Item #{item.index + 1}
+                            </span>
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-1 text-xs",
+                                state === "completed" &&
+                                  "bg-green-100 text-green-700",
+                                state === "current" &&
+                                  "bg-blue-100 text-blue-700",
+                                state === "remaining" &&
+                                  "bg-gray-100 text-gray-700",
                               )}
-                            </div>
+                            >
+                              {state === "completed"
+                                ? "Completed"
+                                : state === "current"
+                                  ? "In Progress"
+                                  : "Pending"}
+                            </span>
+                          </div>
 
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-500">
-                                Plan Item #{item.index + 1}
-                              </span>
-                              <span
-                                className={cn(
-                                  "rounded-full px-2 py-1 text-xs",
-                                  state === "completed" &&
-                                    "bg-green-100 text-green-700",
-                                  state === "current" &&
-                                    "bg-blue-100 text-blue-700",
-                                  state === "remaining" &&
-                                    "bg-gray-100 text-gray-700",
-                                )}
-                              >
-                                {state === "completed"
-                                  ? "Completed"
-                                  : state === "current"
-                                    ? "In Progress"
-                                    : "Pending"}
-                              </span>
-                            </div>
-
-                            {item.completed && item.summary && (
-                              <Collapsible
-                                open={isExpanded}
-                                onOpenChange={() => {
-                                  const newExpanded = new Set(
-                                    expandedSummaries,
-                                  );
-                                  if (newExpanded.has(item.index)) {
-                                    newExpanded.delete(item.index);
-                                  } else {
-                                    newExpanded.add(item.index);
-                                  }
-                                  setExpandedSummaries(newExpanded);
-                                }}
-                                className="mt-2"
-                              >
-                                <CollapsibleTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 p-0 text-xs text-green-700"
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDown className="mr-1 h-3 w-3" />
-                                    ) : (
-                                      <ChevronRight className="mr-1 h-3 w-3" />
-                                    )}
-                                    View summary
-                                  </Button>
-                                </CollapsibleTrigger>
-                                <CollapsibleContent className="mt-2">
-                                  <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800">
-                                    {item.summary}
-                                  </div>
-                                </CollapsibleContent>
-                              </Collapsible>
-                            )}
-                          </>
-                        )}
+                          {item.completed && item.summary && (
+                            <Collapsible
+                              open={isExpanded}
+                              onOpenChange={() => {
+                                const newExpanded = new Set(expandedSummaries);
+                                if (newExpanded.has(item.index)) {
+                                  newExpanded.delete(item.index);
+                                } else {
+                                  newExpanded.add(item.index);
+                                }
+                                setExpandedSummaries(newExpanded);
+                              }}
+                              className="mt-2"
+                            >
+                              <CollapsibleTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 p-0 text-xs text-green-700"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="mr-1 h-3 w-3" />
+                                  ) : (
+                                    <ChevronRight className="mr-1 h-3 w-3" />
+                                  )}
+                                  View summary
+                                </Button>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-2">
+                                <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800">
+                                  {item.summary}
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          )}
+                        </>
                       </div>
                     </div>
                   </div>
                 );
               })
             )}
-
-            {/* Add New Plan Item - Only for latest task and revision */}
-            {isLatestTask &&
-              isLatestRevision &&
-              !planItems.every((item) => item.completed) && (
-                <div>
-                  {showAddPlanItem ? (
-                    <div className="rounded-lg border border-dashed border-gray-300 p-3">
-                      <div className="space-y-2">
-                        <Textarea
-                          value={newPlanItemText}
-                          onChange={(e) => setNewPlanItemText(e.target.value)}
-                          placeholder="Enter new plan item description..."
-                          className="min-h-[60px] text-sm"
-                        />
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            onClick={addNewPlanItem}
-                            disabled={!newPlanItemText.trim()}
-                            className="h-7 text-xs"
-                          >
-                            <Plus className="mr-1 h-3 w-3" />
-                            Add Plan Item
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setShowAddPlanItem(false);
-                              setNewPlanItemText("");
-                            }}
-                            className="h-7 text-xs"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      className="h-10 w-full border-dashed border-gray-300 text-sm"
-                      onClick={() => setShowAddPlanItem(true)}
-                    >
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add New Plan Item
-                    </Button>
-                  )}
-                </div>
-              )}
           </div>
         </div>
       </div>
@@ -582,14 +397,7 @@ export function TasksSidebar({
 }
 
 // Main TaskPlan View Component
-export function TaskPlanView({
-  taskPlan,
-  onTaskChange,
-  onRevisionChange,
-  onEditPlanItem,
-  onAddPlanItem,
-  onDeletePlanItem,
-}: TaskPlanViewProps) {
+export function TaskPlanView({ taskPlan, onTaskChange }: TaskPlanViewProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   if (taskPlan.tasks.length === 0) {
@@ -616,10 +424,6 @@ export function TaskPlanView({
         onClose={() => setIsSidebarOpen(false)}
         taskPlan={taskPlan}
         onTaskChange={onTaskChange}
-        onRevisionChange={onRevisionChange}
-        onEditPlanItem={onEditPlanItem}
-        onAddPlanItem={onAddPlanItem}
-        onDeletePlanItem={onDeletePlanItem}
       />
     </>
   );
