@@ -4,7 +4,7 @@ import { forwardRef, ForwardedRef, useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigField } from "@/components/configuration-sidebar/config-field";
 import { ConfigSection } from "@/components/configuration-sidebar/config-section";
-import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/use-config-store";
+import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";

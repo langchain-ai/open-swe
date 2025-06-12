@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -30,13 +30,13 @@ interface ConfigFieldProps {
   id: string;
   label: string;
   type:
-    | "text"
-    | "textarea"
-    | "number"
-    | "switch"
-    | "slider"
-    | "select"
-    | "json";
+  | "text"
+  | "textarea"
+  | "number"
+  | "switch"
+  | "slider"
+  | "select"
+  | "json";
   description?: string;
   placeholder?: string;
   options?: Option[];
@@ -255,7 +255,7 @@ export function ConfigField({
             className={cn(
               "min-h-[120px] font-mono text-sm",
               jsonError &&
-                "border-red-500 focus:border-red-500 focus-visible:ring-red-500",
+              "border-red-500 focus:border-red-500 focus-visible:ring-red-500",
             )}
           />
           <div className="flex w-full items-start justify-between gap-2 pt-1">
