@@ -92,7 +92,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
   useEffect(() => {
     if (selectedRepository && !branchesLoading && !fetchingBranches.current) {
       fetchingBranches.current = true;
-      console.log("FETCHING!!");
       fetchBranches();
       // Reset branch pagination when repository changes
       setBranchesPage(1);
