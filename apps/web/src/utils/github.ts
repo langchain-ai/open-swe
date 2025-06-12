@@ -238,3 +238,41 @@ export interface Branch {
   };
   protected: boolean;
 }
+
+export async function getPullRequest(inputs: {
+  owner: string;
+  repo: string;
+  baseBranch: string;
+  headBranch: string;
+}) {
+  try {
+    const response = await fetch(
+      `${getBaseApiUrl()}github/proxy/repos/${inputs.owner}/${inputs.repo}/pulls?base=${inputs.baseBranch}&head=${inputs.headBranch}`,
+      {
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "OpenSWE-Agent",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        `Failed to fetch pull request: ${JSON.stringify(errorData)}`,
+      );
+    }
+
+    const data = await response.json();
+    if (data && Array.isArray(data) && data.length > 0) {
+      return data.filter((d) => d.head?.ref === inputs.headBranch)[0];
+    }
+    return data?.[0];
+  } catch (e) {
+    console.error("Failed to get pull request", {
+      inputs,
+      error: e,
+    });
+    return null;
+  }
+}

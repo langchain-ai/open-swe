@@ -656,5 +656,3 @@ export function Thread() {
     </div>
   );
 }
-
-
