@@ -7,23 +7,25 @@ import { getCurrentTaskInput } from "@langchain/langgraph";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
+import { getRepoAbsolutePath } from "../utils/git.js";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
+
+const createApplyPatchToolDescription = (state: GraphState) => {
+  const repoRoot = getRepoAbsolutePath(state.targetRepository);
+  return (
+    "Applies a diff to a file given a file path and diff content." +
+    `The working directory this diff will be applied to is \`${repoRoot}\`. Ensure the file paths you provide are relative to this directory.`
+  );
+};
 
 const applyPatchToolSchema = z.object({
   diff: z
     .string()
     .describe(
-      "The diff to apply. Use a standard diff format. Ensure this field is ALWAYS provided.",
+      `The diff to apply. Use a standard diff format. Ensure this field is ALWAYS provided.`,
     ),
   file_path: z.string().describe("The file path to apply the diff to."),
-  workdir: z
-    .string()
-    .default(SANDBOX_ROOT_DIR)
-    .describe(
-      `The working directory for the command. Ensure this path is NOT included in any command arguments, as it will be added automatically. Defaults to '${SANDBOX_ROOT_DIR}' as this is the root directory of the sandbox.`,
-    ),
 });
 
 export const applyPatchTool = tool(
@@ -37,7 +39,8 @@ export const applyPatchTool = tool(
       throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
     }
 
-    const { diff, file_path, workdir } = input;
+    const { diff, file_path } = input;
+    const workDir = getRepoAbsolutePath(state.targetRepository);
 
     const sandbox = await daytonaClient().get(sandboxSessionId);
 
@@ -45,7 +48,7 @@ export const applyPatchTool = tool(
       sandbox,
       file_path,
       {
-        workDir: workdir,
+        workDir,
       },
     );
     if (!readFileSuccess) {
@@ -99,7 +102,7 @@ export const applyPatchTool = tool(
 
     const { success: writeFileSuccess, output: writeFileOutput } =
       await writeFile(sandbox, file_path, patchedContent, {
-        workDir: workdir,
+        workDir,
       });
     if (!writeFileSuccess) {
       logger.error("Failed to write file", {
@@ -123,8 +126,9 @@ export const applyPatchTool = tool(
   },
   {
     name: "apply_patch",
-    description:
-      "Applies a diff to a file given a file path and diff content. Ensure you ALWAYS pass a valid file path to this tool. The combination of `workdir` and `file_path` should point to a valid file in the sandbox. Ensure you do not omit parts of the path between `workdir` and `file_path`.",
+    description: createApplyPatchToolDescription(
+      getCurrentTaskInput<GraphState>(),
+    ),
     schema: applyPatchToolSchema,
   },
 );

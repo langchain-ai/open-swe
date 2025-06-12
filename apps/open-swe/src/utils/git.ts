@@ -5,6 +5,7 @@ import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
+import path from "node:path";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
 
@@ -16,7 +17,7 @@ export function getRepoAbsolutePath(
     throw new Error("No repository name provided");
   }
 
-  return `${SANDBOX_ROOT_DIR}/${repoName}`;
+  return path.join(SANDBOX_ROOT_DIR, repoName);
 }
 
 export function getBranchName(config: GraphConfig): string {
