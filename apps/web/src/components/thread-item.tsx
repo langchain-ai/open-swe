@@ -48,10 +48,7 @@ export const ThreadItem = memo(function ThreadItem({
   const isSidebar = variant === "sidebar";
   const isRecentlyUpdated = recentlyUpdatedThreads.has(thread.thread_id);
 
-  const displayDate = new Date(thread.created_at).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  const displayDate = formatRelativeDate(thread.created_at);
 
   return (
     <div
@@ -123,5 +120,6 @@ export const ThreadItem = memo(function ThreadItem({
     </div>
   );
 });
+
 
 
