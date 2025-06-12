@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
-import { useGitHubApp } from "@/hooks/useGitHubApp";
+import { useGitHubApp } from "@/providers/GitHubApp";
 import { GitBranch, Shield } from "lucide-react";
 
 interface BranchSelectorProps {

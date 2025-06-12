@@ -42,7 +42,7 @@ interface UseGitHubAppReturn {
   defaultBranch: string | null;
 }
 
-export function useGitHubApp(): UseGitHubAppReturn {
+export function useGitHubAppHook(): UseGitHubAppReturn {
   // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,14 +88,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [selectedRepositoryParam, selectedBranchParam]);
 
-  const fetchingBranches = useRef(false);
   useEffect(() => {
-    if (selectedRepository && !branchesLoading && !fetchingBranches.current) {
-      fetchingBranches.current = true;
+    if (selectedRepository && !branchesLoading) {
       fetchBranches();
       // Reset branch pagination when repository changes
       setBranchesPage(1);
-    } else {
+    } else if (!selectedRepository) {
       setBranches([]);
       setSelectedBranchParam(null);
     }
