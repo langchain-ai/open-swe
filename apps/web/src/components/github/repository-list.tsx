@@ -1,6 +1,6 @@
 "use client";
 
-import { useGitHubApp } from "@/providers/GitHubApp";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallAppButton } from "./install-app-button";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
@@ -11,7 +11,7 @@ interface RepositoryListProps {
 
 export function RepositoryList({ className = "" }: RepositoryListProps) {
   const { isInstalled, isLoading, error, repositories, refreshRepositories } =
-    useGitHubApp();
+    useGitHubAppProvider();
 
   if (isLoading) {
     return (

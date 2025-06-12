@@ -42,7 +42,7 @@ interface UseGitHubAppReturn {
   defaultBranch: string | null;
 }
 
-export function useGitHubAppHook(): UseGitHubAppReturn {
+export function useGitHubApp(): UseGitHubAppReturn {
   // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);

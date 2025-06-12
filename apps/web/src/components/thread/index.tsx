@@ -39,7 +39,7 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { GitHubOAuthButton } from "../github/github-oauth-button";
-import { useGitHubApp } from "@/providers/GitHubApp";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/use-config-store";
@@ -100,7 +100,7 @@ export function Thread() {
   const { push } = useRouter();
   const [artifactContext, setArtifactContext] = useArtifactContext();
   const [artifactOpen, closeArtifact] = useArtifactOpen();
-  const { selectedRepository } = useGitHubApp();
+  const { selectedRepository } = useGitHubAppProvider();
   const { getConfig } = useConfigStore();
   const {
     taskPlan,

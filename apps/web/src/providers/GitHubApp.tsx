@@ -1,15 +1,14 @@
-import { useGitHubAppHook } from "@/hooks/useGitHubApp";
+import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { createContext, useContext, ReactNode } from "react";
 
-type GitHubAppContextType = ReturnType<typeof useGitHubAppHook>;
+type GitHubAppContextType = ReturnType<typeof useGitHubApp>;
 
 const GitHubAppContext = createContext<GitHubAppContextType | undefined>(
   undefined,
 );
 
 export function GitHubAppProvider({ children }: { children: ReactNode }) {
-  const value = useGitHubAppHook();
-  console.log("value", value.branches);
+  const value = useGitHubApp();
   return (
     <GitHubAppContext.Provider value={value}>
       {children}
@@ -17,10 +16,12 @@ export function GitHubAppProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useGitHubApp() {
+export function useGitHubAppProvider() {
   const context = useContext(GitHubAppContext);
   if (context === undefined) {
-    throw new Error("useGitHubApp must be used within a GitHubAppProvider");
+    throw new Error(
+      "useGitHubAppProvider must be used within a GitHubAppProvider",
+    );
   }
   return context;
 }

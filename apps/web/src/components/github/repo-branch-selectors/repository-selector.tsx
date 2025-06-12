@@ -16,7 +16,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
-import { useGitHubApp } from "@/providers/GitHubApp";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import type { Repository } from "@/utils/github";
 import { GitHubSVG } from "@/components/icons/github";
 
@@ -53,7 +53,7 @@ export function RepositorySelector({
     repositoriesHasMore,
     repositoriesLoadingMore,
     loadMoreRepositories,
-  } = useGitHubApp();
+  } = useGitHubAppProvider();
 
   const handleSelect = (repositoryKey: string) => {
     const repository = repositories.find(
