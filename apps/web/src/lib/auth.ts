@@ -95,11 +95,9 @@ export function getGitHubToken(request: NextRequest): GitHubTokenData | null {
  * @param response NextResponse to set cookies on
  */
 export function clearGitHubToken(response: NextResponse): void {
-  const cookieOptions = getCookieOptions(new Date(0)); // Expire immediately
-
-  response.cookies.set(GITHUB_TOKEN_COOKIE, "", cookieOptions);
-  response.cookies.set(GITHUB_TOKEN_TYPE_COOKIE, "", cookieOptions);
-  response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, "", cookieOptions);
+  response.cookies.delete(GITHUB_TOKEN_COOKIE);
+  response.cookies.delete(GITHUB_TOKEN_TYPE_COOKIE);
+  response.cookies.delete(GITHUB_INSTALLATION_ID_COOKIE);
 }
 
 /**

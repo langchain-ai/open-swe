@@ -35,7 +35,9 @@ export function GitHubOAuthButton() {
         method: "POST",
       });
       if (response.ok) {
+        localStorage.removeItem("github_app_installed");
         setIsAuth(false);
+        window.location.href = "/";
       } else {
         console.error("Logout failed");
       }
