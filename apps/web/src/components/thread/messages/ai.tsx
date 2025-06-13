@@ -1,6 +1,11 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
-import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
+import {
+  AIMessage,
+  Checkpoint,
+  Message,
+  ToolMessage,
+} from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
@@ -69,59 +74,73 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
-// Utility to map a ToolMessage to ActionStepProps for take-action node
-function mapToolMessageToActionStepProps(
-  message: any,
-  meta: any,
-  thread: any,
+/** Converts MessageContent to a string for display */
+function messageContentToString(
+  content: string | { type: string; [k: string]: any }[],
+): string {
+  if (typeof content === "string") return content;
+  // If it's an array of MessageContentComplex, join their text/image URLs
+  return content
+    .map((item) => {
+      if (item.type === "text" && "text" in item) return item.text;
+      if (item.type === "image_url" && "image_url" in item) {
+        if (typeof item.image_url === "string") return item.image_url;
+        if (typeof item.image_url === "object" && "url" in item.image_url)
+          return item.image_url.url;
+      }
+      return "";
+    })
+    .join("\n");
+}
+
+export function mapToolMessageToActionStepProps(
+  message: ToolMessage,
+  thread: { messages: Message[] },
 ): ActionStepProps {
   // Find the corresponding tool call from the previous AI message
-  // (ToolMessage.tool_call_id matches AIMessage.tool_calls[].id)
-  let toolCall = undefined;
-  if (message.tool_call_id) {
-    // Find the previous AI message
-    const aiMsg = [...thread.messages]
-      .reverse()
-      .find(
-        (m: any) =>
-          m.type === "ai" &&
-          Array.isArray(m.tool_calls) &&
-          m.tool_calls.some((tc: any) => tc.id === message.tool_call_id),
-      );
-    if (aiMsg) {
-      toolCall = aiMsg.tool_calls.find(
-        (tc: any) => tc.id === message.tool_call_id,
-      );
+  let toolCall:
+    | {
+        name: string;
+        args: Record<string, unknown>;
+        id?: string;
+        type?: "tool_call";
+      }
+    | undefined;
+
+  for (let i = thread.messages.length - 1; i >= 0; i--) {
+    const m = thread.messages[i];
+    if (m.type === "ai" && Array.isArray(m.tool_calls)) {
+      toolCall = m.tool_calls.find((tc) => tc.id === message.tool_call_id);
+      if (toolCall) break;
     }
   }
+
   const status: ActionStepProps["status"] = "done";
   const success = message.status === "success";
+
   if (message.name === "shell") {
     return {
       actionType: "shell",
       status,
       success,
-      command: toolCall?.args?.command || "",
-      workdir: toolCall?.args?.workdir,
-      output: message.content,
-      errorCode: message.errorCode,
-      reasoningText: message.reasoningText,
-      summaryText: message.summaryText,
+      command: (toolCall?.args?.command as string) || "",
+      workdir: toolCall?.args?.workdir as string | undefined,
+      output: messageContentToString(message.content),
     };
   } else if (message.name === "apply_patch" || message.name === "apply-patch") {
     return {
       actionType: "apply-patch",
       status,
       success,
-      file: toolCall?.args?.file || "",
-      diff: message.content,
-      errorMessage: !success ? message.content : undefined,
-      reasoningText: message.reasoningText,
-      summaryText: message.summaryText,
+      file: (toolCall?.args?.file as string) || "",
+      diff: messageContentToString(message.content),
+      errorMessage: !success
+        ? messageContentToString(message.content)
+        : undefined,
     };
   }
   // fallback
-  return { status } as ActionStepProps;
+  return { status: "loading" };
 }
 
 export function AssistantMessage({
@@ -180,7 +199,10 @@ export function AssistantMessage({
           <span>
             {message.name === "shell" || message.name === "apply_patch" ? (
               <ActionStep
-                {...mapToolMessageToActionStepProps(message, meta, thread)}
+                {...mapToolMessageToActionStepProps(
+                  message as ToolMessage,
+                  thread,
+                )}
               />
             ) : (
               <ToolResult message={message} />
