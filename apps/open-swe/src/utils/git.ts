@@ -529,6 +529,22 @@ export async function createPullRequest({
     });
 
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
+
+    // Step 3: Add the 'open-swe' label to the pull request
+    try {
+      await octokit.issues.addLabels({
+        owner,
+        repo,
+        issue_number: pullRequest.number,
+        labels: ['open-swe'],
+      });
+      logger.info(`Added 'open-swe' label to pull request #${pullRequest.number}`);
+    } catch (labelError) {
+      logger.warn(`Failed to add 'open-swe' label to pull request #${pullRequest.number}`, {
+        labelError,
+      });
+    }
+
     return pullRequest;
   } catch (error) {
     if (error instanceof Error && error.message.includes("already exists")) {
@@ -650,3 +666,4 @@ export async function cloneRepo(
     throw e;
   }
 }
+
