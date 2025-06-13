@@ -536,13 +536,18 @@ export async function createPullRequest({
         owner,
         repo,
         issue_number: pullRequest.number,
-        labels: ['open-swe'],
+        labels: ["open-swe"],
       });
-      logger.info(`Added 'open-swe' label to pull request #${pullRequest.number}`);
+      logger.info(
+        `Added 'open-swe' label to pull request #${pullRequest.number}`,
+      );
     } catch (labelError) {
-      logger.warn(`Failed to add 'open-swe' label to pull request #${pullRequest.number}`, {
-        labelError,
-      });
+      logger.warn(
+        `Failed to add 'open-swe' label to pull request #${pullRequest.number}`,
+        {
+          labelError,
+        },
+      );
     }
 
     return pullRequest;
@@ -666,4 +671,3 @@ export async function cloneRepo(
     throw e;
   }
 }
-
