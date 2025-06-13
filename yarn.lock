@@ -1838,21 +1838,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph@npm:^0.3.1":
-  version: 0.3.1
-  resolution: "@langchain/langgraph@npm:0.3.1"
+"@langchain/langgraph@npm:^0.3.2":
+  version: 0.3.2
+  resolution: "@langchain/langgraph@npm:0.3.2"
   dependencies:
     "@langchain/langgraph-checkpoint": ~0.0.18
     "@langchain/langgraph-sdk": ~0.0.32
     uuid: ^10.0.0
-    zod: ^3.23.8
+    zod: ^3.25.32
   peerDependencies:
-    "@langchain/core": ">=0.2.36 <0.3.0 || >=0.3.40 < 0.4.0"
+    "@langchain/core": ">=0.3.58 < 0.4.0"
     zod-to-json-schema: ^3.x
   peerDependenciesMeta:
     zod-to-json-schema:
       optional: true
-  checksum: 25f4a338635c00a0bb56be483438eef29a133b3900cec91b0a32e880ba0b6ee719ea0365f957cc7a5c25218f50f10b83975f2198565aafc27d17127fabf188cc
+  checksum: 1321f6651134281fcf9266d24cef353ba8f0ef6c71c9035a9b1c19df595e6f0b660dff5f26f84517788be5a9aa0ed30e6c8ca62aeaed9cdf157c5e1a5553dce2
   languageName: node
   linkType: hard
 
@@ -2246,7 +2246,7 @@ __metadata:
     "@langchain/anthropic": ^0.3.20
     "@langchain/core": ^0.3.56
     "@langchain/google-genai": ^0.2.9
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.2
     "@langchain/langgraph-cli": latest
     "@langchain/langgraph-sdk": ^0.0.83
     "@langchain/openai": ^0.5.10
@@ -2282,7 +2282,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.2
     "@langchain/langgraph-sdk": ^0.0.83
     "@tsconfig/recommended": ^1.0.8
     "@types/node": ^22.13.5
@@ -2305,7 +2305,7 @@ __metadata:
   dependencies:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.2
     "@langchain/langgraph-sdk": ^0.0.83
     "@open-swe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14
@@ -14530,6 +14530,13 @@ __metadata:
   version: 3.25.32
   resolution: "zod@npm:3.25.32"
   checksum: 27528887ebb778c70ec753e19c8cde453d36cd2bf4682e2f19a441cd9418f87ea85f6da550ab9b157a625b4d19b9c65921e11bf88a76702051528ad4c5bcf2f0
+  languageName: node
+  linkType: hard
+
+"zod@npm:^3.25.32":
+  version: 3.25.64
+  resolution: "zod@npm:3.25.64"
+  checksum: 9f0e86430ed52ef56930712485573454f9b8d64697e24e3139581489520993658d2dee5e939e9e820c1c720afa202fdca58a3ef096f8d91b0d04eb4285bc00ca
   languageName: node
   linkType: hard
 

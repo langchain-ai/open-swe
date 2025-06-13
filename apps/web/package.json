@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@langchain/core": "^0.3.57",
-    "@langchain/langgraph": "^0.3.1",
+    "@langchain/langgraph": "^0.3.2",
     "@langchain/langgraph-sdk": "^0.0.83",
     "@open-swe/shared": "*",
     "@radix-ui/react-alert-dialog": "^1.1.14",
