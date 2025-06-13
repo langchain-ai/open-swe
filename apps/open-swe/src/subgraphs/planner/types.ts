@@ -6,7 +6,7 @@ import { GraphAnnotation } from "@open-swe/shared/open-swe/types";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const PlannerGraphStateObj = GraphAnnotation.extend({
-  plannerMessages: withLangGraph<BaseMessage[], Messages>(
+  plannerMessages: withLangGraph(
     z.custom<BaseMessage[]>(),
     {
       reducer: {
