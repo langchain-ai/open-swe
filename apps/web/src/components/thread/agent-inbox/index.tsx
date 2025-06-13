@@ -39,12 +39,7 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
 
   const planItems = parsePlanData(interruptObj.action_request.args);
   if (planItems?.length) {
-    return (
-      <ProposedPlan
-        originalPlanItems={planItems}
-        actionTitle={interruptObj?.action_request?.action}
-      />
-    );
+    return <ProposedPlan originalPlanItems={planItems} />;
   }
 
   return (
