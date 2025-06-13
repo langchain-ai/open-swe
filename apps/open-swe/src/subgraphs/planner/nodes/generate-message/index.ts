@@ -7,8 +7,8 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { getUserRequest } from "../../../../utils/user-request.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../../utils/followup-prompt.js";
-import { getRepoAbsolutePath } from "../../../../utils/git.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
