@@ -84,7 +84,7 @@ export function createShellTool(state: GraphState) {
         );
       }
     },
-    createShellToolFields(state.targetRepository)
+    createShellToolFields(state.targetRepository),
   );
 
   return shellTool;
