@@ -161,7 +161,15 @@ export function Thread() {
 
   const lastError = useRef<string | undefined>(undefined);
 
-  const isProposedPlanInterrupt = stream.interrupt?.value && typeof stream.interrupt?.value === "object" ? isPlanData((stream.interrupt?.value as HumanInterrupt)?.action_request?.args ?? {}, (stream.interrupt?.value as HumanInterrupt)?.action_request?.action ?? "") : false;
+  const isProposedPlanInterrupt =
+    stream.interrupt?.value && typeof stream.interrupt?.value === "object"
+      ? isPlanData(
+          (stream.interrupt?.value as HumanInterrupt)?.action_request?.args ??
+            {},
+          (stream.interrupt?.value as HumanInterrupt)?.action_request?.action ??
+            "",
+        )
+      : false;
 
   const setThreadId = (id: string | null) => {
     _setThreadId(id);
@@ -230,21 +238,29 @@ export function Thread() {
     setFirstTokenReceived(false);
 
     if (isProposedPlanInterrupt) {
-      const resume: HumanResponse[] = [{
-        type: "response",
-        args: input.trim(),
-      }]
-      console.log("Submitting!")
-      stream.submit({}, {
-        command: {
-          resume,
+      const resume: HumanResponse[] = [
+        {
+          type: "response",
+          args: input.trim(),
         },
-      })
+      ];
+      console.log("Submitting!");
+      stream.submit(
+        {},
+        {
+          command: {
+            resume,
+          },
+        },
+      );
       if (contentBlocks.length > 0) {
-        toast.warning("Content blocks were not submitted with the plan response.", {
-          richColors: true,
-          closeButton: true,
-        })
+        toast.warning(
+          "Content blocks were not submitted with the plan response.",
+          {
+            richColors: true,
+            closeButton: true,
+          },
+        );
       }
       setInput("");
       setContentBlocks([]);

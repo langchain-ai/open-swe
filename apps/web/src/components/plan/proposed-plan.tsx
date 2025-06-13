@@ -3,7 +3,11 @@ import { Button } from "../ui/button";
 import { useProposedPlan } from "../thread/agent-inbox/hooks/useProposedPlan";
 import { PlanItem } from "@open-swe/shared/open-swe/types";
 
-export function ProposedPlan({ originalPlanItems }: { originalPlanItems: PlanItem[] }) {
+export function ProposedPlan({
+  originalPlanItems,
+}: {
+  originalPlanItems: PlanItem[];
+}) {
   const {
     planItems,
     setPlanItems,
