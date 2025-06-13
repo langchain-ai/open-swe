@@ -2,7 +2,9 @@
   "extends": "@tsconfig/recommended",
   "compilerOptions": {
     "target": "ES2021",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "module": "NodeNext",
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
@@ -17,9 +19,18 @@
     "strict": true,
     "strictFunctionTypes": false,
     "outDir": "dist",
-    "types": ["jest", "node"],
+    "types": [
+      "jest",
+      "node"
+    ],
     "resolveJsonModule": true
   },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "**/*.ts",
+    "apps/open-swe/jest.config.cjs"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

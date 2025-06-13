@@ -228,6 +228,10 @@ async function updatePlanTasksFunc(
 
 const updatePlanTasks = traceable(updatePlanTasksFunc, {
   name: "update_plan_tasks",
+  processInputs: (inputs) => {
+    const { model, ...rest } = inputs;
+    return rest;
+  },
 });
 
 export async function rewritePlan(

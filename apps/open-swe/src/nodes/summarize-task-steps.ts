@@ -119,6 +119,10 @@ async function generateTaskSummaryFunc(
 
 const generateTaskSummary = traceable(generateTaskSummaryFunc, {
   name: "generate-task-summary",
+  processInputs: (inputs) => {
+    const { model, ...rest } = inputs;
+    return rest;
+  },
 });
 
 export async function summarizeTaskSteps(

@@ -106,6 +106,10 @@ async function readFileFunc(
 
 export const readFile = traceable(readFileFunc, {
   name: "read_file",
+  processInputs: (inputs) => {
+    const { sandbox, ...rest } = inputs;
+    return rest;
+  },
 });
 
 async function writeFileFunc(
@@ -169,4 +173,8 @@ ${delimiter}`;
 
 export const writeFile = traceable(writeFileFunc, {
   name: "write_file",
+  processInputs: (inputs) => {
+    const { sandbox, ...rest } = inputs;
+    return rest;
+  },
 });
