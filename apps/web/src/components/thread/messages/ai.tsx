@@ -12,6 +12,10 @@ import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { useArtifact } from "../artifact";
 import { Interrupt } from "./interrupt";
+import {
+  ActionStep,
+  type ActionStepProps,
+} from "@/components/gen-ui/action-step";
 
 function CustomComponent({
   message,
@@ -63,6 +67,61 @@ function parseAnthropicStreamedToolCalls(
       type: "tool_call",
     };
   });
+}
+
+// Utility to map a ToolMessage to ActionStepProps for take-action node
+function mapToolMessageToActionStepProps(
+  message: any,
+  meta: any,
+  thread: any,
+): ActionStepProps {
+  // Find the corresponding tool call from the previous AI message
+  // (ToolMessage.tool_call_id matches AIMessage.tool_calls[].id)
+  let toolCall = undefined;
+  if (message.tool_call_id) {
+    // Find the previous AI message
+    const aiMsg = [...thread.messages]
+      .reverse()
+      .find(
+        (m: any) =>
+          m.type === "ai" &&
+          Array.isArray(m.tool_calls) &&
+          m.tool_calls.some((tc: any) => tc.id === message.tool_call_id),
+      );
+    if (aiMsg) {
+      toolCall = aiMsg.tool_calls.find(
+        (tc: any) => tc.id === message.tool_call_id,
+      );
+    }
+  }
+  const status: ActionStepProps["status"] = "done";
+  const success = message.status === "success";
+  if (message.name === "shell") {
+    return {
+      actionType: "shell",
+      status,
+      success,
+      command: toolCall?.args?.command || "",
+      workdir: toolCall?.args?.workdir,
+      output: message.content,
+      errorCode: message.errorCode,
+      reasoningText: message.reasoningText,
+      summaryText: message.summaryText,
+    };
+  } else if (message.name === "apply_patch" || message.name === "apply-patch") {
+    return {
+      actionType: "apply-patch",
+      status,
+      success,
+      file: toolCall?.args?.file || "",
+      diff: message.content,
+      errorMessage: !success ? message.content : undefined,
+      reasoningText: message.reasoningText,
+      summaryText: message.summaryText,
+    };
+  }
+  // fallback
+  return { status } as ActionStepProps;
 }
 
 export function AssistantMessage({
@@ -119,7 +178,13 @@ export function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <span>
-            <ToolResult message={message} />
+            {message.name === "shell" || message.name === "apply_patch" ? (
+              <ActionStep
+                {...mapToolMessageToActionStepProps(message, meta, thread)}
+              />
+            ) : (
+              <ToolResult message={message} />
+            )}
             <Interrupt
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}
