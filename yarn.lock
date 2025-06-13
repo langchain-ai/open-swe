@@ -1838,9 +1838,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::locator=%40open-swe%2Fagent%40workspace%3Aapps%2Fopen-swe":
-  version: 0.3.2
-  resolution: "@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph#/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::hash=1d0cf8&locator=%40open-swe%2Fagent%40workspace%3Aapps%2Fopen-swe"
+"@langchain/langgraph@npm:^0.3.3":
+  version: 0.3.3
+  resolution: "@langchain/langgraph@npm:0.3.3"
   dependencies:
     "@langchain/langgraph-checkpoint": ~0.0.18
     "@langchain/langgraph-sdk": ~0.0.32
@@ -1852,43 +1852,7 @@ __metadata:
   peerDependenciesMeta:
     zod-to-json-schema:
       optional: true
-  checksum: f3eefdfb9d98bffdba966f6e7adbfe76c4f2b1a89a8dac6f0412e3f7600a08dbf13efd5a93027745f481ac60ac4534ed92e6ceb04454e8cec415d0f111be8c89
-  languageName: node
-  linkType: hard
-
-"@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::locator=%40open-swe%2Fshared%40workspace%3Apackages%2Fshared":
-  version: 0.3.2
-  resolution: "@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph#/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::hash=1d0cf8&locator=%40open-swe%2Fshared%40workspace%3Apackages%2Fshared"
-  dependencies:
-    "@langchain/langgraph-checkpoint": ~0.0.18
-    "@langchain/langgraph-sdk": ~0.0.32
-    uuid: ^10.0.0
-    zod: ^3.25.32
-  peerDependencies:
-    "@langchain/core": ">=0.3.58 < 0.4.0"
-    zod-to-json-schema: ^3.x
-  peerDependenciesMeta:
-    zod-to-json-schema:
-      optional: true
-  checksum: f3eefdfb9d98bffdba966f6e7adbfe76c4f2b1a89a8dac6f0412e3f7600a08dbf13efd5a93027745f481ac60ac4534ed92e6ceb04454e8cec415d0f111be8c89
-  languageName: node
-  linkType: hard
-
-"@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::locator=%40open-swe%2Fweb%40workspace%3Aapps%2Fweb":
-  version: 0.3.2
-  resolution: "@langchain/langgraph@file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph#/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph::hash=1d0cf8&locator=%40open-swe%2Fweb%40workspace%3Aapps%2Fweb"
-  dependencies:
-    "@langchain/langgraph-checkpoint": ~0.0.18
-    "@langchain/langgraph-sdk": ~0.0.32
-    uuid: ^10.0.0
-    zod: ^3.25.32
-  peerDependencies:
-    "@langchain/core": ">=0.3.58 < 0.4.0"
-    zod-to-json-schema: ^3.x
-  peerDependenciesMeta:
-    zod-to-json-schema:
-      optional: true
-  checksum: f3eefdfb9d98bffdba966f6e7adbfe76c4f2b1a89a8dac6f0412e3f7600a08dbf13efd5a93027745f481ac60ac4534ed92e6ceb04454e8cec415d0f111be8c89
+  checksum: 26a9fc9003f0c57f892f7d45f1d99ab1b028bdbe73a32a2f5cbc1786da854bc875c6008c157e314aa338af376c9ae546f136dac8d1b8e3807040f3d3c6fa3c73
   languageName: node
   linkType: hard
 
@@ -2282,7 +2246,7 @@ __metadata:
     "@langchain/anthropic": ^0.3.20
     "@langchain/core": ^0.3.56
     "@langchain/google-genai": ^0.2.9
-    "@langchain/langgraph": "file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph"
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-cli": latest
     "@langchain/langgraph-sdk": ^0.0.83
     "@langchain/openai": ^0.5.10
@@ -2318,7 +2282,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
-    "@langchain/langgraph": "file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph"
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.83
     "@tsconfig/recommended": ^1.0.8
     "@types/node": ^22.13.5
@@ -2341,7 +2305,7 @@ __metadata:
   dependencies:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
-    "@langchain/langgraph": "file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph"
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.83
     "@open-swe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14

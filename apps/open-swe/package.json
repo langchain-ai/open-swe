@@ -26,7 +26,7 @@
     "@langchain/anthropic": "^0.3.20",
     "@langchain/core": "^0.3.56",
     "@langchain/google-genai": "^0.2.9",
-    "@langchain/langgraph": "file:/Users/bracesproul/code/lang-chain-ai/langgraphjs/libs/langgraph",
+    "@langchain/langgraph": "^0.3.3",
     "@langchain/langgraph-sdk": "^0.0.83",
     "@langchain/openai": "^0.5.10",
     "@octokit/rest": "^22.0.0",
