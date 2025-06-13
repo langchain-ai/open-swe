@@ -35,7 +35,7 @@
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",
     "uuid": "^11.0.5",
-    "zod": "^3.23.8"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
