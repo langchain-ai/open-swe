@@ -5,8 +5,8 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../utils/load-model.js";
 import {
-  shellTool,
-  applyPatchTool,
+  createShellTool,
+  createApplyPatchTool,
   requestHumanHelpTool,
   updatePlanTool,
 } from "../../tools/index.js";
@@ -17,7 +17,7 @@ import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getCurrentPlanItem } from "../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { loadPrompt } from "./prompt.js";
+import { SYSTEM_PROMPT } from "./prompt.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -27,14 +27,12 @@ const formatPrompt = (state: GraphState): string => {
   const currentPlanItem = activePlanItems
     .filter((p) => !p.completed)
     .sort((a, b) => a.index - b.index)[0];
-  const systemPrompt = loadPrompt("anthropic_gen_anthropic_style");
-  return systemPrompt
-    .replaceAll(
-      "{PLAN_PROMPT_WITH_SUMMARIES}",
-      formatPlanPrompt(getActivePlanItems(state.plan), {
-        includeSummaries: true,
-      }),
-    )
+  return SYSTEM_PROMPT.replaceAll(
+    "{PLAN_PROMPT_WITH_SUMMARIES}",
+    formatPlanPrompt(getActivePlanItems(state.plan), {
+      includeSummaries: true,
+    }),
+  )
     .replaceAll(
       "{PLAN_PROMPT}",
       formatPlanPrompt(getActivePlanItems(state.plan)),
@@ -58,8 +56,8 @@ export async function generateAction(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [
-    shellTool,
-    applyPatchTool,
+    createShellTool(state),
+    createApplyPatchTool(state),
     requestHumanHelpTool,
     updatePlanTool,
   ];

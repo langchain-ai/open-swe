@@ -1,5 +1,5 @@
 import { loadModel, Task } from "../../../../utils/load-model.js";
-import { shellTool } from "../../../../tools/index.js";
+import { createShellTool } from "../../../../tools/index.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../../types.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
@@ -8,19 +8,17 @@ import { getUserRequest } from "../../../../utils/user-request.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../../utils/followup-prompt.js";
 import { getRepoAbsolutePath } from "../../../../utils/git.js";
-import { loadPrompt } from "./prompt.js";
+import { SYSTEM_PROMPT } from "./prompt.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = state.internalMessages.filter(isHumanMessage).length > 1;
-  const systemPrompt = loadPrompt("anthropic_gen_anthropic_style");
-  return systemPrompt
-    .replace(
-      "{FOLLOWUP_MESSAGE_PROMPT}",
-      isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
-    )
+  return SYSTEM_PROMPT.replace(
+    "{FOLLOWUP_MESSAGE_PROMPT}",
+    isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
+  )
     .replaceAll(
       "{CODEBASE_TREE}",
       state.codebaseTree || "No codebase tree generated yet.",
@@ -36,7 +34,7 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [shellTool];
+  const tools = [createShellTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: false,

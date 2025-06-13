@@ -1,5 +1,5 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { shellTool } from "../../../tools/index.js";
+import { createShellTool } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
@@ -20,6 +20,7 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
+  const shellTool = createShellTool(state);
   const toolsMap = {
     [shellTool.name]: shellTool,
   };

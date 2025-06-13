@@ -4,7 +4,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { applyPatchTool, shellTool } from "../tools/index.js";
+import { createApplyPatchTool, createShellTool } from "../tools/index.js";
 import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
@@ -53,6 +53,8 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
+  const applyPatchTool = createApplyPatchTool(state);
+  const shellTool = createShellTool(state);
   const toolsMap = {
     [applyPatchTool.name]: applyPatchTool,
     [shellTool.name]: shellTool,

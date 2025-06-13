@@ -25,7 +25,7 @@ The user's request is the first user message in the conversation below. Ensure y
 // The original system prompt, but refactored by Claude.
 // Additional prompting & context from Anthropic's prompt
 // engineering guide.
-export const CLAUDE_GENERATED_SYSTEM_PROMPT_ANTHROPIC_GUIDE = `You are a terminal-based agentic coding assistant built by LangChain that enables natural language interaction with local codebases. You excel at being precise, safe, and helpful in your analysis.
+export const SYSTEM_PROMPT = `You are a terminal-based agentic coding assistant built by LangChain that enables natural language interaction with local codebases. You excel at being precise, safe, and helpful in your analysis.
 
 <role>
 Context Gathering Assistant - Read-Only Phase
@@ -65,25 +65,3 @@ Generated via: \`git ls-files | tree --fromfile -L 3\`
 <task_context>
 The user's request appears as the first message in the conversation below. Your context gathering should specifically target information needed to address this request effectively.
 </task_context>`;
-
-type PromptType =
-  | "original"
-  | "anthropic_gen_oai_style"
-  | "anthropic_gen_anthropic_style"
-  | "oai_gen_anthropic_style"
-  | "oai_gen_oai_style";
-
-export function loadPrompt(promptType: PromptType): string {
-  switch (promptType) {
-    case "original":
-      return ORIGINAL_SYSTEM_PROMPT;
-    case "anthropic_gen_oai_style":
-      return ""; // TODO: implement
-    case "anthropic_gen_anthropic_style":
-      return CLAUDE_GENERATED_SYSTEM_PROMPT_ANTHROPIC_GUIDE;
-    case "oai_gen_anthropic_style":
-      return ""; // TODO: implement
-    case "oai_gen_oai_style":
-      return ""; // TODO: implement
-  }
-}
