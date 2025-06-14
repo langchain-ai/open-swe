@@ -234,7 +234,6 @@ export function Thread() {
           args: input.trim(),
         },
       ];
-      console.log("Submitting!");
       stream.submit(
         {},
         {
