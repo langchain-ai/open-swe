@@ -1,6 +1,5 @@
 "use client";
 
-import "../app/globals.css";
 import { useState } from "react";
 import {
   Terminal,
@@ -41,7 +40,7 @@ type PatchActionProps = BaseActionProps & {
 };
 
 // Union type for all possible action props
-type ActionStepProps =
+export type ActionStepProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps;

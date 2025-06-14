@@ -2271,7 +2271,7 @@ __metadata:
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     uuid: ^11.0.5
-    zod: ^3.23.8
+    zod: ^3.24.2
   languageName: unknown
   linkType: soft
 
