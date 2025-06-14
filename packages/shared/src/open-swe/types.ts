@@ -125,19 +125,16 @@ export const GraphAnnotation = MessagesZodState.extend({
    * passed to the LLM, truncated, removed etc. The main `messages`
    * key is never modified to persist the content show on the client.
    */
-  internalMessages: withLangGraph<BaseMessage[], Messages>(
-    z.custom<BaseMessage[]>(),
-    {
-      reducer: {
-        schema: z.custom<Messages>(),
-        fn: messagesStateReducer,
-      },
-      jsonSchemaExtra: {
-        langgraph_type: "messages",
-      },
-      default: () => [],
+  internalMessages: withLangGraph(z.custom<BaseMessage[]>(), {
+    reducer: {
+      schema: z.custom<Messages>(),
+      fn: messagesStateReducer,
     },
-  ),
+    jsonSchemaExtra: {
+      langgraph_type: "messages",
+    },
+    default: () => [],
+  }),
   proposedPlan: z
     .array(z.string())
     .default(() => [])

@@ -7,10 +7,9 @@ import { loadModel, Task } from "../../utils/load-model.js";
 import {
   createShellTool,
   createApplyPatchTool,
-  requestHumanHelpTool,
-  updatePlanTool,
+  createRequestHumanHelpToolFields,
+  createUpdatePlanToolFields,
 } from "../../tools/index.js";
-import { getRepoAbsolutePath } from "../../utils/git.js";
 import { formatPlanPrompt } from "../../utils/plan-prompt.js";
 import { stopSandbox } from "../../utils/sandbox.js";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -18,6 +17,7 @@ import { getCurrentPlanItem } from "../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { SYSTEM_PROMPT } from "./prompt.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -58,8 +58,8 @@ export async function generateAction(
   const tools = [
     createShellTool(state),
     createApplyPatchTool(state),
-    requestHumanHelpTool,
-    updatePlanTool,
+    createRequestHumanHelpToolFields(),
+    createUpdatePlanToolFields(),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",

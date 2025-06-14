@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@langchain/core": "^0.3.57",
-    "@langchain/langgraph": "^0.3.1",
+    "@langchain/langgraph": "^0.3.3",
     "@langchain/langgraph-sdk": "^0.0.83",
     "@open-swe/shared": "*",
     "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -65,7 +65,7 @@
     "tailwindcss-animate": "^1.0.7",
     "use-stick-to-bottom": "^1.0.46",
     "uuid": "^11.1.0",
-    "zod": "^3.24.2",
+    "zod": "^3.25.32",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
