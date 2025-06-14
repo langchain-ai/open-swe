@@ -2,23 +2,12 @@ import { Octokit } from "@octokit/rest";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
-import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@open-swe/shared/constants";
+import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
-import path from "node:path";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "GitUtil");
-
-export function getRepoAbsolutePath(
-  targetRepository: TargetRepository,
-): string {
-  const repoName = targetRepository.repo;
-  if (!repoName) {
-    throw new Error("No repository name provided");
-  }
-
-  return path.join(SANDBOX_ROOT_DIR, repoName);
-}
 
 export function getBranchName(config: GraphConfig): string {
   const threadId = config.configurable?.thread_id;

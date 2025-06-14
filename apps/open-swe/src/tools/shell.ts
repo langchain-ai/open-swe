@@ -1,5 +1,4 @@
 import { tool } from "@langchain/core/tools";
-import { z } from "zod";
 import { Sandbox } from "@daytonaio/sdk";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getCurrentTaskInput } from "@langchain/langgraph";
@@ -7,38 +6,13 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { getRepoAbsolutePath } from "../utils/git.js";
+import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-};
-
-const createShellToolSchema = (state: GraphState) => {
-  const repoRoot = getRepoAbsolutePath(state.targetRepository);
-  const shellToolSchema = z.object({
-    command: z
-      .array(z.string())
-      .describe(
-        "The command to run. Ensure the command is properly formatted, with arguments in the correct order, and including any wrapping strings, quotes, etc. By default, this command will be executed in the root of the repository, unless a custom workdir is specified.",
-      ),
-    workdir: z
-      .string()
-      .default(repoRoot)
-      .describe(
-        `The working directory for the command. Defaults to the root of the repository (${repoRoot}). You should only specify this if the command you're running can not be executed from the root of the repository.`,
-      ),
-    timeout: z
-      .number()
-      .optional()
-      .default(TIMEOUT_SEC)
-      .describe(
-        "The maximum time to wait for the command to complete in seconds.",
-      ),
-  });
-  return shellToolSchema;
 };
 
 export function createShellTool(state: GraphState) {
@@ -110,11 +84,7 @@ export function createShellTool(state: GraphState) {
         );
       }
     },
-    {
-      name: "shell",
-      description: "Runs a shell command, and returns its output.",
-      schema: createShellToolSchema(state),
-    },
+    createShellToolFields(state.targetRepository),
   );
 
   return shellTool;
