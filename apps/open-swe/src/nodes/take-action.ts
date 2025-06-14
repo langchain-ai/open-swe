@@ -9,7 +9,6 @@ import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
-  getRepoAbsolutePath,
 } from "../utils/git.js";
 import {
   formatBadArgsError,
@@ -19,6 +18,7 @@ import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../utils/truncate-outputs.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { getCodebaseTree } from "../utils/tree.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 

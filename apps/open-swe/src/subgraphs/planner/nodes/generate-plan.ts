@@ -3,7 +3,7 @@ import {
   isHumanMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { sessionPlanTool } from "../../../tools/index.js";
+import { createSessionPlanToolFields } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
@@ -52,6 +52,7 @@ export async function generatePlan(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.PLANNER);
+  const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
     parallel_tool_calls: false,

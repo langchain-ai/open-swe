@@ -9,7 +9,6 @@ import {
   createPullRequest,
   getBranchName,
   getChangedFilesStatus,
-  getRepoAbsolutePath,
 } from "../utils/git.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { z } from "zod";
@@ -20,6 +19,7 @@ import { ToolMessage } from "@langchain/core/messages";
 import { daytonaClient, deleteSandbox } from "../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 

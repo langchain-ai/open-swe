@@ -1,5 +1,4 @@
 import { tool } from "@langchain/core/tools";
-import { z } from "zod";
 import { applyPatch } from "diff";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
@@ -7,26 +6,10 @@ import { getCurrentTaskInput } from "@langchain/langgraph";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
-import { getRepoAbsolutePath } from "../utils/git.js";
+import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
-
-const createApplyPatchToolDescription = (state: GraphState) => {
-  const repoRoot = getRepoAbsolutePath(state.targetRepository);
-  return (
-    "Applies a diff to a file given a file path and diff content." +
-    `The working directory this diff will be applied to is \`${repoRoot}\`. Ensure the file paths you provide are relative to this directory.`
-  );
-};
-
-const applyPatchToolSchema = z.object({
-  diff: z
-    .string()
-    .describe(
-      `The diff to apply. Use a standard diff format. Ensure this field is ALWAYS provided.`,
-    ),
-  file_path: z.string().describe("The file path to apply the diff to."),
-});
 
 export function createApplyPatchTool(state: GraphState) {
   const applyPatchTool = tool(
@@ -124,11 +107,7 @@ export function createApplyPatchTool(state: GraphState) {
         status: "success",
       };
     },
-    {
-      name: "apply_patch",
-      description: createApplyPatchToolDescription(state),
-      schema: applyPatchToolSchema,
-    },
+    createApplyPatchToolFields(state.targetRepository),
   );
   return applyPatchTool;
 }
