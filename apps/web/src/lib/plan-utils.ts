@@ -3,6 +3,8 @@ import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
 } from "@open-swe/shared/constants";
+import { Interrupt } from "@langchain/langgraph-sdk";
+import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
 
 /**
  * Checks if the interrupt args contain plan data
@@ -62,4 +64,15 @@ export function convertPlanItemsToInterruptString(
   planItems: PlanItem[],
 ): string {
   return planItems.map((item) => item.plan).join(PLAN_INTERRUPT_DELIMITER);
+}
+
+export function isProposedPlanInterrupt(
+  interrupt: Interrupt | undefined,
+): boolean {
+  return interrupt?.value && typeof interrupt?.value === "object"
+    ? isPlanData(
+        (interrupt.value as HumanInterrupt)?.action_request?.args ?? {},
+        (interrupt.value as HumanInterrupt)?.action_request?.action ?? "",
+      )
+    : false;
 }
