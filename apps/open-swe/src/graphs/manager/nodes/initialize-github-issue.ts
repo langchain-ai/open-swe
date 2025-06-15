@@ -3,22 +3,16 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import {
-  BaseMessage,
   HumanMessage,
   isHumanMessage,
-  RemoveMessage,
 } from "@langchain/core/messages";
 import {
-  createIssue,
-  createIssueComment,
   getIssue,
-  getIssueComments,
 } from "../../../utils/github/api.js";
 import {
   GitHubIssue,
   GitHubIssueComment,
 } from "../../../utils/github/types.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
 import { extractTasksFromIssueContent } from "../../../utils/task-string-extraction.js";
 
 const getMessageContentFromIssue = (
@@ -30,22 +24,6 @@ const getMessageContentFromIssue = (
   return `[issue comment]\n${issue.body}`;
 };
 
-const messagesListHasOriginalIssue = (messages: BaseMessage[]) => {
-  return messages.some((message) => {
-    return message.additional_kwargs?.isOriginalIssue;
-  });
-};
-
-const filterUntrackedComments = (
-  messages: BaseMessage[],
-  issueComments: GitHubIssueComment[],
-) => {
-  return issueComments.filter((comment) => {
-    return !messages.some((message) => {
-      return message.additional_kwargs?.githubIssueCommentId === comment.id;
-    });
-  });
-};
 
 /**
  * The initialize function will do nothing if there's already a human message
@@ -77,6 +55,15 @@ export async function initializeGithubIssue(
     });
     if (!issue) {
       throw new Error("Issue not found");
+    }
+
+    let taskPlan = state.taskPlan;
+    if (issue.body) {
+      const extractedTaskPlan = extractTasksFromIssueContent(issue.body);
+      if (!extractedTaskPlan) {
+        throw new Error("Failed to extract task plan from issue body");
+      }
+      taskPlan = extractedTaskPlan;
     }
 
     const newMessage = new HumanMessage({
