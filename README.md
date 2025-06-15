@@ -29,7 +29,7 @@ cp ./apps/open-swe/.env.example ./apps/open-swe/.env
 cp ./apps/web/.env.example ./apps/web/.env
 ```
 
-The agent `.env` file should contain the following variables:
+The open-swe `.env` file should contain the following variables:
 
 ```bash
 # ------------------LangSmith tracing------------------
@@ -45,12 +45,17 @@ GOOGLE_API_KEY=""
 
 # Daytona API key for accessing and modifying the code in the cloud sandbox.
 DAYTONA_API_KEY=""
+
+# Encryption key for GitHub tokens (32-byte hex string for AES-256)
+# Should be the same value as the one used in the web app.
+# Can be generated via: `openssl rand -hex 32`
+GITHUB_TOKEN_ENCRYPTION_KEY=""
 ```
 
 And the web `.env` file should contain the following variables:
 
 ```bash
-# Change to production URLs when deployed
+# Change both to production URLs when deployed
 NEXT_PUBLIC_API_URL="http://localhost:3000/api"
 LANGGRAPH_API_URL="http://localhost:2024"
 NEXT_PUBLIC_ASSISTANT_ID="open-swe"
@@ -63,7 +68,14 @@ GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
 GITHUB_APP_NAME="open-swe-dev"
 GITHUB_APP_ID=""
 GITHUB_APP_PRIVATE_KEY=""
+
+# Encryption key for GitHub tokens (32-byte hex string for AES-256)
+# Should be the same value as the one used in the open-swe app.
+# Can be generated via: `openssl rand -hex 32`
+GITHUB_TOKEN_ENCRYPTION_KEY=""
 ```
+
+**REMINDER**: The `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable must be the same in both the web and open-swe apps.
 
 To get the GitHub App secrets, first create a new GitHub app (note: this is not the same as the OAuth app) in [the developer settings](https://github.com/settings/apps/new).
 
