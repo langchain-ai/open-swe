@@ -201,7 +201,7 @@ export const GraphConfigurationMetadata: {
   maxContextActions: {
     x_open_swe_ui_config: {
       type: "number",
-      default: 10,
+      default: 75,
       min: 1,
       max: 50,
       description:
@@ -325,7 +325,7 @@ export const GraphConfiguration = z.object({
    * The maximum number of context gathering actions to take during planning.
    * Each action consists of 2 messages (request & result), plus 1 human message.
    * Total messages = maxContextActions * 2 + 1
-   * @default 10
+   * @default 75
    */
   maxContextActions: z
     .number()
@@ -463,3 +463,4 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
+
