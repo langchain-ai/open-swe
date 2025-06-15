@@ -13,7 +13,10 @@ import {
   type UIMessage,
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
-import { GITHUB_TOKEN_COOKIE } from "../constants.js";
+import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_TOKEN_COOKIE,
+} from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
@@ -310,6 +313,11 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_INSTALLATION_TOKEN_COOKIE]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -437,6 +445,16 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata[GITHUB_TOKEN_COOKIE]),
+  /**
+   * The installation token from the GitHub app. This token allows us to take actions
+   * on the repos the user has granted us access to, but on behalf of the app, not the user.
+   */
+  [GITHUB_INSTALLATION_TOKEN_COOKIE]: z
+    .string()
+    .optional()
+    .langgraph.metadata(
+      GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
+    ),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

@@ -1,6 +1,50 @@
 import { initApiPassthrough } from "langgraph-nextjs-api-passthrough";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
+import {
+  GITHUB_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+} from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
+import { NextRequest } from "next/server";
+import { getInstallationToken } from "@/utils/github";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
+
+function getGitHubAccessTokenOrThrow(
+  req: NextRequest,
+  encryptionKey: string,
+): string {
+  const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "";
+
+  if (!token) {
+    throw new Error("No GitHub access token cookie found.");
+  }
+
+  return encryptGitHubToken(token, encryptionKey);
+}
+
+async function getGitHubInstallationTokenOrThrow(
+  req: NextRequest,
+  encryptionKey: string,
+): Promise<string> {
+  const installationIdCookie = req.cookies.get(
+    GITHUB_INSTALLATION_ID_COOKIE,
+  )?.value;
+  if (!installationIdCookie) {
+    throw new Error("No GitHub installation ID cookie found.");
+  }
+
+  const appId = process.env.GITHUB_APP_ID;
+  const privateAppKey = process.env.GITHUB_APP_PRIVATE_KEY;
+  if (!appId || !privateAppKey) {
+    throw new Error("GitHub App ID or Private App Key is not configured.");
+  }
+
+  const token = await getInstallationToken(
+    installationIdCookie,
+    appId,
+    privateAppKey,
+  );
+  return encryptGitHubToken(token, encryptionKey);
+}
 
 // This file acts as a proxy for requests to your LangGraph server.
 // Read the [Going to Production](https://github.com/langchain-ai/agent-chat-ui?tab=readme-ov-file#going-to-production) section for more information.
@@ -10,27 +54,18 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
     apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
     runtime: "edge", // default
     disableWarningLog: true,
-    headers: (req) => {
-      const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "";
-      
-      // If no token is present, return empty header
-      if (!token) {
-        return {
-          [GITHUB_TOKEN_COOKIE]: "",
-        };
-      }
-      
-      // Encrypt the GitHub token before forwarding to LangGraph server
+    headers: async (req) => {
       const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
       if (!encryptionKey) {
-        throw new Error("GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required");
+        throw new Error(
+          "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
+        );
       }
-      
-      const encryptedToken = encryptGitHubToken(token, encryptionKey);
-      
+
       return {
-        [GITHUB_TOKEN_COOKIE]: encryptedToken,
+        [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
+        [GITHUB_INSTALLATION_TOKEN_COOKIE]:
+          await getGitHubInstallationTokenOrThrow(req, encryptionKey),
       };
     },
   });
-
