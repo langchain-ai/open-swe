@@ -135,81 +135,16 @@ export async function checkoutBranch(
   }
 }
 
-interface GitHubUserResponse {
-  login: string;
-  id: number;
-  name: string | null;
-  email: string | null;
-}
-
-async function getGitUserDetailsFromGitHub(githubToken: string): Promise<{
-  userName?: string;
-  userEmail?: string;
-}> {
-  try {
-    // Try with Bearer token first (for GitHub App installation tokens)
-    const response = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "OpenSWE",
-      },
-    });
-
-    if (!response.ok) {
-      logger.error(`Failed to fetch GitHub user info`, {
-        status: response.status,
-        statusText: response.statusText,
-      });
-      return {};
-    }
-
-    const userData = (await response.json()) as GitHubUserResponse;
-    const fetchedUserName = userData.name || userData.login;
-    let fetchedUserEmail = userData.email; // This can be string | null
-
-    if (!fetchedUserEmail && userData.id && userData.login) {
-      fetchedUserEmail = `${userData.id}+${userData.login}@users.noreply.github.com`;
-    } else if (!fetchedUserEmail && userData.login) {
-      fetchedUserEmail = `${userData.login}@users.noreply.github.com`;
-    }
-
-    const finalUserName = fetchedUserName || undefined;
-    const finalUserEmail = fetchedUserEmail || undefined;
-
-    if (!finalUserName) {
-      logger.warn("Could not determine GitHub username from API response.");
-    }
-    if (!finalUserEmail) {
-      logger.warn("Could not determine GitHub user email from API response.");
-    }
-    logger.info("Successfully fetched GitHub user info", {
-      userName: finalUserName,
-      userEmail: finalUserEmail,
-    });
-    return { userName: finalUserName, userEmail: finalUserEmail };
-  } catch (e) {
-    logger.error(`Error fetching GitHub user info`, {
-      ...(e instanceof Error && {
-        name: e.name,
-        message: e.message,
-        stack: e.stack,
-      }),
-    });
-    return {};
-  }
-}
-
 export async function configureGitUserInRepo(
   absoluteRepoDir: string,
   sandbox: Sandbox,
   args: {
-    githubAccessToken: string;
+    githubInstallationToken: string;
     owner: string;
     repo: string;
   },
 ): Promise<void> {
-  const { githubAccessToken, owner, repo } = args;
+  const { githubInstallationToken, owner, repo } = args;
   let needsGitConfig = false;
   try {
     const nameCheck = await sandbox.process.executeCommand(
@@ -251,7 +186,7 @@ export async function configureGitUserInRepo(
   try {
     // Set the remote URL with the token using the provided owner and repo
     const setRemoteOutput = await sandbox.process.executeCommand(
-      `git remote set-url origin https://x-access-token:${githubAccessToken}@github.com/${owner}/${repo}.git`,
+      `git remote set-url origin https://x-access-token:${githubInstallationToken}@github.com/${owner}/${repo}.git`,
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
@@ -275,13 +210,16 @@ export async function configureGitUserInRepo(
   }
 
   if (needsGitConfig) {
-    const { userName, userEmail } =
-      await getGitUserDetailsFromGitHub(githubAccessToken);
+    const botAppName = process.env.GITHUB_APP_NAME;
+    if (!botAppName) {
+      logger.error("GITHUB_APP_NAME environment variable is not set.");
+      throw new Error("GITHUB_APP_NAME environment variable is not set.");
+    }
+    const userName = `${botAppName}[bot]`;
+    const userEmail = `${botAppName}@users.noreply.github.com`;
 
-    // Set user name - use fetched name or fallback to "GitHub App User"
-    const nameToUse = userName || "GitHub App User";
     const configUserNameOutput = await sandbox.process.executeCommand(
-      `git config user.name "${nameToUse}"`,
+      `git config user.name "${userName}"`,
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
@@ -291,13 +229,11 @@ export async function configureGitUserInRepo(
         configUserNameOutput,
       });
     } else {
-      logger.info(`Set git user.name to '${nameToUse}' successfully.`);
+      logger.info(`Set git user.name to '${userName}' successfully.`);
     }
 
-    // Set user email - use fetched email or fallback to a generic noreply address
-    const emailToUse = userEmail || `${repo}-bot@noreply.github.com`;
     const configUserEmailOutput = await sandbox.process.executeCommand(
-      `git config user.email "${emailToUse}"`,
+      `git config user.email "${userEmail}"`,
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
@@ -307,7 +243,7 @@ export async function configureGitUserInRepo(
         configUserEmailOutput,
       });
     } else {
-      logger.info(`Set git user.email to '${emailToUse}' successfully.`);
+      logger.info(`Set git user.email to '${userEmail}' successfully.`);
     }
   } else {
     logger.info(
@@ -482,17 +418,17 @@ export async function createPullRequest({
   headBranch,
   title,
   body = "",
-  githubAccessToken,
+  githubInstallationToken,
 }: {
   owner: string;
   repo: string;
   headBranch: string;
   title: string;
   body?: string;
-  githubAccessToken: string;
+  githubInstallationToken: string;
 }) {
   const octokit = new Octokit({
-    auth: githubAccessToken,
+    auth: githubInstallationToken,
   });
 
   try {
@@ -545,7 +481,12 @@ export async function createPullRequest({
       logger.info(
         "Pull request already exists. Getting existing pull request...",
       );
-      return getExistingPullRequest(owner, repo, headBranch, githubAccessToken);
+      return getExistingPullRequest(
+        owner,
+        repo,
+        headBranch,
+        githubInstallationToken,
+      );
     }
 
     logger.error(`Failed to create pull request`, {
@@ -585,7 +526,7 @@ export async function cloneRepo(
   sandbox: Sandbox,
   targetRepository: TargetRepository,
   args: {
-    githubAccessToken: string;
+    githubInstallationToken: string;
     stateBranchName?: string;
   },
 ) {
@@ -593,7 +534,7 @@ export async function cloneRepo(
     const gitCloneCommand = ["git", "clone"];
 
     // Use x-access-token format for better GitHub authentication
-    const repoUrlWithToken = `https://x-access-token:${args.githubAccessToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+    const repoUrlWithToken = `https://x-access-token:${args.githubInstallationToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
 
     const branchName = args.stateBranchName || targetRepository.branch;
     if (branchName) {

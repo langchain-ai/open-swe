@@ -50,6 +50,8 @@ DAYTONA_API_KEY=""
 # Should be the same value as the one used in the web app.
 # Can be generated via: `openssl rand -hex 32`
 GITHUB_TOKEN_ENCRYPTION_KEY=""
+# Used for setting the git user name & email for commits.
+GITHUB_APP_NAME="open-swe-dev"
 ```
 
 And the web `.env` file should contain the following variables:
