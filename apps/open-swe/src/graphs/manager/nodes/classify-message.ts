@@ -5,7 +5,12 @@ import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
-import { BaseMessage, HumanMessage, isHumanMessage, RemoveMessage } from "@langchain/core/messages";
+import {
+  BaseMessage,
+  HumanMessage,
+  isHumanMessage,
+  RemoveMessage,
+} from "@langchain/core/messages";
 import { z } from "zod";
 import { removeLastHumanMessage } from "../../../utils/message/modify-array.js";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
@@ -65,8 +70,14 @@ Your routing options are:
 `;
 
 const baseClassificationSchema = z.object({
-  response: z.string().describe("The response to send to the user. This should be clear, concise, and include any additional context the user may need to know about how/why you're handling their new message."),
-  route: z.enum(["no-op", "plan"]).describe("The route to take to handle the user's new message.")
+  response: z
+    .string()
+    .describe(
+      "The response to send to the user. This should be clear, concise, and include any additional context the user may need to know about how/why you're handling their new message.",
+    ),
+  route: z
+    .enum(["no-op", "plan"])
+    .describe("The route to take to handle the user's new message."),
 });
 
 const createClassificationPromptAndToolSchema = (inputs: {
@@ -78,9 +89,22 @@ const createClassificationPromptAndToolSchema = (inputs: {
   prompt: string;
   schema: z.ZodTypeAny;
 } => {
-  const conversationHistoryWithoutLatest = removeLastHumanMessage(inputs.messages);
-  const formattedTaskPlanPrompt = inputs.taskPlan ? TASK_PLAN_PROMPT.replaceAll("{TASK_PLAN}", formatPlanPrompt(getActivePlanItems(inputs.taskPlan))) : null;
-  const formattedConversationHistoryPrompt = conversationHistoryWithoutLatest?.length ? CONVERSATION_HISTORY_PROMPT.replaceAll("{CONVERSATION_HISTORY}", conversationHistoryWithoutLatest.map(getMessageString).join("\n")) : null;
+  const conversationHistoryWithoutLatest = removeLastHumanMessage(
+    inputs.messages,
+  );
+  const formattedTaskPlanPrompt = inputs.taskPlan
+    ? TASK_PLAN_PROMPT.replaceAll(
+        "{TASK_PLAN}",
+        formatPlanPrompt(getActivePlanItems(inputs.taskPlan)),
+      )
+    : null;
+  const formattedConversationHistoryPrompt =
+    conversationHistoryWithoutLatest?.length
+      ? CONVERSATION_HISTORY_PROMPT.replaceAll(
+          "{CONVERSATION_HISTORY}",
+          conversationHistoryWithoutLatest.map(getMessageString).join("\n"),
+        )
+      : null;
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
     "{PROGRAMMER_STATUS}",
     inputs.programmerRunning ? "RUNNING" : "NOT RUNNING",
@@ -94,10 +118,15 @@ const createClassificationPromptAndToolSchema = (inputs: {
       inputs.programmerRunning ? CODE_ROUTING_OPTION : "",
     )
     .replaceAll("{TASK_PLAN_PROMPT}", formattedTaskPlanPrompt ?? "")
-    .replaceAll("{CONVERSATION_HISTORY_PROMPT}", formattedConversationHistoryPrompt ?? "");
+    .replaceAll(
+      "{CONVERSATION_HISTORY_PROMPT}",
+      formattedConversationHistoryPrompt ?? "",
+    );
 
   const schema = baseClassificationSchema.extend({
-    route: z.enum(["no-op", "plan", ...(inputs.programmerRunning ? ["code"] : [])]).describe("The route to take to handle the user's new message.")
+    route: z
+      .enum(["no-op", "plan", ...(inputs.programmerRunning ? ["code"] : [])])
+      .describe("The route to take to handle the user's new message."),
   });
 
   return {
@@ -106,20 +135,33 @@ const createClassificationPromptAndToolSchema = (inputs: {
   };
 };
 
-async function createIssueTitleAndBodyFromMessagesFunc(messages: BaseMessage[], config: GraphConfig): Promise<{ title: string; body: string }> {
+async function createIssueTitleAndBodyFromMessagesFunc(
+  messages: BaseMessage[],
+  config: GraphConfig,
+): Promise<{ title: string; body: string }> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const githubIssueTool = {
     name: "create_github_issue",
     description: "Create a new GitHub issue with the given title and body.",
     schema: z.object({
-      title: z.string().describe("The title of the issue to create. Should be concise and clear."),
-      body: z.string().describe("The body of the issue to create. This should be an extremely concise description of the issue. You should not over-explain the issue, as we do not want to waste the user's time. Do not include any additional context not found in the conversation history."),
+      title: z
+        .string()
+        .describe(
+          "The title of the issue to create. Should be concise and clear.",
+        ),
+      body: z
+        .string()
+        .describe(
+          "The body of the issue to create. This should be an extremely concise description of the issue. You should not over-explain the issue, as we do not want to waste the user's time. Do not include any additional context not found in the conversation history.",
+        ),
     }),
-  }
-  const modelWithTools = model.bindTools([githubIssueTool], {
-    tool_choice: githubIssueTool.name,
-    parallel_tool_calls: false,
-  }).withConfig({ tags: ["nostream"] })
+  };
+  const modelWithTools = model
+    .bindTools([githubIssueTool], {
+      tool_choice: githubIssueTool.name,
+      parallel_tool_calls: false,
+    })
+    .withConfig({ tags: ["nostream"] });
 
   const prompt = `You're an AI programmer, tasked with taking the conversation history provided below, and creating a new GitHub issue.
 Ensure the issue title and body are both clear and concise. Do not hallucinate any information not found in the conversation history.
@@ -133,7 +175,7 @@ With the above conversation history in mind, please call the ${githubIssueTool.n
     {
       role: "user",
       content: prompt,
-    }
+    },
   ]);
   const toolCall = result.tool_calls?.[0];
   if (!toolCall) {
@@ -142,7 +184,10 @@ With the above conversation history in mind, please call the ${githubIssueTool.n
   return toolCall.args as z.infer<typeof githubIssueTool.schema>;
 }
 
-const createIssueTitleAndBodyFromMessages = traceable(createIssueTitleAndBodyFromMessagesFunc, { name: "create-issue-title-and-body-from-messages" });
+const createIssueTitleAndBodyFromMessages = traceable(
+  createIssueTitleAndBodyFromMessagesFunc,
+  { name: "create-issue-title-and-body-from-messages" },
+);
 
 /**
  * Classify the latest human message to determine how to route the request.
@@ -173,30 +218,31 @@ export async function classifyMessage(
   const programmerRunning = programmerThread?.status === "busy";
   const plannerRunning = plannerThread?.status === "busy";
 
-  const {
-    prompt,
-    schema,
-  } = createClassificationPromptAndToolSchema({
+  const { prompt, schema } = createClassificationPromptAndToolSchema({
     programmerRunning,
     plannerRunning,
     messages: state.messages,
     taskPlan: state.taskPlan,
   });
   const model = await loadModel(config, Task.CLASSIFICATION);
-  const modelWithTools = model.bindTools([
+  const modelWithTools = model.bindTools(
+    [
+      {
+        name: "respond_and_route",
+        description:
+          "Respond to the user's message and determine how to route it.",
+        schema,
+      },
+    ],
     {
-      name: "respond_and_route",
-      description: "Respond to the user's message and determine how to route it.",
-      schema,
-    }
-  ], {
-    tool_choice: "respond_and_route",
-    parallel_tool_calls: false,
-  });
+      tool_choice: "respond_and_route",
+      parallel_tool_calls: false,
+    },
+  );
 
   const userMessage = state.messages.findLast(isHumanMessage);
   if (!userMessage) {
-    throw new Error("No human message found.")
+    throw new Error("No human message found.");
   }
   const response = await modelWithTools.invoke([
     {
@@ -208,9 +254,11 @@ export async function classifyMessage(
 
   const toolCall = response.tool_calls?.[0];
   if (!toolCall) {
-    throw new Error("No tool call found.")
+    throw new Error("No tool call found.");
   }
-  const toolCallArgs = toolCall.args as z.infer<typeof baseClassificationSchema>;
+  const toolCallArgs = toolCall.args as z.infer<
+    typeof baseClassificationSchema
+  >;
 
   if (toolCallArgs.route === "no-op") {
     // If it's a no-op, just add the message to the state and return.
@@ -235,11 +283,16 @@ export async function classifyMessage(
     let title = "";
     let body = "";
     if (state.messages.filter(isHumanMessage).length > 1) {
-      const titleAndContent = await createIssueTitleAndBodyFromMessages(state.messages, config);
+      const titleAndContent = await createIssueTitleAndBodyFromMessages(
+        state.messages,
+        config,
+      );
       title = titleAndContent.title;
       body = titleAndContent.body;
     } else {
-      const titleAndContent = extractIssueTitleAndContentFromMessage(getMessageContentString(userMessage.content));
+      const titleAndContent = extractIssueTitleAndContentFromMessage(
+        getMessageContentString(userMessage.content),
+      );
       title = titleAndContent.title;
       body = titleAndContent.content;
     }
@@ -271,13 +324,18 @@ export async function classifyMessage(
         }),
       ],
     );
-  } else if (githubIssueId && state.messages.filter(isHumanMessage).length > 1) {
+  } else if (
+    githubIssueId &&
+    state.messages.filter(isHumanMessage).length > 1
+  ) {
     // If there already is a GitHub issue ID in state, and multiple human messages, add any
     // human messages to the issue which weren't already added.
-    const messagesNotInIssue = state.messages.filter(isHumanMessage).filter((message) => {
-      // If the message doesn't contain `githubIssueId` in additional kwargs, it hasn't been added to the issue.
-      return !message.additional_kwargs?.githubIssueId;
-    });
+    const messagesNotInIssue = state.messages
+      .filter(isHumanMessage)
+      .filter((message) => {
+        // If the message doesn't contain `githubIssueId` in additional kwargs, it hasn't been added to the issue.
+        return !message.additional_kwargs?.githubIssueId;
+      });
 
     const createCommentsPromise = messagesNotInIssue.map(async (message) => {
       const createdIssue = await createIssueComment({
@@ -290,20 +348,22 @@ export async function classifyMessage(
       if (!createdIssue?.id) {
         throw new Error("Failed to create issue comment");
       }
-      newMessages.push(...[
-        new RemoveMessage({
-          id: message.id ?? "",
-        }),
-        new HumanMessage({
-          ...message,
-          additional_kwargs: {
-            githubIssueId: githubIssueId,
-            githubIssueCommentId: createdIssue.id,
-          },
-        }),
-      ]);
+      newMessages.push(
+        ...[
+          new RemoveMessage({
+            id: message.id ?? "",
+          }),
+          new HumanMessage({
+            ...message,
+            additional_kwargs: {
+              githubIssueId: githubIssueId,
+              githubIssueCommentId: createdIssue.id,
+            },
+          }),
+        ],
+      );
     });
-    
+
     await Promise.all(createCommentsPromise);
   }
 
@@ -323,7 +383,7 @@ export async function classifyMessage(
 
   // The route should now be plan
   if (toolCallArgs.route !== "plan") {
-    throw new Error(`Invalid route: ${toolCallArgs.route}`)
+    throw new Error(`Invalid route: ${toolCallArgs.route}`);
   }
 
   // If the planner is running, we should do nothing since it'll handle picking up any new messages added to the issue as comments.

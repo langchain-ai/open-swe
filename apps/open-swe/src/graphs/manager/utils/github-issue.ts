@@ -26,4 +26,4 @@ export function extractIssueTitleAndContentFromMessage(content: string) {
     );
   }
   return { title: messageTitle, content: messageContent };
-};
+}

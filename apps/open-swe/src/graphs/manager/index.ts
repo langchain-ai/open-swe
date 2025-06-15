@@ -1,7 +1,11 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
 import { ManagerGraphState } from "./types.js";
-import { initializeGithubIssue, classifyMessage, startPlanner } from "./nodes/index.js";
+import {
+  initializeGithubIssue,
+  classifyMessage,
+  startPlanner,
+} from "./nodes/index.js";
 
 const workflow = new StateGraph(ManagerGraphState, GraphConfiguration)
   .addNode("classify-message", classifyMessage, {

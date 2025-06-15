@@ -2,21 +2,28 @@ import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { ManagerGraphState } from "../types.js";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import { GITHUB_INSTALLATION_TOKEN_COOKIE, GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
+import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_TOKEN_COOKIE,
+} from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
 /**
  * Start planner node.
- * This node will kickoff a new planner session using the LangGraph SDK. 
+ * This node will kickoff a new planner session using the LangGraph SDK.
  */
-export async function startPlanner(state: ManagerGraphState, config: GraphConfig) {
+export async function startPlanner(
+  state: ManagerGraphState,
+  config: GraphConfig,
+) {
   const langGraphClient = createLangGraphClient({
     defaultHeaders: {
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]: config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-    }
+      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
+        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+    },
   });
 
   let plannerThreadId = state.plannerThreadId ?? uuidv4();
@@ -32,21 +39,23 @@ export async function startPlanner(state: ManagerGraphState, config: GraphConfig
       config: {
         recursion_limit: 400,
       },
-      ifNotExists: "create"
-    })
+      ifNotExists: "create",
+    });
 
     return {
       plannerThreadId,
-    }
+    };
   } catch (error) {
     logger.error("Failed to start planner", {
-      ...(error instanceof Error ? {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      } : {
-        error,
-      }),
+      ...(error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : {
+            error,
+          }),
     });
     throw error;
   }
