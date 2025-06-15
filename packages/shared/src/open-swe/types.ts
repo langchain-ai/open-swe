@@ -203,7 +203,7 @@ export const GraphConfigurationMetadata: {
       type: "number",
       default: 75,
       min: 1,
-      max: 50,
+      max: 250,
       description:
         "Maximum number of context gathering actions during planning",
     },
@@ -463,4 +463,3 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
-
