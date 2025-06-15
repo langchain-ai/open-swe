@@ -1,17 +1,17 @@
 import { z } from "zod";
-import { createLogger, LogLevel } from "../utils/logger.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   GraphConfig,
   GraphState,
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../utils/load-model.js";
-import { formatPlanPrompt } from "../utils/plan-prompt.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
+import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
-import { getMessageString } from "../utils/message/content.js";
-import { removeFirstHumanMessage } from "../utils/message/modify-array.js";
-import { getUserRequest } from "../utils/user-request.js";
+import { getMessageString } from "../../../utils/message/content.js";
+import { removeFirstHumanMessage } from "../../../utils/message/modify-array.js";
+import { getUserRequest } from "../../../utils/user-request.js";
 import {
   completePlanItem,
   getActivePlanItems,
@@ -20,7 +20,7 @@ import {
 import {
   getCurrentPlanItem,
   getRemainingPlanItems,
-} from "../utils/current-task.js";
+} from "../../../utils/current-task.js";
 import { ToolMessage } from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");

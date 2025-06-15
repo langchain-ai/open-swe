@@ -4,7 +4,7 @@ import {
   PlanItem,
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
 import { z } from "zod";
 import {
   getActiveTask,
@@ -15,9 +15,9 @@ import {
   isAIMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { getMessageString } from "../utils/message/content.js";
-import { formatPlanPrompt } from "../utils/plan-prompt.js";
-import { createLogger, LogLevel } from "../utils/logger.js";
+import { getMessageString } from "../../../utils/message/content.js";
+import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 

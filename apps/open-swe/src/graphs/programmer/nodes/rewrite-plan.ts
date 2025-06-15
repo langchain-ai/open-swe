@@ -4,12 +4,12 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
-import { getUserRequest } from "../utils/user-request.js";
+import { getUserRequest } from "../../../utils/user-request.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 

@@ -298,6 +298,24 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
+  classificationModelName: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "anthropic:claude-3-5-haiku-latest",
+      description: "The model to use for classifying the user's message",
+      options: MODEL_OPTIONS_NO_THINKING,
+    },
+  },
+  classificationTemperature: {
+    x_open_swe_ui_config: {
+      type: "slider",
+      default: 0,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
   maxTokens: {
     x_open_swe_ui_config: {
       type: "number",
@@ -428,6 +446,24 @@ export const GraphConfiguration = z.object({
     .number()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata.summarizerTemperature),
+
+  /**
+   * The model ID to use for classifying the user's message.
+   * @default "anthropic:claude-3-5-haiku-latest"
+   */
+  classificationModelName: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata.classificationModelName),
+  /**
+   * The temperature to use for classifying the user's message.
+   * If selecting a reasoning model, this will be ignored.
+   * @default 0
+   */
+  classificationTemperature: z
+    .number()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata.classificationTemperature),
 
   /**
    * The maximum number of tokens to generate in an individual generation.

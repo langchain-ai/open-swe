@@ -5,13 +5,13 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { formatPlanPrompt } from "../utils/plan-prompt.js";
-import { createLogger, LogLevel } from "../utils/logger.js";
+import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { getMessageString } from "../utils/message/content.js";
-import { removeLastTaskMessages } from "../utils/message/modify-array.js";
+import { getMessageString } from "../../../utils/message/content.js";
+import { removeLastTaskMessages } from "../../../utils/message/modify-array.js";
 import { Command } from "@langchain/langgraph";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
@@ -20,7 +20,7 @@ import {
   getActivePlanItems,
   getActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { getCompletedPlanItems } from "../utils/current-task.js";
+import { getCompletedPlanItems } from "../../../utils/current-task.js";
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 

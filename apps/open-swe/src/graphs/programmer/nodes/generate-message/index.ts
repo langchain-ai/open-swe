@@ -3,17 +3,17 @@ import {
   GraphConfig,
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../utils/load-model.js";
+import { loadModel, Task } from "../../../../utils/load-model.js";
 import {
   createShellTool,
   createApplyPatchTool,
   createRequestHumanHelpToolFields,
   createUpdatePlanToolFields,
-} from "../../tools/index.js";
-import { formatPlanPrompt } from "../../utils/plan-prompt.js";
-import { stopSandbox } from "../../utils/sandbox.js";
-import { createLogger, LogLevel } from "../../utils/logger.js";
-import { getCurrentPlanItem } from "../../utils/current-task.js";
+} from "../../../../tools/index.js";
+import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
+import { stopSandbox } from "../../../../utils/sandbox.js";
+import { createLogger, LogLevel } from "../../../../utils/logger.js";
+import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { SYSTEM_PROMPT } from "./prompt.js";

@@ -23,6 +23,10 @@ export const MODEL_OPTIONS = [
     label: "Claude 3.5 Sonnet",
     value: "anthropic:claude-3-5-sonnet-latest",
   },
+  {
+    label: "Claude 3.5 Haiku",
+    value: "anthropic:claude-3-5-haiku-latest",
+  },
   // {
   //   label: "o4",
   //   value: "openai:o4",
@@ -44,8 +48,16 @@ export const MODEL_OPTIONS = [
     value: "openai:gpt-4o",
   },
   {
+    label: "GPT 4o mini",
+    value: "openai:gpt-4o-mini",
+  },
+  {
     label: "GPT 4.1",
     value: "openai:gpt-4.1",
+  },
+  {
+    label: "GPT 4.1 mini",
+    value: "openai:gpt-4.1-mini",
   },
   {
     label: "Gemini 2.5 Pro Preview",

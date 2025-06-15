@@ -6,18 +6,18 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
-  createPullRequest,
   getBranchName,
   getChangedFilesStatus,
-} from "../utils/git.js";
-import { createLogger, LogLevel } from "../utils/logger.js";
+} from "../../../utils/github/git.js";
+import { createPullRequest } from "../../../utils/github/api.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
-import { loadModel, Task } from "../utils/load-model.js";
-import { formatPlanPromptWithSummaries } from "../utils/plan-prompt.js";
-import { getUserRequest } from "../utils/user-request.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
+import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
+import { getUserRequest } from "../../../utils/user-request.js";
 import { ToolMessage } from "@langchain/core/messages";
-import { daytonaClient, deleteSandbox } from "../utils/sandbox.js";
-import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
+import { daytonaClient, deleteSandbox } from "../../../utils/sandbox.js";
+import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 

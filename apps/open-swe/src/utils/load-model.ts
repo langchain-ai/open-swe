@@ -7,6 +7,7 @@ export enum Task {
   ACTION_GENERATOR = "actionGenerator",
   PROGRESS_PLAN_CHECKER = "progressPlanChecker",
   SUMMARIZER = "summarizer",
+  CLASSIFICATION = "classification",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
@@ -28,6 +29,10 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
   },
   [Task.SUMMARIZER]: {
     modelName: "anthropic:claude-sonnet-4-0",
+    temperature: 0,
+  },
+  [Task.CLASSIFICATION]: {
+    modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
 };

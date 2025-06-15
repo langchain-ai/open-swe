@@ -34,3 +34,11 @@ export function removeFirstHumanMessage(
     return true;
   });
 }
+
+export function removeLastHumanMessage(messages: BaseMessage[]): BaseMessage[] {
+  const lastHumanMessage = messages.findLast(isHumanMessage);
+  if (!lastHumanMessage) {
+    return messages;
+  }
+  return messages.filter((m) => m.id !== lastHumanMessage.id);
+}

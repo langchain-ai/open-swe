@@ -2,7 +2,7 @@ import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
-import { stopSandbox, startSandbox } from "../utils/sandbox.js";
+import { stopSandbox, startSandbox } from "../../../utils/sandbox.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:

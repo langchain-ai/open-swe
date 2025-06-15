@@ -19,7 +19,7 @@ import {
   updatePlan,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
-import { plannerGraph } from "./subgraphs/index.js";
+import { plannerGraph } from "../planner/index.js";
 
 /**
  * Routes to the next appropriate node after taking action.

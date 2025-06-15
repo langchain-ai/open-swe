@@ -1,13 +1,12 @@
-import { Octokit } from "@octokit/rest";
 import { Sandbox } from "@daytonaio/sdk";
-import { createLogger, LogLevel } from "./logger.js";
+import { createLogger, LogLevel } from "../logger.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { getSandboxErrorFields } from "./sandbox-error-fields.js";
+import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
-const logger = createLogger(LogLevel.INFO, "GitUtil");
+const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
 export function getBranchName(config: GraphConfig): string {
   const threadId = config.configurable?.thread_id;
@@ -374,126 +373,6 @@ export async function checkoutBranchAndCommit(
   logger.info("Successfully checked out & committed changes.");
 
   return branchName;
-}
-
-async function getExistingPullRequest(
-  owner: string,
-  repo: string,
-  branchName: string,
-  githubToken: string,
-) {
-  try {
-    const octokit = new Octokit({
-      auth: githubToken,
-    });
-
-    const { data: pullRequests } = await octokit.pulls.list({
-      owner,
-      repo,
-      head: branchName,
-    });
-
-    if (pullRequests?.[0]) {
-      return pullRequests[0];
-    }
-  } catch (e) {
-    logger.error(`Failed to get existing pull request`, {
-      branch: branchName,
-      owner,
-      repo,
-      ...(e instanceof Error && {
-        name: e.name,
-        message: e.message,
-        stack: e.stack,
-      }),
-    });
-  }
-
-  return null;
-}
-
-export async function createPullRequest({
-  owner,
-  repo,
-  headBranch,
-  title,
-  body = "",
-  githubInstallationToken,
-}: {
-  owner: string;
-  repo: string;
-  headBranch: string;
-  title: string;
-  body?: string;
-  githubInstallationToken: string;
-}) {
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
-
-  try {
-    // Step 1: Get repository information to find the default branch
-    const { data: repository } = await octokit.repos.get({
-      owner,
-      repo,
-    });
-
-    const defaultBranch = repository.default_branch;
-    logger.info(
-      `Creating pull request against default branch: ${defaultBranch}`,
-    );
-
-    // Step 2: Create the pull request
-    const { data: pullRequest } = await octokit.pulls.create({
-      owner,
-      repo,
-      title,
-      body,
-      head: headBranch,
-      base: defaultBranch,
-    });
-
-    logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
-
-    // Step 3: Add the 'open-swe' label to the pull request
-    try {
-      await octokit.issues.addLabels({
-        owner,
-        repo,
-        issue_number: pullRequest.number,
-        labels: ["open-swe"],
-      });
-      logger.info(
-        `Added 'open-swe' label to pull request #${pullRequest.number}`,
-      );
-    } catch (labelError) {
-      logger.warn(
-        `Failed to add 'open-swe' label to pull request #${pullRequest.number}`,
-        {
-          labelError,
-        },
-      );
-    }
-
-    return pullRequest;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("already exists")) {
-      logger.info(
-        "Pull request already exists. Getting existing pull request...",
-      );
-      return getExistingPullRequest(
-        owner,
-        repo,
-        headBranch,
-        githubInstallationToken,
-      );
-    }
-
-    logger.error(`Failed to create pull request`, {
-      error,
-    });
-    return null;
-  }
 }
 
 export async function pullLatestChanges(
