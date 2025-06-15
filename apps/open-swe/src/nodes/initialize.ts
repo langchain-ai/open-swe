@@ -29,7 +29,7 @@ export async function initialize(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
   const { sandboxSessionId, targetRepository } = state;
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
@@ -58,7 +58,7 @@ export async function initialize(
   });
 
   const res = await cloneRepo(sandbox, targetRepository, {
-    githubAccessToken,
+    githubInstallationToken,
     stateBranchName: state.branchName,
   });
   if (res.exitCode !== 0) {
@@ -70,7 +70,7 @@ export async function initialize(
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);
   await configureGitUserInRepo(absoluteRepoDir, sandbox, {
-    githubAccessToken,
+    githubInstallationToken,
     owner: targetRepository.owner,
     repo: targetRepository.repo,
   });
