@@ -21,6 +21,20 @@ import {
   ActionStep,
   type ActionStepProps,
 } from "@/components/gen-ui/action-step";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { ToolCall } from "@langchain/core/messages/tool";
+import {
+  createApplyPatchToolFields,
+  createShellToolFields,
+} from "@open-swe/shared/open-swe/tools";
+import { z } from "zod";
+
+// Infer types from Zod schemas
+const dummyRepo = { owner: "dummy", repo: "dummy" };
+const shellSchema = createShellToolFields(dummyRepo).schema;
+type ShellToolArgs = z.infer<typeof shellSchema>;
+const applyPatchSchema = createApplyPatchToolFields(dummyRepo).schema;
+type ApplyPatchToolArgs = z.infer<typeof applyPatchSchema>;
 
 function CustomComponent({
   message,
@@ -74,23 +88,9 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
-/** Converts MessageContent to a string for display */
-function messageContentToString(
-  content: string | { type: string; [k: string]: any }[],
-): string {
-  if (typeof content === "string") return content;
-  // If it's an array of MessageContentComplex, join their text/image URLs
-  return content
-    .map((item) => {
-      if (item.type === "text" && "text" in item) return item.text;
-      if (item.type === "image_url" && "image_url" in item) {
-        if (typeof item.image_url === "string") return item.image_url;
-        if (typeof item.image_url === "object" && "url" in item.image_url)
-          return item.image_url.url;
-      }
-      return "";
-    })
-    .join("\n");
+// Local type guard for AIMessage
+function isAIMessageLocal(m: Message): m is AIMessage {
+  return m.type === "ai";
 }
 
 export function mapToolMessageToActionStepProps(
@@ -98,49 +98,51 @@ export function mapToolMessageToActionStepProps(
   thread: { messages: Message[] },
 ): ActionStepProps {
   // Find the corresponding tool call from the previous AI message
-  let toolCall:
-    | {
-        name: string;
-        args: Record<string, unknown>;
-        id?: string;
-        type?: "tool_call";
-      }
-    | undefined;
+  const toolCall: ToolCall | undefined = thread.messages
+    .filter(isAIMessageLocal)
+    .flatMap((m) => m.tool_calls ?? [])
+    .find((tc) => tc.id === message.tool_call_id);
 
-  for (let i = thread.messages.length - 1; i >= 0; i--) {
-    const m = thread.messages[i];
-    if (m.type === "ai" && Array.isArray(m.tool_calls)) {
-      toolCall = m.tool_calls.find((tc) => tc.id === message.tool_call_id);
-      if (toolCall) break;
-    }
-  }
+  // Find the AI message that generated the tool call for reasoningText
+  const aiMessage = thread.messages
+    .filter(isAIMessageLocal)
+    .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
+  const reasoningText = aiMessage
+    ? getContentString(aiMessage.content)
+    : undefined;
 
   const status: ActionStepProps["status"] = "done";
   const success = message.status === "success";
 
-  if (message.name === "shell") {
+  if (toolCall?.name === "shell") {
+    const args = toolCall.args as ShellToolArgs;
     return {
       actionType: "shell",
       status,
       success,
-      command: (toolCall?.args?.command as string) || "",
-      workdir: toolCall?.args?.workdir as string | undefined,
-      output: messageContentToString(message.content),
+      command: args.command || [],
+      workdir: args.workdir,
+      output: getMessageContentString(message.content),
+      reasoningText,
     };
-  } else if (message.name === "apply_patch" || message.name === "apply-patch") {
+  } else if (toolCall?.name === "apply_patch") {
+    const args = toolCall.args as ApplyPatchToolArgs;
     return {
       actionType: "apply-patch",
       status,
       success,
-      file: (toolCall?.args?.file as string) || "",
-      diff: messageContentToString(message.content),
+      file: args.file_path || "",
+      diff: args.diff,
+      reasoningText,
       errorMessage: !success
-        ? messageContentToString(message.content)
+        ? getMessageContentString(message.content)
         : undefined,
     };
   }
-  // fallback
-  return { status: "loading" };
+  return {
+    status: "loading",
+    summaryText: reasoningText,
+  };
 }
 
 export function AssistantMessage({
@@ -197,16 +199,27 @@ export function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <span>
-            {message.name === "shell" || message.name === "apply_patch" ? (
-              <ActionStep
-                {...mapToolMessageToActionStepProps(
-                  message as ToolMessage,
-                  thread,
-                )}
-              />
-            ) : (
-              <ToolResult message={message} />
-            )}
+            {(() => {
+              // Find the corresponding tool call from the previous AI message
+              const toolCall = thread.messages
+                .filter(isAIMessageLocal)
+                .flatMap((m) => m.tool_calls ?? [])
+                .find((tc) => tc.id === (message as ToolMessage).tool_call_id);
+              if (
+                toolCall?.name === "shell" ||
+                toolCall?.name === "apply_patch"
+              ) {
+                return (
+                  <ActionStep
+                    {...mapToolMessageToActionStepProps(
+                      message as ToolMessage,
+                      thread,
+                    )}
+                  />
+                );
+              }
+              return <ToolResult message={message} />;
+            })()}
             <Interrupt
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}

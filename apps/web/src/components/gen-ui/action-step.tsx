@@ -24,7 +24,7 @@ type BaseActionProps = {
 // Shell command specific props
 type ShellActionProps = BaseActionProps & {
   actionType: "shell";
-  command: string;
+  command: string[];
   workdir?: string;
   output?: string;
   errorCode?: number;
