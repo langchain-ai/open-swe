@@ -4,20 +4,24 @@ import { PlannerGraphState, PlannerGraphUpdate } from "../../types.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { getUserRequest } from "../../../../utils/user-request.js";
-import { isHumanMessage } from "@langchain/core/messages";
 import { formatFollowupMessagePrompt } from "../../utils/followup-prompt.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { BaseMessage } from "@langchain/core/messages";
+import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
+import { getIssueComments } from "../../../../utils/github/api.js";
+import { getUntrackedComments } from "../../../../utils/github/issue-messages.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.internalMessages.filter(isHumanMessage).length > 1;
+  const isFollowup = state.taskPlan.tasks?.length || state.proposedPlan.length;
   return SYSTEM_PROMPT.replace(
     "{FOLLOWUP_MESSAGE_PROMPT}",
-    isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
+    isFollowup
+      ? formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan)
+      : "",
   )
     .replaceAll(
       "{CODEBASE_TREE}",
@@ -27,6 +31,25 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       "{CURRENT_WORKING_DIRECTORY}",
       getRepoAbsolutePath(state.targetRepository),
     );
+}
+
+async function getMissingMessages(
+  state: PlannerGraphState,
+  config: GraphConfig,
+): Promise<BaseMessage[]> {
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const comments = await getIssueComments({
+    owner: state.targetRepository.owner,
+    repo: state.targetRepository.repo,
+    issueNumber: state.githubIssueId,
+    githubInstallationToken,
+    filterBotComments: true,
+  });
+  if (!comments?.length) {
+    return [];
+  }
+
+  return getUntrackedComments(state.messages, state.githubIssueId, comments);
 }
 
 export async function generateAction(
@@ -40,10 +63,7 @@ export async function generateAction(
     parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internalMessages, {
-    returnFullMessage: true,
-  });
-
+  const missingMessages = await getMissingMessages(state, config);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
@@ -51,8 +71,8 @@ export async function generateAction(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      userRequest,
-      ...state.plannerMessages,
+      ...state.messages,
+      ...missingMessages,
     ]);
 
   logger.info("Generated planning message", {
@@ -66,7 +86,6 @@ export async function generateAction(
   });
 
   return {
-    messages: [response],
-    plannerMessages: [response],
+    messages: [...missingMessages, response],
   };
 }

@@ -13,7 +13,7 @@ export async function takeAction(
   state: PlannerGraphState,
   _config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const { plannerMessages: messages } = state;
+  const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
@@ -26,13 +26,11 @@ export async function takeAction(
   };
 
   const toolCall = lastMessage.tool_calls[0];
-
   if (!toolCall) {
     throw new Error("No tool call found.");
   }
 
   const tool = toolsMap[toolCall.name];
-
   if (!tool) {
     logger.error(`Unknown tool: ${toolCall.name}`);
     const toolMessage = new ToolMessage({
@@ -41,9 +39,9 @@ export async function takeAction(
       name: toolCall.name,
       status: "error",
     });
+
     return {
       messages: [toolMessage],
-      plannerMessages: [toolMessage],
     };
   }
 
@@ -95,9 +93,7 @@ export async function takeAction(
     tool_call_id: toolCall.id,
     status: toolCallStatus,
   });
-
   return {
     messages: [toolMessage],
-    plannerMessages: [toolMessage],
   };
 }

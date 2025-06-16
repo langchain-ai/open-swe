@@ -7,6 +7,7 @@ import {
   GITHUB_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { getBranchName } from "../../../utils/github/git.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -35,6 +36,7 @@ export async function startPlanner(
         targetRepository: state.targetRepository,
         // Include the existing task plan, so the agent can use it as context when generating followup tasks.
         taskPlan: state.taskPlan,
+        branchName: getBranchName(config),
       },
       config: {
         recursion_limit: 400,

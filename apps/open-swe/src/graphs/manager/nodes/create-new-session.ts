@@ -16,6 +16,7 @@ import {
   ISSUE_CONTENT_CLOSE_TAG,
   ISSUE_CONTENT_OPEN_TAG,
 } from "../utils/github-issue.js";
+import { getBranchName } from "../../../utils/github/git.js";
 
 /**
  * Create new manager session.
@@ -78,6 +79,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     githubIssueId: newIssue.id,
     targetRepository: state.targetRepository,
     messages: inputMessages,
+    branchName: getBranchName(config),
   };
   await langGraphClient.runs.create(newManagerThreadId, "manager", {
     input: {},

@@ -5,7 +5,6 @@ import {
   GraphState,
 } from "@open-swe/shared/open-swe/types";
 import {
-  initialize,
   generateAction,
   takeAction,
   rewritePlan,
@@ -20,6 +19,7 @@ import {
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { plannerGraph } from "../planner/index.js";
+import { initializeSandbox } from "../shared/initialize-sandbox.js";
 
 /**
  * Routes to the next appropriate node after taking action.
@@ -61,7 +61,7 @@ async function routeGeneratedAction(
 }
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
-  .addNode("initialize", initialize)
+  .addNode("initialize", initializeSandbox)
   .addNode("generate-plan-subgraph", plannerGraph)
   .addNode("rewrite-plan", rewritePlan)
   .addNode("interrupt-plan", interruptPlan, {

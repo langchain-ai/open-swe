@@ -1,8 +1,4 @@
-import {
-  isAIMessage,
-  isHumanMessage,
-  ToolMessage,
-} from "@langchain/core/messages";
+import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createSessionPlanToolFields } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
@@ -36,13 +32,15 @@ The user's request is as follows. Ensure you generate your plan in accordance wi
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.internalMessages.filter(isHumanMessage).length > 1;
-  const userRequest = getUserRequest(state.internalMessages);
+  const isFollowup = state.taskPlan.tasks?.length || state.proposedPlan.length;
+  const userRequest = getUserRequest(state.messages);
 
   return systemPrompt
     .replace(
       "{FOLLOWUP_MESSAGE_PROMPT}",
-      isFollowup ? formatFollowupMessagePrompt(state.plan) : "",
+      isFollowup
+        ? formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan)
+        : "",
     )
     .replace("{USER_REQUEST}", userRequest);
 }
@@ -59,7 +57,7 @@ export async function generatePlan(
   });
 
   let optionalToolMessage: ToolMessage | undefined;
-  const lastMessage = state.plannerMessages[state.plannerMessages.length - 1];
+  const lastMessage = state.messages[state.messages.length - 1];
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
     const lastMessageToolCall = lastMessage.tool_calls?.[0];
     optionalToolMessage = new ToolMessage({
@@ -76,7 +74,7 @@ export async function generatePlan(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      ...state.plannerMessages,
+      ...state.messages,
       ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);
 
@@ -94,7 +92,5 @@ export async function generatePlan(
     messages: [response],
     proposedPlan: response.tool_calls[0].args.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
-    // Do this so that the planner state is up to date with the tool call.
-    ...(optionalToolMessage && { plannerMessages: [optionalToolMessage] }),
   };
 }

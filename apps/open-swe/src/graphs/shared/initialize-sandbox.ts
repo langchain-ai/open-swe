@@ -1,36 +1,32 @@
-import { createLogger, LogLevel } from "../../../utils/logger.js";
-import {
-  GraphState,
-  GraphConfig,
-  GraphUpdate,
-} from "@open-swe/shared/open-swe/types";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getGitHubTokensFromConfig } from "../../utils/github-tokens.js";
+import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
+import { createLogger, LogLevel } from "../../utils/logger.js";
+import { daytonaClient } from "../../utils/sandbox.js";
 import {
   checkoutBranch,
   cloneRepo,
   configureGitUserInRepo,
-  getBranchName,
   pullLatestChanges,
-} from "../../../utils/github/git.js";
-import { daytonaClient } from "../../../utils/sandbox.js";
+} from "../../utils/github/git.js";
+import { getCodebaseTree } from "../../utils/tree.js";
 import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { getCodebaseTree } from "../../../utils/tree.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
-const logger = createLogger(LogLevel.INFO, "Initialize");
+const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
-/**
- * Initializes the session. This ensures there's an active VM session, and that
- * the proper credentials are provided for taking actions on GitHub.
- * It also clones the repository the user has specified to be used, and an optional
- * branch.
- */
-export async function initialize(
-  state: GraphState,
+type InitializeSandboxState = {
+  targetRepository: TargetRepository;
+  branchName: string;
+  sandboxSessionId?: string;
+  codebaseTree?: string;
+};
+
+export async function initializeSandbox(
+  state: InitializeSandboxState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Partial<InitializeSandboxState>> {
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-  const { sandboxSessionId, targetRepository } = state;
+  const { sandboxSessionId, targetRepository, branchName } = state;
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
 
   if (sandboxSessionId) {
@@ -59,7 +55,7 @@ export async function initialize(
 
   const res = await cloneRepo(sandbox, targetRepository, {
     githubInstallationToken,
-    stateBranchName: state.branchName,
+    stateBranchName: branchName,
   });
   if (res.exitCode !== 0) {
     // TODO: This should probably be an interrupt.
@@ -78,7 +74,7 @@ export async function initialize(
 
   const checkoutBranchRes = await checkoutBranch(
     absoluteRepoDir,
-    state.branchName || getBranchName(config),
+    branchName,
     sandbox,
   );
 
@@ -92,7 +88,6 @@ export async function initialize(
 
   return {
     sandboxSessionId: sandbox.id,
-    targetRepository,
     codebaseTree,
   };
 }

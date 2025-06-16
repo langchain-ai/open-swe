@@ -1,21 +1,40 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
-import { Messages, messagesStateReducer } from "@langchain/langgraph";
-import { BaseMessage } from "@langchain/core/messages";
-import { GraphAnnotation } from "@open-swe/shared/open-swe/types";
+import { MessagesZodState } from "@langchain/langgraph";
+import { TargetRepository, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
-export const PlannerGraphStateObj = GraphAnnotation.extend({
-  plannerMessages: withLangGraph(z.custom<BaseMessage[]>(), {
+export const PlannerGraphStateObj = MessagesZodState.extend({
+  sandboxSessionId: z.string().optional(),
+  targetRepository: withLangGraph(z.custom<TargetRepository>(), {
     reducer: {
-      schema: z.custom<Messages>(),
-      fn: messagesStateReducer,
+      schema: z.custom<TargetRepository>(),
+      fn: (_state, update) => update,
     },
-    jsonSchemaExtra: {
-      langgraph_type: "messages",
-    },
-    default: () => [],
   }),
+  githubIssueId: z.number(),
+  codebaseTree: z.string().optional(),
+  taskPlan: withLangGraph(z.custom<TaskPlan>(), {
+    reducer: {
+      schema: z.custom<TaskPlan>(),
+      fn: (_state, update) => update,
+    },
+  }),
+  proposedPlan: withLangGraph(z.custom<string[]>(), {
+    reducer: {
+      schema: z.custom<string[]>(),
+      fn: (_state, update) => update,
+    },
+    default: (): string[] => [],
+  }),
+  planContextSummary: withLangGraph(z.custom<string>(), {
+    reducer: {
+      schema: z.custom<string>(),
+      fn: (_state, update) => update,
+    },
+    default: () => "",
+  }),
+  branchName: z.string(),
 });
 
 export type PlannerGraphState = z.infer<typeof PlannerGraphStateObj>;

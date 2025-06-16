@@ -29,6 +29,11 @@ export const ManagerGraphState = MessagesZodState.extend({
    * The planner thread ID
    */
   plannerThreadId: z.string().optional(),
+  /**
+   * The branch name to checkout and make changes on.
+   * Can be user specified, or defaults to `open-swe/<manager-thread-id>
+   */
+  branchName: z.string(),
 });
 
 export type ManagerGraphState = z.infer<typeof ManagerGraphState>;

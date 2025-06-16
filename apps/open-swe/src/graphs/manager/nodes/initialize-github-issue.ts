@@ -4,20 +4,8 @@ import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
 import { getIssue } from "../../../utils/github/api.js";
-import {
-  GitHubIssue,
-  GitHubIssueComment,
-} from "../../../utils/github/types.js";
+import { getMessageContentFromIssue } from "../../../utils/github/api.js";
 import { extractTasksFromIssueContent } from "../../../utils/task-string-extraction.js";
-
-const getMessageContentFromIssue = (
-  issue: GitHubIssue | GitHubIssueComment,
-) => {
-  if ("title" in issue) {
-    return `[original issue]\n**${issue.title}**\n${issue.body}`;
-  }
-  return `[issue comment]\n${issue.body}`;
-};
 
 /**
  * The initialize function will do nothing if there's already a human message

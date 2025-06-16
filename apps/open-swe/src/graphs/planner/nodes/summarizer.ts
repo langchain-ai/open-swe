@@ -51,10 +51,10 @@ export async function summarizer(
     parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internalMessages);
+  const userRequest = getUserRequest(state.messages);
   const conversationHistoryStr = `Here is the full conversation history:
 
-${state.plannerMessages.map(getMessageString).join("\n")}`;
+${state.messages.map(getMessageString).join("\n")}`;
 
   const response = await modelWithTools.invoke([
     {

@@ -1,16 +1,23 @@
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
+
+const previousCompletedPlanPrompt = `Here is the complete list of previous requests made by the user, along with the tasks you generated to complete these requests, and the task summaries of each task you completed previously:
+{PREVIOUS_PLAN}`;
+
+const previousProposedPlanPrompt = `Here is the complete list of the proposed plan you generated before the user sent their followup request:
+{PREVIOUS_PROPOSED_PLAN}`;
 
 const followupMessagePrompt = `
 The user is sending a followup request for you to generate a plan for. You are provided with the following context to aid in your new plan context gathering steps:
   - The previous user requests, along with the tasks, and task summaries you generated for these previous requests.
-  - You are only provided this information as context to reference when gathering context for the new plan.
+  - The summaries of the actions you took, and their results from previous planning sessions.
+  - You are only provided this information as context to reference when gathering context for the new plan, or for making changes to the previously generated plan.
 
-Here is the complete list of previous requests made by the user, along with the tasks you generated to complete these requests, and the task summaries of each task you completed previously:
 {PREVIOUS_PLAN}
 `;
 
 const formatPreviousPlans = (tasks: TaskPlan): string => {
-  return tasks.tasks
+  const formattedTasksAndRequests = tasks.tasks
     .map((task) => {
       const activePlanItems =
         task.planRevisions[task.activeRevisionIndex].plans;
@@ -22,14 +29,42 @@ const formatPreviousPlans = (tasks: TaskPlan): string => {
   
   Individual tasks you generated to complete this request:
   ${activePlanItems.map((planItem) => `<plan-item index="${planItem.index}">${planItem.plan}</plan-item>`).join("\n")}
-  </previous-task>`;
+</previous-task>`;
     })
     .join("\n");
+
+  return previousCompletedPlanPrompt.replace(
+    "{PREVIOUS_PLAN}",
+    formattedTasksAndRequests,
+  );
 };
 
-export function formatFollowupMessagePrompt(tasks: TaskPlan): string {
+const formatPreviousProposedPlan = (proposedPlan: string[]): string => {
+  const formattedProposedPlan = proposedPlan
+    .map((p) => `<proposed-plan-item>${p}</proposed-plan-item>`)
+    .join("\n");
+  return previousProposedPlanPrompt.replace(
+    "{PREVIOUS_PROPOSED_PLAN}",
+    formattedProposedPlan,
+  );
+};
+
+export function formatFollowupMessagePrompt(
+  tasks: TaskPlan,
+  proposedPlan: string[],
+): string {
+  const activePlanItems = getActivePlanItems(tasks);
+  const isGeneratingNewPlan = activePlanItems.every((p) => p.completed);
+  if (!isGeneratingNewPlan && !proposedPlan.length) {
+    throw new Error(
+      "Can not format plan prompt if no proposed plan is provided.",
+    );
+  }
+
   return followupMessagePrompt.replace(
     "{PREVIOUS_PLAN}",
-    formatPreviousPlans(tasks),
+    isGeneratingNewPlan
+      ? formatPreviousPlans(tasks)
+      : formatPreviousProposedPlan(proposedPlan),
   );
 }
