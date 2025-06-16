@@ -3,6 +3,8 @@ import { ThreadActionsView } from "./components/thread-actions-view";
 import { useState } from "react";
 import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
 import { useStreamContext } from "@/providers/Stream";
+import { parsePlanData } from "@/lib/plan-utils";
+import { ProposedPlan } from "@/components/plan/proposed-plan";
 
 interface ThreadViewProps {
   interrupt: HumanInterrupt | HumanInterrupt[];
@@ -34,6 +36,11 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
       setShowDescription(false);
     }
   };
+
+  const planItems = parsePlanData(interruptObj.action_request.args);
+  if (planItems?.length) {
+    return <ProposedPlan originalPlanItems={planItems} />;
+  }
 
   return (
     <div className="flex h-[80vh] w-full flex-col overflow-y-scroll rounded-2xl bg-gray-50/50 p-8 lg:flex-row [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">

@@ -55,6 +55,8 @@ import {
 import { BaseMessage } from "@langchain/core/messages";
 import { TaskPlanView } from "../tasks";
 import { useTaskPlan } from "../tasks/useTaskPlan";
+import { isProposedPlanInterrupt } from "@/lib/plan-utils";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -111,8 +113,6 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [baseBranch, setBaseBranch] = useQueryState("base-branch");
-
   const [configSidebarOpen, setConfigSidebarOpen] = useState(false);
 
   const isTaskView = !!taskId;
@@ -226,6 +226,35 @@ export function Thread() {
     }
 
     setFirstTokenReceived(false);
+
+    if (isProposedPlanInterrupt(stream.interrupt)) {
+      const resume: HumanResponse[] = [
+        {
+          type: "response",
+          args: input.trim(),
+        },
+      ];
+      stream.submit(
+        {},
+        {
+          command: {
+            resume,
+          },
+        },
+      );
+      if (contentBlocks.length > 0) {
+        toast.warning(
+          "Content blocks were not submitted with the plan response.",
+          {
+            richColors: true,
+            closeButton: true,
+          },
+        );
+      }
+      setInput("");
+      setContentBlocks([]);
+      return;
+    }
 
     const newHumanMessage: Message = {
       id: uuidv4(),

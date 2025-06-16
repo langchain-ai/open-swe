@@ -1,6 +1,10 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
 import { verifyGithubUser, GithubUser } from "./github-auth.js";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
+import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_TOKEN_COOKIE,
+} from "@open-swe/shared/constants";
+import { decryptGitHubToken } from "@open-swe/shared/crypto";
 
 const STUDIO_USER_ID = "langgraph-studio-user";
 
@@ -38,18 +42,38 @@ export const auth = new Auth()
         display_name: "CORS Preflight",
       };
     }
+    const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      throw new Error(
+        "Missing GITHUB_TOKEN_ENCRYPTION_KEY environment variable.",
+      );
+    }
+
     // Parse Authorization header
-    const accessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
-    if (!accessToken) {
+    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
+    if (!encryptedAccessToken) {
       throw new HTTPException(401, {
         message: "GitHub access token header missing",
+      });
+    }
+    // We don't do anything with this token right now, but still confirm it
+    // exists as it will cause issues later on if it's not present.
+    const encryptedInstallationToken = request.headers.get(
+      GITHUB_INSTALLATION_TOKEN_COOKIE,
+    );
+    if (!encryptedInstallationToken) {
+      throw new HTTPException(401, {
+        message: "GitHub installation token header missing",
       });
     }
 
     // Validate GitHub access token
     let user: GithubUser | undefined;
     try {
-      user = await verifyGithubUser(accessToken);
+      // Ensure we decrypt the token before passing to the verification function.
+      user = await verifyGithubUser(
+        decryptGitHubToken(encryptedAccessToken, encryptionKey),
+      );
       if (!user) {
         throw new HTTPException(401, {
           message:

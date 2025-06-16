@@ -1694,9 +1694,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/core@npm:^0.3.56, @langchain/core@npm:^0.3.57":
-  version: 0.3.57
-  resolution: "@langchain/core@npm:0.3.57"
+"@langchain/core@npm:^0.3.58":
+  version: 0.3.58
+  resolution: "@langchain/core@npm:0.3.58"
   dependencies:
     "@cfworker/json-schema": ^4.0.2
     ansi-styles: ^5.0.0
@@ -1708,9 +1708,9 @@ __metadata:
     p-queue: ^6.6.2
     p-retry: 4
     uuid: ^10.0.0
-    zod: ^3.22.4
+    zod: ^3.25.32
     zod-to-json-schema: ^3.22.3
-  checksum: 5a497553209a3fe0c2a31b23c9586f586ea8b0785cb437a0b7140c308be80f0caa4397c45a4d7f0a1b7056f3509b03663f6c714217b75c20cce0a2df4fb3c105
+  checksum: 0dece4accb0da6c67ac9286614b846dafc8e53c39435e404781bb436562ac8f55c474b099b182b44b3b4fdab16f8a9020add5ca804a6d9811b23ec940b7f3589
   languageName: node
   linkType: hard
 
@@ -1838,21 +1838,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph@npm:^0.3.1":
-  version: 0.3.1
-  resolution: "@langchain/langgraph@npm:0.3.1"
+"@langchain/langgraph@npm:^0.3.3":
+  version: 0.3.3
+  resolution: "@langchain/langgraph@npm:0.3.3"
   dependencies:
     "@langchain/langgraph-checkpoint": ~0.0.18
     "@langchain/langgraph-sdk": ~0.0.32
     uuid: ^10.0.0
-    zod: ^3.23.8
+    zod: ^3.25.32
   peerDependencies:
-    "@langchain/core": ">=0.2.36 <0.3.0 || >=0.3.40 < 0.4.0"
+    "@langchain/core": ">=0.3.58 < 0.4.0"
     zod-to-json-schema: ^3.x
   peerDependenciesMeta:
     zod-to-json-schema:
       optional: true
-  checksum: 25f4a338635c00a0bb56be483438eef29a133b3900cec91b0a32e880ba0b6ee719ea0365f957cc7a5c25218f50f10b83975f2198565aafc27d17127fabf188cc
+  checksum: 26a9fc9003f0c57f892f7d45f1d99ab1b028bdbe73a32a2f5cbc1786da854bc875c6008c157e314aa338af376c9ae546f136dac8d1b8e3807040f3d3c6fa3c73
   languageName: node
   linkType: hard
 
@@ -2246,7 +2246,7 @@ __metadata:
     "@langchain/anthropic": ^0.3.20
     "@langchain/core": ^0.3.56
     "@langchain/google-genai": ^0.2.9
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-cli": latest
     "@langchain/langgraph-sdk": ^0.0.83
     "@langchain/openai": ^0.5.10
@@ -2271,7 +2271,7 @@ __metadata:
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     uuid: ^11.0.5
-    zod: ^3.24.2
+    zod: ^3.25.32
   languageName: unknown
   linkType: soft
 
@@ -2282,7 +2282,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.83
     "@tsconfig/recommended": ^1.0.8
     "@types/node": ^22.13.5
@@ -2295,7 +2295,7 @@ __metadata:
     prettier: ^3.5.2
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
-    zod: ^3.23.8
+    zod: ^3.25.32
   languageName: unknown
   linkType: soft
 
@@ -2305,7 +2305,7 @@ __metadata:
   dependencies:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
-    "@langchain/langgraph": ^0.3.1
+    "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.83
     "@open-swe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14
@@ -2374,7 +2374,7 @@ __metadata:
     typescript-eslint: ^8.22.0
     use-stick-to-bottom: ^1.0.46
     uuid: ^11.1.0
-    zod: ^3.24.2
+    zod: ^3.25.32
     zustand: ^5.0.5
   languageName: unknown
   linkType: soft
@@ -14526,10 +14526,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^3.24.2":
-  version: 3.25.32
-  resolution: "zod@npm:3.25.32"
-  checksum: 27528887ebb778c70ec753e19c8cde453d36cd2bf4682e2f19a441cd9418f87ea85f6da550ab9b157a625b4d19b9c65921e11bf88a76702051528ad4c5bcf2f0
+"zod@npm:^3.25.32":
+  version: 3.25.64
+  resolution: "zod@npm:3.25.64"
+  checksum: 9f0e86430ed52ef56930712485573454f9b8d64697e24e3139581489520993658d2dee5e939e9e820c1c720afa202fdca58a3ef096f8d91b0d04eb4285bc00ca
   languageName: node
   linkType: hard
 
