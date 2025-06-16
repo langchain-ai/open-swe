@@ -63,7 +63,6 @@ export async function initializeGithubIssue(
     throw new Error("Target repository not provided");
   }
 
-
   const issue = await getIssue({
     owner: state.targetRepository.owner,
     repo: state.targetRepository.repo,

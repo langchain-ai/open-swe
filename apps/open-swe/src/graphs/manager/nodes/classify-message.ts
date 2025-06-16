@@ -23,6 +23,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { createIssue, createIssueComment } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
+import { ThreadStatus } from "@langchain/langgraph-sdk";
 
 // This should only be included in the state when the programmer is running.
 const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
@@ -78,8 +79,8 @@ const baseClassificationSchema = z.object({
 });
 
 const createClassificationPromptAndToolSchema = (inputs: {
-  programmerRunning: boolean;
-  plannerRunning: boolean;
+  programmerStatus: ThreadStatus | "not_started";
+  plannerStatus: ThreadStatus | "not_started";
   messages: BaseMessage[];
   taskPlan: TaskPlan;
 }): {
@@ -102,23 +103,25 @@ const createClassificationPromptAndToolSchema = (inputs: {
           conversationHistoryWithoutLatest.map(getMessageString).join("\n"),
         )
       : null;
+
+  const showCodeRoutingOption = inputs.programmerStatus === "busy";
+  const showCreateIssueRoutingOption =
+    inputs.programmerStatus !== "not_started" ||
+    inputs.plannerStatus !== "not_started";
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
     "{PROGRAMMER_STATUS}",
-    inputs.programmerRunning ? "RUNNING" : "NOT RUNNING",
+    inputs.programmerStatus,
   )
-    .replaceAll(
-      "{PLANNER_STATUS}",
-      inputs.plannerRunning ? "RUNNING" : "NOT RUNNING",
-    )
+    .replaceAll("{PLANNER_STATUS}", inputs.plannerStatus)
     .replaceAll(
       "{CODE_ROUTING_OPTION}",
-      inputs.programmerRunning ? CODE_ROUTING_OPTION : "",
+      showCodeRoutingOption ? CODE_ROUTING_OPTION : "",
     )
     .replaceAll(
       "{CREATE_ISSUE_ROUTING_OPTION}",
-      inputs.plannerRunning || inputs.programmerRunning
-        ? CREATE_ISSUE_ROUTING_OPTION
-        : "",
+      // Do not show the create new issue option if both the planner & programmer have not started
+      // if either have started/currently running/completed, show the option
+      showCreateIssueRoutingOption ? CREATE_ISSUE_ROUTING_OPTION : "",
     )
     .replaceAll("{TASK_PLAN_PROMPT}", formattedTaskPlanPrompt ?? "")
     .replaceAll(
@@ -131,10 +134,8 @@ const createClassificationPromptAndToolSchema = (inputs: {
       .enum([
         "no_op",
         "plan",
-        ...(inputs.programmerRunning ? ["code"] : []),
-        ...(inputs.plannerRunning || inputs.programmerRunning
-          ? ["create_new_issue"]
-          : []),
+        ...(showCodeRoutingOption ? ["code"] : []),
+        ...(showCreateIssueRoutingOption ? ["create_new_issue"] : []),
       ])
       .describe("The route to take to handle the user's new message."),
   });
@@ -171,12 +172,12 @@ export async function classifyMessage(
       ? langGraphClient.threads.get(state.plannerThreadId)
       : undefined,
   ]);
-  const programmerRunning = programmerThread?.status === "busy";
-  const plannerRunning = plannerThread?.status === "busy";
+  const programmerStatus = programmerThread?.status ?? "not_started";
+  const plannerStatus = plannerThread?.status ?? "not_started";
 
   const { prompt, schema } = createClassificationPromptAndToolSchema({
-    programmerRunning,
-    plannerRunning,
+    programmerStatus,
+    plannerStatus,
     messages: state.messages,
     taskPlan: state.taskPlan,
   });
@@ -343,22 +344,13 @@ export async function classifyMessage(
     });
   }
 
-  // The route should now be plan
-  if (toolCallArgs.route !== "plan") {
-    throw new Error(`Invalid route: ${toolCallArgs.route}`);
-  }
-
-  // If the planner is running, we should do nothing since it'll handle picking up any new messages added to the issue as comments.
-  if (plannerRunning) {
+  if (toolCallArgs.route === "plan") {
+    // Always kickoff a new start planner node. This will enqueue new runs on the planner graph.
     return new Command({
       update: commandUpdate,
-      goto: END,
+      goto: "start-planner",
     });
   }
 
-  // If the planner is not running, we should route to the node which will start the planner graph.
-  return new Command({
-    update: commandUpdate,
-    goto: "start-planner",
-  });
+  throw new Error(`Invalid route: ${toolCallArgs.route}`);
 }
