@@ -37,7 +37,7 @@ export async function createNewSession(
     repo: state.targetRepository.repo,
     title: titleAndContent.title,
     body: titleAndContent.body,
-    githubAccessToken: githubAccessToken,
+    githubAccessToken,
   });
   if (!newIssue) {
     throw new Error("Failed to create new issue");

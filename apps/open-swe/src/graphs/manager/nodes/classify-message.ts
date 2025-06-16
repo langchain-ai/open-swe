@@ -24,13 +24,6 @@ import { createIssue, createIssueComment } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
 
-/**
- * Options:
- * 1. do nothing
- * 2. add to gh issue
- *   a. start planning session if not already running.
- */
-
 // This should only be included in the state when the programmer is running.
 const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
 

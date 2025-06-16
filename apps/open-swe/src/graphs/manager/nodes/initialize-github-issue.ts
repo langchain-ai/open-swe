@@ -27,10 +27,34 @@ export async function initializeGithubIssue(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  let taskPlan = state.taskPlan;
+
   if (state.messages.length && state.messages.some(isHumanMessage)) {
-    // If there are messages, & at least one is a human message, do nothing.
-    return {};
+    // If there are messages, & at least one is a human message, only attempt to read the updated plan from the issue.
+    if (state.githubIssueId) {
+      const issue = await getIssue({
+        owner: state.targetRepository.owner,
+        repo: state.targetRepository.repo,
+        issueNumber: state.githubIssueId,
+        githubInstallationToken,
+      });
+      if (!issue) {
+        throw new Error("Issue not found");
+      }
+      if (issue.body) {
+        const extractedTaskPlan = extractTasksFromIssueContent(issue.body);
+        if (extractedTaskPlan) {
+          taskPlan = extractedTaskPlan;
+        }
+      }
+    }
+
+    return {
+      taskPlan,
+    };
   }
+
   // If there are no messages, ensure there's a GitHub issue to fetch the message from.
   if (!state.githubIssueId) {
     throw new Error("GitHub issue ID not provided");
@@ -38,7 +62,7 @@ export async function initializeGithubIssue(
   if (!state.targetRepository) {
     throw new Error("Target repository not provided");
   }
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+
 
   const issue = await getIssue({
     owner: state.targetRepository.owner,
@@ -49,14 +73,11 @@ export async function initializeGithubIssue(
   if (!issue) {
     throw new Error("Issue not found");
   }
-
-  let taskPlan = state.taskPlan;
   if (issue.body) {
     const extractedTaskPlan = extractTasksFromIssueContent(issue.body);
-    if (!extractedTaskPlan) {
-      throw new Error("Failed to extract task plan from issue body");
+    if (extractedTaskPlan) {
+      taskPlan = extractedTaskPlan;
     }
-    taskPlan = extractedTaskPlan;
   }
 
   const newMessage = new HumanMessage({
@@ -70,5 +91,6 @@ export async function initializeGithubIssue(
 
   return {
     messages: [newMessage],
+    taskPlan,
   };
 }
