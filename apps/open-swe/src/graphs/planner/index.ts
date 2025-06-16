@@ -57,7 +57,8 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   )
   .addEdge("take-plan-action", "generate-plan-context-action")
   .addEdge("generate-plan", "summarizer")
-  .addEdge("summarizer", END);
+  .addEdge("summarizer", "interrupt-proposed-plan")
+  .addEdge("interrupt-proposed-plan", END);
 
 export const plannerGraph = workflow.compile();
 plannerGraph.name = "Planner";
