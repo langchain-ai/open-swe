@@ -132,7 +132,7 @@ export async function openPullRequest(
     repo,
     headBranch: branchName ?? getBranchName(config),
     title,
-    body,
+    body: `Fixes #${state.githubIssueId}\n\n${body}`,
     githubInstallationToken,
   });
 
