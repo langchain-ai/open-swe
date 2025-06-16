@@ -237,7 +237,7 @@ export async function classifyMessage(
   const { githubAccessToken } = getGitHubTokensFromConfig(config);
   let githubIssueId = state.githubIssueId;
 
-  let newMessages: BaseMessage[] = [];
+  const newMessages: BaseMessage[] = [];
 
   // If it's not a no_op, ensure there is a GitHub issue with the user's request.
   if (!githubIssueId) {

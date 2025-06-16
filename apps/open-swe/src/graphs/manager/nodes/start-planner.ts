@@ -27,7 +27,7 @@ export async function startPlanner(
     },
   });
 
-  let plannerThreadId = state.plannerThreadId ?? uuidv4();
+  const plannerThreadId = state.plannerThreadId ?? uuidv4();
   try {
     await langGraphClient.runs.create(plannerThreadId, "planner", {
       input: {
