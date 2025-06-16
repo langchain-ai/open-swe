@@ -59,10 +59,10 @@ const setTaskStatusTool = {
   schema: setTaskStatusToolSchema,
 };
 
-const formatPrompt = (plan: PlanItem[]): string => {
+const formatPrompt = (taskPlan: PlanItem[]): string => {
   return systemPrompt.replace(
     "{PLAN_PROMPT}",
-    formatPlanPrompt(plan, { includeSummaries: true }),
+    formatPlanPrompt(taskPlan, { includeSummaries: true }),
   );
 };
 
@@ -86,7 +86,7 @@ ${removeFirstHumanMessage(state.internalMessages).map(getMessageString).join("\n
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
 
-  const activePlanItems = getActivePlanItems(state.plan);
+  const activePlanItems = getActivePlanItems(state.taskPlan);
 
   const response = await modelWithTools.invoke([
     {
@@ -140,8 +140,8 @@ Once you've determined the status of the current task, call the \`set_task_statu
 
   // LLM marked as completed, so we need to update the plan to reflect that.
   const updatedPlanTasks = completePlanItem(
-    state.plan,
-    getActiveTask(state.plan).id,
+    state.taskPlan,
+    getActiveTask(state.taskPlan).id,
     currentTask.index,
   );
 
@@ -155,7 +155,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
       messages: newMessages,
       internalMessages: newMessages,
       // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
-      plan: updatedPlanTasks,
+      taskPlan: updatedPlanTasks,
     };
     return new Command({
       goto: "generate-conclusion",
@@ -173,7 +173,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
   const commandUpdate: GraphUpdate = {
     messages: newMessages,
     internalMessages: newMessages,
-    plan: updatedPlanTasks,
+    taskPlan: updatedPlanTasks,
   };
 
   return new Command({

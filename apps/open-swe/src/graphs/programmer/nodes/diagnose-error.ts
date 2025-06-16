@@ -68,11 +68,11 @@ const diagnoseErrorTool = {
 
 const formatSystemPrompt = (
   lastFailedActionContent: string,
-  plan: PlanItem[],
+  taskPlan: PlanItem[],
   codebaseTree: string,
 ): string => {
-  const currentPlanItem = getCurrentPlanItem(plan);
-  const completedTasks = getCompletedPlanItems(plan);
+  const currentPlanItem = getCurrentPlanItem(taskPlan);
+  const completedTasks = getCompletedPlanItems(taskPlan);
 
   return systemPrompt
     .replace(
@@ -121,7 +121,7 @@ export async function diagnoseError(
       role: "system",
       content: formatSystemPrompt(
         getMessageContentString(lastFailedAction.content),
-        getActivePlanItems(state.plan),
+        getActivePlanItems(state.taskPlan),
         state.codebaseTree,
       ),
     },

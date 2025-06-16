@@ -7,8 +7,6 @@ import {
 import {
   generateAction,
   takeAction,
-  rewritePlan,
-  interruptPlan,
   progressPlanStep,
   summarizeTaskSteps,
   generateConclusion,
@@ -18,7 +16,6 @@ import {
   updatePlan,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
-import { plannerGraph } from "../planner/index.js";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
 
 /**
@@ -62,11 +59,6 @@ async function routeGeneratedAction(
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
-  .addNode("generate-plan-subgraph", plannerGraph)
-  .addNode("rewrite-plan", rewritePlan)
-  .addNode("interrupt-plan", interruptPlan, {
-    ends: [END, "rewrite-plan", "generate-action"],
-  })
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction, {
     ends: ["progress-plan-step", "diagnose-error"],
@@ -85,10 +77,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
   .addEdge(START, "initialize")
-  .addEdge("initialize", "generate-plan-subgraph")
-  .addEdge("generate-plan-subgraph", "interrupt-plan")
-  // Always interrupt after rewriting the plan.
-  .addEdge("rewrite-plan", "interrupt-plan")
+  .addEdge("initialize", "generate-action")
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",

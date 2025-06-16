@@ -23,19 +23,19 @@ const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
 const formatPrompt = (state: GraphState): string => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
-  const activePlanItems = getActivePlanItems(state.plan);
+  const activePlanItems = getActivePlanItems(state.taskPlan);
   const currentPlanItem = activePlanItems
     .filter((p) => !p.completed)
     .sort((a, b) => a.index - b.index)[0];
   return SYSTEM_PROMPT.replaceAll(
     "{PLAN_PROMPT_WITH_SUMMARIES}",
-    formatPlanPrompt(getActivePlanItems(state.plan), {
+    formatPlanPrompt(getActivePlanItems(state.taskPlan), {
       includeSummaries: true,
     }),
   )
     .replaceAll(
       "{PLAN_PROMPT}",
-      formatPlanPrompt(getActivePlanItems(state.plan)),
+      formatPlanPrompt(getActivePlanItems(state.taskPlan)),
     )
     .replaceAll("{REPO_DIRECTORY}", repoDirectory)
     .replaceAll(
@@ -83,7 +83,7 @@ export async function generateAction(
   }
 
   logger.info("Generated action", {
-    currentTask: getCurrentPlanItem(getActivePlanItems(state.plan)).plan,
+    currentTask: getCurrentPlanItem(getActivePlanItems(state.taskPlan)).plan,
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),

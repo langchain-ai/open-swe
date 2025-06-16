@@ -93,7 +93,7 @@ async function generateTaskSummaryFunc(
   state: GraphState,
   model: ConfigurableModel,
 ): Promise<{ planItemIndex: number; summary: string }> {
-  const activePlanItems = getActivePlanItems(state.plan);
+  const activePlanItems = getActivePlanItems(state.taskPlan);
   const lastCompletedTask = getCompletedPlanItems(activePlanItems).pop();
   if (!lastCompletedTask) {
     throw new Error("Unable to find last completed task.");
@@ -125,7 +125,7 @@ export async function summarizeTaskSteps(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const activePlanItems = getActivePlanItems(state.plan);
+  const activePlanItems = getActivePlanItems(state.taskPlan);
   const lastCompletedTask = getCompletedPlanItems(activePlanItems).pop();
   if (!lastCompletedTask) {
     throw new Error("Unable to find last completed task.");
@@ -134,8 +134,8 @@ export async function summarizeTaskSteps(
   const model = await loadModel(config, Task.SUMMARIZER);
   const taskSummary = await generateTaskSummary(state, model);
   const updatedTaskPlan = completePlanItem(
-    state.plan,
-    getActiveTask(state.plan).id,
+    state.taskPlan,
+    getActiveTask(state.taskPlan).id,
     taskSummary.planItemIndex,
     taskSummary.summary,
   );
@@ -157,7 +157,7 @@ export async function summarizeTaskSteps(
     const commandUpdate: GraphUpdate = {
       messages: [condensedTaskMessage],
       internalMessages: newMessagesStateUpdate,
-      plan: updatedTaskPlan,
+      taskPlan: updatedTaskPlan,
     };
     return new Command({
       goto: "generate-conclusion",
@@ -168,7 +168,7 @@ export async function summarizeTaskSteps(
   const commandUpdate: GraphUpdate = {
     messages: [condensedTaskMessage],
     internalMessages: newMessagesStateUpdate,
-    plan: updatedTaskPlan,
+    taskPlan: updatedTaskPlan,
   };
   return new Command({
     goto: "generate-action",

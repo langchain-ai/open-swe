@@ -5,7 +5,11 @@ import {
 } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { createApplyPatchTool, createShellTool } from "../../../tools/index.js";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  GraphState,
+  GraphConfig,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -160,13 +164,14 @@ export async function takeAction(
 
   const codebaseTree = await getCodebaseTree();
 
+  const commandUpdate: GraphUpdate = {
+    messages: [toolMessage],
+    internalMessages: [toolMessage],
+    ...(branchName && { branchName }),
+    codebaseTree,
+  };
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
-    update: {
-      messages: [toolMessage],
-      internalMessages: [toolMessage],
-      ...(branchName && { branchName }),
-      codebaseTree,
-    },
+    update: commandUpdate,
   });
 }

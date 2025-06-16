@@ -18,6 +18,7 @@ import {
 import { getMessageString } from "../../../utils/message/content.js";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -88,24 +89,26 @@ export async function updatePlan(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  if (!state.planChangeRequest) {
-    throw new Error("No plan change request found.");
-  }
   const lastMessage = state.internalMessages[state.internalMessages.length - 1];
-  if (
-    !lastMessage ||
-    !isAIMessage(lastMessage) ||
-    !lastMessage.tool_calls?.length ||
-    lastMessage.tool_calls[0].name !== updatePlanTool.name ||
-    !lastMessage.tool_calls[0].id
-  ) {
-    throw new Error("Last message was not an update plan tool call.");
+  const updatePlanReasoningTool = createUpdatePlanToolFields();
+
+  if (!lastMessage || !isAIMessage(lastMessage)) {
+    throw new Error("Last message was not an AI message");
   }
-  const updatePlanToolCallId = lastMessage.tool_calls[0].id;
+
+  const updatePlanToolCall = lastMessage.tool_calls?.find(
+    (tc) => tc.name === updatePlanReasoningTool.name,
+  );
+  const updatePlanToolCallId = updatePlanToolCall?.id;
+  const updatePlanToolCallArgs = updatePlanToolCall?.args as z.infer<
+    typeof updatePlanReasoningTool.schema
+  >;
+  if (!updatePlanToolCall || !updatePlanToolCallId || !updatePlanToolCallArgs) {
+    throw new Error("Update plan with reasoning tool call not found.");
+  }
 
   logger.info("Updating plan", {
-    updatePlanToolCallId,
-    planChangeRequest: state.planChangeRequest,
+    ...updatePlanToolCall,
   });
 
   const model = await loadModel(config, Task.PLANNER);
@@ -114,7 +117,7 @@ export async function updatePlan(
     parallel_tool_calls: false,
   });
 
-  const activeTask = getActiveTask(state.plan);
+  const activeTask = getActiveTask(state.taskPlan);
   const request = activeTask.request;
   const activePlanItems = activeTask.planRevisions.find(
     (pr) => pr.revisionIndex === activeTask.activeRevisionIndex,
@@ -125,7 +128,7 @@ export async function updatePlan(
 
   const systemPrompt = formatSystemPrompt(
     request,
-    state.planChangeRequest,
+    updatePlanToolCallArgs.update_plan_reasoning,
     activePlanItems,
   );
   const userMessage = formatUserMessage(state.internalMessages);
@@ -159,7 +162,7 @@ export async function updatePlan(
   ];
 
   const newTaskPlan = updateTaskPlanItems(
-    state.plan,
+    state.taskPlan,
     activeTask.id,
     newPlanItems,
     "agent",
@@ -179,7 +182,6 @@ export async function updatePlan(
   return {
     messages: [toolMessage],
     internalMessages: [toolMessage],
-    plan: newTaskPlan,
-    planChangeRequest: null,
+    taskPlan: newTaskPlan,
   };
 }

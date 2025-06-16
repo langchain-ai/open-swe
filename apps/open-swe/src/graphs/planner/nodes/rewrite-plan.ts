@@ -1,15 +1,14 @@
-import {
-  GraphState,
-  GraphConfig,
-  GraphUpdate,
-  PlanItem,
-} from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/load-model.js";
+// TODO: NOT HOOKED UP TO THE GRAPH YET
+// TODO: WILL NEED TO REFACTOR TO ALLOW FOR CHATTING WITH PLANNING SUBGRAPH
+
+import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
+import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { getUserRequest } from "../../../utils/user-request.js";
+import { loadModel, Task } from "../../../utils/load-model.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 
@@ -87,7 +86,7 @@ const formatSysPromptRewritePlan = (
 };
 
 async function identifyTasksToModifyFunc(
-  state: GraphState,
+  state: PlannerGraphState,
   model: ConfigurableModel,
 ): Promise<PlanItem[]> {
   if (!state.planChangeRequest) {
@@ -138,7 +137,7 @@ async function identifyTasksToModifyFunc(
     },
   );
 
-  const userRequest = getUserRequest(state.internalMessages);
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithIdentifyChangesTool.invoke([
     {
       role: "user",
@@ -168,7 +167,7 @@ const identifyTasksToModify = traceable(identifyTasksToModifyFunc, {
 });
 
 async function updatePlanTasksFunc(
-  state: GraphState,
+  state: PlannerGraphState,
   tasksToModify: PlanItem[],
   model: ConfigurableModel,
 ): Promise<string[]> {
@@ -201,7 +200,7 @@ async function updatePlanTasksFunc(
     parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.internalMessages);
+  const userRequest = getUserRequest(state.messages);
   const response = await modelWithUpdatePlanTasksTool.invoke([
     {
       role: "user",
@@ -231,9 +230,9 @@ const updatePlanTasks = traceable(updatePlanTasksFunc, {
 });
 
 export async function rewritePlan(
-  state: GraphState,
+  state: PlannerGraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<PlannerGraphUpdate> {
   if (!state.planChangeRequest) {
     throw new Error("No plan change request found.");
   }

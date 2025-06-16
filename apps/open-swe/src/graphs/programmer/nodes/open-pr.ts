@@ -55,8 +55,8 @@ const openPrTool = {
   description: "Use this tool to open a pull request.",
 };
 
-const formatPrompt = (plan: PlanItem[], userRequest: string): string => {
-  const completedTasks = plan.filter((task) => task.completed);
+const formatPrompt = (taskPlan: PlanItem[], userRequest: string): string => {
+  const completedTasks = taskPlan.filter((task) => task.completed);
   return openPrSysPrompt
     .replace("{COMPLETED_TASKS}", formatPlanPromptWithSummaries(completedTasks))
     .replace("{USER_REQUEST}", userRequest);
@@ -113,7 +113,7 @@ export async function openPullRequest(
   const response = await modelWithTool.invoke([
     {
       role: "user",
-      content: formatPrompt(getActivePlanItems(state.plan), userRequest),
+      content: formatPrompt(getActivePlanItems(state.taskPlan), userRequest),
     },
   ]);
 

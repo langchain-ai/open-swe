@@ -26,10 +26,10 @@ Since you've successfully completed the user's request, you should now generate 
 Your concision message should be concise and to the point, you do NOT want to include any details which are not ABSOLUTELY NECESSARY.
 `;
 
-const formatPrompt = (plan: PlanItem[]): string => {
+const formatPrompt = (taskPlan: PlanItem[]): string => {
   return prompt.replace(
     "{COMPLETED_TASKS}",
-    plan.map((p) => `${p.index}. ${p.plan}`).join("\n"),
+    taskPlan.map((p) => `${p.index}. ${p.plan}`).join("\n"),
   );
 };
 
@@ -53,7 +53,7 @@ Given all of this, please respond with the concise conclusion. Do not include an
   const response = await model.invoke([
     {
       role: "system",
-      content: formatPrompt(getActivePlanItems(state.plan)),
+      content: formatPrompt(getActivePlanItems(state.taskPlan)),
     },
     {
       role: "user",
@@ -62,9 +62,9 @@ Given all of this, please respond with the concise conclusion. Do not include an
   ]);
 
   logger.info("✅ Successfully generated conclusion. Ending run. 👋");
-  const activeTaskId = getActiveTask(state.plan).id;
+  const activeTaskId = getActiveTask(state.taskPlan).id;
   const updatedTaskPlan = completeTask(
-    state.plan,
+    state.taskPlan,
     activeTaskId,
     getMessageContentString(response.content),
   );
@@ -72,6 +72,6 @@ Given all of this, please respond with the concise conclusion. Do not include an
   return {
     messages: [response],
     internalMessages: [response],
-    plan: updatedTaskPlan,
+    taskPlan: updatedTaskPlan,
   };
 }
