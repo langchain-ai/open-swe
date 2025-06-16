@@ -5,7 +5,9 @@ import {
   isHumanMessage,
 } from "@langchain/core/messages";
 import { GitHubIssueComment } from "./types.js";
-import { getMessageContentFromIssue } from "./api.js";
+import { getIssueComments, getMessageContentFromIssue } from "./api.js";
+import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
+import { getGitHubTokensFromConfig } from "../github-tokens.js";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
@@ -38,4 +40,29 @@ export function getUntrackedComments(
     );
 
   return untrackedCommentMessages;
+}
+
+type GetMissingMessagesInput = {
+  messages: BaseMessage[];
+  githubIssueId: number;
+  targetRepository: TargetRepository;
+};
+
+export async function getMissingMessages(
+  input: GetMissingMessagesInput,
+  config: GraphConfig,
+): Promise<BaseMessage[]> {
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const comments = await getIssueComments({
+    owner: input.targetRepository.owner,
+    repo: input.targetRepository.repo,
+    issueNumber: input.githubIssueId,
+    githubInstallationToken,
+    filterBotComments: true,
+  });
+  if (!comments?.length) {
+    return [];
+  }
+
+  return getUntrackedComments(input.messages, input.githubIssueId, comments);
 }

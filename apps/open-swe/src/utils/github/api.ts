@@ -230,6 +230,47 @@ export async function createIssue({
   }
 }
 
+export async function updateIssue({
+  owner,
+  repo,
+  issueNumber,
+  githubInstallationToken,
+  body,
+  title,
+}: {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  githubInstallationToken: string;
+  body?: string;
+  title?: string;
+}) {
+  if (!body && !title) {
+    throw new Error("Must provide either body or title to update issue");
+  }
+
+  const octokit = new Octokit({
+    auth: githubInstallationToken,
+  });
+
+  try {
+    const { data: issue } = await octokit.issues.update({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      ...(body && { body }),
+      ...(title && { title }),
+    });
+
+    return issue;
+  } catch (error) {
+    logger.error(`Failed to update issue`, {
+      error,
+    });
+    return null;
+  }
+}
+
 export async function createIssueComment({
   owner,
   repo,

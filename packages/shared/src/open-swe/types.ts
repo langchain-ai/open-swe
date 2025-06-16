@@ -196,6 +196,15 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * The ID of the Github issue this thread is associated with
+   */
+  githubIssueId: withLangGraph(z.custom<number>(), {
+    reducer: {
+      schema: z.custom<number>(),
+      fn: (_state, update) => update,
+    },
+  }),
 
   // ---NOT USED---
   ui: z

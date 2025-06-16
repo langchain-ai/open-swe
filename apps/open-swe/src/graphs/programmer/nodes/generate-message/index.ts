@@ -18,6 +18,8 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
+import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -66,12 +68,21 @@ export async function generateAction(
     parallel_tool_calls: false,
   });
 
+  const [missingMessages, latestTaskPlan] = await Promise.all([
+    getMissingMessages(state, config),
+    getTaskPlanFromIssue(state, config),
+  ]);
+
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(state),
+      content: formatPrompt({
+        ...state,
+        taskPlan: latestTaskPlan ?? state.taskPlan,
+      }),
     },
     ...state.internalMessages,
+    ...missingMessages,
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;
@@ -93,9 +104,11 @@ export async function generateAction(
     }),
   });
 
+  const newMessagesList = [...missingMessages, response];
   return {
-    messages: [response],
-    internalMessages: [response],
+    messages: newMessagesList,
+    internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
+    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
