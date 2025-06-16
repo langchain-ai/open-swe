@@ -40,6 +40,7 @@ export async function startPlanner(
         recursion_limit: 400,
       },
       ifNotExists: "create",
+      multitaskStrategy: "enqueue",
     });
 
     return {

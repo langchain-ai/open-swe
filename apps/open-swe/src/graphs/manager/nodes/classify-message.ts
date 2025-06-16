@@ -22,7 +22,7 @@ import { extractIssueTitleAndContentFromMessage } from "../utils/github-issue.js
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createIssue, createIssueComment } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { traceable } from "langsmith/traceable";
+import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
 
 /**
  * Options:
@@ -32,10 +32,10 @@ import { traceable } from "langsmith/traceable";
  */
 
 // This should only be included in the state when the programmer is running.
-// TODO: update to be ephemeral feedback for whatever the agent is currently doing. long term should route to the planner
-// allow manager to create new issue. will kickoff a new manager run where it bypasses the classification step & it creates an issue & starts a planning session.
-// manager should then reply with an `open this link to see your new issue` message.
-const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer, or some other message which you determine their intent is to provide to the programmer.`;
+const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
+
+// This should only be included when the programmer/planner is running.
+const CREATE_ISSUE_ROUTING_OPTION = `- create_new_issue: Call this route if the user's request should create a new GitHub issue, and should be executed independently from the current request. This should only be called if the new request does not depend on the current request.`;
 
 // This should only be included if the task plan exists.
 const TASK_PLAN_PROMPT = `# Task Plan
@@ -69,7 +69,7 @@ Based on all of the context provided above, determine how to respond to the user
 Your routing options are:
 - no_op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
 - plan: Call this route if the user's message is a complete request which you can use to kickoff a new planning session (only if one is not already running), or it's an entirely new request which you should also start a new planning session for (only if both the planner and programmer are not running). You may also call this route if the planner is running, and the user's message contains updated instructions, or additional context which may be relevant/helpful to the planner.
-TODO: ONLY SHOW WHEN PLANNER/PROGRAMMER IS RUNNING - create_issue: Call this route
+{CREATE_ISSUE_ROUTING_OPTION}
 {CODE_ROUTING_OPTION}
 `;
 
@@ -121,6 +121,12 @@ const createClassificationPromptAndToolSchema = (inputs: {
       "{CODE_ROUTING_OPTION}",
       inputs.programmerRunning ? CODE_ROUTING_OPTION : "",
     )
+    .replaceAll(
+      "{CREATE_ISSUE_ROUTING_OPTION}",
+      inputs.plannerRunning || inputs.programmerRunning
+        ? CREATE_ISSUE_ROUTING_OPTION
+        : "",
+    )
     .replaceAll("{TASK_PLAN_PROMPT}", formattedTaskPlanPrompt ?? "")
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
@@ -129,7 +135,14 @@ const createClassificationPromptAndToolSchema = (inputs: {
 
   const schema = baseClassificationSchema.extend({
     route: z
-      .enum(["no_op", "plan", ...(inputs.programmerRunning ? ["code"] : [])])
+      .enum([
+        "no_op",
+        "plan",
+        ...(inputs.programmerRunning ? ["code"] : []),
+        ...(inputs.plannerRunning || inputs.programmerRunning
+          ? ["create_new_issue"]
+          : []),
+      ])
       .describe("The route to take to handle the user's new message."),
   });
 
@@ -138,60 +151,6 @@ const createClassificationPromptAndToolSchema = (inputs: {
     schema,
   };
 };
-
-async function createIssueTitleAndBodyFromMessagesFunc(
-  messages: BaseMessage[],
-  config: GraphConfig,
-): Promise<{ title: string; body: string }> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const githubIssueTool = {
-    name: "create_github_issue",
-    description: "Create a new GitHub issue with the given title and body.",
-    schema: z.object({
-      title: z
-        .string()
-        .describe(
-          "The title of the issue to create. Should be concise and clear.",
-        ),
-      body: z
-        .string()
-        .describe(
-          "The body of the issue to create. This should be an extremely concise description of the issue. You should not over-explain the issue, as we do not want to waste the user's time. Do not include any additional context not found in the conversation history.",
-        ),
-    }),
-  };
-  const modelWithTools = model
-    .bindTools([githubIssueTool], {
-      tool_choice: githubIssueTool.name,
-      parallel_tool_calls: false,
-    })
-    .withConfig({ tags: ["nostream"] });
-
-  const prompt = `You're an AI programmer, tasked with taking the conversation history provided below, and creating a new GitHub issue.
-Ensure the issue title and body are both clear and concise. Do not hallucinate any information not found in the conversation history.
-
-# Conversation History
-${messages.map(getMessageString).join("\n")}
-
-With the above conversation history in mind, please call the ${githubIssueTool.name} tool to create a new GitHub issue based on the user's request.`;
-
-  const result = await modelWithTools.invoke([
-    {
-      role: "user",
-      content: prompt,
-    },
-  ]);
-  const toolCall = result.tool_calls?.[0];
-  if (!toolCall) {
-    throw new Error("No tool call found in result");
-  }
-  return toolCall.args as z.infer<typeof githubIssueTool.schema>;
-}
-
-const createIssueTitleAndBodyFromMessages = traceable(
-  createIssueTitleAndBodyFromMessagesFunc,
-  { name: "create-issue-title-and-body-from-messages" },
-);
 
 /**
  * Classify the latest human message to determine how to route the request.
@@ -229,20 +188,15 @@ export async function classifyMessage(
     taskPlan: state.taskPlan,
   });
   const model = await loadModel(config, Task.CLASSIFICATION);
-  const modelWithTools = model.bindTools(
-    [
-      {
-        name: "respond_and_route",
-        description:
-          "Respond to the user's message and determine how to route it.",
-        schema,
-      },
-    ],
-    {
-      tool_choice: "respond_and_route",
-      parallel_tool_calls: false,
-    },
-  );
+  const respondAndRouteTool = {
+    name: "respond_and_route",
+    description: "Respond to the user's message and determine how to route it.",
+    schema,
+  };
+  const modelWithTools = model.bindTools([respondAndRouteTool], {
+    tool_choice: respondAndRouteTool.name,
+    parallel_tool_calls: false,
+  });
 
   const userMessage = state.messages.findLast(isHumanMessage);
   if (!userMessage) {
@@ -272,6 +226,17 @@ export async function classifyMessage(
     return new Command({
       update: commandUpdate,
       goto: END,
+    });
+  }
+
+  if ((toolCallArgs.route as string) === "create_new_issue") {
+    // Route to node which kicks off new manager run, passing in the full conversation history.
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: [response],
+    };
+    return new Command({
+      update: commandUpdate,
+      goto: "create-new-session",
     });
   }
 

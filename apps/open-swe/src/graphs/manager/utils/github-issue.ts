@@ -1,8 +1,8 @@
 const DEFAULT_ISSUE_TITLE = "New Open SWE Request";
-const ISSUE_TITLE_OPEN_TAG = "<issue-title>";
-const ISSUE_TITLE_CLOSE_TAG = "</issue-title>";
-const ISSUE_CONTENT_OPEN_TAG = "<issue-content>";
-const ISSUE_CONTENT_CLOSE_TAG = "</issue-content>";
+export const ISSUE_TITLE_OPEN_TAG = "<issue-title>";
+export const ISSUE_TITLE_CLOSE_TAG = "</issue-title>";
+export const ISSUE_CONTENT_OPEN_TAG = "<issue-content>";
+export const ISSUE_CONTENT_CLOSE_TAG = "</issue-content>";
 
 export function extractIssueTitleAndContentFromMessage(content: string) {
   let messageTitle = DEFAULT_ISSUE_TITLE;
