@@ -32,6 +32,9 @@ import { traceable } from "langsmith/traceable";
  */
 
 // This should only be included in the state when the programmer is running.
+// TODO: update to be ephemeral feedback for whatever the agent is currently doing. long term should route to the planner
+// allow manager to create new issue. will kickoff a new manager run where it bypasses the classification step & it creates an issue & starts a planning session.
+// manager should then reply with an `open this link to see your new issue` message.
 const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer, or some other message which you determine their intent is to provide to the programmer.`;
 
 // This should only be included if the task plan exists.
@@ -64,8 +67,9 @@ The programmer's current status is: {PROGRAMMER_STATUS}
 # Routing Options
 Based on all of the context provided above, determine how to respond to the user's new message, and how to route their request.
 Your routing options are:
-- no-op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
+- no_op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
 - plan: Call this route if the user's message is a complete request which you can use to kickoff a new planning session (only if one is not already running), or it's an entirely new request which you should also start a new planning session for (only if both the planner and programmer are not running). You may also call this route if the planner is running, and the user's message contains updated instructions, or additional context which may be relevant/helpful to the planner.
+TODO: ONLY SHOW WHEN PLANNER/PROGRAMMER IS RUNNING - create_issue: Call this route
 {CODE_ROUTING_OPTION}
 `;
 
@@ -76,7 +80,7 @@ const baseClassificationSchema = z.object({
       "The response to send to the user. This should be clear, concise, and include any additional context the user may need to know about how/why you're handling their new message.",
     ),
   route: z
-    .enum(["no-op", "plan"])
+    .enum(["no_op", "plan"])
     .describe("The route to take to handle the user's new message."),
 });
 
@@ -125,7 +129,7 @@ const createClassificationPromptAndToolSchema = (inputs: {
 
   const schema = baseClassificationSchema.extend({
     route: z
-      .enum(["no-op", "plan", ...(inputs.programmerRunning ? ["code"] : [])])
+      .enum(["no_op", "plan", ...(inputs.programmerRunning ? ["code"] : [])])
       .describe("The route to take to handle the user's new message."),
   });
 
@@ -260,8 +264,8 @@ export async function classifyMessage(
     typeof baseClassificationSchema
   >;
 
-  if (toolCallArgs.route === "no-op") {
-    // If it's a no-op, just add the message to the state and return.
+  if (toolCallArgs.route === "no_op") {
+    // If it's a no_op, just add the message to the state and return.
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
     };
@@ -276,7 +280,7 @@ export async function classifyMessage(
 
   let newMessages: BaseMessage[] = [];
 
-  // If it's not a no-op, ensure there is a GitHub issue with the user's request.
+  // If it's not a no_op, ensure there is a GitHub issue with the user's request.
   if (!githubIssueId) {
     // If there are multiple human messages in the state, generate a github issue with an LLM.
     // Otherwise extract it from the user's message.

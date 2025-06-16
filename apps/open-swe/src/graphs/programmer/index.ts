@@ -102,4 +102,4 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
 
 // Zod types are messed up
 export const graph = workflow.compile() as any;
-graph.name = "Open Codex";
+graph.name = "Open SWE";
