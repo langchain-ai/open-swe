@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
+import { CustomEvent, isCustomEvent } from "@open-swe/shared/open-swe/custom-events";
 
 const useTypedStream = useStream<
   GraphState,
@@ -32,7 +33,9 @@ const useTypedStream = useStream<
   }
 >;
 
-type StreamContextType = ReturnType<typeof useTypedStream>;
+type StreamContextType = ReturnType<typeof useTypedStream> & {
+  customEvents: CustomEvent[];
+};
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 async function sleep(ms = 4000) {
@@ -43,21 +46,23 @@ const StreamSession = ({
   children,
   apiUrl,
   assistantId,
-  githubToken,
 }: {
   children: ReactNode;
   apiUrl: string;
   assistantId: string;
-  githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads, setThreads } = useThreads();
+  const { refreshThreads } = useThreads();
+  const [customEvents, setCustomEvents] = useState<CustomEvent[]>([]);
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {
+      if (isCustomEvent(event)) {
+        setCustomEvents((prev) => [...prev, event]);
+      }
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
@@ -75,7 +80,10 @@ const StreamSession = ({
   });
 
   return (
-    <StreamContext.Provider value={streamValue}>
+    <StreamContext.Provider value={{
+      ...streamValue,
+      customEvents,
+    }}>
       {children}
     </StreamContext.Provider>
   );
@@ -355,7 +363,6 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     <StreamSession
       apiUrl={apiUrl}
       assistantId={assistantId}
-      githubToken={githubToken}
     >
       {children}
     </StreamSession>

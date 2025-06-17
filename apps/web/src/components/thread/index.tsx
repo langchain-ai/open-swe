@@ -158,6 +158,12 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
+  const customEvents = stream.customEvents;
+
+  // TODO: DELETE BEFORE OPENING PR
+  useEffect(() => {
+    console.log(customEvents)
+  }, [customEvents])
 
   const lastError = useRef<string | undefined>(undefined);
 

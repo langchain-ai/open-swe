@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import {
   GraphState,
@@ -16,6 +17,7 @@ import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 import { getCodebaseTree } from "../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { CustomEvent, INITIALIZE_NODE_ID } from "@open-swe/shared/open-swe/custom-events";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
@@ -38,10 +40,75 @@ export async function initialize(
       logger.info("Sandbox session ID exists. Resuming", {
         sandboxSessionId,
       });
+      const resumeSandboxActionId = uuidv4();
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+        createdAt: new Date().toISOString(),
+        actionId: resumeSandboxActionId,
+        action: "Resuming Sandbox",
+        data: {
+          status: "pending",
+          sandboxSessionId,
+        }
+      });
+
       // Resume the sandbox if the session ID is in the config.
       const existingSandbox = await daytonaClient().get(sandboxSessionId);
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+        actionId: resumeSandboxActionId,
+        action: "Resuming Sandbox",
+        data: {
+          status: "success",
+          sandboxSessionId,
+        }
+      });
+      const pullLatestChangesActionId = uuidv4();
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+        actionId: pullLatestChangesActionId,
+        action: "Pulling latest changes",
+        data: {
+          status: "pending",
+          sandboxSessionId,
+        }
+      });
       await pullLatestChanges(absoluteRepoDir, existingSandbox);
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+        actionId: pullLatestChangesActionId,
+        action: "Pulling latest changes",
+        data: {
+          status: "success",
+          sandboxSessionId,
+        }
+      });
+
+      const generateCodebaseTreeActionId = uuidv4();
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+        actionId: generateCodebaseTreeActionId,
+        action: "Generating codebase tree",
+        data: {
+          status: "pending",
+          sandboxSessionId,
+        }
+      });
       const codebaseTree = await getCodebaseTree(existingSandbox.id);
+      config.writer?.({
+        nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+        actionId: generateCodebaseTreeActionId,
+        action: "Generating codebase tree",
+        data: {
+          status: "success",
+          sandboxSessionId,
+        }
+      });
       return {
         sandboxSessionId: existingSandbox.id,
         codebaseTree,
@@ -53,8 +120,31 @@ export async function initialize(
   }
 
   logger.info("Creating sandbox...");
+  const createSandboxActionId = uuidv4();
+  // TODO: Update the above .write() calls to use this pattern.
+  const baseCreateSandboxAction: CustomEvent = {
+    nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+    actionId: createSandboxActionId,
+    action: "Creating Sandbox",
+    data: {
+      status: "pending",
+      sandboxSessionId: null,
+    }
+  }
+  config.writer?.(baseCreateSandboxAction);
+
   const sandbox = await daytonaClient().create({
     image: SNAPSHOT_NAME,
+  });
+
+  config.writer?.({
+    ...baseCreateSandboxAction,
+    createdAt: new Date().toISOString(),
+    data: {
+      status: "success",
+      sandboxSessionId: sandbox.id,
+    }
   });
 
   const res = await cloneRepo(sandbox, targetRepository, {
