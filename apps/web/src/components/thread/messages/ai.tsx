@@ -29,7 +29,7 @@ import {
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 
-// Infer types from Zod schemas
+// Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
 const shellSchema = createShellToolFields(dummyRepo).schema;
 type ShellToolArgs = z.infer<typeof shellSchema>;
@@ -88,7 +88,7 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
-// Local type guard for AIMessage
+// Local type guard for AIMessage, isAIMessage is for type BaseMessage
 function isAIMessageLocal(m: Message): m is AIMessage {
   return m.type === "ai";
 }
@@ -97,13 +97,11 @@ export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   thread: { messages: Message[] },
 ): ActionStepProps {
-  // Find the corresponding tool call from the previous AI message
   const toolCall: ToolCall | undefined = thread.messages
     .filter(isAIMessageLocal)
     .flatMap((m) => m.tool_calls ?? [])
     .find((tc) => tc.id === message.tool_call_id);
 
-  // Find the AI message that generated the tool call for reasoningText
   const aiMessage = thread.messages
     .filter(isAIMessageLocal)
     .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
@@ -164,18 +162,114 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
+  const messages = thread.messages;
+  const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
+  const nextMessage = idx >= 0 ? messages[idx + 1] : undefined;
+
+  const meta = message ? thread.getMessagesMetadata(message) : undefined;
+  const threadInterrupt = thread.interrupt;
+  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const anthropicStreamedToolCalls = Array.isArray(content)
+    ? parseAnthropicStreamedToolCalls(content)
+    : undefined;
+
+  // Helper: get tool call name from AI message (OpenAI or Anthropic)
+  const aiToolCallName = (() => {
+    if (message && isAIMessageLocal(message)) {
+      return message.tool_calls?.[0]?.name;
+    }
+    if (anthropicStreamedToolCalls?.length) {
+      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
+        .name;
+    }
+    return undefined;
+  })();
+
+  const aiToolCallArgs = (() => {
+    if (message && isAIMessageLocal(message)) {
+      return message.tool_calls?.[0]?.args;
+    }
+    if (anthropicStreamedToolCalls?.length) {
+      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
+        .args;
+    }
+    return undefined;
+  })();
+
+  const toolResult =
+    nextMessage &&
+    nextMessage.type === "tool" &&
+    aiToolCallName &&
+    (nextMessage as ToolMessage).tool_call_id ===
+      (message && isAIMessageLocal(message)
+        ? message.tool_calls?.[0]?.id
+        : anthropicStreamedToolCalls?.length
+          ? anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1].id
+          : undefined)
+      ? (nextMessage as ToolMessage)
+      : undefined;
+
+  if (
+    message &&
+    (aiToolCallName === "shell" || aiToolCallName === "apply_patch")
+  ) {
+    if (toolResult) {
+      return (
+        <ActionStep {...mapToolMessageToActionStepProps(toolResult, thread)} />
+      );
+    }
+    return (
+      <ActionStep
+        actionType={aiToolCallName === "shell" ? "shell" : "apply-patch"}
+        status="generating"
+        command={
+          aiToolCallName === "shell" ? aiToolCallArgs?.command || [] : undefined
+        }
+        workdir={
+          aiToolCallName === "shell" ? aiToolCallArgs?.workdir : undefined
+        }
+        file={
+          aiToolCallName === "apply_patch"
+            ? aiToolCallArgs?.file_path || ""
+            : undefined
+        }
+        diff={
+          aiToolCallName === "apply_patch" ? aiToolCallArgs?.diff : undefined
+        }
+        reasoningText={contentString}
+      />
+    );
+  }
+
+  if (
+    message?.type === "tool" &&
+    (message.name === "shell" || message.name === "apply_patch") &&
+    idx > 0 &&
+    messages[idx - 1] &&
+    ((messages[idx - 1] &&
+      isAIMessageLocal(messages[idx - 1]) &&
+      (messages[idx - 1] as AIMessage).tool_calls?.some(
+        (tc) =>
+          tc.id === (message as ToolMessage).tool_call_id &&
+          (tc.name === "shell" || tc.name === "apply_patch"),
+      )) ||
+      (Array.isArray(messages[idx - 1].content) &&
+        parseAnthropicStreamedToolCalls(
+          messages[idx - 1].content as MessageContentComplex[],
+        )?.some(
+          (tc) =>
+            tc.id === (message as ToolMessage).tool_call_id &&
+            (tc.name === "shell" || tc.name === "apply_patch"),
+        )))
+  ) {
+    return null;
+  }
+
   const isLastMessage =
     thread.messages[thread.messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
-  const threadInterrupt = thread.interrupt;
-
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const anthropicStreamedToolCalls = Array.isArray(content)
-    ? parseAnthropicStreamedToolCalls(content)
-    : undefined;
 
   const hasToolCalls =
     message &&
@@ -200,7 +294,6 @@ export function AssistantMessage({
         {isToolResult ? (
           <span>
             {(() => {
-              // Find the corresponding tool call from the previous AI message
               const toolCall = thread.messages
                 .filter(isAIMessageLocal)
                 .flatMap((m) => m.tool_calls ?? [])
