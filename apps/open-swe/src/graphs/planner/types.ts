@@ -61,6 +61,12 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  programmerThreadId: withLangGraph(z.custom<string>(), {
+    reducer: {
+      schema: z.custom<string>(),
+      fn: (_state, update) => update,
+    },
+  }),
 });
 
 export type PlannerGraphState = z.infer<typeof PlannerGraphStateObj>;

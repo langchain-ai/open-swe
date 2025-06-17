@@ -6,7 +6,6 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
-  getBranchName,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import { createPullRequest } from "../../../utils/github/api.js";
@@ -130,7 +129,7 @@ export async function openPullRequest(
   const pr = await createPullRequest({
     owner,
     repo,
-    headBranch: branchName ?? getBranchName(config),
+    headBranch: branchName,
     title,
     body: `Fixes #${state.githubIssueId}\n\n${body}`,
     githubInstallationToken,

@@ -1,5 +1,6 @@
+import { v4 as uuidv4 } from "uuid";
 import { Command, END, interrupt } from "@langchain/langgraph";
-import { GraphUpdate } from "@open-swe/shared/open-swe/types";
+import { GraphUpdate, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,
@@ -9,14 +10,19 @@ import { startSandbox } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../../../utils/user-request.js";
 import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_TOKEN_COOKIE,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
 } from "@open-swe/shared/constants";
-import { PlannerGraphState } from "../types.js";
+import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
+import { createLangGraphClient } from "../../../utils/langgraph-client.js";
+import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
 export async function interruptProposedPlan(
   state: PlannerGraphState,
-): Promise<Command> {
+  config: GraphConfig,
+): Promise<PlannerGraphUpdate | Command> {
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
@@ -44,36 +50,47 @@ export async function interruptProposedPlan(
     throw new Error("No sandbox session ID found.");
   }
 
+  if (interruptRes.type === "response") {
+    // Plan was responded to, route to the rewrite plan node.
+    throw new Error("RESPONDING TO PLAN NOT IMPLEMENTED.");
+  }
+
+  if (interruptRes.type === "ignore") {
+    // Plan was ignored, end the process.
+    return new Command({
+      goto: END,
+    });
+  }
+
+  const langGraphClient = createLangGraphClient({
+    defaultHeaders: {
+      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
+      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
+        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+    },
+  });
+
   const userRequest = getUserRequest(state.messages);
 
-  if (interruptRes.type === "accept") {
-    const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
+  const runInput: GraphUpdate = {
+    planContextSummary: state.planContextSummary,
+    branchName: state.branchName,
+    targetRepository: state.targetRepository,
+    githubIssueId: state.githubIssueId,
+  };
+  // TODO: UPDATE ISSUE WITH PROGRAMMER THREAD ID.
+  // TODO: UPDATE ISSUE WITH TASK PLAN
+  const programmerThreadId = uuidv4();
 
-    // Plan was accepted, route to the generate-action node to start taking actions.
+  if (interruptRes.type === "accept") {
     const planItems = proposedPlan.map((p, index) => ({
       index,
       plan: p,
       completed: false,
     }));
 
-    const newTaskPlan = createNewTask(userRequest, planItems, state.taskPlan);
-
-    // TODO: CONVERT TO SDK CALL TO CREATE THREAD & UPDATE TASK
-    // TODO: WILL NEED TO STORE PROGRAMMER THREAD ID IN GITHUB ISSUE BODY
-    const commandUpdate: GraphUpdate = {
-      plan: newTaskPlan,
-      sandboxSessionId: newSandboxSessionId,
-    };
-    return new Command({
-      goto: "generate-action",
-      update: commandUpdate,
-    });
-  }
-
-  if (interruptRes.type === "edit") {
-    const newSandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
-
-    // Plan was edited, route to the generate-action node to start taking actions.
+    runInput.taskPlan = createNewTask(userRequest, planItems, state.taskPlan);
+  } else if (interruptRes.type === "edit") {
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(PLAN_INTERRUPT_DELIMITER)
       .map((step: string) => step.trim());
@@ -84,35 +101,34 @@ export async function interruptProposedPlan(
       completed: false,
     }));
 
-    const newTaskPlan = createNewTask(userRequest, planItems, state.taskPlan);
-
-    const commandUpdate: GraphUpdate = {
-      plan: newTaskPlan,
-      sandboxSessionId: newSandboxSessionId,
-    };
-    return new Command({
-      goto: "generate-action",
-      update: commandUpdate,
-    });
+    runInput.taskPlan = createNewTask(userRequest, planItems, state.taskPlan);
+  } else {
+    throw new Error("Unknown interrupt type." + interruptRes.type);
   }
 
-  if (interruptRes.type === "response") {
-    // Plan was responded to, route to the rewrite plan node.
-    const commandUpdate: GraphUpdate = {
-      planChangeRequest: interruptRes.args as string,
-    };
-    return new Command({
-      goto: "rewrite-plan",
-      update: commandUpdate,
-    });
-  }
+  // Restart the sandbox.
+  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
 
-  if (interruptRes.type === "ignore") {
-    // Plan was ignored, end the process.
-    return new Command({
-      goto: END,
-    });
-  }
+  await langGraphClient.runs.create(programmerThreadId, "programmer", {
+    input: runInput,
+    config: {
+      recursion_limit: 400,
+    },
+    ifNotExists: "create",
+  });
 
-  throw new Error("Unknown interrupt type." + interruptRes.type);
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    runInput.taskPlan,
+  );
+
+  return {
+    programmerThreadId,
+    sandboxSessionId: runInput.sandboxSessionId,
+    taskPlan: runInput.taskPlan,
+  };
 }

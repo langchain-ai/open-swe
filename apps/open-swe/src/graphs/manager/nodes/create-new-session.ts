@@ -79,7 +79,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     githubIssueId: newIssue.id,
     targetRepository: state.targetRepository,
     messages: inputMessages,
-    branchName: getBranchName(config),
+    branchName: state.branchName ?? getBranchName(config),
   };
   await langGraphClient.runs.create(newManagerThreadId, "manager", {
     input: {},

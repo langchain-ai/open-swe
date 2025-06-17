@@ -36,7 +36,7 @@ export async function startPlanner(
         targetRepository: state.targetRepository,
         // Include the existing task plan, so the agent can use it as context when generating followup tasks.
         taskPlan: state.taskPlan,
-        branchName: getBranchName(config),
+        branchName: state.branchName ?? getBranchName(config),
       },
       config: {
         recursion_limit: 400,
