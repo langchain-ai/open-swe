@@ -60,5 +60,5 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addEdge("summarizer", "interrupt-proposed-plan")
   .addEdge("interrupt-proposed-plan", END);
 
-export const plannerGraph = workflow.compile();
-plannerGraph.name = "Planner";
+export const graph = workflow.compile();
+graph.name = "Open SWE - Planner";

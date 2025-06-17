@@ -2,7 +2,7 @@ import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 
-export const ManagerGraphState = MessagesZodState.extend({
+export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
    * The GitHub issue number that the user's request is associated with.
    * If not provided when the graph is invoked, it will create an issue.
@@ -36,5 +36,5 @@ export const ManagerGraphState = MessagesZodState.extend({
   branchName: z.string(),
 });
 
-export type ManagerGraphState = z.infer<typeof ManagerGraphState>;
+export type ManagerGraphState = z.infer<typeof ManagerGraphStateObj>;
 export type ManagerGraphUpdate = Partial<ManagerGraphState>;

@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState } from "./types.js";
+import { ManagerGraphStateObj } from "./types.js";
 import {
   initializeGithubIssue,
   classifyMessage,
@@ -8,10 +8,10 @@ import {
   createNewSession,
 } from "./nodes/index.js";
 
-const workflow = new StateGraph(ManagerGraphState, GraphConfiguration)
+const workflow = new StateGraph(ManagerGraphStateObj, GraphConfiguration)
   .addNode("initialize-github-issue", initializeGithubIssue)
   .addNode("classify-message", classifyMessage, {
-    ends: [END, "start-planner"],
+    ends: [END, "start-planner", "create-new-session"],
   })
   .addNode("create-new-session", createNewSession)
   .addNode("start-planner", startPlanner)
@@ -21,4 +21,4 @@ const workflow = new StateGraph(ManagerGraphState, GraphConfiguration)
   .addEdge("start-planner", END);
 
 export const graph = workflow.compile();
-graph.name = "Manager";
+graph.name = "Open SWE - Manager";
