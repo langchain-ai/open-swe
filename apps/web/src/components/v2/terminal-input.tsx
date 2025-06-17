@@ -3,51 +3,16 @@
 import type React from "react";
 
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
-import { Send, ChevronDown, GitBranch, Folder } from "lucide-react";
-
-interface Repository {
-  owner: string;
-  name: string;
-  branches: string[];
-}
+import { Send } from "lucide-react";
+import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
+import { Button } from "../ui/button";
 
 interface TerminalInputProps {
-  onSend?: (message: string, repo: Repository, branch: string) => void;
+  onSend?: (message: string) => void;
   placeholder?: string;
   disabled?: boolean;
 }
-
-const mockRepositories: Repository[] = [
-  {
-    owner: "open-swe",
-    name: "main",
-    branches: ["main", "develop", "feature/auth", "hotfix/bug-123"],
-  },
-  {
-    owner: "vercel",
-    name: "next.js",
-    branches: ["canary", "main", "beta"],
-  },
-  {
-    owner: "facebook",
-    name: "react",
-    branches: ["main", "experimental", "18.2-dev"],
-  },
-  {
-    owner: "microsoft",
-    name: "vscode",
-    branches: ["main", "release/1.85", "insider"],
-  },
-];
 
 export function TerminalInput({
   onSend,
@@ -55,18 +20,10 @@ export function TerminalInput({
   disabled = false,
 }: TerminalInputProps) {
   const [message, setMessage] = useState("");
-  const [selectedRepo, setSelectedRepo] = useState<Repository>(
-    mockRepositories[0],
-  );
-  const [selectedBranch, setSelectedBranch] = useState(
-    mockRepositories[0].branches[0],
-  );
-  const [repoOpen, setRepoOpen] = useState(false);
-  const [branchOpen, setBranchOpen] = useState(false);
 
   const handleSend = () => {
     if (message.trim() && onSend) {
-      onSend(message.trim(), selectedRepo, selectedBranch);
+      onSend(message.trim());
       setMessage("");
     }
   };
@@ -78,126 +35,17 @@ export function TerminalInput({
     }
   };
 
-  const handleRepoSelect = (repo: Repository) => {
-    setSelectedRepo(repo);
-    setSelectedBranch(repo.branches[0]);
-    setRepoOpen(false);
-  };
-
-  const handleBranchSelect = (branch: string) => {
-    setSelectedBranch(branch);
-    setBranchOpen(false);
-  };
-
   return (
     <div className="rounded-md border border-gray-600 bg-black p-2 font-mono text-xs">
       <div className="flex items-start gap-1 text-gray-300">
         {/* User@Host */}
-        <span className="text-gray-400">agent</span>
+        <span className="text-gray-400">open-swe</span>
         <span className="text-gray-500">@</span>
-        <span className="text-gray-400">ai</span>
+        <span className="text-gray-400">github</span>
         <span className="text-gray-500">:</span>
 
-        {/* Repository Selector */}
-        <Popover
-          open={repoOpen}
-          onOpenChange={setRepoOpen}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              className="h-auto p-0 font-mono text-xs text-white hover:bg-transparent hover:text-gray-300"
-              disabled={disabled}
-            >
-              <Folder className="mr-1 h-2 w-2" />
-              {selectedRepo.owner}/{selectedRepo.name}
-              <ChevronDown className="ml-1 h-2 w-2" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="w-64 p-2"
-            align="start"
-          >
-            <div className="space-y-1">
-              <div className="px-2 py-1 text-xs font-medium text-gray-700">
-                Select Repository
-              </div>
-              <ScrollArea className="h-48">
-                {mockRepositories.map((repo) => (
-                  <Button
-                    key={`${repo.owner}/${repo.name}`}
-                    variant="ghost"
-                    className="h-7 w-full justify-start text-xs"
-                    onClick={() => handleRepoSelect(repo)}
-                  >
-                    <Folder className="mr-2 h-2 w-2" />
-                    {repo.owner}/{repo.name}
-                    {selectedRepo.owner === repo.owner &&
-                      selectedRepo.name === repo.name && (
-                        <Badge
-                          variant="secondary"
-                          className="ml-auto text-xs"
-                        >
-                          Current
-                        </Badge>
-                      )}
-                  </Button>
-                ))}
-              </ScrollArea>
-            </div>
-          </PopoverContent>
-        </Popover>
-
-        {/* Branch Selector */}
-        <span className="text-gray-500">(</span>
-        <Popover
-          open={branchOpen}
-          onOpenChange={setBranchOpen}
-        >
-          <PopoverTrigger asChild>
-            <Button
-              variant="ghost"
-              className="h-auto p-0 font-mono text-xs text-gray-300 hover:bg-transparent hover:text-white"
-              disabled={disabled}
-            >
-              <GitBranch className="mr-1 h-2 w-2" />
-              {selectedBranch}
-              <ChevronDown className="ml-1 h-2 w-2" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent
-            className="w-48 p-2"
-            align="start"
-          >
-            <div className="space-y-1">
-              <div className="px-2 py-1 text-xs font-medium text-gray-700">
-                Select Branch
-              </div>
-              <ScrollArea className="h-32">
-                {selectedRepo.branches.map((branch) => (
-                  <Button
-                    key={branch}
-                    variant="ghost"
-                    className="h-6 w-full justify-start text-xs"
-                    onClick={() => handleBranchSelect(branch)}
-                  >
-                    <GitBranch className="mr-2 h-2 w-2" />
-                    {branch}
-                    {selectedBranch === branch && (
-                      <Badge
-                        variant="secondary"
-                        className="ml-auto text-xs"
-                      >
-                        Current
-                      </Badge>
-                    )}
-                  </Button>
-                ))}
-              </ScrollArea>
-            </div>
-          </PopoverContent>
-        </Popover>
-        <span className="text-gray-500">)</span>
+        {/* Repository & Branch Selectors */}
+        <RepositoryBranchSelectors />
 
         {/* Prompt */}
         <span className="text-gray-400">$</span>

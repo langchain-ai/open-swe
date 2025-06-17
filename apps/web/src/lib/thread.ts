@@ -16,13 +16,13 @@ export function getThreadTasks(thread: Thread<GraphState>): {
   totalTasks: number;
   completedTasks: number;
 } {
-  if (!thread.values || !thread.values?.plan) {
+  if (!thread.values || !thread.values?.taskPlan) {
     return {
       totalTasks: 0,
       completedTasks: 0,
     };
   }
-  const activePlanItems = getActivePlanItems(thread.values.plan);
+  const activePlanItems = getActivePlanItems(thread.values.taskPlan);
   const totalTasks = activePlanItems.length;
   const completedTasks = activePlanItems.filter((p) => p.completed).length;
   return {

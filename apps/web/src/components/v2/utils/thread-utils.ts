@@ -1,7 +1,11 @@
-import type { Thread, ThreadDisplayInfo } from "@/types";
+import { Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ThreadDisplayInfo } from "../types";
 
 // Utility function to convert between Thread and ThreadDisplayInfo
-export function threadToDisplayInfo(thread: Thread): ThreadDisplayInfo {
+export function threadToDisplayInfo(
+  thread: Thread<GraphState>,
+): ThreadDisplayInfo {
   const values = thread.values;
   const currentTask = values.taskPlan.tasks[values.taskPlan.activeTaskIndex];
   const completedTasks = values.taskPlan.tasks.filter(

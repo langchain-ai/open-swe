@@ -19,18 +19,16 @@ import {
   Layers3,
   Plus,
   Bug,
-  GitPullRequest,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Thread } from "@langchain/langgraph-sdk";
-import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getThreadTitle } from "@/lib/thread";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { ThreadDisplayInfo } from "./types";
 
 interface ThreadSwitcherProps {
-  currentThread: Thread<GraphState>;
-  allThreads: Thread<GraphState>[];
-  onThreadSelect: (thread: Thread<GraphState>) => void;
+  currentThread: ThreadDisplayInfo;
+  allThreads: ThreadDisplayInfo[];
+  onThreadSelect: (thread: ThreadDisplayInfo) => void;
   onNewChat: () => void;
 }
 
@@ -43,28 +41,26 @@ export function ThreadSwitcher({
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  const getStatusIcon = (status: Thread<GraphState>["status"]) => {
+  const getStatusIcon = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
-      case "busy":
+      case "running":
         return <Loader2 className="h-3 w-3 animate-spin text-blue-400" />;
-      // TODO: Replace with actual completed check. idle does not indicate it was successful.
-      case "idle":
+      case "completed":
         return <CheckCircle className="h-3 w-3 text-green-400" />;
-      case "error":
+      case "failed":
         return <XCircle className="h-3 w-3 text-red-400" />;
       default:
         return <div className="h-3 w-3 rounded-full bg-gray-700" />;
     }
   };
 
-  const getStatusColor = (status: Thread<GraphState>["status"]) => {
+  const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
-      case "busy":
+      case "running":
         return "bg-blue-950 text-blue-400";
-      // TODO: Replace with actual completed check. idle does not indicate it was successful.
-      case "idle":
+      case "completed":
         return "bg-green-950 text-green-400";
-      case "error":
+      case "failed":
         return "bg-red-950 text-red-400";
       default:
         return "bg-gray-800 text-gray-400";
@@ -86,10 +82,10 @@ export function ThreadSwitcher({
     }
   };
 
-  const otherThreads = allThreads.filter(
-    (t) => t.thread_id !== currentThread.thread_id,
-  );
-  const runningCount = otherThreads.filter((t) => t.status === "busy").length;
+  const otherThreads = allThreads.filter((t) => t.id !== currentThread.id);
+  const runningCount = otherThreads.filter(
+    (t) => t.status === "running",
+  ).length;
 
   return (
     <Sheet
@@ -148,12 +144,12 @@ export function ThreadSwitcher({
                 {getStatusIcon(currentThread.status)}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium text-gray-300">
-                    {getThreadTitle(currentThread)}
+                    {currentThread.title}
                   </div>
                   <div className="mt-1 flex items-center gap-1">
                     <GitBranch className="h-2 w-2 text-gray-600" />
                     <span className="truncate text-xs text-gray-500">
-                      {currentThread.values.branchName}
+                      {currentThread.repository}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between">
@@ -164,7 +160,7 @@ export function ThreadSwitcher({
                       {currentThread.status}
                     </Badge>
                     <div className="flex items-center gap-1">
-                      {currentThread.values.githubIssueId && (
+                      {currentThread.githubIssue && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -209,11 +205,11 @@ export function ThreadSwitcher({
                 <div className="space-y-1">
                   {otherThreads.map((thread) => (
                     <Button
-                      key={thread.thread_id}
+                      key={thread.id}
                       variant="ghost"
                       className="h-auto w-full justify-start p-3 text-left text-gray-400 hover:bg-gray-800"
                       onClick={() => {
-                        router.push(`/chat/${thread.thread_id}`);
+                        router.push(`/chat/${thread.id}`);
                         setOpen(false);
                       }}
                     >
@@ -221,24 +217,19 @@ export function ThreadSwitcher({
                         {getStatusIcon(thread.status)}
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-medium text-gray-300">
-                            {getThreadTitle(thread)}
+                            {thread.title}
                           </div>
                           <div className="mt-1 flex items-center gap-1">
                             <GitBranch className="h-2 w-2 text-gray-600" />
                             <span className="truncate text-xs text-gray-500">
-                              {thread.values.targetRepository.owner}/
-                              {thread.values.targetRepository.repo}
+                              {thread.repository}
                             </span>
                           </div>
                           <div className="mt-1 flex items-center justify-between">
-                            {thread.values.taskPlan && (
+                            {thread.taskCount && (
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-gray-600">
-                                  {
-                                    getActivePlanItems(thread.values.taskPlan)
-                                      .length
-                                  }{" "}
-                                  tasks
+                                  {thread.taskCount} tasks
                                 </span>
                                 <Badge
                                   variant="secondary"
@@ -250,7 +241,7 @@ export function ThreadSwitcher({
                             )}
 
                             <div className="flex items-center gap-1">
-                              {thread.values.githubIssueId && (
+                              {thread.githubIssue && (
                                 <Button
                                   variant="ghost"
                                   size="sm"

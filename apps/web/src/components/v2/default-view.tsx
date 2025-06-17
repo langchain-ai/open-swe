@@ -20,9 +20,10 @@ import {
   GitPullRequest,
   Bug,
 } from "lucide-react";
-import type { ThreadDisplayInfo } from "@/types";
-import { TerminalInput } from "@/components/terminal-input";
 import { useRouter } from "next/navigation";
+import { ThreadDisplayInfo } from "./types";
+import { TerminalInput } from "./terminal-input";
+import { useQueryState } from "nuqs";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -31,6 +32,8 @@ interface DefaultViewProps {
 
 export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
   const router = useRouter();
+  const [selectedRepo] = useQueryState("repo");
+  const [selectedBranch] = useQueryState("branch");
 
   const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
@@ -75,6 +78,12 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
     }
   };
 
+  const handleSubmit = (message: string) => {
+    alert(
+      `Creating new thread with: ${message} to ${selectedRepo}:${selectedBranch}`,
+    );
+  };
+
   return (
     <div className="flex flex-1 flex-col">
       {/* Header */}
@@ -82,7 +91,7 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="font-mono text-sm text-gray-400">ai-agent</span>
+            <span className="font-mono text-sm text-gray-400">Open SWE</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-600">ready</span>
@@ -95,21 +104,11 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           {/* Terminal Chat Input */}
-          <Card className="border-gray-800 bg-gray-950">
+          <Card className="border-gray-800 bg-gray-950 py-0">
             <CardContent className="p-4">
               <div className="space-y-3">
                 <TerminalInput
-                  onSend={(message, repo, branch) => {
-                    // In a real app, this would create a new thread and redirect
-                    console.log(
-                      "Creating new thread with:",
-                      message,
-                      "to",
-                      `${repo.owner}/${repo.name}:${branch}`,
-                    );
-                    // For demo purposes, redirect to thread 1
-                    router.push("/chat/1");
-                  }}
+                  onSend={handleSubmit}
                   placeholder="Describe your coding task or ask a question..."
                 />
                 <div className="flex items-center gap-1">
@@ -117,25 +116,10 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
                     variant="outline"
                     size="sm"
                     className="h-7 border-gray-700 bg-gray-900 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-300"
-                  >
-                    <Camera className="mr-1 h-3 w-3" />
-                    Screenshot
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 border-gray-700 bg-gray-900 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-300"
+                    onClick={() => alert("Not implemented")}
                   >
                     <Upload className="mr-1 h-3 w-3" />
                     Upload File
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 border-gray-700 bg-gray-900 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-300"
-                  >
-                    <FileText className="mr-1 h-3 w-3" />
-                    Import Project
                   </Button>
                 </div>
               </div>
@@ -241,8 +225,8 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
               Quick Actions
             </h2>
             <div className="grid gap-3 md:grid-cols-3">
-              <Card className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg">
-                <CardHeader className="p-3">
+              <Card className="cursor-pointer border-gray-800 bg-gray-950 py-3 transition-shadow hover:bg-gray-900 hover:shadow-lg">
+                <CardHeader className="px-3">
                   <CardTitle className="text-sm text-gray-300">
                     Debug Code
                   </CardTitle>
@@ -251,8 +235,8 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
                   </CardDescription>
                 </CardHeader>
               </Card>
-              <Card className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg">
-                <CardHeader className="p-3">
+              <Card className="cursor-pointer border-gray-800 bg-gray-950 py-3 transition-shadow hover:bg-gray-900 hover:shadow-lg">
+                <CardHeader className="px-3">
                   <CardTitle className="text-sm text-gray-300">
                     Add Feature
                   </CardTitle>
@@ -261,8 +245,8 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
                   </CardDescription>
                 </CardHeader>
               </Card>
-              <Card className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg">
-                <CardHeader className="p-3">
+              <Card className="cursor-pointer border-gray-800 bg-gray-950 py-3 transition-shadow hover:bg-gray-900 hover:shadow-lg">
+                <CardHeader className="px-3">
                   <CardTitle className="text-sm text-gray-300">
                     Refactor Code
                   </CardTitle>
