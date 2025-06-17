@@ -1,11 +1,7 @@
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { Command, END } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import {
-  getIssue,
-  getIssueComments,
-  getMessageContentFromIssue,
-} from "../../../utils/github/api.js";
+import { getIssue, getIssueComments } from "../../../utils/github/api.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   AIMessage,
@@ -15,7 +11,10 @@ import {
   RemoveMessage,
 } from "@langchain/core/messages";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { getUntrackedComments } from "../../../utils/github/issue-messages.js";
+import {
+  getMessageContentFromIssue,
+  getUntrackedComments,
+} from "../../../utils/github/issue-messages.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,

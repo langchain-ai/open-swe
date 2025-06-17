@@ -4,8 +4,8 @@ import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
 import { getIssue } from "../../../utils/github/api.js";
-import { getMessageContentFromIssue } from "../../../utils/github/api.js";
 import { extractTasksFromIssueContent } from "../../../utils/github/issue-task.js";
+import { getMessageContentFromIssue } from "../../../utils/github/issue-messages.js";
 
 /**
  * The initialize function will do nothing if there's already a human message

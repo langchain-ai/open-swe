@@ -15,7 +15,8 @@ import {
   ISSUE_TITLE_OPEN_TAG,
   ISSUE_CONTENT_CLOSE_TAG,
   ISSUE_CONTENT_OPEN_TAG,
-} from "../utils/github-issue.js";
+  formatContentForIssueBody,
+} from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
 
 /**
@@ -37,7 +38,7 @@ export async function createNewSession(
     owner: state.targetRepository.owner,
     repo: state.targetRepository.repo,
     title: titleAndContent.title,
-    body: titleAndContent.body,
+    body: formatContentForIssueBody(titleAndContent.body),
     githubAccessToken,
   });
   if (!newIssue) {
