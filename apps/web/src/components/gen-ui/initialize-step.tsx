@@ -1,6 +1,5 @@
 "use client";
 
-import "../app/globals.css";
 import {
   Loader2,
   CheckCircle,
@@ -99,7 +98,7 @@ export function InitializeStep({
         {getStatusIcon()}
       </div>
 
-      {steps && (status === "generating" || status === "done") && (
+      {steps && (
         <div className="p-2">
           <ul className="space-y-2">
             {steps.map((step, index) => (

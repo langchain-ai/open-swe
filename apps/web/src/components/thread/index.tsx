@@ -57,6 +57,9 @@ import { TaskPlanView } from "../tasks";
 import { useTaskPlan } from "../tasks/useTaskPlan";
 import { isProposedPlanInterrupt } from "@/lib/plan-utils";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { InitializeStep } from "@/components/gen-ui/initialize-step";
+import { INITIALIZE_NODE_ID, mapCustomEventsToSteps } from "@open-swe/shared/open-swe/custom-events";
+
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -341,6 +344,12 @@ export function Thread() {
   );
   const isLastMessageHuman = messages[messages.length - 1]?.type === "human";
 
+
+  const initializeEvents = customEvents.filter(
+    (e) => e.nodeId === INITIALIZE_NODE_ID
+  );
+
+  const steps = mapCustomEventsToSteps(initializeEvents);
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <div className="relative hidden lg:flex">
@@ -505,6 +514,15 @@ export function Thread() {
               contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
                 <>
+                  {/* Always show expanded InitializeStep at the top if there are any initialize events */}
+                  {initializeEvents.length > 0 && (
+                    <div className="mb-6">
+                      <InitializeStep
+                        status={"generating"}
+                        steps={steps}
+                      />
+                    </div>
+                  )}
                   {messages
                     .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
                     .map((message, index) =>
