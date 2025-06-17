@@ -58,10 +58,9 @@ export async function initializeSandbox(
     stateBranchName: branchName,
   });
   if (res.exitCode !== 0) {
-    // TODO: This should probably be an interrupt.
-    logger.error("Failed to clone repository", res.result);
     throw new Error(`Failed to clone repository.\n${res.result}`);
   }
+  
   logger.info("Repository cloned successfully.");
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);

@@ -27,7 +27,6 @@ export async function startPlanner(
     },
   });
 
-  // TODO: GITHUB ISSUE ID IS NOT SAVED IN STATE AFTER BEING CREATED IN CLASSIFICATION NODE
   const plannerThreadId = state.plannerThreadId ?? uuidv4();
   try {
     await langGraphClient.runs.create(plannerThreadId, "planner", {

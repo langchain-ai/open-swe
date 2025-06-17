@@ -6,6 +6,26 @@ import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
+class ExecuteCommandError extends Error {
+  command: string;
+  result: string;
+  exitCode: number;
+  constructor(command: string, error: ExecuteResponse) {
+    super("Failed to execute command");
+    this.name = "ExecuteCommandError";
+    this.command = ExecuteCommandError.cleanCommand(command);
+    this.result = error.result;
+    this.exitCode = error.exitCode;
+  }
+
+  static cleanCommand(command: string): string {
+    if (command.includes("x-access-token:") && command.includes("@github.com/")) {
+      return command.replace(/(x-access-token:)([^@]+)(@github\.com\/)/, "$1ACCESS_TOKEN_REDACTED$3");
+    }
+    return command;
+  }
+}
+
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
 export function getBranchName(config: GraphConfig): string {
@@ -409,6 +429,9 @@ export async function cloneRepo(
     stateBranchName?: string;
   },
 ) {
+  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+  let cloneResult: ExecuteResponse | null = null;
+
   try {
     const gitCloneCommand = ["git", "clone"];
 
@@ -427,33 +450,79 @@ export async function cloneRepo(
       repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
       branch: branchName,
       baseCommit: targetRepository.baseCommit,
+      cloneCommand: gitCloneCommand.join(" "),
     });
 
-    const cloneResult = await sandbox.process.executeCommand(
+    cloneResult = await sandbox.process.executeCommand(
       gitCloneCommand.join(" "),
     );
 
     if (!targetRepository.baseCommit) {
       if (cloneResult.exitCode !== 0) {
-        logger.error("Failed to clone repository", {
-          targetRepository,
-          cloneResult,
-        });
-        throw new Error("Failed to clone repository");
+        if (!cloneResult.result.includes("not found in upstream origin")) {
+          logger.error("Failed to clone repository", {
+            targetRepository,
+          });
+          throw new ExecuteCommandError(gitCloneCommand.join(" "), cloneResult);
+        } else {
+          const cloneDefaultBranchCommand = ["git", "clone", repoUrlWithToken];
+          logger.info("Branch not found in upstream origin. Cloning default & checking out branch", {
+            targetRepository,
+            cloneDefaultBranchCommand: cloneDefaultBranchCommand.join(" "),
+          });
+          const cloneDefaultBranchResult = await sandbox.process.executeCommand(
+            cloneDefaultBranchCommand.join(" "),
+          );
+          if (cloneDefaultBranchResult.exitCode !== 0) {
+            logger.error("Failed to clone default branch", {
+              targetRepository,
+              cloneDefaultBranchCommand: cloneDefaultBranchCommand.join(" "),
+            });
+            throw new ExecuteCommandError(cloneDefaultBranchCommand.join(" "), cloneDefaultBranchResult);
+          }
+
+          cloneResult = cloneDefaultBranchResult;
+
+          // Now checkout the branch. We're creating a new branch here since the above error indicated the branch doesn't exist.
+          const checkoutBranchCommand = ["git", "checkout", "-b", branchName];
+          const checkoutBranchResult = await sandbox.process.executeCommand(
+            checkoutBranchCommand.join(" "),
+            absoluteRepoDir,
+            undefined,
+            TIMEOUT_SEC,
+          );
+          if (checkoutBranchResult.exitCode !== 0) {
+            logger.error("Failed to checkout branch", {
+              targetRepository,
+              checkoutBranchCommand: checkoutBranchCommand.join(" "),
+            });
+            throw new ExecuteCommandError(checkoutBranchCommand.join(" "), checkoutBranchResult);
+          }
+
+          logger.info("Successfully checked out branch", {
+            targetRepository,
+            checkoutBranchCommand: checkoutBranchCommand.join(" "),
+          });
+        }
       }
       return cloneResult;
     }
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error("Clone repo failed\n", errorFields ?? e);
+    throw e;
+  }
 
+  try {
     // If a baseCommit is specified, checkout that commit after cloning
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-
     logger.info("Checking out base commit", {
       baseCommit: targetRepository.baseCommit,
       repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
     });
 
+    const checkoutCommitCommand = ["git", "checkout", targetRepository.baseCommit];
     const checkoutResult = await sandbox.process.executeCommand(
-      `git checkout ${targetRepository.baseCommit}`,
+      checkoutCommitCommand.join(" "),
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
@@ -462,21 +531,20 @@ export async function cloneRepo(
     if (checkoutResult.exitCode !== 0) {
       logger.error("Failed to checkout base commit", {
         baseCommit: targetRepository.baseCommit,
-        checkoutResult,
+        checkoutCommitCommand: checkoutCommitCommand.join(" "),
       });
-      throw new Error(
-        `Failed to checkout base commit ${targetRepository.baseCommit}: ${checkoutResult.result}`,
-      );
+      throw new ExecuteCommandError(checkoutCommitCommand.join(" "), checkoutResult);
     }
 
     logger.info("Successfully checked out base commit", {
       baseCommit: targetRepository.baseCommit,
+      checkoutCommitCommand: checkoutCommitCommand.join(" "),
     });
-
-    return cloneResult;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
-    logger.error("Failed to clone repository", errorFields ?? e);
+    logger.error("Clone repo failed\n", errorFields ?? e);
     throw e;
   }
+
+  return cloneResult;
 }

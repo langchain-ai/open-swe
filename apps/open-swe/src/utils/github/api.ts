@@ -1,6 +1,6 @@
 import { Octokit } from "@octokit/rest";
 import { createLogger, LogLevel } from "../logger.js";
-import { GitHubIssue, GitHubIssueComment } from "./types.js";
+import { GitHubIssue, GitHubIssueComment, GitHubPullRequest } from "./types.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-API");
 
@@ -47,6 +47,7 @@ export async function createPullRequest({
   title,
   body = "",
   githubInstallationToken,
+  baseBranch,
 }: {
   owner: string;
   repo: string;
@@ -54,56 +55,65 @@ export async function createPullRequest({
   title: string;
   body?: string;
   githubInstallationToken: string;
+  baseBranch?: string;
 }) {
   const octokit = new Octokit({
     auth: githubInstallationToken,
   });
 
-  try {
-    // Step 1: Get repository information to find the default branch
-    const { data: repository } = await octokit.repos.get({
-      owner,
-      repo,
-    });
+  let repoBaseBranch = baseBranch;
+  if (!repoBaseBranch) {
+    try {
+      logger.info("Fetching default branch from repo", {
+        owner,
+        repo,
+      });
+      const { data: repository } = await octokit.repos.get({
+        owner,
+        repo,
+      });
 
-    const defaultBranch = repository.default_branch;
+      repoBaseBranch = repository.default_branch;
+      if (!repoBaseBranch) {
+        throw new Error("No base branch returned after fetching repo");
+      }
+      logger.info("Fetched default branch from repo", {
+        owner,
+        repo,
+        baseBranch: repoBaseBranch,
+      });
+    } catch (e) {
+      logger.error("Failed to fetch base branch from repo", {
+        owner,
+        repo,
+        ...(e instanceof Error && {
+          name: e.name,
+          message: e.message,
+          stack: e.stack,
+        }),
+      });
+      return null;
+    }
+  }
+
+  let pullRequest: GitHubPullRequest | null = null;
+  try {
     logger.info(
-      `Creating pull request against default branch: ${defaultBranch}`,
+      `Creating pull request against default branch: ${repoBaseBranch}`,
     );
 
     // Step 2: Create the pull request
-    const { data: pullRequest } = await octokit.pulls.create({
+    const { data: pullRequestData } = await octokit.pulls.create({
       owner,
       repo,
       title,
       body,
       head: headBranch,
-      base: defaultBranch,
+      base: repoBaseBranch,
     });
 
+    pullRequest = pullRequestData;
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
-
-    // Step 3: Add the 'open-swe' label to the pull request
-    try {
-      await octokit.issues.addLabels({
-        owner,
-        repo,
-        issue_number: pullRequest.number,
-        labels: ["open-swe"],
-      });
-      logger.info(
-        `Added 'open-swe' label to pull request #${pullRequest.number}`,
-      );
-    } catch (labelError) {
-      logger.warn(
-        `Failed to add 'open-swe' label to pull request #${pullRequest.number}`,
-        {
-          labelError,
-        },
-      );
-    }
-
-    return pullRequest;
   } catch (error) {
     if (error instanceof Error && error.message.includes("already exists")) {
       logger.info(
@@ -122,6 +132,33 @@ export async function createPullRequest({
     });
     return null;
   }
+
+  try {
+    logger.info("Adding 'open-swe' label to pull request", {
+      pullRequestNumber: pullRequest.number,
+    });
+    await octokit.issues.addLabels({
+      owner,
+      repo,
+      issue_number: pullRequest.number,
+      labels: ["open-swe"],
+    });
+    logger.info(
+      "Added 'open-swe' label to pull request", {
+        pullRequestNumber: pullRequest.number,
+      }
+    );
+  } catch (labelError) {
+    logger.warn(
+      "Failed to add 'open-swe' label to pull request",
+      {
+        pullRequestNumber: pullRequest.number,
+        labelError,
+      },
+    );
+  }
+
+  return pullRequest;
 }
 
 export async function getIssue({

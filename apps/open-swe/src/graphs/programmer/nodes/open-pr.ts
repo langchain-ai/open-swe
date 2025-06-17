@@ -133,6 +133,7 @@ export async function openPullRequest(
     title,
     body: `Fixes #${state.githubIssueId}\n\n${body}`,
     githubInstallationToken,
+    baseBranch: state.targetRepository.branch,
   });
 
   let sandboxDeleted = false;
