@@ -60,7 +60,13 @@ export async function loadModel(config: GraphConfig, task: Task) {
   }
 
   const thinkingBudgetTokens = 5000;
-  const maxTokens = thinkingBudgetTokens * 4;
+  const thinkingMaxTokens = thinkingBudgetTokens * 4;
+
+  let maxTokens = config.configurable?.maxTokens ?? 10_000;
+  if (modelName.includes("claude-3-5-haiku")) {
+    // The max tokens for haiku is 8192
+    maxTokens = maxTokens > 8_192 ? 8_192 : maxTokens;
+  }
 
   const model = await initChatModel(modelName, {
     modelProvider,
@@ -68,9 +74,9 @@ export async function loadModel(config: GraphConfig, task: Task) {
     ...(thinkingModel && modelProvider === "anthropic"
       ? {
           thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
-          maxTokens,
+          maxTokens: thinkingMaxTokens,
         }
-      : { maxTokens: config.configurable?.maxTokens ?? 10_000 }),
+      : { maxTokens }),
   });
 
   return model;
