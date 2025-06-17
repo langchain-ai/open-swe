@@ -21,20 +21,20 @@ import {
   ActionStep,
   type ActionStepProps,
 } from "@/components/gen-ui/action-step";
-import { getMessageContentString } from "@open-swe/shared/messages";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
+import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
-const shellSchema = createShellToolFields(dummyRepo).schema;
-type ShellToolArgs = z.infer<typeof shellSchema>;
-const applyPatchSchema = createApplyPatchToolFields(dummyRepo).schema;
-type ApplyPatchToolArgs = z.infer<typeof applyPatchSchema>;
+const shellTool = createShellToolFields(dummyRepo);
+type ShellToolArgs = z.infer<typeof shellTool.schema>;
+const applyPatchTool = createApplyPatchToolFields(dummyRepo);
+type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
 
 function CustomComponent({
   message,
@@ -88,22 +88,17 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
-// Local type guard for AIMessage, isAIMessage is for type BaseMessage
-function isAIMessageLocal(m: Message): m is AIMessage {
-  return m.type === "ai";
-}
-
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   thread: { messages: Message[] },
 ): ActionStepProps {
   const toolCall: ToolCall | undefined = thread.messages
-    .filter(isAIMessageLocal)
+    .filter(isAIMessageSDK)
     .flatMap((m) => m.tool_calls ?? [])
     .find((tc) => tc.id === message.tool_call_id);
 
   const aiMessage = thread.messages
-    .filter(isAIMessageLocal)
+    .filter(isAIMessageSDK)
     .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
   const reasoningText = aiMessage
     ? getContentString(aiMessage.content)
@@ -112,18 +107,18 @@ export function mapToolMessageToActionStepProps(
   const status: ActionStepProps["status"] = "done";
   const success = message.status === "success";
 
-  if (toolCall?.name === "shell") {
+  if (toolCall?.name === shellTool.name) {
     const args = toolCall.args as ShellToolArgs;
     return {
-      actionType: "shell",
+      actionType: shellTool.name as "shell",
       status,
       success,
       command: args.command || [],
       workdir: args.workdir,
-      output: getMessageContentString(message.content),
+      output: getContentString(message.content),
       reasoningText,
     };
-  } else if (toolCall?.name === "apply_patch") {
+  } else if (toolCall?.name === applyPatchTool.name) {
     const args = toolCall.args as ApplyPatchToolArgs;
     return {
       actionType: "apply-patch",
@@ -132,9 +127,7 @@ export function mapToolMessageToActionStepProps(
       file: args.file_path || "",
       diff: args.diff,
       reasoningText,
-      errorMessage: !success
-        ? getMessageContentString(message.content)
-        : undefined,
+      errorMessage: !success ? getContentString(message.content) : undefined,
     };
   }
   return {
@@ -175,7 +168,7 @@ export function AssistantMessage({
 
   // Helper: get tool call name from AI message (OpenAI or Anthropic)
   const aiToolCallName = (() => {
-    if (message && isAIMessageLocal(message)) {
+    if (message && isAIMessageSDK(message)) {
       return message.tool_calls?.[0]?.name;
     }
     if (anthropicStreamedToolCalls?.length) {
@@ -186,7 +179,7 @@ export function AssistantMessage({
   })();
 
   const aiToolCallArgs = (() => {
-    if (message && isAIMessageLocal(message)) {
+    if (message && isAIMessageSDK(message)) {
       return message.tool_calls?.[0]?.args;
     }
     if (anthropicStreamedToolCalls?.length) {
@@ -198,20 +191,21 @@ export function AssistantMessage({
 
   const toolResult =
     nextMessage &&
-    nextMessage.type === "tool" &&
+    isToolMessageSDK(nextMessage) &&
     aiToolCallName &&
-    (nextMessage as ToolMessage).tool_call_id ===
-      (message && isAIMessageLocal(message)
+    nextMessage.tool_call_id ===
+      (message && isAIMessageSDK(message)
         ? message.tool_calls?.[0]?.id
         : anthropicStreamedToolCalls?.length
           ? anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1].id
           : undefined)
-      ? (nextMessage as ToolMessage)
+      ? nextMessage
       : undefined;
 
   if (
     message &&
-    (aiToolCallName === "shell" || aiToolCallName === "apply_patch")
+    (aiToolCallName === shellTool.name ||
+      aiToolCallName === applyPatchTool.name)
   ) {
     if (toolResult) {
       return (
@@ -220,21 +214,27 @@ export function AssistantMessage({
     }
     return (
       <ActionStep
-        actionType={aiToolCallName === "shell" ? "shell" : "apply-patch"}
+        actionType={aiToolCallName === shellTool.name ? "shell" : "apply-patch"}
         status="generating"
         command={
-          aiToolCallName === "shell" ? aiToolCallArgs?.command || [] : undefined
+          aiToolCallName === shellTool.name
+            ? aiToolCallArgs?.command || []
+            : undefined
         }
         workdir={
-          aiToolCallName === "shell" ? aiToolCallArgs?.workdir : undefined
+          aiToolCallName === shellTool.name
+            ? aiToolCallArgs?.workdir
+            : undefined
         }
         file={
-          aiToolCallName === "apply_patch"
+          aiToolCallName === applyPatchTool.name
             ? aiToolCallArgs?.file_path || ""
             : undefined
         }
         diff={
-          aiToolCallName === "apply_patch" ? aiToolCallArgs?.diff : undefined
+          aiToolCallName === applyPatchTool.name
+            ? aiToolCallArgs?.diff
+            : undefined
         }
         reasoningText={contentString}
       />
@@ -243,15 +243,15 @@ export function AssistantMessage({
 
   if (
     message?.type === "tool" &&
-    (message.name === "shell" || message.name === "apply_patch") &&
+    (message.name === shellTool.name || message.name === applyPatchTool.name) &&
     idx > 0 &&
     messages[idx - 1] &&
     ((messages[idx - 1] &&
-      isAIMessageLocal(messages[idx - 1]) &&
+      isAIMessageSDK(messages[idx - 1]) &&
       (messages[idx - 1] as AIMessage).tool_calls?.some(
         (tc) =>
           tc.id === (message as ToolMessage).tool_call_id &&
-          (tc.name === "shell" || tc.name === "apply_patch"),
+          (tc.name === shellTool.name || tc.name === applyPatchTool.name),
       )) ||
       (Array.isArray(messages[idx - 1].content) &&
         parseAnthropicStreamedToolCalls(
@@ -259,7 +259,7 @@ export function AssistantMessage({
         )?.some(
           (tc) =>
             tc.id === (message as ToolMessage).tool_call_id &&
-            (tc.name === "shell" || tc.name === "apply_patch"),
+            (tc.name === shellTool.name || tc.name === applyPatchTool.name),
         )))
   ) {
     return null;
@@ -293,26 +293,7 @@ export function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <span>
-            {(() => {
-              const toolCall = thread.messages
-                .filter(isAIMessageLocal)
-                .flatMap((m) => m.tool_calls ?? [])
-                .find((tc) => tc.id === (message as ToolMessage).tool_call_id);
-              if (
-                toolCall?.name === "shell" ||
-                toolCall?.name === "apply_patch"
-              ) {
-                return (
-                  <ActionStep
-                    {...mapToolMessageToActionStepProps(
-                      message as ToolMessage,
-                      thread,
-                    )}
-                  />
-                );
-              }
-              return <ToolResult message={message} />;
-            })()}
+            <ToolResult message={message} />
             <Interrupt
               interruptValue={threadInterrupt?.value}
               isLastMessage={isLastMessage}

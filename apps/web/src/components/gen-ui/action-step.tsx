@@ -135,7 +135,7 @@ export function ActionStep(props: ActionStepProps) {
             </div>
           )}
           <code className="text-xs font-normal text-gray-800">
-            {props.command}
+            {props.command.join(" ")}
           </code>
         </div>
       );
