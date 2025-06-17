@@ -1,13 +1,15 @@
-"use client"
+"use client";
 
-import { ThreadView } from "@/components/thread-view"
-import { useRouter } from "next/navigation"
-import { notFound } from "next/navigation"
-import type { Thread, ThreadDisplayInfo } from "@/types"
-import { threadToDisplayInfo } from "@/utils/thread-utils"
+import { ThreadView } from "@/components/v2/thread-view";
+import { ThreadDisplayInfo } from "@/components/v2/types";
+import { threadToDisplayInfo } from "@/components/v2/utils/thread-utils";
+import { Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { useRouter } from "next/navigation";
+import { notFound } from "next/navigation";
 
 // Mock data using the new Thread interface
-const mockThreads: Thread[] = [
+const mockThreads: Thread<GraphState>[] = [
   {
     thread_id: "1",
     created_at: "2024-01-15T10:00:00Z",
@@ -54,10 +56,26 @@ const mockThreads: Thread[] = [
                     completed: true,
                     summary: "Found security vulnerabilities in token handling",
                   },
-                  { index: 1, plan: "Implement secure token encryption", completed: false },
-                  { index: 2, plan: "Update proxy route handlers", completed: false },
-                  { index: 3, plan: "Add error handling and validation", completed: false },
-                  { index: 4, plan: "Test the updated implementation", completed: false },
+                  {
+                    index: 1,
+                    plan: "Implement secure token encryption",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Update proxy route handlers",
+                    completed: false,
+                  },
+                  {
+                    index: 3,
+                    plan: "Add error handling and validation",
+                    completed: false,
+                  },
+                  {
+                    index: 4,
+                    plan: "Test the updated implementation",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 120000,
                 createdBy: "agent",
@@ -89,7 +107,10 @@ const mockThreads: Thread[] = [
     status: "idle",
     values: {
       messages: [
-        { content: "Encrypt GitHub access tokens before forwarding", type: "human" },
+        {
+          content: "Encrypt GitHub access tokens before forwarding",
+          type: "human",
+        },
         { content: "Task completed successfully!", type: "ai" },
       ],
       internalMessages: [],
@@ -107,9 +128,21 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Research encryption methods", completed: true },
-                  { index: 1, plan: "Implement AES encryption", completed: true },
-                  { index: 2, plan: "Update forwarding logic", completed: true },
+                  {
+                    index: 0,
+                    plan: "Research encryption methods",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Implement AES encryption",
+                    completed: true,
+                  },
+                  {
+                    index: 2,
+                    plan: "Update forwarding logic",
+                    completed: true,
+                  },
                   { index: 3, plan: "Add tests", completed: true },
                 ],
                 createdAt: Date.now() - 1800000,
@@ -134,37 +167,38 @@ const mockThreads: Thread[] = [
     },
     interrupts: {},
   },
-]
+];
 
 interface ThreadPageProps {
   params: {
-    thread_id: string
-  }
+    thread_id: string;
+  };
 }
 
 export default function ThreadPage({ params }: ThreadPageProps) {
-  const router = useRouter()
-  const { thread_id } = params
+  const router = useRouter();
+  const { thread_id } = params;
 
   // Find the thread by ID
-  const thread = mockThreads.find((t) => t.thread_id === thread_id)
+  const thread = mockThreads.find((t) => t.thread_id === thread_id);
 
   // If thread not found, show 404
   if (!thread) {
-    notFound()
+    notFound();
   }
 
   // Convert all threads to display format
-  const displayThreads: ThreadDisplayInfo[] = mockThreads.map(threadToDisplayInfo)
-  const currentDisplayThread = threadToDisplayInfo(thread)
+  const displayThreads: ThreadDisplayInfo[] =
+    mockThreads.map(threadToDisplayInfo);
+  const currentDisplayThread = threadToDisplayInfo(thread);
 
   const handleThreadSelect = (selectedThread: ThreadDisplayInfo) => {
-    router.push(`/chat/${selectedThread.id}`)
-  }
+    router.push(`/chat/${selectedThread.id}`);
+  };
 
   const handleBackToHome = () => {
-    router.push("/chat")
-  }
+    router.push("/chat");
+  };
 
   return (
     <div className="h-screen bg-black">
@@ -176,5 +210,5 @@ export default function ThreadPage({ params }: ThreadPageProps) {
         onBackToHome={handleBackToHome}
       />
     </div>
-  )
+  );
 }

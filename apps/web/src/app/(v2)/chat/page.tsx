@@ -1,9 +1,9 @@
-"use client"
+"use client";
 
-import { DefaultView } from "@/components/default-view"
-import { useRouter } from "next/navigation"
-import type { Thread, ThreadDisplayInfo } from "@/types"
-import { threadToDisplayInfo } from "@/utils/thread-utils"
+import { DefaultView } from "@/components/default-view";
+import { useRouter } from "next/navigation";
+import type { Thread, ThreadDisplayInfo } from "@/types";
+import { threadToDisplayInfo } from "@/utils/thread-utils";
 
 // Mock data using the new Thread interface
 const mockThreads: Thread[] = [
@@ -15,8 +15,15 @@ const mockThreads: Thread[] = [
     status: "busy",
     values: {
       messages: [
-        { content: "I need to update the GitHub access tokens in the proxy route", type: "human" },
-        { content: "I'll help you update the GitHub access tokens securely", type: "ai" },
+        {
+          content:
+            "I need to update the GitHub access tokens in the proxy route",
+          type: "human",
+        },
+        {
+          content: "I'll help you update the GitHub access tokens securely",
+          type: "ai",
+        },
       ],
       internalMessages: [],
       taskPlan: {
@@ -31,9 +38,21 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Analyze current token implementation", completed: true },
-                  { index: 1, plan: "Implement secure token encryption", completed: false },
-                  { index: 2, plan: "Update proxy route handlers", completed: false },
+                  {
+                    index: 0,
+                    plan: "Analyze current token implementation",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Implement secure token encryption",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Update proxy route handlers",
+                    completed: false,
+                  },
                   { index: 3, plan: "Add error handling", completed: false },
                 ],
                 createdAt: Date.now() - 120000,
@@ -66,7 +85,10 @@ const mockThreads: Thread[] = [
     status: "idle",
     values: {
       messages: [
-        { content: "Encrypt GitHub access tokens before forwarding", type: "human" },
+        {
+          content: "Encrypt GitHub access tokens before forwarding",
+          type: "human",
+        },
         { content: "Task completed successfully!", type: "ai" },
       ],
       internalMessages: [],
@@ -84,9 +106,21 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Research encryption methods", completed: true },
-                  { index: 1, plan: "Implement AES encryption", completed: true },
-                  { index: 2, plan: "Update forwarding logic", completed: true },
+                  {
+                    index: 0,
+                    plan: "Research encryption methods",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Implement AES encryption",
+                    completed: true,
+                  },
+                  {
+                    index: 2,
+                    plan: "Update forwarding logic",
+                    completed: true,
+                  },
                   { index: 3, plan: "Add tests", completed: true },
                 ],
                 createdAt: Date.now() - 1800000,
@@ -134,7 +168,13 @@ const mockThreads: Thread[] = [
             planRevisions: [
               {
                 revisionIndex: 0,
-                plans: [{ index: 0, plan: "Analyze thread performance", completed: false }],
+                plans: [
+                  {
+                    index: 0,
+                    plan: "Analyze thread performance",
+                    completed: false,
+                  },
+                ],
                 createdAt: Date.now() - 3600000,
                 createdBy: "agent",
               },
@@ -181,12 +221,32 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Profile current loading times", completed: true },
-                  { index: 1, plan: "Optimize data fetching", completed: false },
-                  { index: 2, plan: "Implement caching strategies", completed: false },
-                  { index: 3, plan: "Test performance improvements", completed: false },
+                  {
+                    index: 0,
+                    plan: "Profile current loading times",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Optimize data fetching",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Implement caching strategies",
+                    completed: false,
+                  },
+                  {
+                    index: 3,
+                    plan: "Test performance improvements",
+                    completed: false,
+                  },
                   { index: 4, plan: "Deploy optimizations", completed: false },
-                  { index: 5, plan: "Monitor performance metrics", completed: false },
+                  {
+                    index: 5,
+                    plan: "Monitor performance metrics",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 4800000,
                 createdBy: "agent",
@@ -231,7 +291,8 @@ const mockThreads: Thread[] = [
             createdAt: Date.now() - 7200000,
             completed: true,
             completedAt: Date.now() - 6600000,
-            summary: "Successfully added repo/branch display to thread selector",
+            summary:
+              "Successfully added repo/branch display to thread selector",
             planRevisions: [
               {
                 revisionIndex: 0,
@@ -251,7 +312,8 @@ const mockThreads: Thread[] = [
         ],
         activeTaskIndex: 0,
       },
-      planContextSummary: "Completed adding repo/branch name to thread selector",
+      planContextSummary:
+        "Completed adding repo/branch name to thread selector",
       sandboxSessionId: "sandbox-5",
       branchName: "main",
       targetRepository: {
@@ -264,21 +326,25 @@ const mockThreads: Thread[] = [
     },
     interrupts: {},
   },
-]
+];
 
 export default function ChatPage() {
-  const router = useRouter()
+  const router = useRouter();
 
   // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] = mockThreads.map(threadToDisplayInfo)
+  const displayThreads: ThreadDisplayInfo[] =
+    mockThreads.map(threadToDisplayInfo);
 
   const handleThreadSelect = (thread: ThreadDisplayInfo) => {
-    router.push(`/chat/${thread.id}`)
-  }
+    router.push(`/chat/${thread.id}`);
+  };
 
   return (
     <div className="h-screen bg-black">
-      <DefaultView threads={displayThreads} onThreadSelect={handleThreadSelect} />
+      <DefaultView
+        threads={displayThreads}
+        onThreadSelect={handleThreadSelect}
+      />
     </div>
-  )
+  );
 }

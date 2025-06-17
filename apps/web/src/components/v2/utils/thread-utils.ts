@@ -1,47 +1,52 @@
-import type { Thread, ThreadDisplayInfo } from "@/types"
+import type { Thread, ThreadDisplayInfo } from "@/types";
 
 // Utility function to convert between Thread and ThreadDisplayInfo
 export function threadToDisplayInfo(thread: Thread): ThreadDisplayInfo {
-  const values = thread.values
-  const currentTask = values.taskPlan.tasks[values.taskPlan.activeTaskIndex]
-  const completedTasks = values.taskPlan.tasks.filter((t) => t.completed).length
+  const values = thread.values;
+  const currentTask = values.taskPlan.tasks[values.taskPlan.activeTaskIndex];
+  const completedTasks = values.taskPlan.tasks.filter(
+    (t) => t.completed,
+  ).length;
 
   // Determine UI status from thread status and task completion
-  let uiStatus: ThreadDisplayInfo["status"]
+  let uiStatus: ThreadDisplayInfo["status"];
   switch (thread.status) {
     case "busy":
-      uiStatus = "running"
-      break
+      uiStatus = "running";
+      break;
     case "idle":
-      uiStatus = completedTasks === values.taskPlan.tasks.length ? "completed" : "pending"
-      break
+      uiStatus =
+        completedTasks === values.taskPlan.tasks.length
+          ? "completed"
+          : "pending";
+      break;
     case "error":
-      uiStatus = "failed"
-      break
+      uiStatus = "failed";
+      break;
     case "interrupted":
-      uiStatus = "pending"
-      break
+      uiStatus = "pending";
+      break;
     default:
-      uiStatus = "pending"
+      uiStatus = "pending";
   }
 
   // Calculate time since last update
-  const lastUpdate = new Date(thread.updated_at)
-  const now = new Date()
-  const diffMs = now.getTime() - lastUpdate.getTime()
-  const diffMins = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  const lastUpdate = new Date(thread.updated_at);
+  const now = new Date();
+  const diffMs = now.getTime() - lastUpdate.getTime();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  let lastActivity: string
+  let lastActivity: string;
   if (diffMins < 1) {
-    lastActivity = "just now"
+    lastActivity = "just now";
   } else if (diffMins < 60) {
-    lastActivity = `${diffMins} min ago`
+    lastActivity = `${diffMins} min ago`;
   } else if (diffHours < 24) {
-    lastActivity = `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`
+    lastActivity = `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
   } else {
-    lastActivity = `${diffDays} day${diffDays > 1 ? "s" : ""} ago`
+    lastActivity = `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
   }
 
   return {
@@ -59,5 +64,5 @@ export function threadToDisplayInfo(thread: Thread): ThreadDisplayInfo {
         }
       : undefined,
     // Note: PR info would need to be added to GraphAnnotation or derived from metadata
-  }
+  };
 }

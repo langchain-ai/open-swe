@@ -1,25 +1,29 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Badge } from "@/components/ui/badge"
-import { Send, ChevronDown, GitBranch, Folder } from "lucide-react"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { Send, ChevronDown, GitBranch, Folder } from "lucide-react";
 
 interface Repository {
-  owner: string
-  name: string
-  branches: string[]
+  owner: string;
+  name: string;
+  branches: string[];
 }
 
 interface TerminalInputProps {
-  onSend?: (message: string, repo: Repository, branch: string) => void
-  placeholder?: string
-  disabled?: boolean
+  onSend?: (message: string, repo: Repository, branch: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
 }
 
 const mockRepositories: Repository[] = [
@@ -43,42 +47,50 @@ const mockRepositories: Repository[] = [
     name: "vscode",
     branches: ["main", "release/1.85", "insider"],
   },
-]
+];
 
-export function TerminalInput({ onSend, placeholder = "Enter your command...", disabled = false }: TerminalInputProps) {
-  const [message, setMessage] = useState("")
-  const [selectedRepo, setSelectedRepo] = useState<Repository>(mockRepositories[0])
-  const [selectedBranch, setSelectedBranch] = useState(mockRepositories[0].branches[0])
-  const [repoOpen, setRepoOpen] = useState(false)
-  const [branchOpen, setBranchOpen] = useState(false)
+export function TerminalInput({
+  onSend,
+  placeholder = "Enter your command...",
+  disabled = false,
+}: TerminalInputProps) {
+  const [message, setMessage] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<Repository>(
+    mockRepositories[0],
+  );
+  const [selectedBranch, setSelectedBranch] = useState(
+    mockRepositories[0].branches[0],
+  );
+  const [repoOpen, setRepoOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
 
   const handleSend = () => {
     if (message.trim() && onSend) {
-      onSend(message.trim(), selectedRepo, selectedBranch)
-      setMessage("")
+      onSend(message.trim(), selectedRepo, selectedBranch);
+      setMessage("");
     }
-  }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault()
-      handleSend()
+      e.preventDefault();
+      handleSend();
     }
-  }
+  };
 
   const handleRepoSelect = (repo: Repository) => {
-    setSelectedRepo(repo)
-    setSelectedBranch(repo.branches[0])
-    setRepoOpen(false)
-  }
+    setSelectedRepo(repo);
+    setSelectedBranch(repo.branches[0]);
+    setRepoOpen(false);
+  };
 
   const handleBranchSelect = (branch: string) => {
-    setSelectedBranch(branch)
-    setBranchOpen(false)
-  }
+    setSelectedBranch(branch);
+    setBranchOpen(false);
+  };
 
   return (
-    <div className="bg-black border border-gray-600 rounded-md p-2 font-mono text-xs">
+    <div className="rounded-md border border-gray-600 bg-black p-2 font-mono text-xs">
       <div className="flex items-start gap-1 text-gray-300">
         {/* User@Host */}
         <span className="text-gray-400">agent</span>
@@ -87,36 +99,48 @@ export function TerminalInput({ onSend, placeholder = "Enter your command...", d
         <span className="text-gray-500">:</span>
 
         {/* Repository Selector */}
-        <Popover open={repoOpen} onOpenChange={setRepoOpen}>
+        <Popover
+          open={repoOpen}
+          onOpenChange={setRepoOpen}
+        >
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
-              className="h-auto p-0 font-mono text-xs text-white hover:text-gray-300 hover:bg-transparent"
+              className="h-auto p-0 font-mono text-xs text-white hover:bg-transparent hover:text-gray-300"
               disabled={disabled}
             >
-              <Folder className="h-2 w-2 mr-1" />
+              <Folder className="mr-1 h-2 w-2" />
               {selectedRepo.owner}/{selectedRepo.name}
-              <ChevronDown className="h-2 w-2 ml-1" />
+              <ChevronDown className="ml-1 h-2 w-2" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-64 p-2" align="start">
+          <PopoverContent
+            className="w-64 p-2"
+            align="start"
+          >
             <div className="space-y-1">
-              <div className="text-xs font-medium text-gray-700 px-2 py-1">Select Repository</div>
+              <div className="px-2 py-1 text-xs font-medium text-gray-700">
+                Select Repository
+              </div>
               <ScrollArea className="h-48">
                 {mockRepositories.map((repo) => (
                   <Button
                     key={`${repo.owner}/${repo.name}`}
                     variant="ghost"
-                    className="w-full justify-start text-xs h-7"
+                    className="h-7 w-full justify-start text-xs"
                     onClick={() => handleRepoSelect(repo)}
                   >
-                    <Folder className="h-2 w-2 mr-2" />
+                    <Folder className="mr-2 h-2 w-2" />
                     {repo.owner}/{repo.name}
-                    {selectedRepo.owner === repo.owner && selectedRepo.name === repo.name && (
-                      <Badge variant="secondary" className="ml-auto text-xs">
-                        Current
-                      </Badge>
-                    )}
+                    {selectedRepo.owner === repo.owner &&
+                      selectedRepo.name === repo.name && (
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto text-xs"
+                        >
+                          Current
+                        </Badge>
+                      )}
                   </Button>
                 ))}
               </ScrollArea>
@@ -126,33 +150,44 @@ export function TerminalInput({ onSend, placeholder = "Enter your command...", d
 
         {/* Branch Selector */}
         <span className="text-gray-500">(</span>
-        <Popover open={branchOpen} onOpenChange={setBranchOpen}>
+        <Popover
+          open={branchOpen}
+          onOpenChange={setBranchOpen}
+        >
           <PopoverTrigger asChild>
             <Button
               variant="ghost"
-              className="h-auto p-0 font-mono text-xs text-gray-300 hover:text-white hover:bg-transparent"
+              className="h-auto p-0 font-mono text-xs text-gray-300 hover:bg-transparent hover:text-white"
               disabled={disabled}
             >
-              <GitBranch className="h-2 w-2 mr-1" />
+              <GitBranch className="mr-1 h-2 w-2" />
               {selectedBranch}
-              <ChevronDown className="h-2 w-2 ml-1" />
+              <ChevronDown className="ml-1 h-2 w-2" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="w-48 p-2" align="start">
+          <PopoverContent
+            className="w-48 p-2"
+            align="start"
+          >
             <div className="space-y-1">
-              <div className="text-xs font-medium text-gray-700 px-2 py-1">Select Branch</div>
+              <div className="px-2 py-1 text-xs font-medium text-gray-700">
+                Select Branch
+              </div>
               <ScrollArea className="h-32">
                 {selectedRepo.branches.map((branch) => (
                   <Button
                     key={branch}
                     variant="ghost"
-                    className="w-full justify-start text-xs h-6"
+                    className="h-6 w-full justify-start text-xs"
                     onClick={() => handleBranchSelect(branch)}
                   >
-                    <GitBranch className="h-2 w-2 mr-2" />
+                    <GitBranch className="mr-2 h-2 w-2" />
                     {branch}
                     {selectedBranch === branch && (
-                      <Badge variant="secondary" className="ml-auto text-xs">
+                      <Badge
+                        variant="secondary"
+                        className="ml-auto text-xs"
+                      >
                         Current
                       </Badge>
                     )}
@@ -169,28 +204,28 @@ export function TerminalInput({ onSend, placeholder = "Enter your command...", d
       </div>
 
       {/* Multiline Input */}
-      <div className="flex gap-2 mt-1">
+      <div className="mt-1 flex gap-2">
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyPress}
           placeholder={placeholder}
           disabled={disabled}
-          className="flex-1 bg-transparent border-none text-white placeholder:text-gray-600 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 font-mono text-xs min-h-[40px] resize-none"
+          className="min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs text-white placeholder:text-gray-600 focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={3}
         />
         <Button
           onClick={handleSend}
           disabled={disabled || !message.trim()}
           size="sm"
-          className="h-7 w-7 p-0 bg-gray-700 hover:bg-gray-600 self-end"
+          className="h-7 w-7 self-end bg-gray-700 p-0 hover:bg-gray-600"
         >
           <Send className="h-3 w-3" />
         </Button>
       </div>
 
       {/* Help text */}
-      <div className="text-xs text-gray-600 mt-1">Press Cmd+Enter to send</div>
+      <div className="mt-1 text-xs text-gray-600">Press Cmd+Enter to send</div>
     </div>
-  )
+  );
 }

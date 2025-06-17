@@ -1,10 +1,10 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   GitBranch,
@@ -20,33 +20,36 @@ import {
   Send,
   User,
   Bot,
-} from "lucide-react"
-import type { Thread, ActionStep } from "@/types"
-import { ThreadSwitcher } from "@/components/thread-switcher"
+} from "lucide-react";
+import { Message, Thread } from "@langchain/langgraph-sdk";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { isHumanMessageSDK } from "@/lib/langchain-messages";
+import { ThreadSwitcher } from "./thread-switcher";
 
 interface ThreadDisplayInfo {
-  id: string
-  title: string
-  repository: string
-  status: "running" | "completed" | "error"
+  id: string;
+  title: string;
+  repository: string;
+  status: "running" | "completed" | "error";
 }
 
 interface ThreadViewProps {
-  thread: Thread
-  displayThread: ThreadDisplayInfo
-  allDisplayThreads: ThreadDisplayInfo[]
-  onThreadSelect: (thread: ThreadDisplayInfo) => void
-  onBackToHome: () => void
+  thread: Thread<GraphState>;
+  displayThread: ThreadDisplayInfo;
+  allDisplayThreads: ThreadDisplayInfo[];
+  onThreadSelect: (thread: ThreadDisplayInfo) => void;
+  onBackToHome: () => void;
 }
 
 interface ChatMessage {
-  id: string
-  role: "user" | "assistant"
-  content: string
-  timestamp: string
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
 }
 
-const mockActionSteps: ActionStep[] = [
+const mockActionSteps = [
   {
     id: "1",
     title: "Preparing action",
@@ -95,7 +98,7 @@ const mockActionSteps: ActionStep[] = [
     filePath: "src/components/button.tsx",
     diff: "@@ -1,7 +1,8 @@\nimport React from 'react';\n\n-export const Button = ({ children }) => {\n+export const Button = ({ children }) => {",
   },
-]
+];
 
 export function ThreadView({
   thread,
@@ -104,19 +107,23 @@ export function ThreadView({
   onThreadSelect,
   onBackToHome,
 }: ThreadViewProps) {
-  const [newPlanItem, setNewPlanItem] = useState("")
-  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
-  const [chatInput, setChatInput] = useState("")
+  const [newPlanItem, setNewPlanItem] = useState("");
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
+  const [chatInput, setChatInput] = useState("");
 
   const chatMessages = thread.values.messages.map((msg, index) => ({
     id: `msg-${index}`,
-    role: msg.type === "human" ? ("user" as const) : ("assistant" as const),
+    // TODO: Fix this. we should be using `stream.messages` instead
+    role: isHumanMessageSDK(msg as unknown as Message)
+      ? ("user" as const)
+      : ("assistant" as const),
     content: msg.content,
-    timestamp: msg.timestamp || `${index + 1} min ago`,
-  }))
+  }));
 
-  const currentTask = thread.values.taskPlan.tasks[thread.values.taskPlan.activeTaskIndex]
-  const currentRevision = currentTask?.planRevisions[currentTask.activeRevisionIndex]
+  const currentTask =
+    thread.values.taskPlan.tasks[thread.values.taskPlan.activeTaskIndex];
+  const currentRevision =
+    currentTask?.planRevisions[currentTask.activeRevisionIndex];
   const planItems =
     currentRevision?.plans.map((plan) => ({
       id: `plan-${plan.index}`,
@@ -124,68 +131,70 @@ export function ThreadView({
       title: plan.plan,
       status: plan.completed ? ("completed" as const) : ("proposed" as const),
       summary: plan.summary,
-    })) || []
+    })) || [];
 
   const toggleStepExpansion = (stepId: string) => {
-    const newExpanded = new Set(expandedSteps)
+    const newExpanded = new Set(expandedSteps);
     if (newExpanded.has(stepId)) {
-      newExpanded.delete(stepId)
+      newExpanded.delete(stepId);
     } else {
-      newExpanded.add(stepId)
+      newExpanded.add(stepId);
     }
-    setExpandedSteps(newExpanded)
-  }
+    setExpandedSteps(newExpanded);
+  };
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
       // Handle sending message
-      console.log("Sending message:", chatInput)
-      setChatInput("")
+      console.log("Sending message:", chatInput);
+      setChatInput("");
     }
-  }
+  };
 
-  const getStatusIcon = (status: ActionStep["status"]) => {
+  // TODO: Replace with actual status
+  const getStatusIcon = (status: string) => {
     switch (status) {
       case "preparing":
       case "executing":
       case "applying":
-        return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+        return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;
       case "completed":
-        return <CheckCircle className="h-4 w-4 text-green-400" />
+        return <CheckCircle className="h-4 w-4 text-green-400" />;
       case "failed":
-        return <XCircle className="h-4 w-4 text-red-400" />
+        return <XCircle className="h-4 w-4 text-red-400" />;
       default:
-        return <Clock className="h-4 w-4 text-gray-500" />
+        return <Clock className="h-4 w-4 text-gray-500" />;
     }
-  }
+  };
 
-  const getStepIcon = (type: ActionStep["type"]) => {
+  // TODO: Replace with actual type
+  const getStepIcon = (type: string) => {
     switch (type) {
       case "command":
-        return <Terminal className="h-4 w-4 text-gray-500" />
+        return <Terminal className="h-4 w-4 text-gray-500" />;
       case "file_edit":
-        return <FileText className="h-4 w-4 text-gray-500" />
+        return <FileText className="h-4 w-4 text-gray-500" />;
       default:
-        return <Clock className="h-4 w-4 text-gray-500" />
+        return <Clock className="h-4 w-4 text-gray-500" />;
     }
-  }
+  };
 
   return (
-    <div className="flex-1 flex flex-col bg-black h-screen">
+    <div className="flex h-screen flex-1 flex-col bg-black">
       {/* Header */}
-      <div className="absolute top-0 left-0 right-0 z-10 border-b border-gray-900 bg-black px-4 py-2">
+      <div className="absolute top-0 right-0 left-0 z-10 border-b border-gray-900 bg-black px-4 py-2">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-gray-600 hover:text-gray-400 hover:bg-gray-900"
+            className="h-6 w-6 p-0 text-gray-600 hover:bg-gray-900 hover:text-gray-400"
             onClick={onBackToHome}
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div
-              className={`w-2 h-2 rounded-full ${
+              className={`h-2 w-2 rounded-full ${
                 displayThread.status === "running"
                   ? "bg-blue-500"
                   : displayThread.status === "completed"
@@ -193,10 +202,14 @@ export function ThreadView({
                     : "bg-red-500"
               }`}
             ></div>
-            <span className="text-sm text-gray-400 font-mono truncate">{displayThread.title}</span>
+            <span className="truncate font-mono text-sm text-gray-400">
+              {displayThread.title}
+            </span>
             <span className="text-xs text-gray-600">•</span>
             <GitBranch className="h-3 w-3 text-gray-600" />
-            <span className="text-xs text-gray-600 truncate">{displayThread.repository}</span>
+            <span className="truncate text-xs text-gray-600">
+              {displayThread.repository}
+            </span>
           </div>
           <ThreadSwitcher
             currentThread={displayThread}
@@ -208,20 +221,23 @@ export function ThreadView({
       </div>
 
       {/* Main Content - Split Layout */}
-      <div className="flex w-full h-full pt-12">
+      <div className="flex h-full w-full pt-12">
         {/* Left Side - Chat Interface */}
-        <div className="w-1/3 border-r border-gray-900 flex flex-col bg-gray-950 h-full">
+        <div className="flex h-full w-1/3 flex-col border-r border-gray-900 bg-gray-950">
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {chatMessages.map((message) => (
-              <div key={message.id} className="flex gap-3">
+              <div
+                key={message.id}
+                className="flex gap-3"
+              >
                 <div className="flex-shrink-0">
                   {message.role === "user" ? (
-                    <div className="w-6 h-6 bg-gray-700 rounded-full flex items-center justify-center">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-700">
                       <User className="h-3 w-3 text-gray-400" />
                     </div>
                   ) : (
-                    <div className="w-6 h-6 bg-blue-900 rounded-full flex items-center justify-center">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-900">
                       <Bot className="h-3 w-3 text-blue-400" />
                     </div>
                   )}
@@ -231,29 +247,38 @@ export function ThreadView({
                     <span className="text-xs font-medium text-gray-400">
                       {message.role === "user" ? "You" : "AI Agent"}
                     </span>
-                    <span className="text-xs text-gray-600">{message.timestamp}</span>
                   </div>
-                  <div className="text-sm text-gray-300 leading-relaxed">{message.content}</div>
+                  <div className="text-sm leading-relaxed text-gray-300">
+                    {getMessageContentString(message.content)}
+                  </div>
                 </div>
               </div>
             ))}
 
             {/* Add more mock messages to demonstrate scrolling */}
             {Array.from({ length: 10 }, (_, i) => (
-              <div key={`extra-${i}`} className="flex gap-3">
+              <div
+                key={`extra-${i}`}
+                className="flex gap-3"
+              >
                 <div className="flex-shrink-0">
-                  <div className="w-6 h-6 bg-blue-900 rounded-full flex items-center justify-center">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-900">
                     <Bot className="h-3 w-3 text-blue-400" />
                   </div>
                 </div>
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-400">AI Agent</span>
-                    <span className="text-xs text-gray-600">{i + 3} min ago</span>
+                    <span className="text-xs font-medium text-gray-400">
+                      AI Agent
+                    </span>
+                    <span className="text-xs text-gray-600">
+                      {i + 3} min ago
+                    </span>
                   </div>
-                  <div className="text-sm text-gray-300 leading-relaxed">
-                    This is message {i + 4} to demonstrate scrolling behavior in the chat panel. Each message can
-                    contain multiple lines of text and the panel should scroll independently.
+                  <div className="text-sm leading-relaxed text-gray-300">
+                    This is message {i + 4} to demonstrate scrolling behavior in
+                    the chat panel. Each message can contain multiple lines of
+                    text and the panel should scroll independently.
                   </div>
                 </div>
               </div>
@@ -261,17 +286,17 @@ export function ThreadView({
           </div>
 
           {/* Chat Input - Fixed at bottom */}
-          <div className="border-t border-gray-800 p-4 bg-gray-950">
+          <div className="border-t border-gray-800 bg-gray-950 p-4">
             <div className="flex gap-2">
               <Textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 placeholder="Type your message..."
-                className="flex-1 bg-gray-900 border-gray-700 text-gray-300 placeholder:text-gray-600 text-sm min-h-[60px] resize-none"
+                className="min-h-[60px] flex-1 resize-none border-gray-700 bg-gray-900 text-sm text-gray-300 placeholder:text-gray-600"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault()
-                    handleSendMessage()
+                    e.preventDefault();
+                    handleSendMessage();
                   }
                 }}
               />
@@ -279,37 +304,46 @@ export function ThreadView({
                 onClick={handleSendMessage}
                 disabled={!chatInput.trim()}
                 size="sm"
-                className="h-10 w-10 p-0 bg-gray-700 hover:bg-gray-600 self-end"
+                className="h-10 w-10 self-end bg-gray-700 p-0 hover:bg-gray-600"
               >
                 <Send className="h-4 w-4" />
               </Button>
             </div>
-            <div className="text-xs text-gray-600 mt-2">Press Cmd+Enter to send</div>
+            <div className="mt-2 text-xs text-gray-600">
+              Press Cmd+Enter to send
+            </div>
           </div>
         </div>
 
         {/* Right Side - Actions & Plan */}
-        <div className="flex-1 flex flex-col h-full">
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex h-full flex-1 flex-col">
+          <div className="flex-1 space-y-4 overflow-y-auto p-4">
             {/* Action Steps */}
-            <Card className="bg-gray-950 border-gray-800">
+            <Card className="border-gray-800 bg-gray-950">
               <CardHeader className="p-3">
-                <CardTitle className="text-base text-gray-300">Execution Steps</CardTitle>
+                <CardTitle className="text-base text-gray-300">
+                  Execution Steps
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 p-3 pt-0">
                 {mockActionSteps.map((step) => (
-                  <div key={step.id} className="border border-gray-800 rounded-lg p-3 space-y-2 bg-gray-900">
+                  <div
+                    key={step.id}
+                    className="space-y-2 rounded-lg border border-gray-800 bg-gray-900 p-3"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {getStepIcon(step.type)}
-                        <span className="font-medium text-sm text-gray-300">{step.title}</span>
+                        <span className="text-sm font-medium text-gray-300">
+                          {step.title}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1">
                         {step.status === "completed" && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                            className="h-6 text-xs text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                             onClick={() => toggleStepExpansion(step.id)}
                           >
                             Show summary
@@ -319,17 +353,19 @@ export function ThreadView({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                            className="h-6 text-xs text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                             onClick={() => toggleStepExpansion(step.id)}
                           >
                             Show reasoning
                           </Button>
                         )}
-                        {(step.status === "preparing" || step.status === "executing" || step.status === "applying") && (
+                        {(step.status === "preparing" ||
+                          step.status === "executing" ||
+                          step.status === "applying") && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                            className="h-6 text-xs text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                             onClick={() => toggleStepExpansion(step.id)}
                           >
                             Show reasoning
@@ -353,20 +389,22 @@ export function ThreadView({
                     </div>
 
                     {step.command && (
-                      <div className="bg-black rounded p-2 font-mono text-xs">
-                        <div className="text-gray-600 mb-1">{step.workingDirectory}</div>
+                      <div className="rounded bg-black p-2 font-mono text-xs">
+                        <div className="mb-1 text-gray-600">
+                          {step.workingDirectory}
+                        </div>
                         <div className="text-gray-400">{step.command}</div>
                       </div>
                     )}
 
                     {step.output && (
-                      <div className="bg-black text-green-400 rounded p-2 font-mono text-xs">
+                      <div className="rounded bg-black p-2 font-mono text-xs text-green-400">
                         <pre className="whitespace-pre-wrap">{step.output}</pre>
                       </div>
                     )}
 
                     {step.diff && (
-                      <div className="bg-black text-gray-300 rounded p-2 font-mono text-xs">
+                      <div className="rounded bg-black p-2 font-mono text-xs text-gray-300">
                         <pre className="whitespace-pre-wrap">{step.diff}</pre>
                       </div>
                     )}
@@ -375,23 +413,34 @@ export function ThreadView({
 
                 {/* Add more mock steps to demonstrate scrolling */}
                 {Array.from({ length: 5 }, (_, i) => (
-                  <div key={`extra-step-${i}`} className="border border-gray-800 rounded-lg p-3 space-y-2 bg-gray-900">
+                  <div
+                    key={`extra-step-${i}`}
+                    className="space-y-2 rounded-lg border border-gray-800 bg-gray-900 p-3"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Terminal className="h-4 w-4 text-gray-500" />
-                        <span className="font-medium text-sm text-gray-300">Additional step {i + 7}</span>
+                        <span className="text-sm font-medium text-gray-300">
+                          Additional step {i + 7}
+                        </span>
                       </div>
                       <div className="flex items-center gap-1">
                         <CheckCircle className="h-4 w-4 text-green-400" />
-                        <span className="text-xs text-gray-500 capitalize">completed</span>
+                        <span className="text-xs text-gray-500 capitalize">
+                          completed
+                        </span>
                       </div>
                     </div>
-                    <div className="bg-black rounded p-2 font-mono text-xs">
-                      <div className="text-gray-600 mb-1">/home/user/my-project</div>
+                    <div className="rounded bg-black p-2 font-mono text-xs">
+                      <div className="mb-1 text-gray-600">
+                        /home/user/my-project
+                      </div>
                       <div className="text-gray-400">npm run build</div>
                     </div>
-                    <div className="bg-black text-green-400 rounded p-2 font-mono text-xs">
-                      <pre className="whitespace-pre-wrap">Build completed successfully</pre>
+                    <div className="rounded bg-black p-2 font-mono text-xs text-green-400">
+                      <pre className="whitespace-pre-wrap">
+                        Build completed successfully
+                      </pre>
                     </div>
                   </div>
                 ))}
@@ -399,22 +448,27 @@ export function ThreadView({
             </Card>
 
             {/* Proposed Plan */}
-            <Card className="bg-gray-950 border-gray-800">
+            <Card className="border-gray-800 bg-gray-950">
               <CardHeader className="p-3">
-                <CardTitle className="text-base text-gray-300">Proposed Plan</CardTitle>
+                <CardTitle className="text-base text-gray-300">
+                  Proposed Plan
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 p-3 pt-0">
                 {planItems.map((item) => (
                   <div
                     key={item.id}
-                    className="flex items-start gap-2 p-2 border border-gray-800 rounded-lg bg-gray-900"
+                    className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-900 p-2"
                   >
-                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-xs font-medium text-gray-400 mt-0.5">
+                    <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs font-medium text-gray-400">
                       {item.step}
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-xs text-gray-400">{item.title}</p>
-                      <Badge variant="secondary" className="mt-1 text-xs bg-gray-800 text-gray-400">
+                      <Badge
+                        variant="secondary"
+                        className="mt-1 bg-gray-800 text-xs text-gray-400"
+                      >
                         {item.status}
                       </Badge>
                     </div>
@@ -422,14 +476,14 @@ export function ThreadView({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                       >
                         <Edit className="h-3 w-3" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -441,16 +495,20 @@ export function ThreadView({
                 {Array.from({ length: 8 }, (_, i) => (
                   <div
                     key={`extra-plan-${i}`}
-                    className="flex items-start gap-2 p-2 border border-gray-800 rounded-lg bg-gray-900"
+                    className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-900 p-2"
                   >
-                    <div className="flex items-center justify-center w-5 h-5 rounded-full bg-gray-800 text-xs font-medium text-gray-400 mt-0.5">
+                    <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs font-medium text-gray-400">
                       {i + 11}
                     </div>
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-xs text-gray-400">
-                        Additional plan item {i + 11}: Implement feature or fix issue
+                        Additional plan item {i + 11}: Implement feature or fix
+                        issue
                       </p>
-                      <Badge variant="secondary" className="mt-1 text-xs bg-gray-800 text-gray-400">
+                      <Badge
+                        variant="secondary"
+                        className="mt-1 bg-gray-800 text-xs text-gray-400"
+                      >
                         proposed
                       </Badge>
                     </div>
@@ -458,14 +516,14 @@ export function ThreadView({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                       >
                         <Edit className="h-3 w-3" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -473,24 +531,29 @@ export function ThreadView({
                   </div>
                 ))}
 
-                <div className="border-2 border-dashed border-gray-700 rounded-lg p-3">
+                <div className="rounded-lg border-2 border-dashed border-gray-700 p-3">
                   <Textarea
                     placeholder="Add new plan item"
                     value={newPlanItem}
                     onChange={(e) => setNewPlanItem(e.target.value)}
-                    className="mb-2 text-xs min-h-[60px] bg-black border-gray-800 text-gray-400 placeholder:text-gray-600"
+                    className="mb-2 min-h-[60px] border-gray-800 bg-black text-xs text-gray-400 placeholder:text-gray-600"
                   />
-                  <Button size="sm" className="h-7 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300">
-                    <Plus className="h-3 w-3 mr-1" />
+                  <Button
+                    size="sm"
+                    className="h-7 bg-gray-800 text-xs text-gray-300 hover:bg-gray-700"
+                  >
+                    <Plus className="mr-1 h-3 w-3" />
                     Add
                   </Button>
                 </div>
 
                 <div className="flex gap-2 pt-3">
-                  <Button className="flex-1 bg-teal-800 hover:bg-teal-700 h-8 text-xs text-gray-200">Approve</Button>
+                  <Button className="h-8 flex-1 bg-teal-800 text-xs text-gray-200 hover:bg-teal-700">
+                    Approve
+                  </Button>
                   <Button
                     variant="destructive"
-                    className="flex-1 h-8 text-xs bg-red-900 hover:bg-red-800 text-gray-200"
+                    className="h-8 flex-1 bg-red-900 text-xs text-gray-200 hover:bg-red-800"
                   >
                     Reject
                   </Button>
@@ -501,5 +564,5 @@ export function ThreadView({
         </div>
       </div>
     </div>
-  )
+  );
 }

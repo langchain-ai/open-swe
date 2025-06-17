@@ -1,11 +1,11 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
+import type React from "react";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   ArrowLeft,
   Search,
@@ -18,10 +18,10 @@ import {
   Bug,
   Calendar,
   Clock,
-} from "lucide-react"
-import type { Thread, ThreadDisplayInfo } from "@/types"
-import { useRouter } from "next/navigation"
-import { threadToDisplayInfo } from "@/utils/thread-utils"
+} from "lucide-react";
+import type { Thread, ThreadDisplayInfo } from "@/types";
+import { useRouter } from "next/navigation";
+import { threadToDisplayInfo } from "@/utils/thread-utils";
 
 // Mock data using the new Thread interface (same as in chat/page.tsx)
 const mockThreads: Thread[] = [
@@ -33,8 +33,15 @@ const mockThreads: Thread[] = [
     status: "busy",
     values: {
       messages: [
-        { content: "I need to update the GitHub access tokens in the proxy route", type: "human" },
-        { content: "I'll help you update the GitHub access tokens securely", type: "ai" },
+        {
+          content:
+            "I need to update the GitHub access tokens in the proxy route",
+          type: "human",
+        },
+        {
+          content: "I'll help you update the GitHub access tokens securely",
+          type: "ai",
+        },
       ],
       internalMessages: [],
       taskPlan: {
@@ -49,9 +56,21 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Analyze current token implementation", completed: true },
-                  { index: 1, plan: "Implement secure token encryption", completed: false },
-                  { index: 2, plan: "Update proxy route handlers", completed: false },
+                  {
+                    index: 0,
+                    plan: "Analyze current token implementation",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Implement secure token encryption",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Update proxy route handlers",
+                    completed: false,
+                  },
                   { index: 3, plan: "Add error handling", completed: false },
                 ],
                 createdAt: Date.now() - 120000,
@@ -84,8 +103,14 @@ const mockThreads: Thread[] = [
     status: "idle",
     values: {
       messages: [
-        { content: "Encrypt GitHub access tokens before forwarding", type: "human" },
-        { content: "Tokens are now encrypted before being forwarded", type: "ai" },
+        {
+          content: "Encrypt GitHub access tokens before forwarding",
+          type: "human",
+        },
+        {
+          content: "Tokens are now encrypted before being forwarded",
+          type: "ai",
+        },
       ],
       internalMessages: [],
       taskPlan: {
@@ -100,10 +125,26 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Identify sensitive data", completed: true },
-                  { index: 1, plan: "Implement encryption logic", completed: true },
-                  { index: 2, plan: "Test encryption functionality", completed: true },
-                  { index: 3, plan: "Deploy encryption changes", completed: true },
+                  {
+                    index: 0,
+                    plan: "Identify sensitive data",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Implement encryption logic",
+                    completed: true,
+                  },
+                  {
+                    index: 2,
+                    plan: "Test encryption functionality",
+                    completed: true,
+                  },
+                  {
+                    index: 3,
+                    plan: "Deploy encryption changes",
+                    completed: true,
+                  },
                 ],
                 createdAt: Date.now() - 1800000,
                 createdBy: "agent",
@@ -150,7 +191,13 @@ const mockThreads: Thread[] = [
             planRevisions: [
               {
                 revisionIndex: 0,
-                plans: [{ index: 0, plan: "Analyze thread performance", completed: false }],
+                plans: [
+                  {
+                    index: 0,
+                    plan: "Analyze thread performance",
+                    completed: false,
+                  },
+                ],
                 createdAt: Date.now() - 3600000,
                 createdBy: "agent",
               },
@@ -197,10 +244,26 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Profile current loading times", completed: true },
-                  { index: 1, plan: "Optimize data fetching", completed: false },
-                  { index: 2, plan: "Implement caching strategies", completed: false },
-                  { index: 3, plan: "Test performance improvements", completed: false },
+                  {
+                    index: 0,
+                    plan: "Profile current loading times",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Optimize data fetching",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Implement caching strategies",
+                    completed: false,
+                  },
+                  {
+                    index: 3,
+                    plan: "Test performance improvements",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 4800000,
                 createdBy: "agent",
@@ -262,7 +325,8 @@ const mockThreads: Thread[] = [
         ],
         activeTaskIndex: 0,
       },
-      planContextSummary: "Completed adding repo/branch name to thread selector",
+      planContextSummary:
+        "Completed adding repo/branch name to thread selector",
       sandboxSessionId: "sandbox-5",
       branchName: "main",
       targetRepository: {
@@ -299,10 +363,26 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Define authentication requirements", completed: true },
-                  { index: 1, plan: "Design authentication flow", completed: true },
-                  { index: 2, plan: "Implement authentication logic", completed: true },
-                  { index: 3, plan: "Test authentication system", completed: true },
+                  {
+                    index: 0,
+                    plan: "Define authentication requirements",
+                    completed: true,
+                  },
+                  {
+                    index: 1,
+                    plan: "Design authentication flow",
+                    completed: true,
+                  },
+                  {
+                    index: 2,
+                    plan: "Implement authentication logic",
+                    completed: true,
+                  },
+                  {
+                    index: 3,
+                    plan: "Test authentication system",
+                    completed: true,
+                  },
                 ],
                 createdAt: Date.now() - 36000000,
                 createdBy: "agent",
@@ -350,10 +430,18 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Backup current database", completed: true },
+                  {
+                    index: 0,
+                    plan: "Backup current database",
+                    completed: true,
+                  },
                   { index: 1, plan: "Design migration plan", completed: false },
                   { index: 2, plan: "Execute migration", completed: false },
-                  { index: 3, plan: "Verify migration results", completed: false },
+                  {
+                    index: 3,
+                    plan: "Verify migration results",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 72000000,
                 createdBy: "agent",
@@ -402,9 +490,21 @@ const mockThreads: Thread[] = [
                 revisionIndex: 0,
                 plans: [
                   { index: 0, plan: "Design dark mode UI", completed: true },
-                  { index: 1, plan: "Implement dark mode styles", completed: false },
-                  { index: 2, plan: "Test dark mode functionality", completed: false },
-                  { index: 3, plan: "Deploy dark mode changes", completed: false },
+                  {
+                    index: 1,
+                    plan: "Implement dark mode styles",
+                    completed: false,
+                  },
+                  {
+                    index: 2,
+                    plan: "Test dark mode functionality",
+                    completed: false,
+                  },
+                  {
+                    index: 3,
+                    plan: "Deploy dark mode changes",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 108000000,
                 createdBy: "agent",
@@ -452,10 +552,18 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Analyze current image loading", completed: true },
+                  {
+                    index: 0,
+                    plan: "Analyze current image loading",
+                    completed: true,
+                  },
                   { index: 1, plan: "Implement lazy loading", completed: true },
                   { index: 2, plan: "Test lazy loading", completed: true },
-                  { index: 3, plan: "Deploy lazy loading changes", completed: true },
+                  {
+                    index: 3,
+                    plan: "Deploy lazy loading changes",
+                    completed: true,
+                  },
                 ],
                 createdAt: Date.now() - 144000000,
                 createdBy: "agent",
@@ -503,10 +611,22 @@ const mockThreads: Thread[] = [
               {
                 revisionIndex: 0,
                 plans: [
-                  { index: 0, plan: "Define pipeline requirements", completed: true },
+                  {
+                    index: 0,
+                    plan: "Define pipeline requirements",
+                    completed: true,
+                  },
                   { index: 1, plan: "Configure CI/CD tools", completed: false },
-                  { index: 2, plan: "Test pipeline functionality", completed: false },
-                  { index: 3, plan: "Deploy pipeline changes", completed: false },
+                  {
+                    index: 2,
+                    plan: "Test pipeline functionality",
+                    completed: false,
+                  },
+                  {
+                    index: 3,
+                    plan: "Deploy pipeline changes",
+                    completed: false,
+                  },
                 ],
                 createdAt: Date.now() - 172800000,
                 createdBy: "agent",
@@ -530,71 +650,73 @@ const mockThreads: Thread[] = [
     },
     interrupts: {},
   },
-]
+];
 
-type FilterStatus = "all" | "running" | "completed" | "failed" | "pending"
+type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
-  const router = useRouter()
-  const [searchQuery, setSearchQuery] = useState("")
-  const [statusFilter, setStatusFilter] = useState<FilterStatus>("all")
+  const router = useRouter();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
   // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] = mockThreads.map(threadToDisplayInfo)
+  const displayThreads: ThreadDisplayInfo[] =
+    mockThreads.map(threadToDisplayInfo);
 
   const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
       case "running":
-        return "bg-blue-950 text-blue-400"
+        return "bg-blue-950 text-blue-400";
       case "completed":
-        return "bg-green-950 text-green-400"
+        return "bg-green-950 text-green-400";
       case "failed":
-        return "bg-red-950 text-red-400"
+        return "bg-red-950 text-red-400";
       case "pending":
-        return "bg-yellow-950 text-yellow-400"
+        return "bg-yellow-950 text-yellow-400";
       default:
-        return "bg-gray-800 text-gray-400"
+        return "bg-gray-800 text-gray-400";
     }
-  }
+  };
 
   const getStatusIcon = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
       case "running":
-        return <Loader2 className="h-4 w-4 animate-spin" />
+        return <Loader2 className="h-4 w-4 animate-spin" />;
       case "completed":
-        return <CheckCircle className="h-4 w-4" />
+        return <CheckCircle className="h-4 w-4" />;
       case "failed":
-        return <XCircle className="h-4 w-4" />
+        return <XCircle className="h-4 w-4" />;
       case "pending":
-        return <Clock className="h-4 w-4" />
+        return <Clock className="h-4 w-4" />;
       default:
-        return null
+        return null;
     }
-  }
+  };
 
   const getPRStatusColor = (status: string) => {
     switch (status) {
       case "merged":
-        return "text-purple-400"
+        return "text-purple-400";
       case "open":
-        return "text-green-400"
+        return "text-green-400";
       case "draft":
-        return "text-gray-400"
+        return "text-gray-400";
       case "closed":
-        return "text-red-400"
+        return "text-red-400";
       default:
-        return "text-gray-400"
+        return "text-gray-400";
     }
-  }
+  };
 
   // Filter and search threads
   const filteredThreads = displayThreads.filter((thread) => {
     const matchesSearch =
       thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      thread.repository.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesStatus = statusFilter === "all" || thread.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+      thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus =
+      statusFilter === "all" || thread.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
 
   // Group threads by status
   const groupedThreads = {
@@ -602,7 +724,7 @@ export default function AllThreadsPage() {
     completed: filteredThreads.filter((t) => t.status === "completed"),
     failed: filteredThreads.filter((t) => t.status === "failed"),
     pending: filteredThreads.filter((t) => t.status === "pending"),
-  }
+  };
 
   const statusCounts = {
     all: displayThreads.length,
@@ -610,31 +732,33 @@ export default function AllThreadsPage() {
     completed: displayThreads.filter((t) => t.status === "completed").length,
     failed: displayThreads.filter((t) => t.status === "failed").length,
     pending: displayThreads.filter((t) => t.status === "pending").length,
-  }
+  };
 
   const handleThreadClick = (thread: ThreadDisplayInfo) => {
-    router.push(`/chat/${thread.id}`)
-  }
+    router.push(`/chat/${thread.id}`);
+  };
 
   return (
-    <div className="h-screen bg-black flex flex-col">
+    <div className="flex h-screen flex-col bg-black">
       {/* Header */}
       <div className="border-b border-gray-900 bg-black px-4 py-3">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-gray-600 hover:text-gray-400 hover:bg-gray-900"
+            className="h-6 w-6 p-0 text-gray-600 hover:bg-gray-900 hover:text-gray-400"
             onClick={() => router.push("/chat")}
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            <span className="text-sm text-gray-400 font-mono">All Threads</span>
+            <div className="h-2 w-2 rounded-full bg-green-500"></div>
+            <span className="font-mono text-sm text-gray-400">All Threads</span>
           </div>
-          <div className="flex items-center gap-2 ml-auto">
-            <span className="text-xs text-gray-600">{filteredThreads.length} threads</span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-gray-600">
+              {filteredThreads.length} threads
+            </span>
           </div>
         </div>
       </div>
@@ -642,19 +766,27 @@ export default function AllThreadsPage() {
       {/* Search and Filters */}
       <div className="border-b border-gray-900 bg-gray-950 px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform text-gray-500" />
             <Input
               placeholder="Search threads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-gray-900 border-gray-700 text-gray-300 placeholder:text-gray-600"
+              className="border-gray-700 bg-gray-900 pl-10 text-gray-300 placeholder:text-gray-600"
             />
           </div>
           <div className="flex items-center gap-1">
             <Filter className="h-4 w-4 text-gray-500" />
-            <span className="text-xs text-gray-500 mr-2">Filter:</span>
-            {(["all", "running", "completed", "failed", "pending"] as FilterStatus[]).map((status) => (
+            <span className="mr-2 text-xs text-gray-500">Filter:</span>
+            {(
+              [
+                "all",
+                "running",
+                "completed",
+                "failed",
+                "pending",
+              ] as FilterStatus[]
+            ).map((status) => (
               <Button
                 key={status}
                 variant={statusFilter === status ? "secondary" : "ghost"}
@@ -662,12 +794,17 @@ export default function AllThreadsPage() {
                 className={`h-7 text-xs ${
                   statusFilter === status
                     ? "bg-gray-700 text-gray-200"
-                    : "text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+                    : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
                 }`}
                 onClick={() => setStatusFilter(status)}
               >
-                {status === "all" ? "All" : status.charAt(0).toUpperCase() + status.slice(1)}
-                <Badge variant="secondary" className="ml-1 bg-gray-800 text-gray-400 text-xs">
+                {status === "all"
+                  ? "All"
+                  : status.charAt(0).toUpperCase() + status.slice(1)}
+                <Badge
+                  variant="secondary"
+                  className="ml-1 bg-gray-800 text-xs text-gray-400"
+                >
                   {statusCounts[status]}
                 </Badge>
               </Button>
@@ -678,17 +815,22 @@ export default function AllThreadsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        <div className="max-w-6xl mx-auto p-4">
+        <div className="mx-auto max-w-6xl p-4">
           {statusFilter === "all" ? (
             // Show grouped view when "all" is selected
             <div className="space-y-6">
               {Object.entries(groupedThreads).map(([status, threads]) => {
-                if (threads.length === 0) return null
+                if (threads.length === 0) return null;
                 return (
                   <div key={status}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <h2 className="text-base font-semibold text-gray-300 capitalize">{status} Threads</h2>
-                      <Badge variant="secondary" className="bg-gray-800 text-gray-400 text-xs">
+                    <div className="mb-3 flex items-center gap-2">
+                      <h2 className="text-base font-semibold text-gray-300 capitalize">
+                        {status} Threads
+                      </h2>
+                      <Badge
+                        variant="secondary"
+                        className="bg-gray-800 text-xs text-gray-400"
+                      >
                         {threads.length}
                       </Badge>
                     </div>
@@ -705,7 +847,7 @@ export default function AllThreadsPage() {
                       ))}
                     </div>
                   </div>
-                )
+                );
               })}
             </div>
           ) : (
@@ -725,43 +867,58 @@ export default function AllThreadsPage() {
           )}
 
           {filteredThreads.length === 0 && (
-            <div className="text-center py-12">
-              <div className="text-gray-500 mb-2">No threads found</div>
+            <div className="py-12 text-center">
+              <div className="mb-2 text-gray-500">No threads found</div>
               <div className="text-xs text-gray-600">
-                {searchQuery ? "Try adjusting your search query" : "No threads match the selected filter"}
+                {searchQuery
+                  ? "Try adjusting your search query"
+                  : "No threads match the selected filter"}
               </div>
             </div>
           )}
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 interface ThreadCardProps {
-  thread: ThreadDisplayInfo
-  onClick: () => void
-  getStatusColor: (status: ThreadDisplayInfo["status"]) => string
-  getStatusIcon: (status: ThreadDisplayInfo["status"]) => React.ReactNode
-  getPRStatusColor: (status: string) => string
+  thread: ThreadDisplayInfo;
+  onClick: () => void;
+  getStatusColor: (status: ThreadDisplayInfo["status"]) => string;
+  getStatusIcon: (status: ThreadDisplayInfo["status"]) => React.ReactNode;
+  getPRStatusColor: (status: string) => string;
 }
 
-function ThreadCard({ thread, onClick, getStatusColor, getStatusIcon, getPRStatusColor }: ThreadCardProps) {
+function ThreadCard({
+  thread,
+  onClick,
+  getStatusColor,
+  getStatusIcon,
+  getPRStatusColor,
+}: ThreadCardProps) {
   return (
     <Card
-      className="cursor-pointer hover:shadow-lg transition-shadow bg-gray-950 border-gray-800 hover:bg-gray-900"
+      className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg"
       onClick={onClick}
     >
-      <CardHeader className="pb-2 p-3">
+      <CardHeader className="p-3 pb-2">
         <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <CardTitle className="text-sm font-medium truncate text-gray-300">{thread.title}</CardTitle>
-            <div className="flex items-center gap-1 mt-1">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="truncate text-sm font-medium text-gray-300">
+              {thread.title}
+            </CardTitle>
+            <div className="mt-1 flex items-center gap-1">
               <GitBranch className="h-2 w-2 text-gray-600" />
-              <span className="text-xs text-gray-500 truncate">{thread.repository}</span>
+              <span className="truncate text-xs text-gray-500">
+                {thread.repository}
+              </span>
             </div>
           </div>
-          <Badge variant="secondary" className={`${getStatusColor(thread.status)} text-xs`}>
+          <Badge
+            variant="secondary"
+            className={`${getStatusColor(thread.status)} text-xs`}
+          >
             <div className="flex items-center gap-1">
               {getStatusIcon(thread.status)}
               <span className="capitalize">{thread.status}</span>
@@ -769,14 +926,18 @@ function ThreadCard({ thread, onClick, getStatusColor, getStatusIcon, getPRStatu
           </Badge>
         </div>
       </CardHeader>
-      <CardContent className="pt-0 p-3">
+      <CardContent className="p-3 pt-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600">{thread.taskCount} tasks</span>
+            <span className="text-xs text-gray-600">
+              {thread.taskCount} tasks
+            </span>
             <span className="text-xs text-gray-600">•</span>
             <div className="flex items-center gap-1">
               <Calendar className="h-2 w-2 text-gray-600" />
-              <span className="text-xs text-gray-600">{thread.lastActivity}</span>
+              <span className="text-xs text-gray-600">
+                {thread.lastActivity}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -786,8 +947,8 @@ function ThreadCard({ thread, onClick, getStatusColor, getStatusIcon, getPRStatu
                 size="sm"
                 className="h-5 w-5 p-0 text-gray-500 hover:text-gray-300"
                 onClick={(e) => {
-                  e.stopPropagation()
-                  window.open(thread.githubIssue!.url, "_blank")
+                  e.stopPropagation();
+                  window.open(thread.githubIssue!.url, "_blank");
                 }}
               >
                 <Bug className="h-3 w-3" />
@@ -799,8 +960,8 @@ function ThreadCard({ thread, onClick, getStatusColor, getStatusIcon, getPRStatu
                 size="sm"
                 className={`h-5 w-5 p-0 hover:text-gray-300 ${getPRStatusColor(thread.pullRequest.status)}`}
                 onClick={(e) => {
-                  e.stopPropagation()
-                  window.open(thread.pullRequest!.url, "_blank")
+                  e.stopPropagation();
+                  window.open(thread.pullRequest!.url, "_blank");
                 }}
               >
                 <GitPullRequest className="h-3 w-3" />
@@ -810,5 +971,5 @@ function ThreadCard({ thread, onClick, getStatusColor, getStatusIcon, getPRStatu
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }
