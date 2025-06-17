@@ -1,6 +1,11 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { useStreamContext } from "@/providers/Stream";
-import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
+import {
+  AIMessage,
+  Checkpoint,
+  Message,
+  ToolMessage,
+} from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
@@ -12,6 +17,24 @@ import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { useArtifact } from "../artifact";
 import { Interrupt } from "./interrupt";
+import {
+  ActionStep,
+  type ActionStepProps,
+} from "@/components/gen-ui/action-step";
+import { ToolCall } from "@langchain/core/messages/tool";
+import {
+  createApplyPatchToolFields,
+  createShellToolFields,
+} from "@open-swe/shared/open-swe/tools";
+import { z } from "zod";
+import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
+
+// Used only for Zod type inference.
+const dummyRepo = { owner: "dummy", repo: "dummy" };
+const shellTool = createShellToolFields(dummyRepo);
+type ShellToolArgs = z.infer<typeof shellTool.schema>;
+const applyPatchTool = createApplyPatchToolFields(dummyRepo);
+type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
 
 function CustomComponent({
   message,
@@ -65,6 +88,54 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
+export function mapToolMessageToActionStepProps(
+  message: ToolMessage,
+  thread: { messages: Message[] },
+): ActionStepProps {
+  const toolCall: ToolCall | undefined = thread.messages
+    .filter(isAIMessageSDK)
+    .flatMap((m) => m.tool_calls ?? [])
+    .find((tc) => tc.id === message.tool_call_id);
+
+  const aiMessage = thread.messages
+    .filter(isAIMessageSDK)
+    .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
+  const reasoningText = aiMessage
+    ? getContentString(aiMessage.content)
+    : undefined;
+
+  const status: ActionStepProps["status"] = "done";
+  const success = message.status === "success";
+
+  if (toolCall?.name === shellTool.name) {
+    const args = toolCall.args as ShellToolArgs;
+    return {
+      actionType: shellTool.name as "shell",
+      status,
+      success,
+      command: args.command || [],
+      workdir: args.workdir,
+      output: getContentString(message.content),
+      reasoningText,
+    };
+  } else if (toolCall?.name === applyPatchTool.name) {
+    const args = toolCall.args as ApplyPatchToolArgs;
+    return {
+      actionType: "apply-patch",
+      status,
+      success,
+      file: args.file_path || "",
+      diff: args.diff,
+      reasoningText,
+      errorMessage: !success ? getContentString(message.content) : undefined,
+    };
+  }
+  return {
+    status: "loading",
+    summaryText: reasoningText,
+  };
+}
+
 export function AssistantMessage({
   message,
   isLoading,
@@ -84,18 +155,121 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
+  const messages = thread.messages;
+  const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
+  const nextMessage = idx >= 0 ? messages[idx + 1] : undefined;
+
+  const meta = message ? thread.getMessagesMetadata(message) : undefined;
+  const threadInterrupt = thread.interrupt;
+  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  const anthropicStreamedToolCalls = Array.isArray(content)
+    ? parseAnthropicStreamedToolCalls(content)
+    : undefined;
+
+  // Helper: get tool call name from AI message (OpenAI or Anthropic)
+  const aiToolCallName = (() => {
+    if (message && isAIMessageSDK(message)) {
+      return message.tool_calls?.[0]?.name;
+    }
+    if (anthropicStreamedToolCalls?.length) {
+      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
+        .name;
+    }
+    return undefined;
+  })();
+
+  const aiToolCallArgs = (() => {
+    if (message && isAIMessageSDK(message)) {
+      return message.tool_calls?.[0]?.args;
+    }
+    if (anthropicStreamedToolCalls?.length) {
+      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
+        .args;
+    }
+    return undefined;
+  })();
+
+  const toolResult =
+    nextMessage &&
+    isToolMessageSDK(nextMessage) &&
+    aiToolCallName &&
+    nextMessage.tool_call_id ===
+      (message && isAIMessageSDK(message)
+        ? message.tool_calls?.[0]?.id
+        : anthropicStreamedToolCalls?.length
+          ? anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1].id
+          : undefined)
+      ? nextMessage
+      : undefined;
+
+  if (
+    message &&
+    (aiToolCallName === shellTool.name ||
+      aiToolCallName === applyPatchTool.name)
+  ) {
+    if (toolResult) {
+      return (
+        <ActionStep {...mapToolMessageToActionStepProps(toolResult, thread)} />
+      );
+    }
+    return (
+      <ActionStep
+        actionType={aiToolCallName === shellTool.name ? "shell" : "apply-patch"}
+        status="generating"
+        command={
+          aiToolCallName === shellTool.name
+            ? aiToolCallArgs?.command || []
+            : undefined
+        }
+        workdir={
+          aiToolCallName === shellTool.name
+            ? aiToolCallArgs?.workdir
+            : undefined
+        }
+        file={
+          aiToolCallName === applyPatchTool.name
+            ? aiToolCallArgs?.file_path || ""
+            : undefined
+        }
+        diff={
+          aiToolCallName === applyPatchTool.name
+            ? aiToolCallArgs?.diff
+            : undefined
+        }
+        reasoningText={contentString}
+      />
+    );
+  }
+
+  if (
+    message?.type === "tool" &&
+    (message.name === shellTool.name || message.name === applyPatchTool.name) &&
+    idx > 0 &&
+    messages[idx - 1] &&
+    ((messages[idx - 1] &&
+      isAIMessageSDK(messages[idx - 1]) &&
+      (messages[idx - 1] as AIMessage).tool_calls?.some(
+        (tc) =>
+          tc.id === (message as ToolMessage).tool_call_id &&
+          (tc.name === shellTool.name || tc.name === applyPatchTool.name),
+      )) ||
+      (Array.isArray(messages[idx - 1].content) &&
+        parseAnthropicStreamedToolCalls(
+          messages[idx - 1].content as MessageContentComplex[],
+        )?.some(
+          (tc) =>
+            tc.id === (message as ToolMessage).tool_call_id &&
+            (tc.name === shellTool.name || tc.name === applyPatchTool.name),
+        )))
+  ) {
+    return null;
+  }
+
   const isLastMessage =
     thread.messages[thread.messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
-  const threadInterrupt = thread.interrupt;
-
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
-  const anthropicStreamedToolCalls = Array.isArray(content)
-    ? parseAnthropicStreamedToolCalls(content)
-    : undefined;
 
   const hasToolCalls =
     message &&

@@ -1,6 +1,5 @@
 "use client";
 
-import "../app/globals.css";
 import { useState } from "react";
 import {
   Terminal,
@@ -25,7 +24,7 @@ type BaseActionProps = {
 // Shell command specific props
 type ShellActionProps = BaseActionProps & {
   actionType: "shell";
-  command: string;
+  command: string[];
   workdir?: string;
   output?: string;
   errorCode?: number;
@@ -41,7 +40,7 @@ type PatchActionProps = BaseActionProps & {
 };
 
 // Union type for all possible action props
-type ActionStepProps =
+export type ActionStepProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps;
@@ -136,7 +135,7 @@ export function ActionStep(props: ActionStepProps) {
             </div>
           )}
           <code className="text-xs font-normal text-gray-800">
-            {props.command}
+            {props.command.join(" ")}
           </code>
         </div>
       );
