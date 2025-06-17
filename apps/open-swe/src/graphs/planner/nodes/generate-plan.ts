@@ -4,7 +4,10 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { formatFollowupMessagePrompt } from "../utils/followup-prompt.js";
+import {
+  formatFollowupMessagePrompt,
+  isFollowupRequest,
+} from "../utils/followup.js";
 import { stopSandbox } from "../../../utils/sandbox.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
@@ -32,7 +35,7 @@ The user's request is as follows. Ensure you generate your plan in accordance wi
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.taskPlan.tasks?.length || state.proposedPlan.length;
+  const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const userRequest = getUserRequest(state.messages);
 
   return systemPrompt

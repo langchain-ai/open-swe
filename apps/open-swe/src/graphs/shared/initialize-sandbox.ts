@@ -60,7 +60,7 @@ export async function initializeSandbox(
   if (res.exitCode !== 0) {
     throw new Error(`Failed to clone repository.\n${res.result}`);
   }
-  
+
   logger.info("Repository cloned successfully.");
 
   logger.info(`Configuring git user for repository at "${absoluteRepoDir}"...`);

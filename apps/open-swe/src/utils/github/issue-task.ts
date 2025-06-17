@@ -75,6 +75,10 @@ export async function getTaskPlanFromIssue(
   return extractTasksFromIssueContent(issue.body);
 }
 
+const DETAILS_OPEN_TAG = "<details>";
+const DETAILS_CLOSE_TAG = "</details>";
+const AGENT_CONTEXT_DETAILS_SUMMARY = "<summary>Agent Context</summary>";
+
 export async function addTaskPlanToIssue(
   input: GetIssueTaskPlanInput,
   config: GraphConfig,
@@ -101,16 +105,21 @@ export async function addTaskPlanToIssue(
   ) {
     newBody = `${issue.body}
 
+${DETAILS_OPEN_TAG}
+${AGENT_CONTEXT_DETAILS_SUMMARY}
+
 ${TASK_OPEN_TAG}
 ${taskPlanString}
-${TASK_CLOSE_TAG}`;
+${TASK_CLOSE_TAG}
+
+${DETAILS_CLOSE_TAG}`;
   } else {
     const contentBeforeOpenTag = issue.body.split(TASK_OPEN_TAG)?.[0];
     const contentAfterCloseTag = issue.body.split(TASK_CLOSE_TAG)?.[1];
     const newTaskPlanString = JSON.stringify(taskPlan, null, 2);
 
     newBody = `${contentBeforeOpenTag}
-  
+
 ${TASK_OPEN_TAG}
 ${newTaskPlanString}
 ${TASK_CLOSE_TAG}

@@ -19,8 +19,14 @@ class ExecuteCommandError extends Error {
   }
 
   static cleanCommand(command: string): string {
-    if (command.includes("x-access-token:") && command.includes("@github.com/")) {
-      return command.replace(/(x-access-token:)([^@]+)(@github\.com\/)/, "$1ACCESS_TOKEN_REDACTED$3");
+    if (
+      command.includes("x-access-token:") &&
+      command.includes("@github.com/")
+    ) {
+      return command.replace(
+        /(x-access-token:)([^@]+)(@github\.com\/)/,
+        "$1ACCESS_TOKEN_REDACTED$3",
+      );
     }
     return command;
   }
@@ -466,10 +472,13 @@ export async function cloneRepo(
           throw new ExecuteCommandError(gitCloneCommand.join(" "), cloneResult);
         } else {
           const cloneDefaultBranchCommand = ["git", "clone", repoUrlWithToken];
-          logger.info("Branch not found in upstream origin. Cloning default & checking out branch", {
-            targetRepository,
-            cloneDefaultBranchCommand: cloneDefaultBranchCommand.join(" "),
-          });
+          logger.info(
+            "Branch not found in upstream origin. Cloning default & checking out branch",
+            {
+              targetRepository,
+              cloneDefaultBranchCommand: cloneDefaultBranchCommand.join(" "),
+            },
+          );
           const cloneDefaultBranchResult = await sandbox.process.executeCommand(
             cloneDefaultBranchCommand.join(" "),
           );
@@ -478,7 +487,10 @@ export async function cloneRepo(
               targetRepository,
               cloneDefaultBranchCommand: cloneDefaultBranchCommand.join(" "),
             });
-            throw new ExecuteCommandError(cloneDefaultBranchCommand.join(" "), cloneDefaultBranchResult);
+            throw new ExecuteCommandError(
+              cloneDefaultBranchCommand.join(" "),
+              cloneDefaultBranchResult,
+            );
           }
 
           cloneResult = cloneDefaultBranchResult;
@@ -496,7 +508,10 @@ export async function cloneRepo(
               targetRepository,
               checkoutBranchCommand: checkoutBranchCommand.join(" "),
             });
-            throw new ExecuteCommandError(checkoutBranchCommand.join(" "), checkoutBranchResult);
+            throw new ExecuteCommandError(
+              checkoutBranchCommand.join(" "),
+              checkoutBranchResult,
+            );
           }
 
           logger.info("Successfully checked out branch", {
@@ -520,7 +535,11 @@ export async function cloneRepo(
       repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
     });
 
-    const checkoutCommitCommand = ["git", "checkout", targetRepository.baseCommit];
+    const checkoutCommitCommand = [
+      "git",
+      "checkout",
+      targetRepository.baseCommit,
+    ];
     const checkoutResult = await sandbox.process.executeCommand(
       checkoutCommitCommand.join(" "),
       absoluteRepoDir,
@@ -533,7 +552,10 @@ export async function cloneRepo(
         baseCommit: targetRepository.baseCommit,
         checkoutCommitCommand: checkoutCommitCommand.join(" "),
       });
-      throw new ExecuteCommandError(checkoutCommitCommand.join(" "), checkoutResult);
+      throw new ExecuteCommandError(
+        checkoutCommitCommand.join(" "),
+        checkoutResult,
+      );
     }
 
     logger.info("Successfully checked out base commit", {

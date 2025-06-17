@@ -5,6 +5,8 @@ import {
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
 
+// TODO: Might want a better way of doing this.
+// maybe add a new kwarg `isRequest` and have this return the last human message with that field?
 export function getUserRequest(
   messages: BaseMessage[],
   options?: { returnFullMessage?: never | false },

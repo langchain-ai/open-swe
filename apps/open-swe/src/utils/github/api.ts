@@ -143,19 +143,14 @@ export async function createPullRequest({
       issue_number: pullRequest.number,
       labels: ["open-swe"],
     });
-    logger.info(
-      "Added 'open-swe' label to pull request", {
-        pullRequestNumber: pullRequest.number,
-      }
-    );
+    logger.info("Added 'open-swe' label to pull request", {
+      pullRequestNumber: pullRequest.number,
+    });
   } catch (labelError) {
-    logger.warn(
-      "Failed to add 'open-swe' label to pull request",
-      {
-        pullRequestNumber: pullRequest.number,
-        labelError,
-      },
-    );
+    logger.warn("Failed to add 'open-swe' label to pull request", {
+      pullRequestNumber: pullRequest.number,
+      labelError,
+    });
   }
 
   return pullRequest;

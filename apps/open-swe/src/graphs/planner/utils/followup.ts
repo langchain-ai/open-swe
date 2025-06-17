@@ -53,12 +53,15 @@ export function formatFollowupMessagePrompt(
   tasks: TaskPlan,
   proposedPlan: string[],
 ): string {
-  const activePlanItems = getActivePlanItems(tasks);
-  const isGeneratingNewPlan = activePlanItems.every((p) => p.completed);
-  if (!isGeneratingNewPlan && !proposedPlan.length) {
-    throw new Error(
-      "Can not format plan prompt if no proposed plan is provided.",
-    );
+  let isGeneratingNewPlan = false;
+  if (tasks && tasks.tasks?.length) {
+    const activePlanItems = getActivePlanItems(tasks);
+    isGeneratingNewPlan = activePlanItems.every((p) => p.completed);
+    if (!isGeneratingNewPlan && !proposedPlan.length) {
+      throw new Error(
+        "Can not format plan prompt if no proposed plan is provided.",
+      );
+    }
   }
 
   return followupMessagePrompt.replace(
@@ -67,4 +70,11 @@ export function formatFollowupMessagePrompt(
       ? formatPreviousPlans(tasks)
       : formatPreviousProposedPlan(proposedPlan),
   );
+}
+
+export function isFollowupRequest(
+  taskPlan: TaskPlan | undefined,
+  proposedPlan: string[] | undefined,
+) {
+  return taskPlan?.tasks?.length || proposedPlan?.length;
 }

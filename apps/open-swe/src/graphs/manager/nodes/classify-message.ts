@@ -334,7 +334,7 @@ export async function classifyMessage(
 
   const commandUpdate: ManagerGraphUpdate = {
     messages: newMessages,
-    ...(githubIssueId ? { githubIssueId } : {})
+    ...(githubIssueId ? { githubIssueId } : {}),
   };
 
   if ((toolCallArgs.route as any) === "code") {

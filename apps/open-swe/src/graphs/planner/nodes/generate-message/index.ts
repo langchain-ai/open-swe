@@ -4,7 +4,10 @@ import { PlannerGraphState, PlannerGraphUpdate } from "../../types.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { formatFollowupMessagePrompt } from "../../utils/followup-prompt.js";
+import {
+  formatFollowupMessagePrompt,
+  isFollowupRequest,
+} from "../../utils/followup.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -13,7 +16,7 @@ const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
-  const isFollowup = state.taskPlan.tasks?.length || state.proposedPlan.length;
+  const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   return SYSTEM_PROMPT.replace(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
