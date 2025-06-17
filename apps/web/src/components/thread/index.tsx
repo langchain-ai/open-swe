@@ -58,8 +58,10 @@ import { useTaskPlan } from "../tasks/useTaskPlan";
 import { isProposedPlanInterrupt } from "@/lib/plan-utils";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { InitializeStep } from "@/components/gen-ui/initialize-step";
-import { INITIALIZE_NODE_ID, mapCustomEventsToSteps } from "@open-swe/shared/open-swe/custom-events";
-
+import {
+  INITIALIZE_NODE_ID,
+  mapCustomEventsToSteps,
+} from "@open-swe/shared/open-swe/custom-events";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -165,8 +167,8 @@ export function Thread() {
 
   // TODO: DELETE BEFORE OPENING PR
   useEffect(() => {
-    console.log(customEvents)
-  }, [customEvents])
+    console.log(customEvents);
+  }, [customEvents]);
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -344,12 +346,19 @@ export function Thread() {
   );
   const isLastMessageHuman = messages[messages.length - 1]?.type === "human";
 
-
   const initializeEvents = customEvents.filter(
-    (e) => e.nodeId === INITIALIZE_NODE_ID
+    (e) => e.nodeId === INITIALIZE_NODE_ID,
   );
 
   const steps = mapCustomEventsToSteps(initializeEvents);
+  const allSuccess =
+    steps.length > 0 && steps.every((s) => s.status === "success");
+
+  let initStatus: "loading" | "generating" | "done" = "generating";
+  if (allSuccess) {
+    initStatus = "done";
+  }
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <div className="relative hidden lg:flex">
@@ -518,8 +527,9 @@ export function Thread() {
                   {initializeEvents.length > 0 && (
                     <div className="mb-6">
                       <InitializeStep
-                        status={"generating"}
+                        status={initStatus}
                         steps={steps}
+                        success={allSuccess}
                       />
                     </div>
                   )}

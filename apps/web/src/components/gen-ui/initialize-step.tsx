@@ -12,7 +12,7 @@ import { useState } from "react";
 
 type Step = {
   name: string;
-  status: "waiting" | "generating" | "success" | "error";
+  status: "waiting" | "generating" | "success" | "error" | "skipped";
   error?: string;
 };
 
@@ -101,24 +101,32 @@ export function InitializeStep({
       {steps && (
         <div className="p-2">
           <ul className="space-y-2">
-            {steps.map((step, index) => (
-              <li
-                key={index}
-                className="flex items-center text-xs"
-              >
-                <span className="mr-2">{stepStatusIcon[step.status]}</span>
-                <span
-                  className={`font-normal ${step.status === "error" ? "text-red-500" : "text-gray-800"}`}
+            {steps
+              .filter((step) => step.status !== "skipped")
+              .map((step, index) => (
+                <li
+                  key={index}
+                  className="flex items-center text-xs"
                 >
-                  {step.name}
-                </span>
-                {step.error && (
-                  <span className="ml-2 text-xs text-red-500">
-                    ({step.error})
+                  <span className="mr-2">
+                    {stepStatusIcon[
+                      step.status as keyof typeof stepStatusIcon
+                    ] ?? (
+                      <div className="h-3.5 w-3.5 rounded-full border border-gray-300" />
+                    )}
                   </span>
-                )}
-              </li>
-            ))}
+                  <span
+                    className={`font-normal ${step.status === "error" ? "text-red-500" : "text-gray-800"}`}
+                  >
+                    {step.name}
+                  </span>
+                  {step.error && (
+                    <span className="ml-2 text-xs text-red-500">
+                      ({step.error})
+                    </span>
+                  )}
+                </li>
+              ))}
           </ul>
         </div>
       )}

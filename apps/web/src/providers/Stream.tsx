@@ -23,7 +23,10 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
-import { CustomEvent, isCustomEvent } from "@open-swe/shared/open-swe/custom-events";
+import {
+  CustomEvent,
+  isCustomEvent,
+} from "@open-swe/shared/open-swe/custom-events";
 
 const useTypedStream = useStream<
   GraphState,
@@ -80,10 +83,12 @@ const StreamSession = ({
   });
 
   return (
-    <StreamContext.Provider value={{
-      ...streamValue,
-      customEvents,
-    }}>
+    <StreamContext.Provider
+      value={{
+        ...streamValue,
+        customEvents,
+      }}
+    >
       {children}
     </StreamContext.Provider>
   );

@@ -17,7 +17,10 @@ import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
 import { getCodebaseTree } from "../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { CustomEvent, INITIALIZE_NODE_ID } from "@open-swe/shared/open-swe/custom-events";
+import {
+  CustomEvent,
+  INITIALIZE_NODE_ID,
+} from "@open-swe/shared/open-swe/custom-events";
 
 const logger = createLogger(LogLevel.INFO, "Initialize");
 
@@ -47,6 +50,34 @@ export async function initialize(
     }
   }
 
+  // If we are NOT resuming a sandbox, we know 'Resuming Sandbox' and 'Pulling latest changes' are not needed. Emit 'skipped' events for both as early as possible.
+  if (!sandboxSessionId) {
+    // Resuming Sandbox is not needed
+    emitEvent({
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: uuidv4(),
+      action: "Resuming Sandbox",
+      data: {
+        status: "skipped",
+        branch: branchName,
+        repo: repoName,
+      },
+    });
+    // Pulling latest changes is not needed
+    emitEvent({
+      nodeId: INITIALIZE_NODE_ID,
+      createdAt: new Date().toISOString(),
+      actionId: uuidv4(),
+      action: "Pulling latest changes",
+      data: {
+        status: "skipped",
+        branch: branchName,
+        repo: repoName,
+      },
+    });
+  }
+
   if (sandboxSessionId) {
     try {
       // Resuming Sandbox
@@ -61,7 +92,7 @@ export async function initialize(
           sandboxSessionId,
           branch: branchName,
           repo: repoName,
-        }
+        },
       };
       emitEvent(baseResumeSandboxAction);
       try {
@@ -83,7 +114,7 @@ export async function initialize(
             sandboxSessionId,
             branch: branchName,
             repo: repoName,
-          }
+          },
         };
         emitEvent(basePullLatestChangesAction);
         try {
@@ -100,7 +131,8 @@ export async function initialize(
             data: {
               ...basePullLatestChangesAction.data,
               status: "error",
-              error: "Failed to pull latest changes. Please check your repository connection.",
+              error:
+                "Failed to pull latest changes. Please check your repository connection.",
             },
           });
         }
@@ -116,7 +148,7 @@ export async function initialize(
             sandboxSessionId,
             branch: branchName,
             repo: repoName,
-          }
+          },
         };
         emitEvent(baseGenerateCodebaseTreeAction);
         try {
@@ -137,7 +169,8 @@ export async function initialize(
             data: {
               ...baseGenerateCodebaseTreeAction.data,
               status: "error",
-              error: "Failed to generate codebase tree. Please try again later.",
+              error:
+                "Failed to generate codebase tree. Please try again later.",
             },
           });
         }
@@ -148,7 +181,8 @@ export async function initialize(
           data: {
             ...baseResumeSandboxAction.data,
             status: "error",
-            error: "Failed to resume sandbox. A new environment will be created.",
+            error:
+              "Failed to resume sandbox. A new environment will be created.",
           },
         });
       }
@@ -170,7 +204,7 @@ export async function initialize(
       sandboxSessionId: null,
       branch: branchName,
       repo: repoName,
-    }
+    },
   };
   emitEvent(baseCreateSandboxAction);
   let sandbox;
@@ -179,7 +213,11 @@ export async function initialize(
     emitEvent({
       ...baseCreateSandboxAction,
       createdAt: new Date().toISOString(),
-      data: { ...baseCreateSandboxAction.data, status: "success", sandboxSessionId: sandbox.id },
+      data: {
+        ...baseCreateSandboxAction.data,
+        status: "success",
+        sandboxSessionId: sandbox.id,
+      },
     });
   } catch (_) {
     emitEvent({
@@ -208,7 +246,7 @@ export async function initialize(
       sandboxSessionId: sandbox.id,
       branch: branchName,
       repo: repoName,
-    }
+    },
   };
   emitEvent(baseCloneRepoAction);
   let res;
@@ -230,7 +268,8 @@ export async function initialize(
       data: {
         ...baseCloneRepoAction.data,
         status: "error",
-        error: "Failed to clone repository. Please check your repo URL and permissions.",
+        error:
+          "Failed to clone repository. Please check your repo URL and permissions.",
       },
     });
     // TODO remove after dev
@@ -249,7 +288,7 @@ export async function initialize(
       sandboxSessionId: sandbox.id,
       branch: branchName,
       repo: repoName,
-    }
+    },
   };
   emitEvent(baseConfigureGitUserAction);
   try {
@@ -289,7 +328,7 @@ export async function initialize(
       sandboxSessionId: sandbox.id,
       branch: branchName,
       repo: repoName,
-    }
+    },
   };
   emitEvent(baseCheckoutBranchAction);
   try {
@@ -330,7 +369,7 @@ export async function initialize(
       sandboxSessionId: sandbox.id,
       branch: branchName,
       repo: repoName,
-    }
+    },
   };
   emitEvent(baseGenerateCodebaseTreeAction);
   let codebaseTree = undefined;
