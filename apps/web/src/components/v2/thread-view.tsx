@@ -33,8 +33,10 @@ export function ThreadView({
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");
-  const plannerThreadId = stream.values?.plannerThreadId;
-  const [programmerThreadId, setProgrammerThreadId] = useState("");
+  const plannerThreadId = stream.values?.plannerSession?.threadId;
+  const plannerRunId = stream.values?.plannerSession?.runId;
+  const [programmerSession, setProgrammerSession] = useState<ManagerGraphState["programmerSession"]>();
+
   if (!stream.messages?.length) {
     return null;
   }
@@ -172,12 +174,13 @@ export function ThreadView({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
-                    {plannerThreadId && PLANNER_ASSISTANT_ID && (
+                    {plannerThreadId && plannerRunId && PLANNER_ASSISTANT_ID && (
                       <ActionsRenderer<PlannerGraphState>
                         graphId={PLANNER_ASSISTANT_ID}
                         threadId={plannerThreadId}
-                        setProgrammerThreadId={setProgrammerThreadId}
-                        programmerThreadId={programmerThreadId}
+                        runId={plannerRunId}
+                        setProgrammerSession={setProgrammerSession}
+                        programmerSession={programmerSession}
                       />
                     )}
                   </CardContent>
@@ -191,10 +194,11 @@ export function ThreadView({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
-                    {programmerThreadId && PROGRAMMER_ASSISTANT_ID && (
+                    {programmerSession && PROGRAMMER_ASSISTANT_ID && (
                       <ActionsRenderer<PlannerGraphState>
                         graphId={PROGRAMMER_ASSISTANT_ID}
-                        threadId={programmerThreadId}
+                        threadId={programmerSession.threadId}
+                        runId={programmerSession.runId}
                       />
                     )}
                   </CardContent>

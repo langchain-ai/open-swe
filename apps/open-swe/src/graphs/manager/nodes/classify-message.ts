@@ -1,5 +1,5 @@
 import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
+import { ManagerGraphState, ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
@@ -168,11 +168,11 @@ export async function classifyMessage(
   });
 
   const [programmerThread, plannerThread] = await Promise.all([
-    state.programmerThreadId
-      ? langGraphClient.threads.get(state.programmerThreadId)
+    state.programmerSession?.threadId
+      ? langGraphClient.threads.get(state.programmerSession.threadId)
       : undefined,
-    state.plannerThreadId
-      ? langGraphClient.threads.get(state.plannerThreadId)
+    state.plannerSession?.threadId
+      ? langGraphClient.threads.get(state.plannerSession.threadId)
       : undefined,
   ]);
   const programmerStatus = programmerThread?.status ?? "not_started";

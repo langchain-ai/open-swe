@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
+import { ManagerGraphState, ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
 import { getIssue } from "../../../utils/github/api.js";

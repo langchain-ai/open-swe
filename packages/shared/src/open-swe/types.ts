@@ -528,3 +528,8 @@ export type GraphConfig = LangGraphRunnableConfig<
     assistant_id: string;
   }
 >;
+
+export interface AgentSession {
+  threadId: string;
+  runId: string;
+}

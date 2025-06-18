@@ -1,4 +1,4 @@
-import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
+import { PlannerGraphState, PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 import { Command, END } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";

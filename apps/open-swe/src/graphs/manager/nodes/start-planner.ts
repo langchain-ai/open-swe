@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState } from "../types.js";
+import { ManagerGraphState, ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
@@ -18,7 +18,7 @@ const logger = createLogger(LogLevel.INFO, "StartPlanner");
 export async function startPlanner(
   state: ManagerGraphState,
   config: GraphConfig,
-) {
+): Promise<ManagerGraphUpdate> {
   const langGraphClient = createLangGraphClient({
     defaultHeaders: {
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
@@ -27,9 +27,9 @@ export async function startPlanner(
     },
   });
 
-  const plannerThreadId = state.plannerThreadId ?? uuidv4();
+  const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
   try {
-    await langGraphClient.runs.create(plannerThreadId, "planner", {
+    const run = await langGraphClient.runs.create(plannerThreadId, "planner", {
       input: {
         // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
         githubIssueId: state.githubIssueId,
@@ -43,10 +43,14 @@ export async function startPlanner(
       },
       ifNotExists: "create",
       multitaskStrategy: "enqueue",
+      streamResumable: true,
     });
 
     return {
-      plannerThreadId,
+      plannerSession: {
+        threadId: plannerThreadId,
+        runId: run.run_id,
+      },
     };
   } catch (error) {
     logger.error("Failed to start planner", {
