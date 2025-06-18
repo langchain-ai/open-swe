@@ -139,7 +139,11 @@ export function TerminalInput({
           size="sm"
           className="h-7 w-7 self-end bg-gray-700 p-0 hover:bg-gray-600"
         >
-          {loading ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
+          {loading ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Send className="size-3" />
+          )}
         </Button>
       </div>
 
