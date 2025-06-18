@@ -94,7 +94,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       : contentStr;
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+    <div className="mx-auto grid grid-rows-[1fr_auto] gap-2">
       <div className="overflow-hidden rounded-lg border border-gray-700">
         <div className="border-b border-gray-700 bg-gray-800 px-4 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -109,7 +109,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
               <h3 className="font-medium text-gray-100">Tool Result</h3>
             )}
             {message.tool_call_id && (
-              <code className="ml-2 rounded bg-gray-700 px-2 py-1 text-sm">
+              <code className="ml-2 rounded bg-gray-700 px-2 py-1 text-sm text-gray-100">
                 {message.tool_call_id}
               </code>
             )}
@@ -165,7 +165,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                     </tbody>
                   </table>
                 ) : (
-                  <code className="block text-sm">{displayedContent}</code>
+                  <code className="block text-sm text-gray-300">
+                    {displayedContent}
+                  </code>
                 )}
               </motion.div>
             </AnimatePresence>

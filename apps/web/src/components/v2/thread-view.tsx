@@ -3,20 +3,8 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  ArrowLeft,
-  GitBranch,
-  Edit,
-  Trash2,
-  Plus,
-  Send,
-  User,
-  Bot,
-} from "lucide-react";
-import { Message, Thread } from "@langchain/langgraph-sdk";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ArrowLeft, GitBranch, Send, User, Bot } from "lucide-react";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
@@ -25,6 +13,9 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { ActionsRenderer } from "./actions-renderer";
+
+const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
+const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -42,21 +33,18 @@ export function ThreadView({
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");
-
+  const plannerThreadId = stream.values?.plannerThreadId;
+  const [programmerThreadId, setProgrammerThreadId] = useState("");
   if (!stream.messages?.length) {
     return null;
   }
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
-      // Handle sending message
-      console.log("Sending message:", chatInput);
+      alert("SENDING MANAGER FOLLOWUPS NOT HOOKED UP YET");
       setChatInput("");
     }
   };
-
-  const plannerThreadId = stream.values?.plannerThreadId;
-  console.log(plannerThreadId);
 
   return (
     <div className="flex h-screen flex-1 flex-col bg-black">
@@ -184,13 +172,14 @@ export function ThreadView({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
-                    {plannerThreadId &&
-                      process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID && (
-                        <ActionsRenderer<PlannerGraphState>
-                          graphId={process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID}
-                          threadId={plannerThreadId}
-                        />
-                      )}
+                    {plannerThreadId && PLANNER_ASSISTANT_ID && (
+                      <ActionsRenderer<PlannerGraphState>
+                        graphId={PLANNER_ASSISTANT_ID}
+                        threadId={plannerThreadId}
+                        setProgrammerThreadId={setProgrammerThreadId}
+                        programmerThreadId={programmerThreadId}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -202,7 +191,12 @@ export function ThreadView({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
-                    <p>TODO: HOOKUP TO MESSAGES STREAM</p>
+                    {programmerThreadId && PROGRAMMER_ASSISTANT_ID && (
+                      <ActionsRenderer<PlannerGraphState>
+                        graphId={PROGRAMMER_ASSISTANT_ID}
+                        threadId={programmerThreadId}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

@@ -37,7 +37,6 @@ export function useThreads<State extends Record<string, any>>(
           }
         : undefined;
       const threads = await client.threads.search<State>(searchArgs);
-      console.log("got threads", threads);
       return threads;
     } catch (error) {
       console.error("Failed to fetch threads:", error);

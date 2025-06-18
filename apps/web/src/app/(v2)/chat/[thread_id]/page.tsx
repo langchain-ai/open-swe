@@ -8,6 +8,7 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
+import { use } from "react";
 
 interface ThreadPageProps {
   thread_id: string;
@@ -19,7 +20,7 @@ export default function ThreadPage({
   params: Promise<ThreadPageProps>;
 }) {
   const router = useRouter();
-  const { thread_id } = React.use(params);
+  const { thread_id } = use(params);
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
     assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "",
