@@ -184,11 +184,6 @@ export function ThreadView({
               </TabsContent>
               <TabsContent value="programmer">
                 <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
-                  <CardHeader>
-                    <CardTitle className="text-foreground text-base">
-                      Code Actions
-                    </CardTitle>
-                  </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
                     {programmerSession && PROGRAMMER_ASSISTANT_ID && (
                       <ActionsRenderer<PlannerGraphState>
