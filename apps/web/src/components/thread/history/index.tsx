@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { useThreads } from "@/providers/Thread";
+import { useThreadsContext } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useEffect } from "react";
 
@@ -82,7 +82,7 @@ export default function ThreadHistory() {
     parseAsBoolean.withDefault(false),
   );
 
-  const { refreshThreads, threads, threadsLoading } = useThreads();
+  const { refreshThreads, threads, threadsLoading } = useThreadsContext();
 
   useEffect(() => {
     if (typeof window === "undefined") return;

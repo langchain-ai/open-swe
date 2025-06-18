@@ -1,5 +1,4 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { useStreamContext } from "@/providers/Stream";
 import {
   AIMessage,
   Checkpoint,
@@ -9,13 +8,15 @@ import {
 import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
-import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
+import {
+  LoadExternalComponent,
+  UIMessage,
+} from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import { useArtifact } from "../artifact";
 import { Interrupt } from "./interrupt";
 import {
   ActionStep,
@@ -28,6 +29,7 @@ import {
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -41,13 +43,15 @@ function CustomComponent({
   thread,
 }: {
   message: Message;
-  thread: ReturnType<typeof useStreamContext>;
+  thread: ReturnType<typeof useStream>;
 }) {
-  const artifact = useArtifact();
-  const { values } = useStreamContext();
-  const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id,
-  );
+  const values = thread.values;
+  const customComponents =
+    "ui" in values
+      ? (values.ui as UIMessage[]).filter(
+          (ui) => ui.metadata?.message_id === message.id,
+        )
+      : [];
 
   if (!customComponents?.length) return null;
   return (
@@ -57,7 +61,7 @@ function CustomComponent({
           key={customComponent.id}
           stream={thread}
           message={customComponent}
-          meta={{ ui: customComponent, artifact }}
+          meta={{ ui: customComponent }}
         />
       ))}
     </Fragment>
@@ -141,11 +145,13 @@ export function AssistantMessage({
   isLoading,
   handleRegenerate,
   forceRenderInterrupt = false,
+  thread,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   forceRenderInterrupt?: boolean;
+  thread: ReturnType<typeof useStream<Record<string, unknown>>>;
 }) {
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -154,7 +160,6 @@ export function AssistantMessage({
     parseAsBoolean.withDefault(false),
   );
 
-  const thread = useStreamContext();
   const messages = thread.messages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
   const nextMessage = idx >= 0 ? messages[idx + 1] : undefined;
@@ -289,7 +294,7 @@ export function AssistantMessage({
   }
 
   return (
-    <div className="group mr-auto flex w-full max-w-3xl items-start gap-2">
+    <div className="group mr-auto flex w-full items-start gap-2">
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <span>
@@ -299,6 +304,7 @@ export function AssistantMessage({
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
               forceRenderInterrupt={forceRenderInterrupt}
+              thread={thread}
             />
           </span>
         ) : (
@@ -334,6 +340,7 @@ export function AssistantMessage({
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
               forceRenderInterrupt={forceRenderInterrupt}
+              thread={thread}
             />
             <div
               className={cn(

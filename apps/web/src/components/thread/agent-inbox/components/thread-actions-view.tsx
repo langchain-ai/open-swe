@@ -7,12 +7,14 @@ import { toast } from "sonner";
 import { useQueryState } from "nuqs";
 import { constructOpenInStudioURL } from "../utils";
 import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 interface ThreadActionsViewProps {
   interrupt: HumanInterrupt;
   handleShowSidePanel: (showState: boolean, showDescription: boolean) => void;
   showState: boolean;
   showDescription: boolean;
+  stream: ReturnType<typeof useStream>;
 }
 
 function ButtonGroup({
@@ -59,6 +61,7 @@ export function ThreadActionsView({
   handleShowSidePanel,
   showDescription,
   showState,
+  stream,
 }: ThreadActionsViewProps) {
   const [threadId] = useQueryState("threadId");
   const {
@@ -80,6 +83,7 @@ export function ThreadActionsView({
     initialHumanInterruptEditValue,
   } = useInterruptedActions({
     interrupt,
+    stream,
   });
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
 

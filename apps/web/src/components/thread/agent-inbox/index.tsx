@@ -2,17 +2,17 @@ import { StateView } from "./components/state-view";
 import { ThreadActionsView } from "./components/thread-actions-view";
 import { useState } from "react";
 import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
-import { useStreamContext } from "@/providers/Stream";
 import { parsePlanData } from "@/lib/plan-utils";
 import { ProposedPlan } from "@/components/plan/proposed-plan";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 interface ThreadViewProps {
   interrupt: HumanInterrupt | HumanInterrupt[];
+  thread: ReturnType<typeof useStream>;
 }
 
-export function ThreadView({ interrupt }: ThreadViewProps) {
+export function ThreadView({ interrupt, thread }: ThreadViewProps) {
   const interruptObj = Array.isArray(interrupt) ? interrupt[0] : interrupt;
-  const thread = useStreamContext();
   const [showDescription, setShowDescription] = useState(false);
   const [showState, setShowState] = useState(false);
   const showSidePanel = showDescription || showState;
@@ -39,7 +39,12 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
 
   const planItems = parsePlanData(interruptObj.action_request.args);
   if (planItems?.length) {
-    return <ProposedPlan originalPlanItems={planItems} />;
+    return (
+      <ProposedPlan
+        originalPlanItems={planItems}
+        stream={thread}
+      />
+    );
   }
 
   return (
@@ -57,6 +62,7 @@ export function ThreadView({ interrupt }: ThreadViewProps) {
           handleShowSidePanel={handleShowSidePanel}
           showState={showState}
           showDescription={showDescription}
+          stream={thread}
         />
       )}
     </div>

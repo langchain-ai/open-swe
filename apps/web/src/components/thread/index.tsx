@@ -32,12 +32,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import {
-  useArtifactOpen,
-  ArtifactContent,
-  ArtifactTitle,
-  useArtifactContext,
-} from "./artifact";
 import { GitHubOAuthButton } from "../github/github-oauth-button";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import TaskList from "../task-list";
@@ -101,8 +95,6 @@ function ScrollToBottom(props: { className?: string }) {
 
 export function Thread() {
   const { push } = useRouter();
-  const [artifactContext, setArtifactContext] = useArtifactContext();
-  const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubAppProvider();
   const { getConfig } = useConfigStore();
   const { taskPlan } = useTaskPlan();
@@ -166,8 +158,6 @@ export function Thread() {
 
     if (id === null) {
       setTaskId(null);
-      closeArtifact();
-      setArtifactContext({});
     }
   };
 
@@ -267,9 +257,6 @@ export function Thread() {
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
 
-    const context =
-      Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
-
     const newMessages = [
       ...toolMessages,
       newHumanMessage,
@@ -278,14 +265,12 @@ export function Thread() {
       {
         messages: newMessages,
         internalMessages: newMessages,
-        context,
         targetRepository: selectedRepository,
       },
       {
         streamMode: ["values"],
         optimisticValues: (prev) => ({
           ...prev,
-          context,
           messages: [
             ...(prev.messages ?? []),
             ...toolMessages,
@@ -362,12 +347,7 @@ export function Thread() {
         </motion.div>
       </div>
 
-      <div
-        className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
-        )}
-      >
+      <div className="grid w-full grid-cols-[1fr_0fr] transition-all duration-500">
         <motion.div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -514,6 +494,7 @@ export function Thread() {
                           message={message}
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
+                          thread={stream}
                         />
                       ),
                     )}
@@ -527,6 +508,7 @@ export function Thread() {
                         isLoading={isLoading}
                         handleRegenerate={handleRegenerate}
                         forceRenderInterrupt={true}
+                        thread={stream}
                       />
                     )}
                   {isLoading && !firstTokenReceived && (
@@ -658,20 +640,6 @@ export function Thread() {
             />
           </StickToBottom>
         </motion.div>
-        <div className="relative flex flex-col border-l">
-          <div className="absolute inset-0 flex min-w-[30vw] flex-col">
-            <div className="grid grid-cols-[1fr_auto] border-b p-4">
-              <ArtifactTitle className="truncate overflow-hidden" />
-              <button
-                onClick={closeArtifact}
-                className="cursor-pointer"
-              >
-                <XIcon className="size-5" />
-              </button>
-            </div>
-            <ArtifactContent className="relative flex-grow" />
-          </div>
-        </div>
       </div>
 
       <ConfigurationSidebar

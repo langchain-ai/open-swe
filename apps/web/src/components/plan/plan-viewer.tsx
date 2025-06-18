@@ -38,11 +38,11 @@ export function PlanViewer({
   return (
     <div className={cn("w-full space-y-3", className)}>
       <div className="mb-4 flex items-center gap-2">
-        <h3 className="text-sm font-medium text-gray-900">
+        <h3 className="text-sm font-medium text-white">
           {isProposedPlan ? "Proposed" : "Execution"} Plan
         </h3>
         {!isProposedPlan && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-gray-400">
             {planItems.filter((item) => item.completed).length} of{" "}
             {planItems.length} completed
           </span>
@@ -61,9 +61,9 @@ export function PlanViewer({
                 className={cn(
                   "flex items-start gap-3 rounded-lg border p-3 transition-colors",
                   {
-                    "border-green-200 bg-green-50": status === "completed",
-                    "border-blue-200 bg-blue-50": status === "current",
-                    "border-gray-200 bg-gray-50": [
+                    "border-green-800 bg-green-900/30": status === "completed",
+                    "border-blue-800 bg-blue-900/30": status === "current",
+                    "border-gray-800 bg-gray-900/30": [
                       "remaining",
                       "proposed",
                     ].includes(status),
@@ -73,35 +73,35 @@ export function PlanViewer({
                 {/* Status Icon */}
                 <div className="mt-0.5 flex-shrink-0">
                   {status === "completed" && (
-                    <Check className="h-4 w-4 text-green-600" />
+                    <Check className="h-4 w-4 text-green-400" />
                   )}
                   {status === "current" && (
-                    <Play className="h-4 w-4 text-blue-600" />
+                    <Play className="h-4 w-4 text-blue-400" />
                   )}
                   {["remaining", "proposed"].includes(status) && (
-                    <Clock className="h-4 w-4 text-gray-400" />
+                    <Clock className="h-4 w-4 text-gray-500" />
                   )}
                 </div>
 
                 {/* Task Content */}
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center justify-between text-gray-500">
+                  <div className="mb-1 flex items-center justify-between text-gray-400">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium">
                         Step {item.index + 1}
                       </span>
                       {status === "current" && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                        <span className="rounded-full bg-blue-900/50 px-2 py-0.5 text-xs text-blue-300">
                           In Progress
                         </span>
                       )}
                       {status === "completed" && (
-                        <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
+                        <span className="rounded-full bg-green-900/50 px-2 py-0.5 text-xs text-green-300">
                           Done
                         </span>
                       )}
                       {status === "proposed" && (
-                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">
+                        <span className="rounded-full bg-gray-800 px-2 py-0.5 text-xs text-gray-300">
                           Proposed
                         </span>
                       )}
@@ -162,12 +162,13 @@ export function PlanViewer({
                           });
                         });
                       }}
+                      className="text-gray-200"
                     />
                   ) : (
                     <p
                       className={cn("text-sm leading-relaxed", {
-                        "text-gray-900": status === "current",
-                        "text-gray-600":
+                        "text-white": status === "current",
+                        "text-gray-300":
                           status === "completed" ||
                           ["remaining", "proposed"].includes(status),
                       })}
@@ -178,11 +179,11 @@ export function PlanViewer({
 
                   {/* Summary for completed tasks */}
                   {item.summary && status === "completed" && (
-                    <div className="bg-green-25 mt-2 rounded border border-green-100 p-2">
-                      <p className="mb-1 text-xs font-medium text-green-700">
+                    <div className="mt-2 rounded border border-green-800 bg-green-900/30 p-2">
+                      <p className="mb-1 text-xs font-medium text-green-300">
                         Summary:
                       </p>
-                      <p className="text-xs text-green-600">{item.summary}</p>
+                      <p className="text-xs text-green-400">{item.summary}</p>
                     </div>
                   )}
                 </div>
@@ -192,12 +193,13 @@ export function PlanViewer({
         {isProposedPlan && (
           <div
             key="add-new-plan-item"
-            className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 transition-colors"
+            className="flex items-start gap-3 rounded-lg border border-gray-800 bg-gray-900/30 p-3 transition-colors"
           >
             <Textarea
               placeholder="Add new plan item"
               value={newPlanItem}
               onChange={(e) => setNewPlanItem(e.target.value)}
+              className="text-gray-200"
             />
             <Button
               onClick={() => {
@@ -212,7 +214,7 @@ export function PlanViewer({
                 ]);
                 setNewPlanItem("");
               }}
-              className="mt-auto"
+              className="mt-auto bg-inherit text-gray-200 transition-colors hover:bg-gray-800 hover:text-gray-100"
               size="sm"
               variant="outline"
             >

@@ -1,7 +1,7 @@
 "use client";
 import { Archive, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useThreads } from "@/providers/Thread";
+import { useThreadsContext } from "@/providers/Thread";
 import { useQueryState, parseAsString } from "nuqs";
 import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";
@@ -14,7 +14,7 @@ export default function TaskList() {
   const [taskId, setTaskId] = useQueryState("taskId", parseAsString);
   const [threadId, setThreadId] = useQueryState("threadId", parseAsString);
   const [currentPage, setCurrentPage] = useState(0);
-  const { threads, threadsLoading, handleThreadClick } = useThreads();
+  const { threads, threadsLoading, handleThreadClick } = useThreadsContext();
 
   const isDashboardMode = !taskId;
 

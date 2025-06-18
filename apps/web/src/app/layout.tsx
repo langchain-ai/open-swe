@@ -14,9 +14,9 @@ export const metadata: Metadata = {
   title: "Open SWE",
   description: "Open SWE UX by LangChain",
   icons: {
-    icon: "/favicon.png",
-    shortcut: "/favicon.png",
-    apple: "/favicon.png",
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
   },
 };
 

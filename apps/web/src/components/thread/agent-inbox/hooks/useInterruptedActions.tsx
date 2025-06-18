@@ -12,11 +12,12 @@ import { createDefaultHumanResponse } from "../utils";
 import { toast } from "sonner";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END } from "@langchain/langgraph/web";
-import { useStreamContext } from "@/providers/Stream";
-import { useThreads } from "@/providers/Thread";
+import { useThreadsContext } from "@/providers/Thread";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 interface UseInterruptedActionsInput {
   interrupt: HumanInterrupt;
+  stream: ReturnType<typeof useStream>;
 }
 
 interface UseInterruptedActionsValue {
@@ -53,9 +54,9 @@ interface UseInterruptedActionsValue {
 
 export default function useInterruptedActions({
   interrupt,
+  stream: thread,
 }: UseInterruptedActionsInput): UseInterruptedActionsValue {
-  const thread = useStreamContext();
-  const { refreshThreads } = useThreads();
+  const { refreshThreads } = useThreadsContext();
   const [humanResponse, setHumanResponse] = useState<HumanResponseWithEdits[]>(
     [],
   );
