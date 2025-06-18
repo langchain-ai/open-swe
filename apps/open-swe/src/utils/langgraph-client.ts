@@ -4,8 +4,8 @@ export function createLangGraphClient(options?: {
   defaultHeaders?: Record<string, string>;
   includeApiKey?: boolean;
 }) {
-  if (!process.env.LANGGRAPH_API_URL) {
-    throw new Error("LANGGRAPH_API_URL not found");
+  if (!process.env.PORT) {
+    throw new Error("PORT environment variable not found");
   }
   if (options?.includeApiKey && !process.env.LANGGRAPH_API_KEY) {
     throw new Error("LANGGRAPH_API_KEY not found");
@@ -14,7 +14,7 @@ export function createLangGraphClient(options?: {
     ...(options?.includeApiKey && {
       apiKey: process.env.LANGGRAPH_API_KEY,
     }),
-    apiUrl: process.env.LANGGRAPH_API_URL,
+    apiUrl: `http://localhost:${process.env.PORT}`,
     defaultHeaders: options?.defaultHeaders,
   });
 }
