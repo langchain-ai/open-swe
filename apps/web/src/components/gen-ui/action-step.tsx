@@ -54,10 +54,12 @@ export function ActionStep(props: ActionStepProps) {
     switch (props.status) {
       case "loading":
         return (
-          <div className="h-3.5 w-3.5 rounded-full border border-gray-600" />
+          <div className="border-border h-3.5 w-3.5 rounded-full border" />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />;
+        return (
+          <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
+        );
       case "done":
         return props.success ? (
           <CheckCircle className="h-3.5 w-3.5 text-green-500" />
@@ -106,13 +108,13 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderIcon = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <Loader2 className="mr-2 h-3.5 w-3.5 text-gray-400" />;
+      return <Loader2 className="text-muted-foreground mr-2 h-3.5 w-3.5" />;
     }
 
     return props.actionType === "shell" ? (
-      <Terminal className="mr-2 h-3.5 w-3.5 text-gray-400" />
+      <Terminal className="text-muted-foreground mr-2 h-3.5 w-3.5" />
     ) : (
-      <FileCode className="mr-2 h-3.5 w-3.5 text-gray-400" />
+      <FileCode className="text-muted-foreground mr-2 h-3.5 w-3.5" />
     );
   };
 
@@ -120,7 +122,7 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderContent = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       return (
-        <span className="text-xs font-normal text-gray-300">
+        <span className="text-foreground/80 text-xs font-normal">
           Preparing action...
         </span>
       );
@@ -130,18 +132,18 @@ export function ActionStep(props: ActionStepProps) {
       return (
         <div className="flex-1">
           {props.workdir && (
-            <div className="mb-0.5 text-xs font-normal text-gray-400">
+            <div className="text-muted-foreground mb-0.5 text-xs font-normal">
               {props.workdir}
             </div>
           )}
-          <code className="text-xs font-normal text-gray-300">
+          <code className="text-foreground/80 text-xs font-normal">
             {props.command.join(" ")}
           </code>
         </div>
       );
     } else {
       return (
-        <code className="flex-1 text-xs font-normal text-gray-300">
+        <code className="text-foreground/80 flex-1 text-xs font-normal">
           {props.file}
         </code>
       );
@@ -156,12 +158,12 @@ export function ActionStep(props: ActionStepProps) {
 
     if (props.actionType === "shell" && props.output) {
       return (
-        <div className="overflow-x-auto bg-gray-900 p-2 text-gray-200">
+        <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
           {props.errorCode !== undefined && !props.success && (
-            <div className="mt-1 text-xs text-red-400">
+            <div className="mt-1 text-xs text-red-500 dark:text-red-400">
               Exit code: {props.errorCode}
             </div>
           )}
@@ -169,23 +171,25 @@ export function ActionStep(props: ActionStepProps) {
       );
     } else if (props.actionType === "apply-patch" && props.diff) {
       return (
-        <div className="overflow-x-auto bg-gray-900 p-2">
+        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
           <pre
-            className="text-xs font-normal whitespace-pre-wrap text-gray-200"
+            className="text-foreground/90 text-xs font-normal whitespace-pre-wrap"
             dangerouslySetInnerHTML={{ __html: formatDiff(props.diff) }}
           />
 
           {!props.success && props.errorMessage && (
-            <div className="mt-2 rounded border border-red-700/30 bg-red-900/30 p-2 text-xs text-red-400">
+            <div className="mt-2 rounded border border-red-700/30 bg-red-100/30 p-2 text-xs text-red-600 dark:bg-red-900/30 dark:text-red-400">
               {props.errorMessage}
             </div>
           )}
 
           {!props.success && props.fixedDiff && (
             <div className="mt-2">
-              <div className="mb-1 text-xs text-gray-400">Fixed diff:</div>
+              <div className="text-muted-foreground mb-1 text-xs">
+                Fixed diff:
+              </div>
               <pre
-                className="text-xs font-normal whitespace-pre-wrap text-gray-200"
+                className="text-foreground/90 text-xs font-normal whitespace-pre-wrap"
                 dangerouslySetInnerHTML={{
                   __html: formatDiff(props.fixedDiff),
                 }}
@@ -200,36 +204,36 @@ export function ActionStep(props: ActionStepProps) {
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-700">
+    <div className="border-border overflow-hidden rounded-md border">
       {props.reasoningText && (
-        <div className="border-b border-blue-800 bg-blue-900/50 p-2">
+        <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-400 hover:text-blue-300"
+            className="flex items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-300">
+            <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
               {props.reasoningText}
             </p>
           )}
         </div>
       )}
 
-      <div className="flex items-center border-b border-gray-700 bg-gray-800 p-2">
+      <div className="border-border bg-card flex items-center border-b p-2 dark:bg-gray-800">
         {renderHeaderIcon()}
         {renderHeaderContent()}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-normal text-gray-400">
+          <span className="text-muted-foreground text-xs font-normal">
             {getStatusText()}
           </span>
           {getStatusIcon()}
           {shouldShowToggle() && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-gray-400 hover:text-gray-300"
+              className="text-muted-foreground hover:text-foreground"
             >
               {expanded ? (
                 <ChevronUp className="h-3.5 w-3.5" />
@@ -244,16 +248,16 @@ export function ActionStep(props: ActionStepProps) {
       {renderContent()}
 
       {props.summaryText && props.status === "done" && (
-        <div className="border-t border-green-800 bg-green-900/50 p-2">
+        <div className="border-t border-green-300 bg-green-100/50 p-2 dark:border-green-800 dark:bg-green-900/50">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-400 hover:text-green-300"
+            className="flex items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-300">
+            <p className="mt-1 text-xs font-normal text-green-700 dark:text-green-300">
               {props.summaryText}
             </p>
           )}
@@ -268,11 +272,11 @@ function formatDiff(diff: string) {
     .split("\n")
     .map((line) => {
       if (line.startsWith("+")) {
-        return `<span class="text-green-400">${line}</span>`;
+        return `<span class="text-green-600 dark:text-green-400">${line}</span>`;
       } else if (line.startsWith("-")) {
-        return `<span class="text-red-400">${line}</span>`;
+        return `<span class="text-red-600 dark:text-red-400">${line}</span>`;
       } else if (line.startsWith("@")) {
-        return `<span class="text-blue-400">${line}</span>`;
+        return `<span class="text-blue-600 dark:text-blue-400">${line}</span>`;
       }
       return line;
     })

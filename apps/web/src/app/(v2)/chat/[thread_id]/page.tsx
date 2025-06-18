@@ -1,6 +1,7 @@
 "use client";
 
 import { ThreadView } from "@/components/v2/thread-view";
+import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -28,13 +29,18 @@ export default function ThreadPage({
     reconnectOnMount: true,
   });
 
-  const { threads } = useThreads<GraphState>();
-
+  const { threads, threadsLoading } = useThreads<GraphState>(
+    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
+  );
   // Find the thread by ID
   const thread = threads?.find((t) => t.thread_id === thread_id);
-  // If thread not found, show 404
-  if (!thread) {
-    return <>Loading...</>;
+
+  const handleBackToHome = () => {
+    router.push("/chat");
+  };
+
+  if (!thread || threadsLoading) {
+    return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
   // Convert all threads to display format
@@ -42,21 +48,12 @@ export default function ThreadPage({
     threads?.map(threadToDisplayInfo) ?? [];
   const currentDisplayThread = threadToDisplayInfo(thread);
 
-  const handleThreadSelect = (selectedThread: ThreadDisplayInfo) => {
-    router.push(`/chat/${selectedThread.id}`);
-  };
-
-  const handleBackToHome = () => {
-    router.push("/chat");
-  };
-
   return (
-    <div className="h-screen bg-black">
+    <div className="bg-background fixed inset-0">
       <ThreadView
         stream={stream}
         displayThread={currentDisplayThread}
         allDisplayThreads={displayThreads}
-        onThreadSelect={handleThreadSelect}
         onBackToHome={handleBackToHome}
       />
     </div>

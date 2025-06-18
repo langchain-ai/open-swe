@@ -7,6 +7,7 @@ export function useThreads<State extends Record<string, any>>(
 ) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const [threads, setThreads] = useState<Thread<State>[] | null>(null);
+  const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThread = useCallback(
     async (threadId: string): Promise<Thread<State> | null> => {
@@ -26,6 +27,7 @@ export function useThreads<State extends Record<string, any>>(
 
   const getThreads = useCallback(async (): Promise<Thread<State>[] | null> => {
     if (!apiUrl) return null;
+    setThreadsLoading(true);
     const client = createClient(apiUrl);
 
     try {
@@ -41,6 +43,8 @@ export function useThreads<State extends Record<string, any>>(
     } catch (error) {
       console.error("Failed to fetch threads:", error);
       return null;
+    } finally {
+      setThreadsLoading(false);
     }
   }, [apiUrl]);
 
@@ -50,5 +54,5 @@ export function useThreads<State extends Record<string, any>>(
     });
   }, [getThreads]);
 
-  return { threads, setThreads, getThread, getThreads };
+  return { threads, setThreads, getThread, getThreads, threadsLoading };
 }
