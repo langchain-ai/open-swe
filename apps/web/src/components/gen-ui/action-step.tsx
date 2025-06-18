@@ -46,7 +46,7 @@ export type ActionStepProps =
   | PatchActionProps;
 
 export function ActionStep(props: ActionStepProps) {
-  const [expanded, setExpanded] = useState(props.status === "done");
+  const [expanded, setExpanded] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
 
