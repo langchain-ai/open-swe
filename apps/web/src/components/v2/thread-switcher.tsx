@@ -36,38 +36,6 @@ export function ThreadSwitcher({
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  const getStatusIcon = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return (
-          <Loader2 className="h-3 w-3 animate-spin text-blue-600 dark:text-blue-400" />
-        );
-      case "completed":
-        return (
-          <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
-        );
-      case "failed":
-        return <XCircle className="h-3 w-3 text-red-600 dark:text-red-400" />;
-      default:
-        return (
-          <div className="bg-muted-foreground/50 h-3 w-3 rounded-full dark:bg-gray-700" />
-        );
-    }
-  };
-
-  const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400";
-      case "completed":
-        return "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400";
-      case "failed":
-        return "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400";
-      default:
-        return "bg-muted text-muted-foreground dark:bg-gray-800 dark:text-gray-400";
-    }
-  };
-
   const otherThreads = allThreads.filter((t) => t.id !== currentThread.id);
   const runningCount = otherThreads.filter(
     (t) => t.status === "running",

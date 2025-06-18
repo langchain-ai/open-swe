@@ -22,7 +22,6 @@ interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadDisplayInfo;
   allDisplayThreads: ThreadDisplayInfo[];
-  onThreadSelect: (thread: ThreadDisplayInfo) => void;
   onBackToHome: () => void;
 }
 
@@ -30,7 +29,6 @@ export function ThreadView({
   stream,
   displayThread,
   allDisplayThreads,
-  onThreadSelect,
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");

@@ -5,15 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  ArrowLeft,
-  Search,
-  Filter,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  Clock,
-} from "lucide-react";
+import { ArrowLeft, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
@@ -25,58 +17,15 @@ type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
   const router = useRouter();
-  const { threads } = useThreads<GraphState>();
+  const { threads } = useThreads<GraphState>(
+    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
   // Convert Thread objects to ThreadDisplayInfo for UI
   const displayThreads: ThreadDisplayInfo[] =
     threads?.map(threadToDisplayInfo) ?? [];
-
-  const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return "dark:bg-blue-950 bg-blue-100 dark:text-blue-400 text-blue-700";
-      case "completed":
-        return "dark:bg-green-950 bg-green-100 dark:text-green-400 text-green-700";
-      case "failed":
-        return "dark:bg-red-950 bg-red-100 dark:text-red-400 text-red-700";
-      case "pending":
-        return "dark:bg-yellow-950 bg-yellow-100 dark:text-yellow-400 text-yellow-700";
-      default:
-        return "dark:bg-gray-800 bg-gray-200 dark:text-gray-400 text-gray-700";
-    }
-  };
-
-  const getStatusIcon = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return <Loader2 className="h-4 w-4 animate-spin" />;
-      case "completed":
-        return <CheckCircle className="h-4 w-4" />;
-      case "failed":
-        return <XCircle className="h-4 w-4" />;
-      case "pending":
-        return <Clock className="h-4 w-4" />;
-      default:
-        return null;
-    }
-  };
-
-  const getPRStatusColor = (status: string) => {
-    switch (status) {
-      case "merged":
-        return "dark:text-purple-400 text-purple-600";
-      case "open":
-        return "dark:text-green-400 text-green-600";
-      case "draft":
-        return "dark:text-gray-400 text-gray-600";
-      case "closed":
-        return "dark:text-red-400 text-red-600";
-      default:
-        return "dark:text-gray-400 text-gray-600";
-    }
-  };
 
   // Filter and search threads
   const filteredThreads = displayThreads.filter((thread) => {
@@ -102,10 +51,6 @@ export default function AllThreadsPage() {
     completed: displayThreads.filter((t) => t.status === "completed").length,
     failed: displayThreads.filter((t) => t.status === "failed").length,
     pending: displayThreads.filter((t) => t.status === "pending").length,
-  };
-
-  const handleThreadClick = (thread: ThreadDisplayInfo) => {
-    router.push(`/chat/${thread.id}`);
   };
 
   return (
