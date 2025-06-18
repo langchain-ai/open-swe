@@ -519,29 +519,38 @@ export function Thread() {
               content={
                 <>
                   {(() => {
-                    const filteredMessages = messages.filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX));
+                    const filteredMessages = messages.filter(
+                      (m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
+                    );
                     let inserted = false;
                     const rendered = filteredMessages.map((message, index) => {
-                      const isFirstHuman = !inserted && message.type === "human" && initializeEvents.length > 0;
-                      const msgNode = message.type === "human" ? (
-                        <HumanMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                        />
-                      ) : (
-                        <AssistantMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                          handleRegenerate={handleRegenerate}
-                        />
-                      );
+                      const isFirstHuman =
+                        !inserted &&
+                        message.type === "human" &&
+                        initializeEvents.length > 0;
+                      const msgNode =
+                        message.type === "human" ? (
+                          <HumanMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                          />
+                        ) : (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                            handleRegenerate={handleRegenerate}
+                          />
+                        );
                       if (isFirstHuman) {
                         inserted = true;
                         return [
                           msgNode,
-                          <div className="mb-6" key="initialize-step">
+                          <div
+                            className="mb-6"
+                            key="initialize-step"
+                          >
                             <InitializeStep
                               status={initStatus}
                               steps={steps}
@@ -556,14 +565,17 @@ export function Thread() {
                     // If no human message, render at the top
                     if (initializeEvents.length > 0 && !inserted) {
                       rendered.unshift(
-                        <div className="mb-6" key="initialize-step">
+                        <div
+                          className="mb-6"
+                          key="initialize-step"
+                        >
                           <InitializeStep
                             status={initStatus}
                             steps={steps}
                             success={allSuccess}
                             collapse={initStatus === "done" && allSuccess}
                           />
-                        </div>
+                        </div>,
                       );
                     }
                     return rendered;
@@ -580,9 +592,11 @@ export function Thread() {
                         forceRenderInterrupt={true}
                       />
                     )}
-                  {isLoading && !firstTokenReceived && initializeEvents.length === 0 && (
-                    <AssistantMessageLoading />
-                  )}
+                  {isLoading &&
+                    !firstTokenReceived &&
+                    initializeEvents.length === 0 && (
+                      <AssistantMessageLoading />
+                    )}
                 </>
               }
               footer={
