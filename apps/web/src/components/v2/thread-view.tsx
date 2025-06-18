@@ -115,7 +115,7 @@ export function ThreadView({
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-gray-400">
-                      {message.type === "human" ? "You" : "AI Agent"}
+                      {message.type === "human" ? "You" : "Agent"}
                     </span>
                   </div>
                   <div className="text-sm leading-relaxed text-gray-300">
@@ -163,17 +163,12 @@ export function ThreadView({
               defaultValue="planner"
               className="w-full"
             >
-              <TabsList>
+              <TabsList className="bg-gray-800">
                 <TabsTrigger value="planner">Planner</TabsTrigger>
                 <TabsTrigger value="programmer">Programmer</TabsTrigger>
               </TabsList>
               <TabsContent value="planner">
                 <Card className="border-gray-800 bg-gray-950 px-0 py-4">
-                  <CardHeader>
-                    <CardTitle className="text-base text-gray-300">
-                      Planning Actions
-                    </CardTitle>
-                  </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
                     {plannerThreadId &&
                       plannerRunId &&
