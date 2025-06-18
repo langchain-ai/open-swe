@@ -38,6 +38,12 @@ export const INIT_STEPS = [
   "Generating codebase tree",
 ];
 
+export type Step = {
+  name: string;
+  status: "waiting" | "generating" | "success" | "error" | "skipped";
+  error?: string;
+};
+
 /**
  * Maps custom events to step objects for UI rendering. Skipped steps are filtered out.
  */

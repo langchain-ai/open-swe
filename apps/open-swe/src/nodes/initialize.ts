@@ -48,29 +48,53 @@ export async function initialize(
       logger.error("[DEV] Failed to emit custom event", { event, err });
     }
   }
+
+  // Helper function to emit step events
+  function emitStepEvent(
+    base: CustomEvent,
+    status: "pending" | "success" | "error" | "skipped",
+    error?: string,
+  ) {
+    emitEvent({
+      ...base,
+      createdAt: new Date().toISOString(),
+      data: {
+        ...base.data,
+        status,
+        ...(error ? { error } : {}),
+      },
+    });
+  }
+
   if (!sandboxSessionId) {
-    emitEvent({
-      nodeId: INITIALIZE_NODE_ID,
-      createdAt: new Date().toISOString(),
-      actionId: uuidv4(),
-      action: "Resuming Sandbox",
-      data: {
-        status: "skipped",
-        branch: branchName,
-        repo: repoName,
+    emitStepEvent(
+      {
+        nodeId: INITIALIZE_NODE_ID,
+        createdAt: new Date().toISOString(),
+        actionId: uuidv4(),
+        action: "Resuming Sandbox",
+        data: {
+          status: "skipped",
+          branch: branchName,
+          repo: repoName,
+        },
       },
-    });
-    emitEvent({
-      nodeId: INITIALIZE_NODE_ID,
-      createdAt: new Date().toISOString(),
-      actionId: uuidv4(),
-      action: "Pulling latest changes",
-      data: {
-        status: "skipped",
-        branch: branchName,
-        repo: repoName,
+      "skipped",
+    );
+    emitStepEvent(
+      {
+        nodeId: INITIALIZE_NODE_ID,
+        createdAt: new Date().toISOString(),
+        actionId: uuidv4(),
+        action: "Pulling latest changes",
+        data: {
+          status: "skipped",
+          branch: branchName,
+          repo: repoName,
+        },
       },
-    });
+      "skipped",
+    );
   }
 
   if (sandboxSessionId) {
@@ -88,14 +112,10 @@ export async function initialize(
           repo: repoName,
         },
       };
-      emitEvent(baseResumeSandboxAction);
+      emitStepEvent(baseResumeSandboxAction, "pending");
       try {
         const existingSandbox = await daytonaClient().get(sandboxSessionId);
-        emitEvent({
-          ...baseResumeSandboxAction,
-          createdAt: new Date().toISOString(),
-          data: { ...baseResumeSandboxAction.data, status: "success" },
-        });
+        emitStepEvent(baseResumeSandboxAction, "success");
         const pullLatestChangesActionId = uuidv4();
         const basePullLatestChangesAction: CustomEvent = {
           nodeId: INITIALIZE_NODE_ID,
@@ -109,25 +129,16 @@ export async function initialize(
             repo: repoName,
           },
         };
-        emitEvent(basePullLatestChangesAction);
+        emitStepEvent(basePullLatestChangesAction, "pending");
         try {
           await pullLatestChanges(absoluteRepoDir, existingSandbox);
-          emitEvent({
-            ...basePullLatestChangesAction,
-            createdAt: new Date().toISOString(),
-            data: { ...basePullLatestChangesAction.data, status: "success" },
-          });
+          emitStepEvent(basePullLatestChangesAction, "success");
         } catch (_) {
-          emitEvent({
-            ...basePullLatestChangesAction,
-            createdAt: new Date().toISOString(),
-            data: {
-              ...basePullLatestChangesAction.data,
-              status: "error",
-              error:
-                "Failed to pull latest changes. Please check your repository connection.",
-            },
-          });
+          emitStepEvent(
+            basePullLatestChangesAction,
+            "error",
+            "Failed to pull latest changes. Please check your repository connection.",
+          );
         }
         const generateCodebaseTreeActionId = uuidv4();
         const baseGenerateCodebaseTreeAction: CustomEvent = {
@@ -142,41 +153,27 @@ export async function initialize(
             repo: repoName,
           },
         };
-        emitEvent(baseGenerateCodebaseTreeAction);
+        emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
         try {
           const codebaseTree = await getCodebaseTree(existingSandbox.id);
-          emitEvent({
-            ...baseGenerateCodebaseTreeAction,
-            createdAt: new Date().toISOString(),
-            data: { ...baseGenerateCodebaseTreeAction.data, status: "success" },
-          });
+          emitStepEvent(baseGenerateCodebaseTreeAction, "success");
           return {
             sandboxSessionId: existingSandbox.id,
             codebaseTree,
           };
         } catch (_) {
-          emitEvent({
-            ...baseGenerateCodebaseTreeAction,
-            createdAt: new Date().toISOString(),
-            data: {
-              ...baseGenerateCodebaseTreeAction.data,
-              status: "error",
-              error:
-                "Failed to generate codebase tree. Please try again later.",
-            },
-          });
+          emitStepEvent(
+            baseGenerateCodebaseTreeAction,
+            "error",
+            "Failed to generate codebase tree. Please try again later.",
+          );
         }
       } catch (_) {
-        emitEvent({
-          ...baseResumeSandboxAction,
-          createdAt: new Date().toISOString(),
-          data: {
-            ...baseResumeSandboxAction.data,
-            status: "error",
-            error:
-              "Failed to resume sandbox. A new environment will be created.",
-          },
-        });
+        emitStepEvent(
+          baseResumeSandboxAction,
+          "error",
+          "Failed to resume sandbox. A new environment will be created.",
+        );
       }
     } catch (_) {
       logger.error("[DEV] Failed to get sandbox session", _);
@@ -197,31 +194,17 @@ export async function initialize(
       repo: repoName,
     },
   };
-  emitEvent(baseCreateSandboxAction);
+  emitStepEvent(baseCreateSandboxAction, "pending");
   let sandbox;
   try {
     sandbox = await daytonaClient().create({ image: SNAPSHOT_NAME });
-    emitEvent({
-      ...baseCreateSandboxAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseCreateSandboxAction.data,
-        status: "success",
-        sandboxSessionId: sandbox.id,
-      },
-    });
+    emitStepEvent(baseCreateSandboxAction, "success");
   } catch (_) {
-    emitEvent({
-      ...baseCreateSandboxAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseCreateSandboxAction.data,
-        status: "error",
-        error: "Failed to create sandbox environment. Please try again later.",
-      },
-    });
-    // TODO remove after dev
-    logger.error("[DEV] Failed to create sandbox", _);
+    emitStepEvent(
+      baseCreateSandboxAction,
+      "error",
+      "Failed to create sandbox environment. Please try again later.",
+    );
     return {};
   }
 
@@ -239,7 +222,7 @@ export async function initialize(
       repo: repoName,
     },
   };
-  emitEvent(baseCloneRepoAction);
+  emitStepEvent(baseCloneRepoAction, "pending");
   let res;
   try {
     res = await cloneRepo(sandbox, targetRepository, {
@@ -247,24 +230,13 @@ export async function initialize(
       stateBranchName: state.branchName,
     });
     if (res.exitCode !== 0) throw new Error();
-    emitEvent({
-      ...baseCloneRepoAction,
-      createdAt: new Date().toISOString(),
-      data: { ...baseCloneRepoAction.data, status: "success" },
-    });
+    emitStepEvent(baseCloneRepoAction, "success");
   } catch (_) {
-    emitEvent({
-      ...baseCloneRepoAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseCloneRepoAction.data,
-        status: "error",
-        error:
-          "Failed to clone repository. Please check your repo URL and permissions.",
-      },
-    });
-    // TODO remove after dev
-    logger.error("[DEV] Failed to clone repository", res?.result || _);
+    emitStepEvent(
+      baseCloneRepoAction,
+      "error",
+      "Failed to clone repository. Please check your repo URL and permissions.",
+    );
   }
 
   // Configuring git user
@@ -281,30 +253,20 @@ export async function initialize(
       repo: repoName,
     },
   };
-  emitEvent(baseConfigureGitUserAction);
+  emitStepEvent(baseConfigureGitUserAction, "pending");
   try {
     await configureGitUserInRepo(absoluteRepoDir, sandbox, {
       githubInstallationToken,
       owner: targetRepository.owner,
       repo: targetRepository.repo,
     });
-    emitEvent({
-      ...baseConfigureGitUserAction,
-      createdAt: new Date().toISOString(),
-      data: { ...baseConfigureGitUserAction.data, status: "success" },
-    });
+    emitStepEvent(baseConfigureGitUserAction, "success");
   } catch (_) {
-    emitEvent({
-      ...baseConfigureGitUserAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseConfigureGitUserAction.data,
-        status: "error",
-        error: "Failed to configure git user. Please check your git settings.",
-      },
-    });
-    // TODO remove after dev
-    logger.error("[DEV] Failed to configure git user", _);
+    emitStepEvent(
+      baseConfigureGitUserAction,
+      "error",
+      "Failed to configure git user. Please check your git settings.",
+    );
   }
 
   // Checking out branch
@@ -321,7 +283,7 @@ export async function initialize(
       repo: repoName,
     },
   };
-  emitEvent(baseCheckoutBranchAction);
+  emitStepEvent(baseCheckoutBranchAction, "pending");
   try {
     const checkoutBranchRes = await checkoutBranch(
       absoluteRepoDir,
@@ -329,23 +291,13 @@ export async function initialize(
       sandbox,
     );
     if (!checkoutBranchRes) throw new Error();
-    emitEvent({
-      ...baseCheckoutBranchAction,
-      createdAt: new Date().toISOString(),
-      data: { ...baseCheckoutBranchAction.data, status: "success" },
-    });
+    emitStepEvent(baseCheckoutBranchAction, "success");
   } catch (_) {
-    emitEvent({
-      ...baseCheckoutBranchAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseCheckoutBranchAction.data,
-        status: "error",
-        error: "Failed to checkout branch. Please check your branch name.",
-      },
-    });
-    // TODO remove after dev
-    logger.error("[DEV] Failed to checkout branch", _);
+    emitStepEvent(
+      baseCheckoutBranchAction,
+      "error",
+      "Failed to checkout branch. Please check your branch name.",
+    );
   }
 
   // Generating codebase tree
@@ -362,27 +314,17 @@ export async function initialize(
       repo: repoName,
     },
   };
-  emitEvent(baseGenerateCodebaseTreeAction);
+  emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
   let codebaseTree = undefined;
   try {
     codebaseTree = await getCodebaseTree(sandbox.id);
-    emitEvent({
-      ...baseGenerateCodebaseTreeAction,
-      createdAt: new Date().toISOString(),
-      data: { ...baseGenerateCodebaseTreeAction.data, status: "success" },
-    });
+    emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
-    emitEvent({
-      ...baseGenerateCodebaseTreeAction,
-      createdAt: new Date().toISOString(),
-      data: {
-        ...baseGenerateCodebaseTreeAction.data,
-        status: "error",
-        error: "Failed to generate codebase tree. Please try again later.",
-      },
-    });
-    // TODO remove after dev
-    logger.error("[DEV] Failed to generate codebase tree", _);
+    emitStepEvent(
+      baseGenerateCodebaseTreeAction,
+      "error",
+      "Failed to generate codebase tree. Please try again later.",
+    );
   }
 
   return {

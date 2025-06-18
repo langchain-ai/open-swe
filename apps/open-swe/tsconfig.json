@@ -18,11 +18,7 @@
     "strictFunctionTypes": false,
     "outDir": "dist",
     "types": ["jest", "node"],
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@open-swe/shared/*": ["../../packages/shared/src/*"]
-    }
+    "resolveJsonModule": true
   },
   "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
   "exclude": ["node_modules", "dist"]
