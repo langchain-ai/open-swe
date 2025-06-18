@@ -70,11 +70,11 @@ export function DefaultView({ threads }: DefaultViewProps) {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <ThemeToggle />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="bg-muted h-1 w-1 rounded-full"></div>
             </div>
+            <ThemeToggle />
           </div>
         </div>
       </div>

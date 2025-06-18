@@ -396,12 +396,7 @@ export function Thread() {
                 >
                   <Settings className="size-4" />
                 </TooltipIconButton>
-                <TooltipIconButton
-                  tooltip="Toggle theme"
-                  variant="ghost"
-                >
-                  <ThemeToggle />
-                </TooltipIconButton>
+                <ThemeToggle />
                 <GitHubOAuthButton />
               </div>
             </div>

@@ -3,7 +3,6 @@
 import type React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,16 +12,14 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
-  GitBranch,
-  GitPullRequest,
-  Bug,
-  Calendar,
   Clock,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ThreadCard } from "@/components/v2/thread-card";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
@@ -130,10 +127,13 @@ export default function AllThreadsPage() {
               All Threads
             </span>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">
-              {filteredThreads.length} threads
-            </span>
+          <div className="ml-auto flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">
+                {filteredThreads.length} threads
+              </span>
+            </div>
+            <ThemeToggle />
           </div>
         </div>
       </div>
@@ -214,10 +214,6 @@ export default function AllThreadsPage() {
                         <ThreadCard
                           key={thread.id}
                           thread={thread}
-                          onClick={() => handleThreadClick(thread)}
-                          getStatusColor={getStatusColor}
-                          getStatusIcon={getStatusIcon}
-                          getPRStatusColor={getPRStatusColor}
                         />
                       ))}
                     </div>
@@ -232,10 +228,6 @@ export default function AllThreadsPage() {
                 <ThreadCard
                   key={thread.id}
                   thread={thread}
-                  onClick={() => handleThreadClick(thread)}
-                  getStatusColor={getStatusColor}
-                  getStatusIcon={getStatusIcon}
-                  getPRStatusColor={getPRStatusColor}
                 />
               ))}
             </div>
@@ -254,97 +246,5 @@ export default function AllThreadsPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-interface ThreadCardProps {
-  thread: ThreadDisplayInfo;
-  onClick: () => void;
-  getStatusColor: (status: ThreadDisplayInfo["status"]) => string;
-  getStatusIcon: (status: ThreadDisplayInfo["status"]) => React.ReactNode;
-  getPRStatusColor: (status: string) => string;
-}
-
-function ThreadCard({
-  thread,
-  onClick,
-  getStatusColor,
-  getStatusIcon,
-  getPRStatusColor,
-}: ThreadCardProps) {
-  return (
-    <Card
-      className="border-border bg-card hover:bg-muted cursor-pointer transition-shadow hover:shadow-lg dark:bg-gray-950"
-      onClick={onClick}
-    >
-      <CardHeader className="p-3 pb-2">
-        <div className="flex items-start justify-between">
-          <div className="min-w-0 flex-1">
-            <CardTitle className="text-foreground truncate text-sm font-medium">
-              {thread.title}
-            </CardTitle>
-            <div className="mt-1 flex items-center gap-1">
-              <GitBranch className="text-muted-foreground h-2 w-2" />
-              <span className="text-muted-foreground truncate text-xs">
-                {thread.repository}
-              </span>
-            </div>
-          </div>
-          <Badge
-            variant="secondary"
-            className={`${getStatusColor(thread.status)} text-xs`}
-          >
-            <div className="flex items-center gap-1">
-              {getStatusIcon(thread.status)}
-              <span className="capitalize">{thread.status}</span>
-            </div>
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="p-3 pt-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">
-              {thread.taskCount} tasks
-            </span>
-            <span className="text-muted-foreground text-xs">•</span>
-            <div className="flex items-center gap-1">
-              <Calendar className="text-muted-foreground h-2 w-2" />
-              <span className="text-muted-foreground text-xs">
-                {thread.lastActivity}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {thread.githubIssue && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground h-5 w-5 p-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.githubIssue!.url, "_blank");
-                }}
-              >
-                <Bug className="h-3 w-3" />
-              </Button>
-            )}
-            {thread.pullRequest && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`h-5 w-5 p-0 hover:text-gray-300 ${getPRStatusColor(thread.pullRequest.status)}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.pullRequest!.url, "_blank");
-                }}
-              >
-                <GitPullRequest className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

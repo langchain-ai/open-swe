@@ -13,6 +13,7 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { ActionsRenderer } from "./actions-renderer";
+import { ThemeToggle } from "../theme-toggle";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -84,9 +85,8 @@ export function ThreadView({
           <ThreadSwitcher
             currentThread={displayThread}
             allThreads={allDisplayThreads}
-            onThreadSelect={onThreadSelect}
-            onNewChat={onBackToHome}
           />
+          <ThemeToggle />
         </div>
       </div>
 
