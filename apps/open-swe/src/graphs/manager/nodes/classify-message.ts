@@ -211,6 +211,11 @@ export async function classifyMessage(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  const userMessage = state.messages.findLast(isHumanMessage);
+  if (!userMessage) {
+    throw new Error("No human message found.");
+  }
+
   const langGraphClient = createLangGraphClient({
     defaultHeaders: {
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
@@ -236,12 +241,8 @@ export async function classifyMessage(
     messages: state.messages,
     taskPlan: state.taskPlan,
   });
-  const model = await loadModel(config, Task.CLASSIFICATION);
 
-  const userMessage = state.messages.findLast(isHumanMessage);
-  if (!userMessage) {
-    throw new Error("No human message found.");
-  }
+  const model = await loadModel(config, Task.CLASSIFICATION);
   const response = await model.invoke([
     {
       role: "system",
@@ -250,6 +251,7 @@ export async function classifyMessage(
     userMessage,
   ]);
 
+  // Get the new prompt, this time passing the `routingResponse` to the prompt.
   const { prompt: routingPrompt, schema } =
     createClassificationPromptAndToolSchema({
       programmerStatus,
