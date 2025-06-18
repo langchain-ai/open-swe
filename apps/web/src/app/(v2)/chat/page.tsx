@@ -18,7 +18,7 @@ export default function ChatPage() {
     threads?.map(threadToDisplayInfo) ?? [];
 
   return (
-    <div className="h-screen overflow-y-hidden bg-black">
+    <div className="bg-background h-screen overflow-y-hidden">
       <Suspense>
         <Toaster />
         <GitHubAppProvider>

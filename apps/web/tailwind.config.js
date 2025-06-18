@@ -1,7 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: "class",
-  // Force dark mode
   future: {
     hoverOnlyWhenSupported: true,
   },

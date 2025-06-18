@@ -39,15 +39,15 @@ export default function AllThreadsPage() {
   const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
       case "running":
-        return "bg-blue-950 text-blue-400";
+        return "dark:bg-blue-950 bg-blue-100 dark:text-blue-400 text-blue-700";
       case "completed":
-        return "bg-green-950 text-green-400";
+        return "dark:bg-green-950 bg-green-100 dark:text-green-400 text-green-700";
       case "failed":
-        return "bg-red-950 text-red-400";
+        return "dark:bg-red-950 bg-red-100 dark:text-red-400 text-red-700";
       case "pending":
-        return "bg-yellow-950 text-yellow-400";
+        return "dark:bg-yellow-950 bg-yellow-100 dark:text-yellow-400 text-yellow-700";
       default:
-        return "bg-gray-800 text-gray-400";
+        return "dark:bg-gray-800 bg-gray-200 dark:text-gray-400 text-gray-700";
     }
   };
 
@@ -69,15 +69,15 @@ export default function AllThreadsPage() {
   const getPRStatusColor = (status: string) => {
     switch (status) {
       case "merged":
-        return "text-purple-400";
+        return "dark:text-purple-400 text-purple-600";
       case "open":
-        return "text-green-400";
+        return "dark:text-green-400 text-green-600";
       case "draft":
-        return "text-gray-400";
+        return "dark:text-gray-400 text-gray-600";
       case "closed":
-        return "text-red-400";
+        return "dark:text-red-400 text-red-600";
       default:
-        return "text-gray-400";
+        return "dark:text-gray-400 text-gray-600";
     }
   };
 
@@ -112,24 +112,26 @@ export default function AllThreadsPage() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-black">
+    <div className="bg-background flex h-screen flex-col">
       {/* Header */}
-      <div className="border-b border-gray-900 bg-black px-4 py-3">
+      <div className="border-border bg-card border-b px-4 py-3">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-gray-600 hover:bg-gray-900 hover:text-gray-400"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground h-6 w-6 p-0"
             onClick={() => router.push("/chat")}
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="font-mono text-sm text-gray-400">All Threads</span>
+            <span className="text-muted-foreground font-mono text-sm">
+              All Threads
+            </span>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-gray-600">
+            <span className="text-muted-foreground text-xs">
               {filteredThreads.length} threads
             </span>
           </div>
@@ -137,20 +139,20 @@ export default function AllThreadsPage() {
       </div>
 
       {/* Search and Filters */}
-      <div className="border-b border-gray-900 bg-gray-950 px-4 py-3">
+      <div className="border-border bg-muted/50 border-b px-4 py-3 dark:bg-gray-950">
         <div className="flex items-center gap-3">
           <div className="relative max-w-md flex-1">
-            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform text-gray-500" />
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
             <Input
               placeholder="Search threads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="border-gray-700 bg-gray-900 pl-10 text-gray-300 placeholder:text-gray-600"
+              className="border-border bg-background text-foreground placeholder:text-muted-foreground pl-10 dark:bg-gray-900"
             />
           </div>
           <div className="flex items-center gap-1">
-            <Filter className="h-4 w-4 text-gray-500" />
-            <span className="mr-2 text-xs text-gray-500">Filter:</span>
+            <Filter className="text-muted-foreground h-4 w-4" />
+            <span className="text-muted-foreground mr-2 text-xs">Filter:</span>
             {(
               [
                 "all",
@@ -166,8 +168,8 @@ export default function AllThreadsPage() {
                 size="sm"
                 className={`h-7 text-xs ${
                   statusFilter === status
-                    ? "bg-gray-700 text-gray-200"
-                    : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    ? "bg-muted text-foreground dark:bg-gray-700"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
                 onClick={() => setStatusFilter(status)}
               >
@@ -176,7 +178,7 @@ export default function AllThreadsPage() {
                   : status.charAt(0).toUpperCase() + status.slice(1)}
                 <Badge
                   variant="secondary"
-                  className="ml-1 bg-gray-800 text-xs text-gray-400"
+                  className="bg-muted/70 text-muted-foreground ml-1 text-xs dark:bg-gray-800"
                 >
                   {statusCounts[status]}
                 </Badge>
@@ -197,12 +199,12 @@ export default function AllThreadsPage() {
                 return (
                   <div key={status}>
                     <div className="mb-3 flex items-center gap-2">
-                      <h2 className="text-base font-semibold text-gray-300 capitalize">
+                      <h2 className="text-foreground text-base font-semibold capitalize">
                         {status} Threads
                       </h2>
                       <Badge
                         variant="secondary"
-                        className="bg-gray-800 text-xs text-gray-400"
+                        className="bg-muted/70 text-muted-foreground text-xs dark:bg-gray-800"
                       >
                         {threads.length}
                       </Badge>
@@ -241,8 +243,8 @@ export default function AllThreadsPage() {
 
           {filteredThreads.length === 0 && (
             <div className="py-12 text-center">
-              <div className="mb-2 text-gray-500">No threads found</div>
-              <div className="text-xs text-gray-600">
+              <div className="text-muted-foreground mb-2">No threads found</div>
+              <div className="text-muted-foreground/70 text-xs">
                 {searchQuery
                   ? "Try adjusting your search query"
                   : "No threads match the selected filter"}
@@ -272,18 +274,18 @@ function ThreadCard({
 }: ThreadCardProps) {
   return (
     <Card
-      className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg"
+      className="border-border bg-card hover:bg-muted cursor-pointer transition-shadow hover:shadow-lg dark:bg-gray-950"
       onClick={onClick}
     >
       <CardHeader className="p-3 pb-2">
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">
-            <CardTitle className="truncate text-sm font-medium text-gray-300">
+            <CardTitle className="text-foreground truncate text-sm font-medium">
               {thread.title}
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">
-              <GitBranch className="h-2 w-2 text-gray-600" />
-              <span className="truncate text-xs text-gray-500">
+              <GitBranch className="text-muted-foreground h-2 w-2" />
+              <span className="text-muted-foreground truncate text-xs">
                 {thread.repository}
               </span>
             </div>
@@ -302,13 +304,13 @@ function ThreadCard({
       <CardContent className="p-3 pt-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600">
+            <span className="text-muted-foreground text-xs">
               {thread.taskCount} tasks
             </span>
-            <span className="text-xs text-gray-600">•</span>
+            <span className="text-muted-foreground text-xs">•</span>
             <div className="flex items-center gap-1">
-              <Calendar className="h-2 w-2 text-gray-600" />
-              <span className="text-xs text-gray-600">
+              <Calendar className="text-muted-foreground h-2 w-2" />
+              <span className="text-muted-foreground text-xs">
                 {thread.lastActivity}
               </span>
             </div>
@@ -318,7 +320,7 @@ function ThreadCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-5 w-5 p-0 text-gray-500 hover:text-gray-300"
+                className="text-muted-foreground hover:text-foreground h-5 w-5 p-0"
                 onClick={(e) => {
                   e.stopPropagation();
                   window.open(thread.githubIssue!.url, "_blank");

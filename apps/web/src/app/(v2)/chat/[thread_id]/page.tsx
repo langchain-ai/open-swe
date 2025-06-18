@@ -51,7 +51,7 @@ export default function ThreadPage({
   };
 
   return (
-    <div className="h-screen bg-black">
+    <div className="bg-background h-screen">
       <ThreadView
         stream={stream}
         displayThread={currentDisplayThread}
