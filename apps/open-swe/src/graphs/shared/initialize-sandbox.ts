@@ -128,7 +128,10 @@ export async function initialize(
       };
       emitStepEvent(basePullLatestChangesAction, "pending");
 
-      const pullChangesRes = await pullLatestChanges(absoluteRepoDir, existingSandbox);
+      const pullChangesRes = await pullLatestChanges(
+        absoluteRepoDir,
+        existingSandbox,
+      );
       if (!pullChangesRes || pullChangesRes.exitCode !== 0) {
         emitStepEvent(
           basePullLatestChangesAction,
