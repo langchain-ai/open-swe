@@ -8,7 +8,7 @@ import {
   FileText,
   ChevronDown,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 // TODO: Replace with import from shared package when path aliasing is fixed
 // Temporary local definition of Step type
@@ -38,6 +38,18 @@ export function InitializeStep({
   const [showReasoning, setShowReasoning] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [collapsed, setCollapsed] = useState(collapseProp ?? false);
+  const wasDone = useRef(false);
+
+  // Auto-collapse when status is 'done' and success is true
+  useEffect(() => {
+    if (status === "done" && success && !collapsed && !wasDone.current) {
+      setCollapsed(true);
+      wasDone.current = true;
+    }
+    if (status !== "done") {
+      wasDone.current = false;
+    }
+  }, [status, success, collapsed]);
 
   const stepStatusIcon = {
     waiting: (
