@@ -8,7 +8,9 @@ interface ActionsRendererProps {
   graphId: string;
   threadId: string;
   runId?: string;
-  setProgrammerSession?: (session: ManagerGraphState["programmerSession"]) => void;
+  setProgrammerSession?: (
+    session: ManagerGraphState["programmerSession"],
+  ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
 }
 
@@ -32,7 +34,7 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
       streamJoined.current = true;
       stream.joinStream(runId).catch(console.error);
     }
-  }, [runId])
+  }, [runId]);
 
   const nonHumanMessages = stream.messages?.filter(
     (m) => !isHumanMessageSDK(m),
@@ -44,11 +46,18 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
       stream.values?.programmerSession &&
       typeof stream.values.programmerSession === "object" &&
       stream.values.programmerSession &&
-      (stream.values.programmerSession as ManagerGraphState["programmerSession"])?.runId &&
-      (stream.values.programmerSession as ManagerGraphState["programmerSession"])?.threadId &&
+      (
+        stream.values
+          .programmerSession as ManagerGraphState["programmerSession"]
+      )?.runId &&
+      (
+        stream.values
+          .programmerSession as ManagerGraphState["programmerSession"]
+      )?.threadId &&
       !programmerSession
     ) {
-      const programmerSession = stream.values.programmerSession as ManagerGraphState["programmerSession"];
+      const programmerSession = stream.values
+        .programmerSession as ManagerGraphState["programmerSession"];
       setProgrammerSession?.(programmerSession);
     }
   }, [stream.values]);

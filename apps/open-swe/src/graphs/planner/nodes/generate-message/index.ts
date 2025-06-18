@@ -1,6 +1,9 @@
 import { loadModel, Task } from "../../../../utils/load-model.js";
 import { createShellTool } from "../../../../tools/index.js";
-import { PlannerGraphState, PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
+import {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@open-swe/shared/open-swe/planner/types";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";

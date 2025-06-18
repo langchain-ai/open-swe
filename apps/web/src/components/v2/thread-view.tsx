@@ -35,7 +35,8 @@ export function ThreadView({
   const [chatInput, setChatInput] = useState("");
   const plannerThreadId = stream.values?.plannerSession?.threadId;
   const plannerRunId = stream.values?.plannerSession?.runId;
-  const [programmerSession, setProgrammerSession] = useState<ManagerGraphState["programmerSession"]>();
+  const [programmerSession, setProgrammerSession] =
+    useState<ManagerGraphState["programmerSession"]>();
 
   if (!stream.messages?.length) {
     return null;
@@ -174,15 +175,17 @@ export function ThreadView({
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 p-3 pt-0">
-                    {plannerThreadId && plannerRunId && PLANNER_ASSISTANT_ID && (
-                      <ActionsRenderer<PlannerGraphState>
-                        graphId={PLANNER_ASSISTANT_ID}
-                        threadId={plannerThreadId}
-                        runId={plannerRunId}
-                        setProgrammerSession={setProgrammerSession}
-                        programmerSession={programmerSession}
-                      />
-                    )}
+                    {plannerThreadId &&
+                      plannerRunId &&
+                      PLANNER_ASSISTANT_ID && (
+                        <ActionsRenderer<PlannerGraphState>
+                          graphId={PLANNER_ASSISTANT_ID}
+                          threadId={plannerThreadId}
+                          runId={plannerRunId}
+                          setProgrammerSession={setProgrammerSession}
+                          programmerSession={programmerSession}
+                        />
+                      )}
                   </CardContent>
                 </Card>
               </TabsContent>

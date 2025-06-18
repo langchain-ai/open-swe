@@ -1,5 +1,8 @@
 import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState, ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import {
+  ManagerGraphState,
+  ManagerGraphUpdate,
+} from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,

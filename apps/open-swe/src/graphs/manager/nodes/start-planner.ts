@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState, ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import {
+  ManagerGraphState,
+  ManagerGraphUpdate,
+} from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,

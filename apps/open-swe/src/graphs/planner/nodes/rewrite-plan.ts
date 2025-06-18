@@ -6,7 +6,10 @@ import { z } from "zod";
 import { tool } from "@langchain/core/tools";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
-import { PlannerGraphState, PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
+import {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@open-swe/shared/open-swe/planner/types";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 
