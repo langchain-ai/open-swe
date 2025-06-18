@@ -3,7 +3,6 @@
 import { Thread } from "@/components/thread";
 import { StreamProvider } from "@/providers/Stream";
 import { ThreadProvider } from "@/providers/Thread";
-import { ArtifactProvider } from "@/components/thread/artifact";
 import { Toaster } from "@/components/ui/sonner";
 import React from "react";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
@@ -15,9 +14,7 @@ export default function DemoPage(): React.ReactNode {
       <GitHubAppProvider>
         <ThreadProvider>
           <StreamProvider>
-            <ArtifactProvider>
-              <Thread />
-            </ArtifactProvider>
+            <Thread />
           </StreamProvider>
         </ThreadProvider>
       </GitHubAppProvider>

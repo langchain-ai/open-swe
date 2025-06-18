@@ -15,7 +15,9 @@ const DEFAULT_ENV = {
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-export function createShellTool(state: GraphState) {
+export function createShellTool(
+  state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+) {
   const shellTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       let sandbox: Sandbox | undefined;

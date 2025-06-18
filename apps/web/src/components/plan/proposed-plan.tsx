@@ -2,11 +2,14 @@ import { PlanViewer } from "./plan-viewer";
 import { Button } from "../ui/button";
 import { useProposedPlan } from "../thread/agent-inbox/hooks/useProposedPlan";
 import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 export function ProposedPlan({
   originalPlanItems,
+  stream,
 }: {
   originalPlanItems: PlanItem[];
+  stream: ReturnType<typeof useStream>;
 }) {
   const {
     planItems,
@@ -14,7 +17,7 @@ export function ProposedPlan({
     changesMade,
     handleResumePlan,
     handleRejectPlan,
-  } = useProposedPlan(originalPlanItems);
+  } = useProposedPlan(originalPlanItems, stream);
 
   if (!planItems.length) return null;
 

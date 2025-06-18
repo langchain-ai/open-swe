@@ -32,12 +32,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import {
-  useArtifactOpen,
-  ArtifactContent,
-  ArtifactTitle,
-  useArtifactContext,
-} from "./artifact";
 import { GitHubOAuthButton } from "../github/github-oauth-button";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import TaskList from "../task-list";
@@ -106,8 +100,6 @@ function ScrollToBottom(props: { className?: string }) {
 
 export function Thread() {
   const { push } = useRouter();
-  const [artifactContext, setArtifactContext] = useArtifactContext();
-  const [artifactOpen, closeArtifact] = useArtifactOpen();
   const { selectedRepository } = useGitHubAppProvider();
   const { getConfig } = useConfigStore();
   const { taskPlan } = useTaskPlan();
@@ -172,8 +164,6 @@ export function Thread() {
 
     if (id === null) {
       setTaskId(null);
-      closeArtifact();
-      setArtifactContext({});
     }
   };
 
@@ -273,9 +263,6 @@ export function Thread() {
 
     const toolMessages = ensureToolCallsHaveResponses(stream.messages);
 
-    const context =
-      Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
-
     const newMessages = [
       ...toolMessages,
       newHumanMessage,
@@ -284,14 +271,12 @@ export function Thread() {
       {
         messages: newMessages,
         internalMessages: newMessages,
-        context,
         targetRepository: selectedRepository,
       },
       {
         streamMode: ["values"],
         optimisticValues: (prev) => ({
           ...prev,
-          context,
           messages: [
             ...(prev.messages ?? []),
             ...toolMessages,
@@ -381,12 +366,7 @@ export function Thread() {
         </motion.div>
       </div>
 
-      <div
-        className={cn(
-          "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
-          artifactOpen && "grid-cols-[3fr_2fr]",
-        )}
-      >
+      <div className="grid w-full grid-cols-[1fr_0fr] transition-all duration-500">
         <motion.div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -518,68 +498,25 @@ export function Thread() {
               contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
                 <>
-                  {(() => {
-                    const filteredMessages = messages.filter(
-                      (m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
-                    );
-                    let inserted = false;
-                    const rendered = filteredMessages.map((message, index) => {
-                      const isFirstHuman =
-                        !inserted &&
-                        message.type === "human" &&
-                        initializeEvents.length > 0;
-                      const msgNode =
-                        message.type === "human" ? (
-                          <HumanMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={isLoading}
-                          />
-                        ) : (
-                          <AssistantMessage
-                            key={message.id || `${message.type}-${index}`}
-                            message={message}
-                            isLoading={isLoading}
-                            handleRegenerate={handleRegenerate}
-                          />
-                        );
-                      if (isFirstHuman) {
-                        inserted = true;
-                        return [
-                          msgNode,
-                          <div
-                            className="mb-6"
-                            key="initialize-step"
-                          >
-                            <InitializeStep
-                              status={initStatus}
-                              steps={steps}
-                              success={allSuccess}
-                              collapse={initStatus === "done" && allSuccess}
-                            />
-                          </div>,
-                        ];
-                      }
-                      return msgNode;
-                    });
-                    // If no human message, render at the top
-                    if (initializeEvents.length > 0 && !inserted) {
-                      rendered.unshift(
-                        <div
-                          className="mb-6"
-                          key="initialize-step"
-                        >
-                          <InitializeStep
-                            status={initStatus}
-                            steps={steps}
-                            success={allSuccess}
-                            collapse={initStatus === "done" && allSuccess}
-                          />
-                        </div>,
-                      );
-                    }
-                    return rendered;
-                  })()}
+                  {messages
+                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+                    .map((message, index) =>
+                      message.type === "human" ? (
+                        <HumanMessage
+                          key={message.id || `${message.type}-${index}`}
+                          message={message}
+                          isLoading={isLoading}
+                        />
+                      ) : (
+                        <AssistantMessage
+                          key={message.id || `${message.type}-${index}`}
+                          message={message}
+                          isLoading={isLoading}
+                          handleRegenerate={handleRegenerate}
+                          thread={stream}
+                        />
+                      ),
+                    )}
                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
                     We need to render it outside of the messages list, since there are no messages to render */}
                   {(hasNoAIOrToolMessages || isLastMessageHuman) &&
@@ -590,6 +527,7 @@ export function Thread() {
                         isLoading={isLoading}
                         handleRegenerate={handleRegenerate}
                         forceRenderInterrupt={true}
+                        thread={stream}
                       />
                     )}
                   {isLoading &&
@@ -723,20 +661,6 @@ export function Thread() {
             />
           </StickToBottom>
         </motion.div>
-        <div className="relative flex flex-col border-l">
-          <div className="absolute inset-0 flex min-w-[30vw] flex-col">
-            <div className="grid grid-cols-[1fr_auto] border-b p-4">
-              <ArtifactTitle className="truncate overflow-hidden" />
-              <button
-                onClick={closeArtifact}
-                className="cursor-pointer"
-              >
-                <XIcon className="size-5" />
-              </button>
-            </div>
-            <ArtifactContent className="relative flex-grow" />
-          </div>
-        </div>
       </div>
 
       <ConfigurationSidebar

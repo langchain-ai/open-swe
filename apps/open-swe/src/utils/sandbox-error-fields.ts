@@ -8,13 +8,12 @@ export function getSandboxErrorFields(
     typeof error !== "object" ||
     !("result" in error) ||
     !error.result ||
-    typeof error.result !== "object" ||
-    !("exitCode" in error.result) ||
-    !("stderr" in error.result) ||
-    !("stdout" in error.result)
+    typeof error.result !== "string" ||
+    !("exitCode" in error) ||
+    typeof error.exitCode !== "number"
   ) {
     return undefined;
   }
 
-  return error.result as unknown as ExecuteResponse;
+  return error as ExecuteResponse;
 }

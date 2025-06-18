@@ -165,10 +165,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useThreads() {
+export function useThreadsContext() {
   const context = useContext(ThreadContext);
   if (context === undefined) {
-    throw new Error("useThreads must be used within a ThreadProvider");
+    throw new Error("useThreadsContext must be used within a ThreadProvider");
   }
   return context;
 }

@@ -54,10 +54,10 @@ export function ActionStep(props: ActionStepProps) {
     switch (props.status) {
       case "loading":
         return (
-          <div className="h-3.5 w-3.5 rounded-full border border-gray-300" />
+          <div className="h-3.5 w-3.5 rounded-full border border-gray-600" />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
+        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />;
       case "done":
         return props.success ? (
           <CheckCircle className="h-3.5 w-3.5 text-green-500" />
@@ -106,13 +106,13 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderIcon = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <Loader2 className="mr-2 h-3.5 w-3.5 text-gray-500" />;
+      return <Loader2 className="mr-2 h-3.5 w-3.5 text-gray-400" />;
     }
 
     return props.actionType === "shell" ? (
-      <Terminal className="mr-2 h-3.5 w-3.5 text-gray-500" />
+      <Terminal className="mr-2 h-3.5 w-3.5 text-gray-400" />
     ) : (
-      <FileCode className="mr-2 h-3.5 w-3.5 text-gray-500" />
+      <FileCode className="mr-2 h-3.5 w-3.5 text-gray-400" />
     );
   };
 
@@ -120,7 +120,7 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderContent = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       return (
-        <span className="text-xs font-normal text-gray-800">
+        <span className="text-xs font-normal text-gray-300">
           Preparing action...
         </span>
       );
@@ -130,18 +130,18 @@ export function ActionStep(props: ActionStepProps) {
       return (
         <div className="flex-1">
           {props.workdir && (
-            <div className="mb-0.5 text-xs font-normal text-gray-500">
+            <div className="mb-0.5 text-xs font-normal text-gray-400">
               {props.workdir}
             </div>
           )}
-          <code className="text-xs font-normal text-gray-800">
+          <code className="text-xs font-normal text-gray-300">
             {props.command.join(" ")}
           </code>
         </div>
       );
     } else {
       return (
-        <code className="flex-1 text-xs font-normal text-gray-800">
+        <code className="flex-1 text-xs font-normal text-gray-300">
           {props.file}
         </code>
       );
@@ -200,36 +200,36 @@ export function ActionStep(props: ActionStepProps) {
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
+    <div className="overflow-hidden rounded-md border border-gray-700">
       {props.reasoningText && (
-        <div className="border-b border-blue-100 bg-blue-50 p-2">
+        <div className="border-b border-blue-800 bg-blue-900/50 p-2">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
+            className="flex items-center gap-1 text-xs font-normal text-blue-400 hover:text-blue-300"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800">
+            <p className="mt-1 text-xs font-normal text-blue-300">
               {props.reasoningText}
             </p>
           )}
         </div>
       )}
 
-      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2">
+      <div className="flex items-center border-b border-gray-700 bg-gray-800 p-2">
         {renderHeaderIcon()}
         {renderHeaderContent()}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-normal text-gray-500">
+          <span className="text-xs font-normal text-gray-400">
             {getStatusText()}
           </span>
           {getStatusIcon()}
           {shouldShowToggle() && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-400 hover:text-gray-300"
             >
               {expanded ? (
                 <ChevronUp className="h-3.5 w-3.5" />
@@ -244,16 +244,16 @@ export function ActionStep(props: ActionStepProps) {
       {renderContent()}
 
       {props.summaryText && props.status === "done" && (
-        <div className="border-t border-green-100 bg-green-50 p-2">
+        <div className="border-t border-green-800 bg-green-900/50 p-2">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800"
+            className="flex items-center gap-1 text-xs font-normal text-green-400 hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-800">
+            <p className="mt-1 text-xs font-normal text-green-300">
               {props.summaryText}
             </p>
           )}

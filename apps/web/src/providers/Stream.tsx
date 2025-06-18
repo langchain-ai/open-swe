@@ -15,7 +15,7 @@ import {
 } from "@langchain/langgraph-sdk/react-ui";
 import { useQueryState } from "nuqs";
 import { LangGraphLogoSVG } from "@/components/icons/langgraph";
-import { useThreads } from "./Thread";
+import { useThreadsContext } from "./Thread";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { Copy, CopyCheck, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
@@ -57,8 +57,8 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const { refreshThreads } = useThreads();
   const [customEvents, setCustomEvents] = useState<CustomEvent[]>([]);
+  const { refreshThreads } = useThreadsContext();
   const streamValue = useTypedStream({
     apiUrl,
     assistantId,

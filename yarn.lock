@@ -2248,7 +2248,7 @@ __metadata:
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-cli": latest
-    "@langchain/langgraph-sdk": ^0.0.83
+    "@langchain/langgraph-sdk": ^0.0.84
     "@langchain/openai": ^0.5.10
     "@octokit/rest": ^22.0.0
     "@open-swe/shared": "*"

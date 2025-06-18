@@ -12,21 +12,21 @@ export const PLAN_PROMPT = `## Completed Tasks
 
 /**
  * Formats a plan for use in a prompt.
- * @param plan The plan to format
+ * @param taskPlan The plan to format
  * @param options Options for formatting the plan
  * @param options.useLastCompletedTask Whether to use the last completed task as the current task
  * @param options.includeSummaries Whether to include summaries of completed tasks
  * @returns The formatted plan
  */
 export function formatPlanPrompt(
-  plan: PlanItem[],
+  taskPlan: PlanItem[],
   options?: {
     useLastCompletedTask?: boolean;
     includeSummaries?: boolean;
   },
 ): string {
-  let completedTasks = plan.filter((p) => p.completed);
-  let remainingTasks = plan.filter((p) => !p.completed);
+  let completedTasks = taskPlan.filter((p) => p.completed);
+  let remainingTasks = taskPlan.filter((p) => !p.completed);
   let currentTask: PlanItem | undefined;
   if (options?.useLastCompletedTask) {
     currentTask = completedTasks.sort((a, b) => a.index - b.index)[0];
@@ -72,8 +72,8 @@ export function formatPlanPrompt(
     );
 }
 
-export function formatPlanPromptWithSummaries(plan: PlanItem[]): string {
-  return plan
+export function formatPlanPromptWithSummaries(taskPlan: PlanItem[]): string {
+  return taskPlan
     .map(
       (p) =>
         `<${p.completed ? "completed-" : ""}task index="${p.index}">\n${p.plan}\n  <task-summary>\n${p.summary || "No task summary found"}\n  </task-summary>\n</${p.completed ? "completed-" : ""}task>`,

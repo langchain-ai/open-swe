@@ -7,6 +7,7 @@ export enum Task {
   ACTION_GENERATOR = "actionGenerator",
   PROGRESS_PLAN_CHECKER = "progressPlanChecker",
   SUMMARIZER = "summarizer",
+  CLASSIFICATION = "classification",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
@@ -28,6 +29,10 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
   },
   [Task.SUMMARIZER]: {
     modelName: "anthropic:claude-sonnet-4-0",
+    temperature: 0,
+  },
+  [Task.CLASSIFICATION]: {
+    modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
 };
@@ -55,7 +60,13 @@ export async function loadModel(config: GraphConfig, task: Task) {
   }
 
   const thinkingBudgetTokens = 5000;
-  const maxTokens = thinkingBudgetTokens * 4;
+  const thinkingMaxTokens = thinkingBudgetTokens * 4;
+
+  let maxTokens = config.configurable?.maxTokens ?? 10_000;
+  if (modelName.includes("claude-3-5-haiku")) {
+    // The max tokens for haiku is 8192
+    maxTokens = maxTokens > 8_192 ? 8_192 : maxTokens;
+  }
 
   const model = await initChatModel(modelName, {
     modelProvider,
@@ -63,9 +74,9 @@ export async function loadModel(config: GraphConfig, task: Task) {
     ...(thinkingModel && modelProvider === "anthropic"
       ? {
           thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
-          maxTokens,
+          maxTokens: thinkingMaxTokens,
         }
-      : { maxTokens: config.configurable?.maxTokens ?? 10_000 }),
+      : { maxTokens }),
   });
 
   return model;

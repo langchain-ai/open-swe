@@ -1,7 +1,9 @@
 {
   "node_version": "20",
   "graphs": {
-    "open_swe": "./apps/open-swe/src/index.ts:graph"
+    "programmer": "./apps/open-swe/src/graphs/programmer/index.ts:graph",
+    "planner": "./apps/open-swe/src/graphs/planner/index.ts:graph",
+    "manager": "./apps/open-swe/src/graphs/manager/index.ts:graph"
   },
   "env": "./apps/open-swe/.env",
   "dependencies": ["./apps/open-swe"],

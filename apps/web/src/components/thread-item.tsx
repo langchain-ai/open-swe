@@ -2,7 +2,7 @@
 import { memo } from "react";
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
 import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
-import { useThreads } from "@/providers/Thread";
+import { useThreadsContext } from "@/providers/Thread";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
 import { GitHubSVG } from "./icons/github";
@@ -46,7 +46,7 @@ export const ThreadItem = memo(function ThreadItem({
   className,
 }: ThreadItemProps) {
   const [threadId] = useQueryState("threadId");
-  const { recentlyUpdatedThreads } = useThreads();
+  const { recentlyUpdatedThreads } = useThreadsContext();
   const isSelected = thread.thread_id === threadId;
   const isSidebar = variant === "sidebar";
   const isRecentlyUpdated = recentlyUpdatedThreads.has(thread.thread_id);

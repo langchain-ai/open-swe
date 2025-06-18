@@ -2,11 +2,13 @@ import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { useEffect, useState } from "react";
 import { PlanItem } from "@open-swe/shared/open-swe/types";
 import { convertPlanItemsToInterruptString } from "@/lib/plan-utils";
-import { useStreamContext } from "@/providers/Stream";
 import { PLAN_INTERRUPT_ACTION_TITLE } from "@open-swe/shared/constants";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
-export function useProposedPlan(originalPlanItems: PlanItem[]) {
-  const stream = useStreamContext();
+export function useProposedPlan(
+  originalPlanItems: PlanItem[],
+  stream: ReturnType<typeof useStream>,
+) {
   const [planItems, setPlanItems] = useState<PlanItem[]>(originalPlanItems);
   const [changesMade, setChangesMade] = useState(false);
 
