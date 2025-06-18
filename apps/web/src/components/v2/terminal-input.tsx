@@ -4,7 +4,7 @@ import type React from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Dispatch, SetStateAction, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -40,6 +40,7 @@ export function TerminalInput({
   const [message, setMessage] = useState("");
   const { getConfig } = useConfigStore();
   const { selectedRepository } = useGitHubAppProvider();
+  const [loading, setLoading] = useState(false);
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -48,6 +49,9 @@ export function TerminalInput({
     threadId: null,
     onThreadId: (id) => {
       push(`/chat/${id}`);
+      setLoading(false);
+      setMessage("");
+      setContentBlocks([]);
     },
   });
 
@@ -59,6 +63,7 @@ export function TerminalInput({
       });
       return;
     }
+    setLoading(true);
     const trimmedMessage = message.trim();
     if (trimmedMessage.length > 0 || contentBlocks.length > 0) {
       const newHumanMessage = new HumanMessage({
@@ -90,8 +95,6 @@ export function TerminalInput({
           },
         },
       );
-      setMessage("");
-      setContentBlocks([]);
     }
   };
 
@@ -136,7 +139,7 @@ export function TerminalInput({
           size="sm"
           className="h-7 w-7 self-end bg-gray-700 p-0 hover:bg-gray-600"
         >
-          <Send className="h-3 w-3" />
+          {loading ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
         </Button>
       </div>
 
