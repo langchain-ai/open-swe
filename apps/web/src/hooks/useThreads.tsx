@@ -45,7 +45,7 @@ export function useThreads<State extends Record<string, any>>(
       return null;
     } finally {
       setThreadsLoading(false);
-    } 
+    }
   }, [apiUrl]);
 
   useEffect(() => {

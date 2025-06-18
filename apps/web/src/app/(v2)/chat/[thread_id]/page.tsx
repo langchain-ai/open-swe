@@ -34,11 +34,11 @@ export default function ThreadPage({
   const thread = threads?.find((t) => t.thread_id === thread_id);
 
   const handleBackToHome = () => {
-    router.push("/chat")
-  }
+    router.push("/chat");
+  };
 
   if (!thread || threadsLoading) {
-    return <ThreadViewLoading onBackToHome={handleBackToHome} />
+    return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
   // Convert all threads to display format
