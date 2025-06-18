@@ -9,8 +9,8 @@ import { createLogger, LogLevel } from "../logger.js";
 
 const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 
-export const TASK_OPEN_TAG = "<oap-do-not-edit-task-plan>";
-export const TASK_CLOSE_TAG = "</oap-do-not-edit-task-plan>";
+export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";
+export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
 
 function typeNarrowTaskPlan(taskPlan: unknown): taskPlan is TaskPlan {
   return !!(
