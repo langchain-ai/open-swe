@@ -8,11 +8,11 @@ export function useTaskPlan() {
 
   useEffect(() => {
     const currentPlanStr = JSON.stringify(taskPlan, null, 2);
-    const newPlanStr = JSON.stringify(values?.plan, null, 2);
+    const newPlanStr = JSON.stringify(values?.taskPlan, null, 2);
     if (currentPlanStr !== newPlanStr) {
-      setTaskPlan(values?.plan);
+      setTaskPlan(values?.taskPlan);
     }
-  }, [values?.plan]);
+  }, [values?.taskPlan]);
 
   return {
     taskPlan,

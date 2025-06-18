@@ -6,6 +6,7 @@ import { useThreads } from "@/hooks/useThreads";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Toaster } from "@/components/ui/sonner";
+import { Suspense } from "react";
 
 export default function ChatPage() {
   const { threads } = useThreads<GraphState>(
@@ -18,10 +19,12 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen overflow-y-hidden bg-black">
-      <Toaster />
-      <GitHubAppProvider>
-        <DefaultView threads={displayThreads} />
-      </GitHubAppProvider>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Toaster />
+        <GitHubAppProvider>
+          <DefaultView threads={displayThreads} />
+        </GitHubAppProvider>
+      </Suspense>
     </div>
   );
 }

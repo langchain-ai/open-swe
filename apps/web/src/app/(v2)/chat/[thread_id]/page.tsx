@@ -16,7 +16,7 @@ interface ThreadPageProps {
 export default function ThreadPage({
   params,
 }: {
-  params: React.Usable<ThreadPageProps>;
+  params: Promise<ThreadPageProps>;
 }) {
   const router = useRouter();
   const { thread_id } = React.use(params);
@@ -28,8 +28,6 @@ export default function ThreadPage({
   });
 
   const { threads } = useThreads<GraphState>();
-
-  console.log("stream.values", stream.values);
 
   // Find the thread by ID
   const thread = threads?.find((t) => t.thread_id === thread_id);
