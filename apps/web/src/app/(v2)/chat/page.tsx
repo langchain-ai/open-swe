@@ -19,7 +19,7 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen overflow-y-hidden bg-black">
-      <Suspense fallback={<div>Loading...</div>}>
+      <Suspense>
         <Toaster />
         <GitHubAppProvider>
           <DefaultView threads={displayThreads} />
