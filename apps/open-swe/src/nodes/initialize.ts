@@ -40,7 +40,6 @@ export async function initialize(
   const branchName = state.branchName || getBranchName(config);
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
-  // Helper to emit events and log errors in dev
   function emitEvent(event: CustomEvent) {
     try {
       config.writer?.(event);
@@ -49,10 +48,7 @@ export async function initialize(
       logger.error("[DEV] Failed to emit custom event", { event, err });
     }
   }
-
-  // If we are NOT resuming a sandbox, we know 'Resuming Sandbox' and 'Pulling latest changes' are not needed. Emit 'skipped' events for both as early as possible.
   if (!sandboxSessionId) {
-    // Resuming Sandbox is not needed
     emitEvent({
       nodeId: INITIALIZE_NODE_ID,
       createdAt: new Date().toISOString(),
@@ -64,7 +60,6 @@ export async function initialize(
         repo: repoName,
       },
     });
-    // Pulling latest changes is not needed
     emitEvent({
       nodeId: INITIALIZE_NODE_ID,
       createdAt: new Date().toISOString(),
@@ -80,7 +75,6 @@ export async function initialize(
 
   if (sandboxSessionId) {
     try {
-      // Resuming Sandbox
       const resumeSandboxActionId = uuidv4();
       const baseResumeSandboxAction: CustomEvent = {
         nodeId: INITIALIZE_NODE_ID,
@@ -102,7 +96,6 @@ export async function initialize(
           createdAt: new Date().toISOString(),
           data: { ...baseResumeSandboxAction.data, status: "success" },
         });
-        // Pulling latest changes
         const pullLatestChangesActionId = uuidv4();
         const basePullLatestChangesAction: CustomEvent = {
           nodeId: INITIALIZE_NODE_ID,
@@ -136,7 +129,6 @@ export async function initialize(
             },
           });
         }
-        // Generating codebase tree
         const generateCodebaseTreeActionId = uuidv4();
         const baseGenerateCodebaseTreeAction: CustomEvent = {
           nodeId: INITIALIZE_NODE_ID,
@@ -187,7 +179,6 @@ export async function initialize(
         });
       }
     } catch (_) {
-      // TODO remove after dev
       logger.error("[DEV] Failed to get sandbox session", _);
     }
   }

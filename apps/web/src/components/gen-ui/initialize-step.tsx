@@ -22,6 +22,7 @@ type InitializeStepProps = {
   steps?: Step[];
   reasoningText?: string;
   summaryText?: string;
+  collapse?: boolean;
 };
 
 export function InitializeStep({
@@ -30,6 +31,7 @@ export function InitializeStep({
   steps,
   reasoningText,
   summaryText,
+  collapse,
 }: InitializeStepProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
@@ -73,7 +75,7 @@ export function InitializeStep({
 
   return (
     <div className="overflow-hidden rounded-md border border-gray-200">
-      {reasoningText && (
+      {!collapse && reasoningText && (
         <div className="border-b border-blue-100 bg-blue-50 p-2">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
@@ -98,7 +100,7 @@ export function InitializeStep({
         {getStatusIcon()}
       </div>
 
-      {steps && (
+      {!collapse && steps && (
         <div className="p-2">
           <ul className="space-y-2">
             {steps
@@ -131,7 +133,7 @@ export function InitializeStep({
         </div>
       )}
 
-      {summaryText && status === "done" && (
+      {!collapse && summaryText && status === "done" && (
         <div className="border-t border-green-100 bg-green-50 p-2">
           <button
             onClick={() => setShowSummary(!showSummary)}

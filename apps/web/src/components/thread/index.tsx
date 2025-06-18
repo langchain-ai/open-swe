@@ -165,11 +165,6 @@ export function Thread() {
   const isLoading = stream.isLoading;
   const customEvents = stream.customEvents;
 
-  // TODO: DELETE BEFORE OPENING PR
-  useEffect(() => {
-    console.log(customEvents);
-  }, [customEvents]);
-
   const lastError = useRef<string | undefined>(undefined);
 
   const setThreadId = (id: string | null) => {
@@ -523,20 +518,12 @@ export function Thread() {
               contentClassName="pt-8 pb-16  max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
                 <>
-                  {/* Always show expanded InitializeStep at the top if there are any initialize events */}
-                  {initializeEvents.length > 0 && (
-                    <div className="mb-6">
-                      <InitializeStep
-                        status={initStatus}
-                        steps={steps}
-                        success={allSuccess}
-                      />
-                    </div>
-                  )}
-                  {messages
-                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                    .map((message, index) =>
-                      message.type === "human" ? (
+                  {(() => {
+                    const filteredMessages = messages.filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX));
+                    let inserted = false;
+                    const rendered = filteredMessages.map((message, index) => {
+                      const isFirstHuman = !inserted && message.type === "human" && initializeEvents.length > 0;
+                      const msgNode = message.type === "human" ? (
                         <HumanMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
@@ -549,8 +536,38 @@ export function Thread() {
                           isLoading={isLoading}
                           handleRegenerate={handleRegenerate}
                         />
-                      ),
-                    )}
+                      );
+                      if (isFirstHuman) {
+                        inserted = true;
+                        return [
+                          msgNode,
+                          <div className="mb-6" key="initialize-step">
+                            <InitializeStep
+                              status={initStatus}
+                              steps={steps}
+                              success={allSuccess}
+                              collapse={initStatus === "done" && allSuccess}
+                            />
+                          </div>,
+                        ];
+                      }
+                      return msgNode;
+                    });
+                    // If no human message, render at the top
+                    if (initializeEvents.length > 0 && !inserted) {
+                      rendered.unshift(
+                        <div className="mb-6" key="initialize-step">
+                          <InitializeStep
+                            status={initStatus}
+                            steps={steps}
+                            success={allSuccess}
+                            collapse={initStatus === "done" && allSuccess}
+                          />
+                        </div>
+                      );
+                    }
+                    return rendered;
+                  })()}
                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
                     We need to render it outside of the messages list, since there are no messages to render */}
                   {(hasNoAIOrToolMessages || isLastMessageHuman) &&
@@ -563,7 +580,7 @@ export function Thread() {
                         forceRenderInterrupt={true}
                       />
                     )}
-                  {isLoading && !firstTokenReceived && (
+                  {isLoading && !firstTokenReceived && initializeEvents.length === 0 && (
                     <AssistantMessageLoading />
                   )}
                 </>
