@@ -22,6 +22,7 @@ import {
   getRemainingPlanItems,
 } from "../../../utils/current-task.js";
 import { ToolMessage } from "@langchain/core/messages";
+import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -143,6 +144,15 @@ Once you've determined the status of the current task, call the \`set_task_statu
     state.taskPlan,
     getActiveTask(state.taskPlan).id,
     currentTask.index,
+  );
+  // Update the github issue to reflect this task as completed.
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    updatedPlanTasks,
   );
 
   // This should in theory never happen, but ensure we route properly if it does.

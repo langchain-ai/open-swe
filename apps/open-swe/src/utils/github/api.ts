@@ -340,12 +340,3 @@ export async function createIssueComment({
     return null;
   }
 }
-
-export function getMessageContentFromIssue(
-  issue: GitHubIssue | GitHubIssueComment,
-): string {
-  if ("title" in issue) {
-    return `[original issue]\n**${issue.title}**\n${issue.body}`;
-  }
-  return `[issue comment]\n${issue.body}`;
-}

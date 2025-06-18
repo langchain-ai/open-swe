@@ -21,6 +21,7 @@ import {
   getActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
 import { getCompletedPlanItems } from "../../../utils/current-task.js";
+import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -138,6 +139,15 @@ export async function summarizeTaskSteps(
     getActiveTask(state.taskPlan).id,
     taskSummary.planItemIndex,
     taskSummary.summary,
+  );
+  // Update the github issue to include the new task summary.
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    updatedTaskPlan,
   );
 
   const removedMessages = removeLastTaskMessages(state.internalMessages);

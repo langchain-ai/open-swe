@@ -18,12 +18,15 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { getMessageString } from "../../../utils/message/content.js";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { Command, END } from "@langchain/langgraph";
-import { extractIssueTitleAndContentFromMessage } from "../utils/github-issue.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createIssue, createIssueComment } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
+import {
+  extractIssueTitleAndContentFromMessage,
+  formatContentForIssueBody,
+} from "../../../utils/github/issue-messages.js";
 
 // This should only be included in the state when the programmer is running.
 const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
@@ -264,7 +267,7 @@ export async function classifyMessage(
       owner: state.targetRepository.owner,
       repo: state.targetRepository.repo,
       title,
-      body,
+      body: formatContentForIssueBody(body),
       githubAccessToken,
     });
     if (!newIssue) {
