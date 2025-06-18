@@ -37,7 +37,7 @@ export default function ThreadPage({
     router.push("/chat");
   };
 
-  if (!thread || threadsLoading || !threadsLoading) {
+  if (!thread || threadsLoading) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
