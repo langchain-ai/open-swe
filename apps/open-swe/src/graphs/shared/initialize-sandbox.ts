@@ -27,7 +27,7 @@ type InitializeSandboxState = {
   codebaseTree?: string;
 };
 
-export async function initialize(
+export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
