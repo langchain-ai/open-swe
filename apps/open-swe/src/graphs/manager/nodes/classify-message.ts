@@ -31,6 +31,9 @@ import {
   formatContentForIssueBody,
 } from "../../../utils/github/issue-messages.js";
 
+// This should not be shown to the user if the programmer is running
+const PLAN_ROUTING_OPTION = `- plan: Call this route if the user's message is a complete request which you can use to kickoff a new planning session (only if one is not already running), or it's an entirely new request which you should also start a new planning session for (only if both the planner and programmer are not running). You may also call this route if the planner is running, and the user's message contains updated instructions, or additional context which may be relevant/helpful to the planner.`;
+
 // This should only be included in the state when the programmer is running.
 const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
 
@@ -48,13 +51,16 @@ The following is the conversation history between the user and you. This does no
 {CONVERSATION_HISTORY}
 \n\n`;
 
+// This prompt does not generate the route, it only generates the response.
 const CLASSIFICATION_SYSTEM_PROMPT = `# Identity
-You're a highly intelligent AI software engineering manager, tasked with identifying the user's intent, and responding to their message, plus routing it to the proper AI assistant.
+You're a highly intelligent AI software engineering manager, tasked with identifying the user's intent, and responding to their message, and determining how you'll route it to the proper AI assistant.
 Your overall system is an AI coding agent, tasked with completing user's requests to improve their codebase.
 
 # Instructions
 Carefully examine the user's message, along with the conversation history provided (or none, if it's the first message they sent) to you in this system message below.
-Using their most recent request, the conversation history, and the current status of your two AI assistants (programmer and planner), generate a response to send to the user, along with the route you should take to handle the request.
+Using their most recent request, the conversation history, and the current status of your two AI assistants (programmer and planner), generate a response to send to the user.
+Below you're provided with routes to take given the user's request. You should not select a route in this step, but your response should make it clear which route you'll take. (the routing will handle in a step which is not exposed to the user).
+Ensure your response is clear, and concise. You should not explicitly state which route you're taking, but it should be obvious to anyone who also knows what routes are available.
 Although you're only supposed to classify & respond to the latest message, this does not mean you should look at it in isolation. You should consider the conversation history as a whole, and the current status of your two AI assistants (programmer and planner) to determine how to respond to the user's new message.
 
 # Assistant Statuses
@@ -65,13 +71,46 @@ The programmer's current status is: {PROGRAMMER_STATUS}
 {CONVERSATION_HISTORY_PROMPT}
 
 # Routing Options
-Based on all of the context provided above, determine how to respond to the user's new message, and how to route their request.
+Based on all of the context provided above, generate a response to send to the user, including messaging about the route you'll select from the below options in your next step.
 Your routing options are:
 - no_op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
-- plan: Call this route if the user's message is a complete request which you can use to kickoff a new planning session (only if one is not already running), or it's an entirely new request which you should also start a new planning session for (only if both the planner and programmer are not running). You may also call this route if the planner is running, and the user's message contains updated instructions, or additional context which may be relevant/helpful to the planner.
+{PLAN_ROUTING_OPTION}
 {CREATE_ISSUE_ROUTING_OPTION}
 {CODE_ROUTING_OPTION}
+
+# Response
+Your response should be clear, concise and straight to the point. Do NOT include any additional context, such as an idea for how to implement their request.
+You're only acting as a manager, and thus you should only respond with a short message about which route you'll take. You do not need to explain why you're taking that route.
+Your response will not exceed two sentences. You will be rewarded for being concise.
 `;
+
+// This prompt uses the response to generate the route.
+const ROUTING_SYSTEM_PROMPT = `# Identity
+You're a highly intelligent AI software engineering manager, tasked with identifying the user's intent, and responding to their message, plus routing it to the proper AI assistant.
+Your overall system is an AI coding agent, tasked with completing user's requests to improve their codebase.
+
+# Instructions
+Carefully examine the user's message,  the conversation history provided (or none, if it's the first message they sent) to you in this system message below, and the response you just generated in the previous step.
+Using their most recent request, and your response to the user (which will contain context about how you should route the user's message), and the current status of your two AI assistants (programmer and planner), call the \`respond_and_route\` tool to route the user's response.
+
+# Assistant Statuses
+The planner's current status is: {PLANNER_STATUS}
+The programmer's current status is: {PROGRAMMER_STATUS}
+
+{TASK_PLAN_PROMPT}
+{CONVERSATION_HISTORY_PROMPT}
+
+# Response
+This is the response you just generated which was sent to the user. It will include context about how/what route you should take. Pay careful attention to this response, and ensure you're following it.
+{ROUTING_RESPONSE}
+
+# Routing Options
+Based on all of the context provided above, generate a response to send to the user, including messaging about the route you'll select from the below options in your next step.
+Your routing options are:
+- no_op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
+{PLAN_ROUTING_OPTION}
+{CREATE_ISSUE_ROUTING_OPTION}
+{CODE_ROUTING_OPTION}`;
 
 const baseClassificationSchema = z.object({
   response: z
@@ -80,7 +119,7 @@ const baseClassificationSchema = z.object({
       "The response to send to the user. This should be clear, concise, and include any additional context the user may need to know about how/why you're handling their new message.",
     ),
   route: z
-    .enum(["no_op", "plan"])
+    .enum(["no_op"])
     .describe("The route to take to handle the user's new message."),
 });
 
@@ -89,6 +128,7 @@ const createClassificationPromptAndToolSchema = (inputs: {
   plannerStatus: ThreadStatus | "not_started";
   messages: BaseMessage[];
   taskPlan: TaskPlan;
+  routingResponse?: string;
 }): {
   prompt: string;
   schema: z.ZodTypeAny;
@@ -110,18 +150,26 @@ const createClassificationPromptAndToolSchema = (inputs: {
         )
       : null;
 
-  const showCodeRoutingOption = inputs.programmerStatus === "busy";
+  const programmerIsRunning = inputs.programmerStatus === "busy";
   const showCreateIssueRoutingOption =
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
-  const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
-    "{PROGRAMMER_STATUS}",
-    inputs.programmerStatus,
-  )
+
+  const systemPrompt = inputs.routingResponse
+    ? ROUTING_SYSTEM_PROMPT
+    : CLASSIFICATION_SYSTEM_PROMPT;
+
+  const prompt = systemPrompt
+    .replaceAll("{PROGRAMMER_STATUS}", inputs.programmerStatus)
     .replaceAll("{PLANNER_STATUS}", inputs.plannerStatus)
     .replaceAll(
       "{CODE_ROUTING_OPTION}",
-      showCodeRoutingOption ? CODE_ROUTING_OPTION : "",
+      programmerIsRunning ? CODE_ROUTING_OPTION : "",
+    )
+    // Only show the planner option if the programmer is not running
+    .replaceAll(
+      "{PLAN_ROUTING_OPTION}",
+      !programmerIsRunning ? PLAN_ROUTING_OPTION : "",
     )
     .replaceAll(
       "{CREATE_ISSUE_ROUTING_OPTION}",
@@ -133,14 +181,15 @@ const createClassificationPromptAndToolSchema = (inputs: {
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
       formattedConversationHistoryPrompt ?? "",
-    );
+    )
+    .replaceAll("{ROUTING_RESPONSE}", inputs.routingResponse ?? "");
 
   const schema = baseClassificationSchema.extend({
     route: z
       .enum([
         "no_op",
-        "plan",
-        ...(showCodeRoutingOption ? ["code"] : []),
+        ...(programmerIsRunning ? ["code"] : []),
+        ...(!programmerIsRunning ? ["plan"] : []),
         ...(showCreateIssueRoutingOption ? ["create_new_issue"] : []),
       ])
       .describe("The route to take to handle the user's new message."),
@@ -181,13 +230,34 @@ export async function classifyMessage(
   const programmerStatus = programmerThread?.status ?? "not_started";
   const plannerStatus = plannerThread?.status ?? "not_started";
 
-  const { prompt, schema } = createClassificationPromptAndToolSchema({
+  const { prompt: responsePrompt } = createClassificationPromptAndToolSchema({
     programmerStatus,
     plannerStatus,
     messages: state.messages,
     taskPlan: state.taskPlan,
   });
   const model = await loadModel(config, Task.CLASSIFICATION);
+
+  const userMessage = state.messages.findLast(isHumanMessage);
+  if (!userMessage) {
+    throw new Error("No human message found.");
+  }
+  const response = await model.invoke([
+    {
+      role: "system",
+      content: responsePrompt,
+    },
+    userMessage,
+  ]);
+
+  const { prompt: routingPrompt, schema } =
+    createClassificationPromptAndToolSchema({
+      programmerStatus,
+      plannerStatus,
+      messages: state.messages,
+      taskPlan: state.taskPlan,
+      routingResponse: getMessageContentString(response.content),
+    });
   const respondAndRouteTool = {
     name: "respond_and_route",
     description: "Respond to the user's message and determine how to route it.",
@@ -198,19 +268,17 @@ export async function classifyMessage(
     parallel_tool_calls: false,
   });
 
-  const userMessage = state.messages.findLast(isHumanMessage);
-  if (!userMessage) {
-    throw new Error("No human message found.");
-  }
-  const response = await modelWithTools.invoke([
-    {
-      role: "system",
-      content: prompt,
-    },
-    userMessage,
-  ]);
+  const toolCallingResponse = await modelWithTools
+    .withConfig({ tags: ["nostream"] })
+    .invoke([
+      {
+        role: "system",
+        content: routingPrompt,
+      },
+      userMessage,
+    ]);
 
-  const toolCall = response.tool_calls?.[0];
+  const toolCall = toolCallingResponse.tool_calls?.[0];
   if (!toolCall) {
     throw new Error("No tool call found.");
   }
@@ -243,7 +311,7 @@ export async function classifyMessage(
   const { githubAccessToken } = getGitHubTokensFromConfig(config);
   let githubIssueId = state.githubIssueId;
 
-  const newMessages: BaseMessage[] = [];
+  const newMessages: BaseMessage[] = [response];
 
   // If it's not a no_op, ensure there is a GitHub issue with the user's request.
   if (!githubIssueId) {
