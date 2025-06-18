@@ -9,7 +9,7 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import { use } from "react";
+import { use, useLayoutEffect } from "react";
 
 interface ThreadPageProps {
   thread_id: string;
@@ -28,6 +28,18 @@ export default function ThreadPage({
     threadId: thread_id,
     reconnectOnMount: true,
   });
+
+  // Prevent body scrolling when this component is mounted
+  useLayoutEffect(() => {
+    // Save original overflow style
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    // Prevent scrolling on body
+    document.body.style.overflow = "hidden";
+    // Restore original overflow style when component unmounts
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
 
   const { threads, threadsLoading } = useThreads<GraphState>(
     process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
@@ -49,7 +61,7 @@ export default function ThreadPage({
   const currentDisplayThread = threadToDisplayInfo(thread);
 
   return (
-    <div className="bg-background h-screen">
+    <div className="bg-background h-screen w-screen">
       <ThreadView
         stream={stream}
         displayThread={currentDisplayThread}
