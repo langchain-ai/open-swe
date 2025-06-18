@@ -3,7 +3,9 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
-export function getThreadTitle(thread: Thread<GraphState>): string {
+export function getThreadTitle<State extends Record<string, any> = GraphState>(
+  thread: Thread<State>,
+): string {
   const messages = thread?.values?.messages;
   if (!messages?.length || !messages[0]?.content) {
     return `Thread ${thread.thread_id.substring(0, 8)}`;
@@ -12,7 +14,9 @@ export function getThreadTitle(thread: Thread<GraphState>): string {
   return threadTitle;
 }
 
-export function getThreadTasks(thread: Thread<GraphState>): {
+export function getThreadTasks<State extends Record<string, any> = GraphState>(
+  thread: Thread<State>,
+): {
   totalTasks: number;
   completedTasks: number;
 } {

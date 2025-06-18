@@ -11,12 +11,6 @@ import {
   Edit,
   Trash2,
   Plus,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  Clock,
-  Terminal,
-  FileText,
   Send,
   User,
   Bot,
@@ -24,12 +18,16 @@ import {
 import { Message, Thread } from "@langchain/langgraph-sdk";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { isHumanMessageSDK } from "@/lib/langchain-messages";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadDisplayInfo } from "./types";
+import { useStream } from "@langchain/langgraph-sdk/react";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { ActionsRenderer } from "./actions-renderer";
 
 interface ThreadViewProps {
-  thread: Thread<GraphState>;
+  stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadDisplayInfo;
   allDisplayThreads: ThreadDisplayInfo[];
   onThreadSelect: (thread: ThreadDisplayInfo) => void;
@@ -37,47 +35,17 @@ interface ThreadViewProps {
 }
 
 export function ThreadView({
-  thread,
+  stream,
   displayThread,
   allDisplayThreads,
   onThreadSelect,
   onBackToHome,
 }: ThreadViewProps) {
-  const [newPlanItem, setNewPlanItem] = useState("");
-  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
   const [chatInput, setChatInput] = useState("");
 
-  const chatMessages = thread.values.messages.map((msg, index) => ({
-    id: `msg-${index}`,
-    // TODO: Fix this. we should be using `stream.messages` instead
-    role: isHumanMessageSDK(msg as unknown as Message)
-      ? ("user" as const)
-      : ("assistant" as const),
-    content: msg.content,
-  }));
-
-  const currentTask =
-    thread.values.taskPlan.tasks[thread.values.taskPlan.activeTaskIndex];
-  const currentRevision =
-    currentTask?.planRevisions[currentTask.activeRevisionIndex];
-  const planItems =
-    currentRevision?.plans.map((plan) => ({
-      id: `plan-${plan.index}`,
-      step: plan.index + 1,
-      title: plan.plan,
-      status: plan.completed ? ("completed" as const) : ("proposed" as const),
-      summary: plan.summary,
-    })) || [];
-
-  const toggleStepExpansion = (stepId: string) => {
-    const newExpanded = new Set(expandedSteps);
-    if (newExpanded.has(stepId)) {
-      newExpanded.delete(stepId);
-    } else {
-      newExpanded.add(stepId);
-    }
-    setExpandedSteps(newExpanded);
-  };
+  if (!stream.messages?.length) {
+    return null;
+  }
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -87,33 +55,8 @@ export function ThreadView({
     }
   };
 
-  // TODO: Replace with actual status
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "preparing":
-      case "executing":
-      case "applying":
-        return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;
-      case "completed":
-        return <CheckCircle className="h-4 w-4 text-green-400" />;
-      case "failed":
-        return <XCircle className="h-4 w-4 text-red-400" />;
-      default:
-        return <Clock className="h-4 w-4 text-gray-500" />;
-    }
-  };
-
-  // TODO: Replace with actual type
-  const getStepIcon = (type: string) => {
-    switch (type) {
-      case "command":
-        return <Terminal className="h-4 w-4 text-gray-500" />;
-      case "file_edit":
-        return <FileText className="h-4 w-4 text-gray-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-gray-500" />;
-    }
-  };
+  const plannerThreadId = stream.values?.plannerThreadId;
+  console.log(plannerThreadId);
 
   return (
     <div className="flex h-screen flex-1 flex-col bg-black">
@@ -162,13 +105,13 @@ export function ThreadView({
         <div className="flex h-full w-1/3 flex-col border-r border-gray-900 bg-gray-950">
           {/* Chat Messages */}
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            {chatMessages.map((message) => (
+            {stream.messages.map((message) => (
               <div
                 key={message.id}
                 className="flex gap-3"
               >
                 <div className="flex-shrink-0">
-                  {message.role === "user" ? (
+                  {message.type === "human" ? (
                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-700">
                       <User className="h-3 w-3 text-gray-400" />
                     </div>
@@ -181,40 +124,11 @@ export function ThreadView({
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium text-gray-400">
-                      {message.role === "user" ? "You" : "AI Agent"}
+                      {message.type === "human" ? "You" : "AI Agent"}
                     </span>
                   </div>
                   <div className="text-sm leading-relaxed text-gray-300">
                     {getMessageContentString(message.content)}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Add more mock messages to demonstrate scrolling */}
-            {Array.from({ length: 10 }, (_, i) => (
-              <div
-                key={`extra-${i}`}
-                className="flex gap-3"
-              >
-                <div className="flex-shrink-0">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-900">
-                    <Bot className="h-3 w-3 text-blue-400" />
-                  </div>
-                </div>
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-400">
-                      AI Agent
-                    </span>
-                    <span className="text-xs text-gray-600">
-                      {i + 3} min ago
-                    </span>
-                  </div>
-                  <div className="text-sm leading-relaxed text-gray-300">
-                    This is message {i + 4} to demonstrate scrolling behavior in
-                    the chat panel. Each message can contain multiple lines of
-                    text and the panel should scroll independently.
                   </div>
                 </div>
               </div>
@@ -254,131 +168,45 @@ export function ThreadView({
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            {/* Action Steps */}
-            <Card className="border-gray-800 bg-gray-950">
-              <CardHeader className="p-3">
-                <CardTitle className="text-base text-gray-300">
-                  Execution Steps
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 p-3 pt-0">
-                <p>TODO: HOOKUP TO MESSAGES STREAM</p>
-              </CardContent>
-            </Card>
-
-            {/* Proposed Plan */}
-            <Card className="border-gray-800 bg-gray-950">
-              <CardHeader className="p-3">
-                <CardTitle className="text-base text-gray-300">
-                  Proposed Plan
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 p-3 pt-0">
-                {planItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-900 p-2"
-                  >
-                    <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs font-medium text-gray-400">
-                      {item.step}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-gray-400">{item.title}</p>
-                      <Badge
-                        variant="secondary"
-                        className="mt-1 bg-gray-800 text-xs text-gray-400"
-                      >
-                        {item.status}
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                      >
-                        <Edit className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Add more mock plan items to demonstrate scrolling */}
-                {Array.from({ length: 8 }, (_, i) => (
-                  <div
-                    key={`extra-plan-${i}`}
-                    className="flex items-start gap-2 rounded-lg border border-gray-800 bg-gray-900 p-2"
-                  >
-                    <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-gray-800 text-xs font-medium text-gray-400">
-                      {i + 11}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-gray-400">
-                        Additional plan item {i + 11}: Implement feature or fix
-                        issue
-                      </p>
-                      <Badge
-                        variant="secondary"
-                        className="mt-1 bg-gray-800 text-xs text-gray-400"
-                      >
-                        proposed
-                      </Badge>
-                    </div>
-                    <div className="flex items-center gap-0.5">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                      >
-                        <Edit className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-
-                <div className="rounded-lg border-2 border-dashed border-gray-700 p-3">
-                  <Textarea
-                    placeholder="Add new plan item"
-                    value={newPlanItem}
-                    onChange={(e) => setNewPlanItem(e.target.value)}
-                    className="mb-2 min-h-[60px] border-gray-800 bg-black text-xs text-gray-400 placeholder:text-gray-600"
-                  />
-                  <Button
-                    size="sm"
-                    className="h-7 bg-gray-800 text-xs text-gray-300 hover:bg-gray-700"
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Add
-                  </Button>
-                </div>
-
-                <div className="flex gap-2 pt-3">
-                  <Button className="h-8 flex-1 bg-teal-800 text-xs text-gray-200 hover:bg-teal-700">
-                    Approve
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="h-8 flex-1 bg-red-900 text-xs text-gray-200 hover:bg-red-800"
-                  >
-                    Reject
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <Tabs
+              defaultValue="planner"
+              className="w-full"
+            >
+              <TabsList>
+                <TabsTrigger value="planner">Planner</TabsTrigger>
+                <TabsTrigger value="programmer">Programmer</TabsTrigger>
+              </TabsList>
+              <TabsContent value="planner">
+                <Card className="border-gray-800 bg-gray-950 px-0 py-4">
+                  <CardHeader>
+                    <CardTitle className="text-base text-gray-300">
+                      Planning Actions
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 p-3 pt-0">
+                    {plannerThreadId &&
+                      process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID && (
+                        <ActionsRenderer<PlannerGraphState>
+                          graphId={process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID}
+                          threadId={plannerThreadId}
+                        />
+                      )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="programmer">
+                <Card className="border-gray-800 bg-gray-950 px-0 py-4">
+                  <CardHeader>
+                    <CardTitle className="text-base text-gray-300">
+                      Code Actions
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 p-3 pt-0">
+                    <p>TODO: HOOKUP TO MESSAGES STREAM</p>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </div>

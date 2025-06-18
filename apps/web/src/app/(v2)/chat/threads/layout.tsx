@@ -6,9 +6,9 @@ export const metadata: Metadata = {
   title: "Open SWE - All Threads",
   description: "Open SWE view all threads",
   icons: {
-    icon: "/favicon.png",
-    shortcut: "/favicon.png",
-    apple: "/favicon.png",
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
   },
 };
 

@@ -5,27 +5,22 @@ import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { useRouter } from "next/navigation";
+import { Toaster } from "@/components/ui/sonner";
 
 export default function ChatPage() {
-  const router = useRouter();
-  const { threads } = useThreads<GraphState>();
+  const { threads } = useThreads<GraphState>(
+    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
+  );
 
   // Convert Thread objects to ThreadDisplayInfo for UI
   const displayThreads: ThreadDisplayInfo[] =
     threads?.map(threadToDisplayInfo) ?? [];
 
-  const handleThreadSelect = (thread: ThreadDisplayInfo) => {
-    router.push(`/chat/${thread.id}`);
-  };
-
   return (
-    <div className="h-screen bg-black">
+    <div className="h-screen overflow-y-hidden bg-black">
+      <Toaster />
       <GitHubAppProvider>
-        <DefaultView
-          threads={displayThreads}
-          onThreadSelect={handleThreadSelect}
-        />
+        <DefaultView threads={displayThreads} />
       </GitHubAppProvider>
     </div>
   );

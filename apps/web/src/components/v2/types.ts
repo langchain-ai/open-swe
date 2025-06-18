@@ -1,7 +1,7 @@
 import { getThreadTitle } from "@/lib/thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 
 export interface ThreadDisplayInfo {
   id: string;
@@ -24,11 +24,12 @@ export interface ThreadDisplayInfo {
 
 // Utility functions to convert between Thread and ThreadDisplayInfo
 export function threadToDisplayInfo(
-  thread: Thread<GraphState>,
+  thread: Thread<ManagerGraphState>,
 ): ThreadDisplayInfo {
   const values = thread.values;
-  const activePlanItems = getActivePlanItems(values.taskPlan);
-  const activePlanItem = activePlanItems[0];
+  const activePlanItems = values?.taskPlan
+    ? getActivePlanItems(values.taskPlan)
+    : [];
   const completedTasksLen = activePlanItems.filter((t) => t.completed).length;
 
   // Determine UI status from thread status and task completion
@@ -75,13 +76,13 @@ export function threadToDisplayInfo(
     title: getThreadTitle(thread),
     status: uiStatus,
     lastActivity,
-    taskCount: values.taskPlan.tasks.length,
-    repository: `${values.targetRepository.owner}/${values.targetRepository.repo}`,
-    branch: values.targetRepository.branch || "main",
-    githubIssue: values.githubIssueId
+    taskCount: values?.taskPlan?.tasks.length ?? 0,
+    repository: `${values?.targetRepository.owner}/${values?.targetRepository.repo}`,
+    branch: values?.targetRepository.branch || "main",
+    githubIssue: values?.githubIssueId
       ? {
-          number: values.githubIssueId,
-          url: `https://github.com/${values.targetRepository.owner}/${values.targetRepository.repo}/issues/${values.githubIssueId}`,
+          number: values?.githubIssueId,
+          url: `https://github.com/${values?.targetRepository.owner}/${values?.targetRepository.repo}/issues/${values?.githubIssueId}`,
         }
       : undefined,
   };

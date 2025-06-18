@@ -1,30 +1,97 @@
 "use client";
 
 import type React from "react";
-
-import { useState } from "react";
+import { v4 as uuidv4 } from "uuid";
+import { Dispatch, SetStateAction, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Send } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { Button } from "../ui/button";
+import { useStream } from "@langchain/langgraph-sdk/react";
+import { useRouter } from "next/navigation";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { Message } from "@langchain/langgraph-sdk";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { GraphState } from "@open-swe/shared/open-swe/types";
+import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
+import { toast } from "sonner";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
 interface TerminalInputProps {
-  onSend?: (message: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  apiUrl: string;
+  assistantId: string;
+  contentBlocks: Base64ContentBlock[];
+  setContentBlocks: Dispatch<SetStateAction<Base64ContentBlock[]>>;
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 }
 
 export function TerminalInput({
-  onSend,
   placeholder = "Enter your command...",
   disabled = false,
+  apiUrl,
+  assistantId,
+  contentBlocks,
+  setContentBlocks,
+  onPaste,
 }: TerminalInputProps) {
+  const { push } = useRouter();
   const [message, setMessage] = useState("");
+  const { getConfig } = useConfigStore();
+  const { selectedRepository } = useGitHubAppProvider();
+
+  const stream = useStream<GraphState>({
+    apiUrl,
+    assistantId,
+    reconnectOnMount: true,
+    threadId: null,
+    onThreadId: (id) => {
+      push(`/chat/${id}`);
+    },
+  });
 
   const handleSend = () => {
-    if (message.trim() && onSend) {
-      onSend(message.trim());
+    if (!selectedRepository) {
+      toast.error("Please select a repository first", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length > 0 || contentBlocks.length > 0) {
+      const newHumanMessage = new HumanMessage({
+        id: uuidv4(),
+        content: [
+          ...(trimmedMessage.length > 0
+            ? [{ type: "text", text: trimmedMessage }]
+            : []),
+          ...contentBlocks,
+        ],
+      });
+
+      stream.submit(
+        {
+          messages: [newHumanMessage],
+          targetRepository: selectedRepository,
+        },
+        {
+          streamMode: ["values"],
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [...(prev.messages ?? []), newHumanMessage],
+          }),
+          config: {
+            recursion_limit: 400,
+            configurable: {
+              ...getConfig(DEFAULT_CONFIG_KEY),
+            },
+          },
+        },
+      );
       setMessage("");
+      setContentBlocks([]);
     }
   };
 
@@ -61,6 +128,7 @@ export function TerminalInput({
           disabled={disabled}
           className="min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs text-white placeholder:text-gray-600 focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={3}
+          onPaste={onPaste}
         />
         <Button
           onClick={handleSend}

@@ -10,30 +10,46 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Camera,
-  Upload,
-  FileText,
   CheckCircle,
   XCircle,
   Loader2,
   GitBranch,
   GitPullRequest,
   Bug,
+  FilePlus2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo } from "./types";
 import { TerminalInput } from "./terminal-input";
-import { useQueryState } from "nuqs";
+import { useFileUpload } from "@/hooks/useFileUpload";
+import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
+import { Label } from "../ui/label";
+import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
-  onThreadSelect: (thread: ThreadDisplayInfo) => void;
 }
 
-export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
+export function DefaultView({ threads }: DefaultViewProps) {
   const router = useRouter();
-  const [selectedRepo] = useQueryState("repo");
-  const [selectedBranch] = useQueryState("branch");
+  const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const assistantId: string | undefined =
+    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "";
+  const {
+    contentBlocks,
+    setContentBlocks,
+    handleFileUpload,
+    dropRef,
+    removeBlock,
+    dragOver,
+    handlePaste,
+  } = useFileUpload();
 
   const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
     switch (status) {
@@ -78,11 +94,9 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
     }
   };
 
-  const handleSubmit = (message: string) => {
-    alert(
-      `Creating new thread with: ${message} to ${selectedRepo}:${selectedBranch}`,
-    );
-  };
+  if (!apiUrl || !assistantId) {
+    return <div>Missing API URL or Assistant ID</div>;
+  }
 
   return (
     <div className="flex flex-1 flex-col">
@@ -104,23 +118,51 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
       <div className="flex-1 overflow-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           {/* Terminal Chat Input */}
-          <Card className="border-gray-800 bg-gray-950 py-0">
+          <Card
+            className={cn(
+              "border-gray-800 bg-gray-950 py-0",
+              dragOver
+                ? "border-primary border-2 border-dotted"
+                : "border border-solid",
+            )}
+            ref={dropRef}
+          >
             <CardContent className="p-4">
+              <ContentBlocksPreview
+                blocks={contentBlocks}
+                onRemove={removeBlock}
+              />
+              <input
+                id="file-input"
+                type="file"
+                onChange={handleFileUpload}
+                multiple
+                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                className="hidden"
+              />
               <div className="space-y-3">
                 <TerminalInput
-                  onSend={handleSubmit}
                   placeholder="Describe your coding task or ask a question..."
+                  apiUrl={apiUrl}
+                  assistantId={assistantId}
+                  contentBlocks={contentBlocks}
+                  setContentBlocks={setContentBlocks}
+                  onPaste={handlePaste}
                 />
                 <div className="flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 border-gray-700 bg-gray-900 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-300"
-                    onClick={() => alert("Not implemented")}
-                  >
-                    <Upload className="mr-1 h-3 w-3" />
-                    Upload File
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <Label
+                          htmlFor="file-input"
+                          className="flex cursor-pointer items-center justify-center rounded-full bg-inherit text-gray-500 hover:text-gray-300"
+                        >
+                          <FilePlus2 className="size-4" />
+                        </Label>
+                      </TooltipTrigger>
+                      <TooltipContent>Attach files</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </div>
             </CardContent>
@@ -146,10 +188,12 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
               {threads.slice(0, 4).map((thread) => (
                 <Card
                   key={thread.id}
-                  className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg"
-                  onClick={() => onThreadSelect(thread)}
+                  className="cursor-pointer border-gray-800 bg-gray-950 px-0 py-3 transition-shadow hover:bg-gray-900 hover:shadow-lg"
+                  onClick={() => {
+                    router.push(`/chat/${thread.id}`);
+                  }}
                 >
-                  <CardHeader className="p-3 pb-2">
+                  <CardHeader>
                     <div className="flex items-start justify-between">
                       <div className="min-w-0 flex-1">
                         <CardTitle className="truncate text-sm font-medium text-gray-300">
@@ -173,11 +217,13 @@ export function DefaultView({ threads, onThreadSelect }: DefaultViewProps) {
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="p-3 pt-0">
+                  <CardContent>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-gray-600">
-                          {thread.taskCount} tasks
+                          {thread.taskCount === 0
+                            ? "No tasks"
+                            : `${thread.taskCount} tasks`}
                         </span>
                         <span className="text-xs text-gray-600">•</span>
                         <span className="text-xs text-gray-600">

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import "../../../globals.css";
+import "../../globals.css";
 import React from "react";
 
 export const metadata: Metadata = {
-  title: "Open SWE - Thread",
-  description: "Open SWE thread view",
+  title: "Open SWE - Chat",
+  description: "Open SWE chat",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",
