@@ -278,4 +278,3 @@ function formatDiff(diff: string) {
     })
     .join("\n");
 }
-
