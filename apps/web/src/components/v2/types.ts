@@ -77,7 +77,7 @@ export function threadToDisplayInfo(
     status: uiStatus,
     lastActivity,
     taskCount: values?.taskPlan?.tasks.length ?? 0,
-    repository: `${values?.targetRepository.owner}/${values?.targetRepository.repo}`,
+    repository: values?.targetRepository ? `${values.targetRepository.owner}/${values.targetRepository.repo}` : "",
     branch: values?.targetRepository.branch || "main",
     githubIssue: values?.githubIssueId
       ? {

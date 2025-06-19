@@ -88,7 +88,7 @@ export function ThreadView({
           </Button>
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <div
-              className={`h-2 w-2 rounded-full ${
+              className={`size-2 flex-shrink-0 rounded-full ${
                 displayThread.status === "running"
                   ? "bg-blue-500"
                   : displayThread.status === "completed"
@@ -96,14 +96,18 @@ export function ThreadView({
                     : "bg-red-500"
               }`}
             ></div>
-            <span className="text-muted-foreground truncate font-mono text-sm">
+            <span className="text-muted-foreground truncate font-mono text-sm max-w-[500px]">
               {displayThread.title}
             </span>
-            <span className="text-muted-foreground text-xs">•</span>
-            <GitBranch className="text-muted-foreground h-3 w-3" />
-            <span className="text-muted-foreground truncate text-xs">
-              {displayThread.repository}
-            </span>
+            {displayThread.repository && (
+              <>
+                <span className="text-muted-foreground text-xs">•</span>
+                <GitBranch className="text-muted-foreground h-3 w-3" />
+                <span className="text-muted-foreground truncate text-xs">
+                  {displayThread.repository}
+                </span>
+              </>
+            )}
           </div>
           <ThreadSwitcher
             currentThread={displayThread}
@@ -221,6 +225,11 @@ export function ThreadView({
                         threadId={programmerSession.threadId}
                         runId={programmerSession.runId}
                       />
+                    )}
+                    {!programmerSession && (
+                      <div className="text-muted-foreground text-xs">
+                        No programmer session
+                      </div>
                     )}
                   </CardContent>
                 </Card>
