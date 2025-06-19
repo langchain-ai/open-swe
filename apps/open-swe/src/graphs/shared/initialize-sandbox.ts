@@ -80,7 +80,7 @@ export async function initializeSandbox(
         nodeId: INITIALIZE_NODE_ID,
         createdAt: new Date().toISOString(),
         actionId: uuidv4(),
-        action: "Resuming Sandbox",
+        action: "Resuming sandbox",
         data: {
           status: "skipped",
           branch: branchName,
@@ -111,7 +111,7 @@ export async function initializeSandbox(
       nodeId: INITIALIZE_NODE_ID,
       createdAt: new Date().toISOString(),
       actionId: resumeSandboxActionId,
-      action: "Resuming Sandbox",
+      action: "Resuming sandbox",
       data: {
         status: "pending",
         sandboxSessionId,
@@ -147,8 +147,7 @@ export async function initializeSandbox(
       if (!pullChangesRes || pullChangesRes.exitCode !== 0) {
         emitStepEvent(
           basePullLatestChangesAction,
-          "error",
-          "Failed to pull latest changes. Please check your repository connection.",
+          "skipped",
         );
         throw new Error("Failed to pull latest changes.");
       }
@@ -187,19 +186,19 @@ export async function initializeSandbox(
     } catch {
       emitStepEvent(
         baseResumeSandboxAction,
-        "error",
-        "Failed to resume sandbox. A new environment will be created.",
+        "skipped",
+        "Unable to resume sandbox. A new environment will be created.",
       );
     }
   }
 
-  // Creating Sandbox
+  // Creating sandbox
   const createSandboxActionId = uuidv4();
   const baseCreateSandboxAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: createSandboxActionId,
-    action: "Creating Sandbox",
+    action: "Creating sandbox",
     data: {
       status: "pending",
       sandboxSessionId: null,
