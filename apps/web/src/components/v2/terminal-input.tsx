@@ -10,8 +10,6 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { Message } from "@langchain/langgraph-sdk";
-import { useFileUpload } from "@/hooks/useFileUpload";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
@@ -46,13 +44,6 @@ export function TerminalInput({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
-    threadId: null,
-    // onThreadId: (id) => {
-    //   push(`/chat/${id}`);
-    //   setLoading(false);
-    //   setMessage("");
-    //   setContentBlocks([]);
-    // },
   });
 
   const handleSend = async () => {
@@ -84,29 +75,34 @@ export function TerminalInput({
         ],
       });
 
-      // lg:stream:
-      const newThreadId = uuidv4();
-      const run = await stream.client.runs.create(newThreadId, assistantId, {
-        input: {
-          messages: [newHumanMessage],
-          targetRepository: selectedRepository,
-        },
-        config: {
-          recursion_limit: 400,
-          configurable: {
-            ...getConfig(DEFAULT_CONFIG_KEY),
+      try {
+        const newThreadId = uuidv4();
+        const run = await stream.client.runs.create(newThreadId, assistantId, {
+          input: {
+            messages: [newHumanMessage],
+            targetRepository: selectedRepository,
           },
-        },
-        ifNotExists: "create",
-        streamResumable: true,
-        streamMode: ["values", "messages", "custom"],
-      });
-      // set session storage
-      sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
-      push(`/chat/${newThreadId}`);
-      setLoading(false);
-      setMessage("");
-      setContentBlocks([]);
+          config: {
+            recursion_limit: 400,
+            configurable: {
+              ...getConfig(DEFAULT_CONFIG_KEY),
+            },
+          },
+          ifNotExists: "create",
+          streamResumable: true,
+          streamMode: ["values", "messages", "custom"],
+        });
+
+        // set session storage so the stream can be resumed after redirect.
+        sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
+        push(`/chat/${newThreadId}`);
+        setMessage("");
+        setContentBlocks([]);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
