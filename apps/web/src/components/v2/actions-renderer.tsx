@@ -45,7 +45,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
     if (
-      "programmerSession" in stream.values && stream.values.programmerSession && (stream.values.programmerSession.runId !== programmerSession?.runId || stream.values.programmerSession.threadId !== programmerSession?.threadId)
+      "programmerSession" in stream.values &&
+      stream.values.programmerSession &&
+      (stream.values.programmerSession.runId !== programmerSession?.runId ||
+        stream.values.programmerSession.threadId !==
+          programmerSession?.threadId)
     ) {
       setProgrammerSession?.(stream.values.programmerSession);
     }

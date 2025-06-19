@@ -50,8 +50,8 @@ export function ThreadView({
         content: chatInput,
       });
       stream.submit({
-        messages: [newHumanMessage]
-      })
+        messages: [newHumanMessage],
+      });
       setChatInput("");
     }
   };
