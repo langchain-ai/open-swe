@@ -1,4 +1,4 @@
-export type CustomEvent = {
+export type CustomNodeEvent = {
   /**
    * A UUID for the node the action is associated with.
    */
@@ -15,7 +15,7 @@ export type CustomEvent = {
   };
 };
 
-export function isCustomEvent(event: unknown): event is CustomEvent {
+export function isCustomNodeEvent(event: unknown): event is CustomNodeEvent {
   return (
     typeof event === "object" &&
     event !== null &&
@@ -47,7 +47,7 @@ export type Step = {
 /**
  * Maps custom events to step objects for UI rendering. Skipped steps are filtered out.
  */
-export function mapCustomEventsToSteps(events: CustomEvent[]) {
+export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
   return INIT_STEPS.map((stepName) => {
     const event = [...events]
       .filter((e) => e.action === stepName)

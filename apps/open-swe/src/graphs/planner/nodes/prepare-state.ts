@@ -18,6 +18,7 @@ import {
   getMessageContentFromIssue,
   getUntrackedComments,
 } from "../../../utils/github/issue-messages.js";
+import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
@@ -92,8 +93,8 @@ export async function prepareGraphState(
     });
   }
 
-  // Remove all messages not marked as summaryMessage, and not human messages.
-  const removedNonSummaryMessages = state.messages
+  // Remove all messages not marked as summaryMessage, hidden, and not human messages.
+  const removedNonSummaryMessages = filterHiddenMessages(state.messages)
     .filter((m) => !m.additional_kwargs?.summaryMessage && !isHumanMessage(m))
     .map((m: BaseMessage) => new RemoveMessage({ id: m.id ?? "" }));
   const summaryMessage = new AIMessage({

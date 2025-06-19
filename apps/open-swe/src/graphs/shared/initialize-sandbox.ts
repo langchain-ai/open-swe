@@ -11,12 +11,16 @@ import {
   pullLatestChanges,
 } from "../../utils/github/git.js";
 import { getCodebaseTree } from "../../utils/tree.js";
-import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
 import {
-  CustomEvent,
+  DO_NOT_RENDER_ID_PREFIX,
+  SNAPSHOT_NAME,
+} from "@open-swe/shared/constants";
+import {
+  CustomNodeEvent,
   INITIALIZE_NODE_ID,
-} from "@open-swe/shared/open-swe/custom-events";
+} from "@open-swe/shared/open-swe/custom-node-events";
 import { Sandbox } from "@daytonaio/sdk";
+import { AIMessage, BaseMessage } from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -25,6 +29,7 @@ type InitializeSandboxState = {
   branchName: string;
   sandboxSessionId?: string;
   codebaseTree?: string;
+  messages?: BaseMessage[];
 };
 
 export async function initializeSandbox(
@@ -36,22 +41,13 @@ export async function initializeSandbox(
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
 
-  function emitEvent(event: CustomEvent) {
-    try {
-      config.writer?.(event);
-    } catch (err) {
-      // TODO remove after dev
-      logger.error("[DEV] Failed to emit custom event", { event, err });
-    }
-  }
-
-  // Helper function to emit step events
-  function emitStepEvent(
-    base: CustomEvent,
+  const events: CustomNodeEvent[] = [];
+  const emitStepEvent = (
+    base: CustomNodeEvent,
     status: "pending" | "success" | "error" | "skipped",
     error?: string,
-  ) {
-    emitEvent({
+  ) => {
+    const event = {
       ...base,
       createdAt: new Date().toISOString(),
       data: {
@@ -59,8 +55,24 @@ export async function initializeSandbox(
         status,
         ...(error ? { error } : {}),
       },
-    });
-  }
+    };
+    events.push(event);
+    try {
+      config.writer?.(event);
+    } catch (err) {
+      logger.error("Failed to emit custom event", { event, err });
+    }
+  };
+  const createEventsMessage = () => [
+    new AIMessage({
+      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+      content: "",
+      additional_kwargs: {
+        hidden: true,
+        customNodeEvents: events,
+      },
+    }),
+  ];
 
   if (!sandboxSessionId) {
     emitStepEvent(
@@ -95,7 +107,7 @@ export async function initializeSandbox(
 
   if (sandboxSessionId) {
     const resumeSandboxActionId = uuidv4();
-    const baseResumeSandboxAction: CustomEvent = {
+    const baseResumeSandboxAction: CustomNodeEvent = {
       nodeId: INITIALIZE_NODE_ID,
       createdAt: new Date().toISOString(),
       actionId: resumeSandboxActionId,
@@ -114,7 +126,7 @@ export async function initializeSandbox(
       emitStepEvent(baseResumeSandboxAction, "success");
 
       const pullLatestChangesActionId = uuidv4();
-      const basePullLatestChangesAction: CustomEvent = {
+      const basePullLatestChangesAction: CustomNodeEvent = {
         nodeId: INITIALIZE_NODE_ID,
         createdAt: new Date().toISOString(),
         actionId: pullLatestChangesActionId,
@@ -143,7 +155,7 @@ export async function initializeSandbox(
       emitStepEvent(basePullLatestChangesAction, "success");
 
       const generateCodebaseTreeActionId = uuidv4();
-      const baseGenerateCodebaseTreeAction: CustomEvent = {
+      const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
         nodeId: INITIALIZE_NODE_ID,
         createdAt: new Date().toISOString(),
         actionId: generateCodebaseTreeActionId,
@@ -162,6 +174,7 @@ export async function initializeSandbox(
         return {
           sandboxSessionId: existingSandbox.id,
           codebaseTree,
+          messages: createEventsMessage(),
         };
       } catch {
         emitStepEvent(
@@ -182,7 +195,7 @@ export async function initializeSandbox(
 
   // Creating Sandbox
   const createSandboxActionId = uuidv4();
-  const baseCreateSandboxAction: CustomEvent = {
+  const baseCreateSandboxAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: createSandboxActionId,
@@ -211,7 +224,7 @@ export async function initializeSandbox(
 
   // Cloning repository
   const cloneRepoActionId = uuidv4();
-  const baseCloneRepoAction: CustomEvent = {
+  const baseCloneRepoAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: cloneRepoActionId,
@@ -240,7 +253,7 @@ export async function initializeSandbox(
 
   // Configuring git user
   const configureGitUserActionId = uuidv4();
-  const baseConfigureGitUserAction: CustomEvent = {
+  const baseConfigureGitUserAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: configureGitUserActionId,
@@ -263,7 +276,7 @@ export async function initializeSandbox(
 
   // Checking out branch
   const checkoutBranchActionId = uuidv4();
-  const baseCheckoutBranchAction: CustomEvent = {
+  const baseCheckoutBranchAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: checkoutBranchActionId,
@@ -293,7 +306,7 @@ export async function initializeSandbox(
 
   // Generating codebase tree
   const generateCodebaseTreeActionId = uuidv4();
-  const baseGenerateCodebaseTreeAction: CustomEvent = {
+  const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
     nodeId: INITIALIZE_NODE_ID,
     createdAt: new Date().toISOString(),
     actionId: generateCodebaseTreeActionId,
@@ -322,5 +335,6 @@ export async function initializeSandbox(
     sandboxSessionId: sandbox.id,
     targetRepository,
     codebaseTree,
+    messages: createEventsMessage(),
   };
 }

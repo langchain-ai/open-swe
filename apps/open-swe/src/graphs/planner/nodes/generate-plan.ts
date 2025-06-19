@@ -12,6 +12,7 @@ import {
   isFollowupRequest,
 } from "../utils/followup.js";
 import { stopSandbox } from "../../../utils/sandbox.js";
+import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 {FOLLOWUP_MESSAGE_PROMPT}
@@ -80,7 +81,7 @@ export async function generatePlan(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      ...state.messages,
+      ...filterHiddenMessages(state.messages),
       ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);
 

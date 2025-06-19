@@ -10,20 +10,13 @@ import {
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-// TODO: Replace with import from shared package when path aliasing is fixed
-// Temporary local definition of Step type
-export type Step = {
-  name: string;
-  status: "waiting" | "generating" | "success" | "error" | "skipped";
-  error?: string;
-};
+import { Step } from "@open-swe/shared/open-swe/custom-node-events";
+import { Button } from "../ui/button";
 
 type InitializeStepProps = {
   status: "loading" | "generating" | "done";
   success?: boolean;
   steps?: Step[];
-  reasoningText?: string;
-  summaryText?: string;
   collapse?: boolean;
 };
 
@@ -31,12 +24,8 @@ export function InitializeStep({
   status,
   success,
   steps,
-  reasoningText,
-  summaryText,
   collapse: collapseProp,
 }: InitializeStepProps) {
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
   const [collapsed, setCollapsed] = useState(collapseProp ?? false);
   const wasDone = useRef(false);
 
@@ -99,102 +88,61 @@ export function InitializeStep({
           {getStatusText()}
         </span>
         {getStatusIcon()}
-        <button
-          type="button"
+        <Button
           aria-label={collapsed ? "Expand" : "Collapse"}
           onClick={() => setCollapsed((c) => !c)}
-          className={cn(
-            "ml-2 rounded p-1 transition-colors hover:bg-gray-100",
-            "flex items-center justify-center",
-          )}
+          variant="ghost"
+          size="icon"
         >
           <ChevronDown
             className={cn(
-              "h-4 w-4 transition-transform",
+              "size-4 transition-transform",
               collapsed ? "rotate-0" : "rotate-180",
             )}
           />
-        </button>
+        </Button>
       </div>
       {/* Only render the rest if not collapsed */}
-      {!collapsed && (
-        <>
-          {reasoningText && (
-            <div className="border-b border-blue-100 bg-blue-50 p-2">
-              <button
-                onClick={() => setShowReasoning(!showReasoning)}
-                className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
-              >
-                <MessageSquare className="h-3 w-3" />
-                {showReasoning ? "Hide reasoning" : "Show reasoning"}
-              </button>
-              {showReasoning && (
-                <p className="mt-1 text-xs font-normal text-blue-800">
-                  {reasoningText}
-                </p>
-              )}
-            </div>
-          )}
-
-          {steps && (
-            <div className="p-2">
-              <ul className="space-y-2">
-                {steps
-                  .filter((step) => step.status !== "skipped")
-                  .map((step, index) => (
-                    <li
-                      key={index}
-                      className="flex items-center text-xs"
-                    >
-                      <span className="mr-2">
-                        {stepStatusIcon[
-                          step.status as keyof typeof stepStatusIcon
-                        ] ?? (
-                          <div
-                            className={cn(
-                              "h-3.5 w-3.5 rounded-full border border-gray-300",
-                            )}
-                          />
-                        )}
-                      </span>
-                      <span
+      {!collapsed && steps && steps.length > 0 && (
+        <div className="p-2">
+          <ul className="space-y-2">
+            {steps
+              .filter((step) => step.status !== "skipped")
+              .map((step, index) => (
+                <li
+                  key={index}
+                  className="flex items-center text-xs"
+                >
+                  <span className="mr-2">
+                    {stepStatusIcon[
+                      step.status as keyof typeof stepStatusIcon
+                    ] ?? (
+                      <div
                         className={cn(
-                          "font-normal",
-                          step.status === "error"
-                            ? "text-red-500"
-                            : "text-gray-800",
+                          "h-3.5 w-3.5 rounded-full border border-gray-300",
                         )}
-                      >
-                        {step.name}
-                      </span>
-                      {step.error && (
-                        <span className="ml-2 text-xs text-red-500">
-                          ({step.error})
-                        </span>
-                      )}
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          )}
-
-          {summaryText && status === "done" && (
-            <div className="border-t border-green-100 bg-green-50 p-2">
-              <button
-                onClick={() => setShowSummary(!showSummary)}
-                className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800"
-              >
-                <FileText className="h-3 w-3" />
-                {showSummary ? "Hide summary" : "Show summary"}
-              </button>
-              {showSummary && (
-                <p className="mt-1 text-xs font-normal text-green-800">
-                  {summaryText}
-                </p>
-              )}
-            </div>
-          )}
-        </>
+                      />
+                    )}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-normal",
+                      step.status === "error"
+                        ? "text-red-500"
+                        : "text-gray-800",
+                    )}
+                  >
+                    {step.name}
+                  </span>
+                  {step.error && (
+                    <span className="ml-2 text-xs text-red-500">
+                      ({step.error})
+                    </span>
+                  )}
+                </li>
+              ))}
+          </ul>
+        </div>
       )}
     </div>
   );

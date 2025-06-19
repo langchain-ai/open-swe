@@ -14,6 +14,7 @@ import {
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
+import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -55,7 +56,7 @@ export async function generateAction(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      ...state.messages,
+      ...filterHiddenMessages(state.messages),
       ...missingMessages,
     ]);
 

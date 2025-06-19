@@ -8,10 +8,7 @@ import { Button } from "../ui/button";
 import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
-import {
-  DO_NOT_RENDER_ID_PREFIX,
-  ensureToolCallsHaveResponses,
-} from "@/lib/ensure-tool-responses";
+import { ensureToolCallsHaveResponses } from "@/lib/ensure-tool-responses";
 import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import {
@@ -52,11 +49,11 @@ import { TaskPlanView } from "../tasks";
 import { useTaskPlan } from "../tasks/useTaskPlan";
 import { isProposedPlanInterrupt } from "@/lib/plan-utils";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { InitializeStep } from "@/components/gen-ui/initialize-step";
 import {
   INITIALIZE_NODE_ID,
   mapCustomEventsToSteps,
-} from "@open-swe/shared/open-swe/custom-events";
+} from "@open-swe/shared/open-swe/custom-node-events";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 function StickyToBottomContent(props: {
   content: ReactNode;

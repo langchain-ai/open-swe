@@ -24,9 +24,9 @@ import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
 import {
-  CustomEvent,
-  isCustomEvent,
-} from "@open-swe/shared/open-swe/custom-events";
+  CustomNodeEvent,
+  isCustomNodeEvent,
+} from "@open-swe/shared/open-swe/custom-node-events";
 
 const useTypedStream = useStream<
   GraphState,
@@ -37,7 +37,7 @@ const useTypedStream = useStream<
 >;
 
 type StreamContextType = ReturnType<typeof useTypedStream> & {
-  customEvents: CustomEvent[];
+  customEvents: CustomNodeEvent[];
 };
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
@@ -57,7 +57,7 @@ const StreamSession = ({
   githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
-  const [customEvents, setCustomEvents] = useState<CustomEvent[]>([]);
+  const [customEvents, setCustomEvents] = useState<CustomNodeEvent[]>([]);
   const { refreshThreads } = useThreadsContext();
   const streamValue = useTypedStream({
     apiUrl,
@@ -65,7 +65,7 @@ const StreamSession = ({
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {
-      if (isCustomEvent(event)) {
+      if (isCustomNodeEvent(event)) {
         setCustomEvents((prev) => [...prev, event]);
       }
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
