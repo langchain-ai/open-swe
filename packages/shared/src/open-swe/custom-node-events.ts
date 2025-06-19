@@ -29,8 +29,8 @@ export function isCustomNodeEvent(event: unknown): event is CustomNodeEvent {
 export const INITIALIZE_NODE_ID = "initialize";
 
 export const INIT_STEPS = [
-  "Resuming Sandbox",
-  "Creating Sandbox",
+  "Resuming sandbox",
+  "Creating sandbox",
   "Cloning repository",
   "Pulling latest changes",
   "Configuring git user",
