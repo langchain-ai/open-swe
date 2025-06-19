@@ -22,7 +22,10 @@ export default function ChatPage() {
       <Suspense>
         <Toaster />
         <GitHubAppProvider>
-          <DefaultView threads={displayThreads} threadsLoading={threadsLoading} />
+          <DefaultView
+            threads={displayThreads}
+            threadsLoading={threadsLoading}
+          />
         </GitHubAppProvider>
       </Suspense>
     </div>

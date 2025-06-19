@@ -140,9 +140,7 @@ export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
 
 export function ThreadCardLoading() {
   return (
-    <Card
-      className="border-border bg-card px-0 py-3 dark:bg-gray-950"
-    >
+    <Card className="border-border bg-card px-0 py-3 dark:bg-gray-950">
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">

@@ -153,21 +153,21 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
 
             {threadsLoading || threads.length ? (
               <div className="grid gap-3 md:grid-cols-2">
-              {threadsLoading && threads.length === 0 && (
-                <>
-                <ThreadCardLoading />
-                <ThreadCardLoading />
-                <ThreadCardLoading />
-                <ThreadCardLoading />
-                </>
-              )}
-              {threads.slice(0, 4).map((thread) => (
-                <ThreadCard
-                  key={thread.id}
-                  thread={thread}
-                />
-              ))}
-            </div>
+                {threadsLoading && threads.length === 0 && (
+                  <>
+                    <ThreadCardLoading />
+                    <ThreadCardLoading />
+                    <ThreadCardLoading />
+                    <ThreadCardLoading />
+                  </>
+                )}
+                {threads.slice(0, 4).map((thread) => (
+                  <ThreadCard
+                    key={thread.id}
+                    thread={thread}
+                  />
+                ))}
+              </div>
             ) : (
               <div className="flex items-center justify-center py-8">
                 <span className="text-muted-foreground flex items-center gap-2">
@@ -176,7 +176,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                 </span>
               </div>
             )}
-            
           </div>
 
           {/* Quick Actions */}
