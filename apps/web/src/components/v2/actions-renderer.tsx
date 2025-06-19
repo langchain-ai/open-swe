@@ -1,7 +1,7 @@
 import { isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
-import { useEffect, useRef } from "react";
+import { Dispatch, SetStateAction, useEffect, useRef } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
@@ -14,6 +14,7 @@ interface ActionsRendererProps {
     session: ManagerGraphState["programmerSession"],
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
+  setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
 }
 
 export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
@@ -22,6 +23,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   runId,
   setProgrammerSession,
   programmerSession,
+  setSelectedTab,
 }: ActionsRendererProps) {
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -52,6 +54,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           programmerSession?.threadId)
     ) {
       setProgrammerSession?.(stream.values.programmerSession);
+      setSelectedTab?.("programmer");
     }
   }, [stream.values]);
 

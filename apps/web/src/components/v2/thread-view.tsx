@@ -34,6 +34,9 @@ export function ThreadView({
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");
+  const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
+    "planner",
+  );
   const plannerThreadId = stream.values?.plannerSession?.threadId;
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
@@ -168,6 +171,10 @@ export function ThreadView({
             <Tabs
               defaultValue="planner"
               className="w-full"
+              value={selectedTab}
+              onValueChange={(value) =>
+                setSelectedTab(value as "planner" | "programmer")
+              }
             >
               <TabsList className="bg-muted/70 dark:bg-gray-800">
                 <TabsTrigger value="planner">Planner</TabsTrigger>
@@ -185,6 +192,7 @@ export function ThreadView({
                           runId={plannerRunId}
                           setProgrammerSession={setProgrammerSession}
                           programmerSession={programmerSession}
+                          setSelectedTab={setSelectedTab}
                         />
                       )}
                   </CardContent>
