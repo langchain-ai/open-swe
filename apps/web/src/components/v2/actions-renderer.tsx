@@ -10,7 +10,7 @@ import {
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
-import { AIMessage, Message } from "@langchain/langgraph-sdk";
+import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
@@ -66,7 +66,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     threadId,
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
-        console.log("CUSTOM STREAM EVENT RECEIVED!!", event);
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
@@ -93,7 +92,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     if (!customInitEvents?.length || initializeEvents.length) {
       return;
     }
-    console.log("CUSTOM EVENT FORM MESSAGES RECEIVED!!", customInitEvents);
     setCustomNodeEvents(customInitEvents);
   }, [stream.messages]);
 
@@ -101,6 +99,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   useEffect(() => {
     if (!streamJoined.current && runId) {
       streamJoined.current = true;
+      // TODO: If the SDK changes go in, use this instead:
+      // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
       stream.joinStream(runId).catch(console.error);
     }
   }, [runId]);

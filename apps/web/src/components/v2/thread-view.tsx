@@ -52,9 +52,18 @@ export function ThreadView({
         id: uuidv4(),
         content: chatInput,
       });
-      stream.submit({
-        messages: [newHumanMessage],
-      });
+      stream.submit(
+        {
+          messages: [newHumanMessage],
+        },
+        {
+          streamResumable: true,
+          optimisticValues: (prev) => ({
+            ...prev,
+            messages: [...(prev.messages ?? []), newHumanMessage],
+          }),
+        },
+      );
       setChatInput("");
     }
   };

@@ -47,15 +47,23 @@ export function TerminalInput({
     assistantId,
     reconnectOnMount: true,
     threadId: null,
-    onThreadId: (id) => {
-      push(`/chat/${id}`);
-      setLoading(false);
-      setMessage("");
-      setContentBlocks([]);
-    },
+    // onThreadId: (id) => {
+    //   push(`/chat/${id}`);
+    //   setLoading(false);
+    //   setMessage("");
+    //   setContentBlocks([]);
+    // },
   });
 
-  const handleSend = () => {
+  const handleSend = async () => {
+    const assistantId = process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID;
+    if (!assistantId) {
+      toast.error("No assistant ID found", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
     if (!selectedRepository) {
       toast.error("Please select a repository first", {
         richColors: true,
@@ -76,25 +84,29 @@ export function TerminalInput({
         ],
       });
 
-      stream.submit(
-        {
+      // lg:stream:
+      const newThreadId = uuidv4();
+      const run = await stream.client.runs.create(newThreadId, assistantId, {
+        input: {
           messages: [newHumanMessage],
           targetRepository: selectedRepository,
         },
-        {
-          streamMode: ["values"],
-          optimisticValues: (prev) => ({
-            ...prev,
-            messages: [...(prev.messages ?? []), newHumanMessage],
-          }),
-          config: {
-            recursion_limit: 400,
-            configurable: {
-              ...getConfig(DEFAULT_CONFIG_KEY),
-            },
+        config: {
+          recursion_limit: 400,
+          configurable: {
+            ...getConfig(DEFAULT_CONFIG_KEY),
           },
         },
-      );
+        ifNotExists: "create",
+        streamResumable: true,
+        streamMode: ["values", "messages", "custom"],
+      });
+      // set session storage
+      sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
+      push(`/chat/${newThreadId}`);
+      setLoading(false);
+      setMessage("");
+      setContentBlocks([]);
     }
   };
 
@@ -108,7 +120,6 @@ export function TerminalInput({
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
       <div className="text-foreground flex items-start gap-1">
-        {/* User@Host */}
         <span className="text-muted-foreground">open-swe</span>
         <span className="text-muted-foreground/70">@</span>
         <span className="text-muted-foreground">github</span>

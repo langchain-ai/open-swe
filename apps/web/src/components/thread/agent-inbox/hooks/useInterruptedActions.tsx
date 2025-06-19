@@ -94,6 +94,7 @@ export default function useInterruptedActions({
           config: {
             recursion_limit: 400,
           },
+          streamResumable: true,
         },
       );
 
