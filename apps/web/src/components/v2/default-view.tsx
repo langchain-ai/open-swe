@@ -17,6 +17,7 @@ import {
   GitPullRequest,
   Bug,
   FilePlus2,
+  Archive,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo } from "./types";
@@ -33,13 +34,14 @@ import { Label } from "../ui/label";
 import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { ThemeToggle } from "../theme-toggle";
-import { ThreadCard } from "./thread-card";
+import { ThreadCard, ThreadCardLoading } from "./thread-card";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
+  threadsLoading: boolean;
 }
 
-export function DefaultView({ threads }: DefaultViewProps) {
+export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const router = useRouter();
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const assistantId: string | undefined =
@@ -149,7 +151,16 @@ export function DefaultView({ threads }: DefaultViewProps) {
               </Button>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
+            {threadsLoading || threads.length ? (
+              <div className="grid gap-3 md:grid-cols-2">
+              {threadsLoading && threads.length === 0 && (
+                <>
+                <ThreadCardLoading />
+                <ThreadCardLoading />
+                <ThreadCardLoading />
+                <ThreadCardLoading />
+                </>
+              )}
               {threads.slice(0, 4).map((thread) => (
                 <ThreadCard
                   key={thread.id}
@@ -157,6 +168,15 @@ export function DefaultView({ threads }: DefaultViewProps) {
                 />
               ))}
             </div>
+            ) : (
+              <div className="flex items-center justify-center py-8">
+                <span className="text-muted-foreground flex items-center gap-2">
+                  <Archive className="size-4" />
+                  <span className="text-sm">No threads found</span>
+                </span>
+              </div>
+            )}
+            
           </div>
 
           {/* Quick Actions */}

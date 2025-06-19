@@ -9,7 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Suspense } from "react";
 
 export default function ChatPage() {
-  const { threads } = useThreads<GraphState>(
+  const { threads, threadsLoading } = useThreads<GraphState>(
     process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
   );
 
@@ -22,7 +22,7 @@ export default function ChatPage() {
       <Suspense>
         <Toaster />
         <GitHubAppProvider>
-          <DefaultView threads={displayThreads} />
+          <DefaultView threads={displayThreads} threadsLoading={threadsLoading} />
         </GitHubAppProvider>
       </Suspense>
     </div>

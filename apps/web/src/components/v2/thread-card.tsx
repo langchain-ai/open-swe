@@ -11,6 +11,7 @@ import { ThreadDisplayInfo } from "./types";
 import { useRouter } from "next/navigation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
 
 export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
   const router = useRouter();
@@ -130,6 +131,42 @@ export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
                 <GitPullRequest className="h-3 w-3" />
               </Button>
             )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function ThreadCardLoading() {
+  return (
+    <Card
+      className="border-border bg-card px-0 py-3 dark:bg-gray-950"
+    >
+      <CardHeader>
+        <div className="flex items-start justify-between">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-foreground truncate text-sm font-medium">
+              <Skeleton className="h-5 w-48" />
+            </CardTitle>
+            <div className="mt-1 flex items-center gap-1">
+              <Skeleton className="h-3 w-3 rounded-full" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </div>
+          <Skeleton className="h-6 w-24 rounded-full" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-3 w-1" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="flex items-center gap-1">
+            <Skeleton className="h-5 w-5 rounded-full" />
+            <Skeleton className="h-5 w-5 rounded-full" />
           </div>
         </div>
       </CardContent>
