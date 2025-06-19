@@ -15,6 +15,8 @@ import {
 import {
   createApplyPatchToolFields,
   createShellToolFields,
+  formatRgCommand,
+  RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 
@@ -51,11 +53,20 @@ type PatchActionProps = BaseActionProps &
     fixedDiff?: string;
   };
 
+// Rg specific props
+type RgActionProps = BaseActionProps &
+  Partial<RipgrepCommand> & {
+    actionType: "rg";
+    output?: string;
+    errorCode?: number;
+  };
+
 // Union type for all possible action props
 export type ActionStepProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
-  | PatchActionProps;
+  | PatchActionProps
+  | RgActionProps;
 
 export function ActionStep(props: ActionStepProps) {
   const [expanded, setExpanded] = useState(false);
@@ -97,6 +108,8 @@ export function ActionStep(props: ActionStepProps) {
         return props.success ? "Command completed" : "Command failed";
       } else if (props.actionType === "apply-patch") {
         return props.success ? "Patch applied" : "Patch failed";
+      } else if (props.actionType === "rg") {
+        return props.success ? "Search completed" : "Search failed";
       }
     }
 
@@ -107,7 +120,7 @@ export function ActionStep(props: ActionStepProps) {
   const shouldShowToggle = () => {
     if (props.status !== "done") return false;
 
-    if (props.actionType === "shell") {
+    if (props.actionType === "shell" || props.actionType === "rg") {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
@@ -153,6 +166,27 @@ export function ActionStep(props: ActionStepProps) {
           </code>
         </div>
       );
+    } else if (props.actionType === "rg") {
+      let formattedRgCommand = "";
+      try {
+        formattedRgCommand =
+          formatRgCommand({
+            pattern: props.pattern,
+            paths: props.paths,
+            flags: props.flags,
+            useStdin: props.useStdin ?? false,
+            mode: props.mode ?? "search",
+          })?.join(" ") ?? "";
+      } catch {
+        // no-op
+      }
+      return (
+        <div className="flex-1">
+          <code className="text-foreground/80 text-xs font-normal">
+            {formattedRgCommand}
+          </code>
+        </div>
+      );
     } else {
       return (
         <code className="text-foreground/80 flex-1 text-xs font-normal">
@@ -168,7 +202,10 @@ export function ActionStep(props: ActionStepProps) {
 
     if (!expanded) return null;
 
-    if (props.actionType === "shell" && props.output) {
+    if (
+      (props.actionType === "shell" || props.actionType === "rg") &&
+      props.output
+    ) {
       return (
         <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
           <pre className="text-xs font-normal whitespace-pre-wrap">

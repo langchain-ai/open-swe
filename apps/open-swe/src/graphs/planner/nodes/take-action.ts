@@ -9,6 +9,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
+import { createRgTool } from "../../../tools/rg.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -24,8 +25,10 @@ export async function takeAction(
   }
 
   const shellTool = createShellTool(state);
+  const rgTool = createRgTool(state);
   const toolsMap = {
     [shellTool.name]: shellTool,
+    [rgTool.name]: rgTool,
   };
 
   const toolCall = lastMessage.tool_calls[0];
