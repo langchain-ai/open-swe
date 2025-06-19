@@ -50,7 +50,7 @@ function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
       thread_id: config.configurable?.thread_id,
       run_id: config.configurable?.run_id,
     };
-  } catch (error) {
+  } catch {
     // If getConfig throws an error or config.configurable is undefined,
     // return empty object and proceed as normal
     return {};
@@ -134,6 +134,3 @@ export function createLogger(level: LogLevel, prefix: string) {
     },
   };
 }
-
-
-
