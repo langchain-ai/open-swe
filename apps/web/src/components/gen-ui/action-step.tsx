@@ -141,6 +141,18 @@ export function ActionStep(props: ActionStepProps) {
     }
 
     if (props.actionType === "shell") {
+      let commandStr = "";
+      if (props.command) {
+        if (Array.isArray(props.command)) {
+          commandStr = props.command.join(" ");
+        } else if (typeof props.command === "string" && (props.command as string).length > 0) {
+          try {
+            commandStr = JSON.parse(props.command);
+          } catch {
+            commandStr = props.command;
+          }
+        }
+      }
       return (
         <div className="flex-1">
           {props.workdir && (
@@ -149,7 +161,7 @@ export function ActionStep(props: ActionStepProps) {
             </div>
           )}
           <code className="text-foreground/80 text-xs font-normal">
-            {props.command?.join(" ")}
+            {commandStr}
           </code>
         </div>
       );
