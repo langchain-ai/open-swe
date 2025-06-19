@@ -38,8 +38,18 @@ And here is the plan you just generated:
 With all of this in mind, please carefully inspect the conversation history, and the plan you generated. Then, determine which actions and context from the conversation history will be most useful to you when you execute the plan. After you're done analyzing, call the \`write_technical_notes\` tool.
 `;
 
-const formatPrompt = (userRequest: string, conversationHistory: BaseMessage[], proposedPlan: string[]): string =>
-  systemPrompt.replace("{USER_REQUEST}", userRequest).replace("{CONVERSATION_HISTORY}", conversationHistory.map(getMessageString).join("\n")).replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`);
+const formatPrompt = (
+  userRequest: string,
+  conversationHistory: BaseMessage[],
+  proposedPlan: string[],
+): string =>
+  systemPrompt
+    .replace("{USER_REQUEST}", userRequest)
+    .replace(
+      "{CONVERSATION_HISTORY}",
+      conversationHistory.map(getMessageString).join("\n"),
+    )
+    .replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`);
 
 const condenseContextToolSchema = z.object({
   notes: z
@@ -71,7 +81,11 @@ ${state.messages.map(getMessageString).join("\n")}`;
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(userRequest || "No user request provided.", state.messages, state.proposedPlan),
+      content: formatPrompt(
+        userRequest || "No user request provided.",
+        state.messages,
+        state.proposedPlan,
+      ),
     },
     {
       role: "user",
@@ -86,6 +100,8 @@ ${state.messages.map(getMessageString).join("\n")}`;
 
   return {
     messages: [response],
-    contextGatheringNotes: (toolCall.args as z.infer<typeof condenseContextToolSchema>).notes,
+    contextGatheringNotes: (
+      toolCall.args as z.infer<typeof condenseContextToolSchema>
+    ).notes,
   };
 }

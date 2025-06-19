@@ -61,7 +61,7 @@ Structure your plan items as clear directives, for example:
 - "Modify the authentication middleware in /src/auth.js to add rate limiting using the Express rate-limit package"
 </output_format>
 
-Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`
+Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
@@ -72,7 +72,9 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .replace(
       "{FOLLOWUP_MESSAGE_PROMPT}",
       isFollowup
-        ? "\n" + formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) + "\n\n"
+        ? "\n" +
+            formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) +
+            "\n\n"
         : "",
     )
     .replace("{USER_REQUEST}", userRequest);
