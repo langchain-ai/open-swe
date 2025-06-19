@@ -76,7 +76,7 @@ export async function interruptProposedPlan(
   const userRequest = getUserRequest(state.messages);
 
   const runInput: GraphUpdate = {
-    planContextSummary: state.planContextSummary,
+    contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
     targetRepository: state.targetRepository,
     githubIssueId: state.githubIssueId,
