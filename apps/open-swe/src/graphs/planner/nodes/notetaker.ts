@@ -13,7 +13,7 @@ const systemPrompt = `You are operating as a terminal-based agentic coding assis
 
 You've just finished gathering context to aid in generating a development plan to address the user's request. The context you've gathered is provided in the conversation history below.
 After this, the conversation history will be deleted, and you'll start executing on the plan.
-Your task is to carefully read over the conversation history, and take notes on the most important and useful actions you preformed which will be helpful to you when you go and execute on the plan.
+Your task is to carefully read over the conversation history, and take notes on the most important and useful actions you performed which will be helpful to you when you go and execute on the plan.
 The notes you extract should be thoughtful, and should include technical details about the codebase, files, patterns, dependencies and setup instructions you discovered during the context gathering step, which you believe will be helpful when you go to execute on the plan.
 These notes should not be overly verbose, as you'll be able to gather additional context when executing.
 Your goal is to generate notes on all of the low-hanging fruit from the conversation history, to speed up the execution so that you don't need to duplicate work to gather context.
