@@ -66,7 +66,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     threadId,
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
-        console.log("CUSTOM STREAM EVENT RECEIVED!!", event)
+        console.log("CUSTOM STREAM EVENT RECEIVED!!", event);
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
@@ -93,7 +93,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     if (!customInitEvents?.length || initializeEvents.length) {
       return;
     }
-    console.log("CUSTOM EVENT FORM MESSAGES RECEIVED!!", customInitEvents)
+    console.log("CUSTOM EVENT FORM MESSAGES RECEIVED!!", customInitEvents);
     setCustomNodeEvents(customInitEvents);
   }, [stream.messages]);
 
