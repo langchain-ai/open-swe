@@ -15,6 +15,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
+import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -48,13 +49,19 @@ export async function generateAction(
     parallel_tool_calls: false,
   });
 
-  const missingMessages = await getMissingMessages(state, config);
+  const [missingMessages, latestTaskPlan] = await Promise.all([
+    getMissingMessages(state, config),
+    getTaskPlanFromIssue(state, config),
+  ]);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
       {
         role: "system",
-        content: formatSystemPrompt(state),
+        content: formatSystemPrompt({
+          ...state,
+          taskPlan: latestTaskPlan ?? state.taskPlan,
+        }),
       },
       ...filterHiddenMessages(state.messages),
       ...missingMessages,
@@ -72,5 +79,6 @@ export async function generateAction(
 
   return {
     messages: [...missingMessages, response],
+    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }

@@ -165,7 +165,6 @@ export async function summarizeTaskSteps(
   const allTasksCompleted = activePlanItems.every((p) => p.completed);
   if (allTasksCompleted) {
     const commandUpdate: GraphUpdate = {
-      messages: [condensedTaskMessage],
       internalMessages: newMessagesStateUpdate,
       taskPlan: updatedTaskPlan,
     };
@@ -176,7 +175,6 @@ export async function summarizeTaskSteps(
   }
 
   const commandUpdate: GraphUpdate = {
-    messages: [condensedTaskMessage],
     internalMessages: newMessagesStateUpdate,
     taskPlan: updatedTaskPlan,
   };

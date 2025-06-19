@@ -1,7 +1,7 @@
 import { isAIMessageSDK, isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
-import { useEffect, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import {
   isCustomNodeEvent,
@@ -12,6 +12,8 @@ import {
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { AIMessage, Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 
 interface ActionsRendererProps {
   graphId: string;
@@ -21,6 +23,7 @@ interface ActionsRendererProps {
     session: ManagerGraphState["programmerSession"],
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
+  setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -45,12 +48,13 @@ const getCustomNodeEventsFromMessages = (
     .flat();
 };
 
-export function ActionsRenderer<State extends Record<string, unknown>>({
+export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   graphId,
   threadId,
   runId,
   setProgrammerSession,
   programmerSession,
+  setSelectedTab,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
@@ -62,6 +66,7 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
     threadId,
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
+        console.log("CUSTOM STREAM EVENT RECEIVED!!", event)
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
@@ -88,6 +93,7 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
     if (!customInitEvents?.length || initializeEvents.length) {
       return;
     }
+    console.log("CUSTOM EVENT FORM MESSAGES RECEIVED!!", customInitEvents)
     setCustomNodeEvents(customInitEvents);
   }, [stream.messages]);
 
@@ -109,22 +115,14 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
   // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
     if (
-      stream.values?.programmerSession &&
-      typeof stream.values.programmerSession === "object" &&
+      "programmerSession" in stream.values &&
       stream.values.programmerSession &&
-      (
-        stream.values
-          .programmerSession as ManagerGraphState["programmerSession"]
-      )?.runId &&
-      (
-        stream.values
-          .programmerSession as ManagerGraphState["programmerSession"]
-      )?.threadId &&
-      !programmerSession
+      (stream.values.programmerSession.runId !== programmerSession?.runId ||
+        stream.values.programmerSession.threadId !==
+          programmerSession?.threadId)
     ) {
-      const programmerSession = stream.values
-        .programmerSession as ManagerGraphState["programmerSession"];
-      setProgrammerSession?.(programmerSession);
+      setProgrammerSession?.(stream.values.programmerSession);
+      setSelectedTab?.("programmer");
     }
   }, [stream.values]);
 
