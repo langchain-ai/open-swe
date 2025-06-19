@@ -24,7 +24,7 @@ type BaseActionProps = {
 // Shell command specific props
 type ShellActionProps = BaseActionProps & {
   actionType: "shell";
-  command: string[];
+  command?: string[];
   workdir?: string;
   output?: string;
   errorCode?: number;
@@ -137,7 +137,7 @@ export function ActionStep(props: ActionStepProps) {
             </div>
           )}
           <code className="text-foreground/80 text-xs font-normal">
-            {props.command.join(" ")}
+            {props.command?.join(" ")}
           </code>
         </div>
       );
