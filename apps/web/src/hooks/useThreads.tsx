@@ -6,7 +6,7 @@ export function useThreads<State extends Record<string, any>>(
   assistantId?: string,
 ) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
-  const [threads, setThreads] = useState<Thread<State>[] | null>(null);
+  const [threads, setThreads] = useState<Thread<State>[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   const getThread = useCallback(
@@ -50,7 +50,7 @@ export function useThreads<State extends Record<string, any>>(
 
   useEffect(() => {
     getThreads().then((threads) => {
-      setThreads(threads);
+      setThreads(threads ?? []);
     });
   }, [getThreads]);
 
