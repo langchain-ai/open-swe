@@ -10,22 +10,21 @@ import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { ThreadCard } from "@/components/v2/thread-card";
+import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
   const router = useRouter();
-  const { threads } = useThreads<GraphState>(
+  const { threads, threadsLoading } = useThreads<GraphState>(
     process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
   // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] =
-    threads?.map(threadToDisplayInfo) ?? [];
+  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
 
   // Filter and search threads
   const filteredThreads = displayThreads.filter((thread) => {
@@ -178,13 +177,28 @@ export default function AllThreadsPage() {
             </div>
           )}
 
-          {filteredThreads.length === 0 && (
+          {filteredThreads.length === 0 && !threadsLoading && (
             <div className="py-12 text-center">
               <div className="text-muted-foreground mb-2">No threads found</div>
               <div className="text-muted-foreground/70 text-xs">
                 {searchQuery
                   ? "Try adjusting your search query"
                   : "No threads match the selected filter"}
+              </div>
+            </div>
+          )}
+
+          {threadsLoading && threads.length === 0 && (
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-foreground text-base font-semibold capitalize">
+                  Loading threads...
+                </h2>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 9 }).map((_, index) => (
+                  <ThreadCardLoading key={`all-threads-loading-${index}`} />
+                ))}
               </div>
             </div>
           )}

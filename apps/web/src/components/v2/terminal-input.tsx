@@ -136,13 +136,13 @@ export function TerminalInput({
           onKeyDown={handleKeyPress}
           placeholder={placeholder}
           disabled={disabled}
-          className="text-foreground placeholder:text-muted-foreground min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="text-foreground placeholder:text-muted-foreground min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={3}
           onPaste={onPaste}
         />
         <Button
           onClick={handleSend}
-          disabled={disabled || !message.trim()}
+          disabled={disabled || !message.trim() || !selectedRepository}
           size="sm"
           className="bg-muted-foreground/20 hover:bg-muted-foreground/30 h-7 w-7 self-end p-0 dark:bg-gray-700 hover:dark:bg-gray-600"
         >

@@ -128,7 +128,7 @@ export function mapToolMessageToActionStepProps(
       actionType: "apply-patch",
       status,
       success,
-      file: args.file_path || "",
+      file_path: args.file_path || "",
       diff: args.diff,
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
@@ -222,24 +222,18 @@ export function AssistantMessage({
         actionType={aiToolCallName === shellTool.name ? "shell" : "apply-patch"}
         status="generating"
         command={
-          aiToolCallName === shellTool.name
-            ? aiToolCallArgs?.command || []
-            : undefined
+          aiToolCallName === shellTool.name ? aiToolCallArgs?.command || [] : []
         }
         workdir={
-          aiToolCallName === shellTool.name
-            ? aiToolCallArgs?.workdir
-            : undefined
+          aiToolCallName === shellTool.name ? aiToolCallArgs?.workdir : ""
         }
-        file={
+        file_path={
           aiToolCallName === applyPatchTool.name
             ? aiToolCallArgs?.file_path || ""
-            : undefined
+            : ""
         }
         diff={
-          aiToolCallName === applyPatchTool.name
-            ? aiToolCallArgs?.diff
-            : undefined
+          aiToolCallName === applyPatchTool.name ? aiToolCallArgs?.diff : ""
         }
         reasoningText={contentString}
       />
