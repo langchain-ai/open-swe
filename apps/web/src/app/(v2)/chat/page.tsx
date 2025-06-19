@@ -14,8 +14,7 @@ export default function ChatPage() {
   );
 
   // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] =
-    threads?.map(threadToDisplayInfo) ?? [];
+  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
 
   return (
     <div className="bg-background h-screen overflow-y-hidden">

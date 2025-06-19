@@ -33,7 +33,7 @@ export default function ThreadPage({
     process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
   );
   // Find the thread by ID
-  const thread = threads?.find((t) => t.thread_id === thread_id);
+  const thread = threads.find((t) => t.thread_id === thread_id);
 
   const handleBackToHome = () => {
     router.push("/chat");
@@ -44,8 +44,7 @@ export default function ThreadPage({
   }
 
   // Convert all threads to display format
-  const displayThreads: ThreadDisplayInfo[] =
-    threads?.map(threadToDisplayInfo) ?? [];
+  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
   const currentDisplayThread = threadToDisplayInfo(thread);
 
   return (
