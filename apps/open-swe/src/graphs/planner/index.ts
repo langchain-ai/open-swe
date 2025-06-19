@@ -37,7 +37,6 @@ function takeActionOrGeneratePlan(
     return "take-plan-action";
   }
 
-  console.log("BEING FORCED TO GENERATE A PLAN!!!!", config.configurable?.maxContextActions)
   // If the last message does not have tool calls, continue to generate plan without modifications.
   return "generate-plan";
 }
