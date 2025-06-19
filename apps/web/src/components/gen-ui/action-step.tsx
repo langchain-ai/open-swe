@@ -12,6 +12,18 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
+import {
+  createApplyPatchToolFields,
+  createShellToolFields,
+} from "@open-swe/shared/open-swe/tools";
+import { z } from "zod";
+
+// Used only for Zod type inference.
+const dummyRepo = { owner: "dummy", repo: "dummy" };
+const shellTool = createShellToolFields(dummyRepo);
+type ShellToolArgs = z.infer<typeof shellTool.schema>;
+const applyPatchTool = createApplyPatchToolFields(dummyRepo);
+type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -21,23 +33,23 @@ type BaseActionProps = {
   summaryText?: string;
 };
 
-// Shell command specific props
-type ShellActionProps = BaseActionProps & {
-  actionType: "shell";
-  command?: string[];
-  workdir?: string;
-  output?: string;
-  errorCode?: number;
-};
+// Shell command specific props. We need to wrap the args in Partial<...>
+// because even though they're required, they may be undefined at a point in time
+// due to streaming.
+type ShellActionProps = BaseActionProps &
+  Partial<ShellToolArgs> & {
+    actionType: "shell";
+    output?: string;
+    errorCode?: number;
+  };
 
 // Apply patch specific props
-type PatchActionProps = BaseActionProps & {
-  actionType: "apply-patch";
-  file: string;
-  diff?: string;
-  errorMessage?: string;
-  fixedDiff?: string;
-};
+type PatchActionProps = BaseActionProps &
+  Partial<ApplyPatchToolArgs> & {
+    actionType: "apply-patch";
+    errorMessage?: string;
+    fixedDiff?: string;
+  };
 
 // Union type for all possible action props
 export type ActionStepProps =
@@ -144,7 +156,7 @@ export function ActionStep(props: ActionStepProps) {
     } else {
       return (
         <code className="text-foreground/80 flex-1 text-xs font-normal">
-          {props.file}
+          {props.file_path}
         </code>
       );
     }
