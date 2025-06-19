@@ -42,6 +42,21 @@ function simpleHash(str: string): number {
   return Math.abs(hash); // Ensure positive for modulo index
 }
 
+// Helper function to safely extract thread_id and run_id from LangGraph config
+function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
+  try {
+    const config = getConfig();
+    return {
+      thread_id: config.configurable?.thread_id,
+      run_id: config.configurable?.run_id,
+    };
+  } catch (error) {
+    // If getConfig throws an error or config.configurable is undefined,
+    // return empty object and proceed as normal
+    return {};
+  }
+}
+
 export function createLogger(level: LogLevel, prefix: string) {
   const hash = simpleHash(prefix);
   const color = COLORS[hash % COLORS.length];
@@ -95,4 +110,5 @@ export function createLogger(level: LogLevel, prefix: string) {
     },
   };
 }
+
 
