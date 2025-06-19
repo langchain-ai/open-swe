@@ -3,6 +3,8 @@ import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { useEffect, useRef } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 
 interface ActionsRendererProps {
   graphId: string;
@@ -14,7 +16,7 @@ interface ActionsRendererProps {
   programmerSession?: ManagerGraphState["programmerSession"];
 }
 
-export function ActionsRenderer<State extends Record<string, unknown>>({
+export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   graphId,
   threadId,
   runId,
@@ -43,22 +45,9 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
   // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
     if (
-      stream.values?.programmerSession &&
-      typeof stream.values.programmerSession === "object" &&
-      stream.values.programmerSession &&
-      (
-        stream.values
-          .programmerSession as ManagerGraphState["programmerSession"]
-      )?.runId &&
-      (
-        stream.values
-          .programmerSession as ManagerGraphState["programmerSession"]
-      )?.threadId &&
-      !programmerSession
+      "programmerSession" in stream.values && stream.values.programmerSession && (stream.values.programmerSession.runId !== programmerSession?.runId || stream.values.programmerSession.threadId !== programmerSession?.threadId)
     ) {
-      const programmerSession = stream.values
-        .programmerSession as ManagerGraphState["programmerSession"];
-      setProgrammerSession?.(programmerSession);
+      setProgrammerSession?.(stream.values.programmerSession);
     }
   }, [stream.values]);
 

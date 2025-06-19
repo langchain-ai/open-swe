@@ -1,5 +1,6 @@
 "use client";
 
+import { v4 as uuidv4 } from "uuid";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
+import { HumanMessage } from "@langchain/core/messages";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -43,7 +45,13 @@ export function ThreadView({
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
-      alert("SENDING MANAGER FOLLOWUPS NOT HOOKED UP YET");
+      const newHumanMessage = new HumanMessage({
+        id: uuidv4(),
+        content: chatInput,
+      });
+      stream.submit({
+        messages: [newHumanMessage]
+      })
       setChatInput("");
     }
   };

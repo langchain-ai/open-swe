@@ -1,7 +1,7 @@
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
-const previousCompletedPlanPrompt = `Here is the complete list of previous requests made by the user, along with the tasks you generated to complete these requests, and the task summaries of each task you completed previously:
+const previousCompletedPlanPrompt = `Here is the list of tasks from the previous session. You've already completed all of these tasks. Use the tasks, and task summaries as context when generating a new plan:
 {PREVIOUS_PLAN}`;
 
 const previousProposedPlanPrompt = `Here is the complete list of the proposed plan you generated before the user sent their followup request:
