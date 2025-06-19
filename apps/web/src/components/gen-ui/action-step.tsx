@@ -145,7 +145,10 @@ export function ActionStep(props: ActionStepProps) {
       if (props.command) {
         if (Array.isArray(props.command)) {
           commandStr = props.command.join(" ");
-        } else if (typeof props.command === "string" && (props.command as string).length > 0) {
+        } else if (
+          typeof props.command === "string" &&
+          (props.command as string).length > 0
+        ) {
           try {
             commandStr = JSON.parse(props.command);
           } catch {
