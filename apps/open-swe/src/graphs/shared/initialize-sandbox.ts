@@ -145,10 +145,7 @@ export async function initializeSandbox(
         existingSandbox,
       );
       if (!pullChangesRes || pullChangesRes.exitCode !== 0) {
-        emitStepEvent(
-          basePullLatestChangesAction,
-          "skipped",
-        );
+        emitStepEvent(basePullLatestChangesAction, "skipped");
         throw new Error("Failed to pull latest changes.");
       }
       emitStepEvent(basePullLatestChangesAction, "success");
