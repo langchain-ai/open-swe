@@ -26,6 +26,7 @@ import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
+  createRgToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -37,6 +38,8 @@ const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
+const rgTool = createRgToolFields(dummyRepo);
+type RgToolArgs = z.infer<typeof rgTool.schema>;
 
 function CustomComponent({
   message,
@@ -133,10 +136,65 @@ export function mapToolMessageToActionStepProps(
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
     };
+  } else if (toolCall?.name === rgTool.name) {
+    const args = toolCall.args as RgToolArgs;
+    return {
+      actionType: "rg",
+      status,
+      success,
+      reasoningText,
+      pattern: args.pattern,
+      paths: args.paths,
+      output: getContentString(message.content),
+      flags: args.flags,
+      useStdin: args.useStdin,
+      mode: args.mode,
+    };
   }
   return {
     status: "loading",
     summaryText: reasoningText,
+  };
+}
+
+function mapToolCallToActionStepProps(
+  toolCallName: string,
+  toolCallArgs:
+    | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
+    | undefined,
+): ActionStepProps {
+  if (toolCallName === shellTool.name) {
+    const args = toolCallArgs as ShellToolArgs;
+    return {
+      actionType: "shell",
+      status: "generating",
+      command: args.command || [],
+      workdir: args.workdir,
+    };
+  } else if (toolCallName === applyPatchTool.name) {
+    const args = toolCallArgs as ApplyPatchToolArgs;
+    return {
+      actionType: "apply-patch",
+      status: "generating",
+      file_path: args.file_path || "",
+      diff: args.diff,
+    };
+  } else if (toolCallName === rgTool.name) {
+    const args = toolCallArgs as RgToolArgs;
+    return {
+      actionType: "rg",
+      status: "generating",
+      pattern: args.pattern,
+      paths: args.paths,
+      flags: args.flags,
+      useStdin: args.useStdin,
+      mode: args.mode,
+    };
+  }
+
+  return {
+    status: "loading",
+    summaryText: "",
   };
 }
 
@@ -185,11 +243,15 @@ export function AssistantMessage({
 
   const aiToolCallArgs = (() => {
     if (message && isAIMessageSDK(message)) {
-      return message.tool_calls?.[0]?.args;
+      return message.tool_calls?.[0]?.args as
+        | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
+        | undefined;
     }
     if (anthropicStreamedToolCalls?.length) {
       return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
-        .args;
+        .args as
+        | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
+        | undefined;
     }
     return undefined;
   })();
@@ -210,7 +272,8 @@ export function AssistantMessage({
   if (
     message &&
     (aiToolCallName === shellTool.name ||
-      aiToolCallName === applyPatchTool.name)
+      aiToolCallName === applyPatchTool.name ||
+      aiToolCallName === rgTool.name)
   ) {
     if (toolResult) {
       return (
@@ -219,22 +282,7 @@ export function AssistantMessage({
     }
     return (
       <ActionStep
-        actionType={aiToolCallName === shellTool.name ? "shell" : "apply-patch"}
-        status="generating"
-        command={
-          aiToolCallName === shellTool.name ? aiToolCallArgs?.command || [] : []
-        }
-        workdir={
-          aiToolCallName === shellTool.name ? aiToolCallArgs?.workdir : ""
-        }
-        file_path={
-          aiToolCallName === applyPatchTool.name
-            ? aiToolCallArgs?.file_path || ""
-            : ""
-        }
-        diff={
-          aiToolCallName === applyPatchTool.name ? aiToolCallArgs?.diff : ""
-        }
+        {...mapToolCallToActionStepProps(aiToolCallName, aiToolCallArgs)}
         reasoningText={contentString}
       />
     );
@@ -242,7 +290,9 @@ export function AssistantMessage({
 
   if (
     message?.type === "tool" &&
-    (message.name === shellTool.name || message.name === applyPatchTool.name) &&
+    (message.name === shellTool.name ||
+      message.name === applyPatchTool.name ||
+      message.name === rgTool.name) &&
     idx > 0 &&
     messages[idx - 1] &&
     ((messages[idx - 1] &&
@@ -250,7 +300,9 @@ export function AssistantMessage({
       (messages[idx - 1] as AIMessage).tool_calls?.some(
         (tc) =>
           tc.id === (message as ToolMessage).tool_call_id &&
-          (tc.name === shellTool.name || tc.name === applyPatchTool.name),
+          (tc.name === shellTool.name ||
+            tc.name === applyPatchTool.name ||
+            tc.name === rgTool.name),
       )) ||
       (Array.isArray(messages[idx - 1].content) &&
         parseAnthropicStreamedToolCalls(
@@ -258,7 +310,9 @@ export function AssistantMessage({
         )?.some(
           (tc) =>
             tc.id === (message as ToolMessage).tool_call_id &&
-            (tc.name === shellTool.name || tc.name === applyPatchTool.name),
+            (tc.name === shellTool.name ||
+              tc.name === applyPatchTool.name ||
+              tc.name === rgTool.name),
         )))
   ) {
     return null;

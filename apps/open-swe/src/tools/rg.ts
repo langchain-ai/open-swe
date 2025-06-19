@@ -51,7 +51,11 @@ export function createRgTool(
           TIMEOUT_SEC,
         );
 
-        if (response.exitCode !== 0) {
+        let successResult = response.result;
+
+        if (response.exitCode === 1) {
+          successResult = "Exit code 1. No results found.";
+        } else if (response.exitCode > 1) {
           logger.error("Failed to run rg command", {
             error: response.result,
             error_result: response,
@@ -63,7 +67,7 @@ export function createRgTool(
         }
 
         return {
-          result: response.result,
+          result: successResult,
           status: "success",
         };
       } catch (e) {
