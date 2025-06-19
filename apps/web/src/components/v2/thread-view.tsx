@@ -96,7 +96,7 @@ export function ThreadView({
                     : "bg-red-500"
               }`}
             ></div>
-            <span className="text-muted-foreground truncate font-mono text-sm max-w-[500px]">
+            <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
               {displayThread.title}
             </span>
             {displayThread.repository && (
