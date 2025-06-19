@@ -4,7 +4,7 @@ import type React from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Dispatch, SetStateAction, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
-import { Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -40,6 +40,7 @@ export function TerminalInput({
   const [message, setMessage] = useState("");
   const { getConfig } = useConfigStore();
   const { selectedRepository } = useGitHubAppProvider();
+  const [loading, setLoading] = useState(false);
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -48,6 +49,9 @@ export function TerminalInput({
     threadId: null,
     onThreadId: (id) => {
       push(`/chat/${id}`);
+      setLoading(false);
+      setMessage("");
+      setContentBlocks([]);
     },
   });
 
@@ -59,6 +63,7 @@ export function TerminalInput({
       });
       return;
     }
+    setLoading(true);
     const trimmedMessage = message.trim();
     if (trimmedMessage.length > 0 || contentBlocks.length > 0) {
       const newHumanMessage = new HumanMessage({
@@ -90,8 +95,6 @@ export function TerminalInput({
           },
         },
       );
-      setMessage("");
-      setContentBlocks([]);
     }
   };
 
@@ -103,19 +106,19 @@ export function TerminalInput({
   };
 
   return (
-    <div className="rounded-md border border-gray-600 bg-black p-2 font-mono text-xs">
-      <div className="flex items-start gap-1 text-gray-300">
+    <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
+      <div className="text-foreground flex items-start gap-1">
         {/* User@Host */}
-        <span className="text-gray-400">open-swe</span>
-        <span className="text-gray-500">@</span>
-        <span className="text-gray-400">github</span>
-        <span className="text-gray-500">:</span>
+        <span className="text-muted-foreground">open-swe</span>
+        <span className="text-muted-foreground/70">@</span>
+        <span className="text-muted-foreground">github</span>
+        <span className="text-muted-foreground/70">:</span>
 
         {/* Repository & Branch Selectors */}
         <RepositoryBranchSelectors />
 
         {/* Prompt */}
-        <span className="text-gray-400">$</span>
+        <span className="text-muted-foreground">$</span>
       </div>
 
       {/* Multiline Input */}
@@ -126,7 +129,7 @@ export function TerminalInput({
           onKeyDown={handleKeyPress}
           placeholder={placeholder}
           disabled={disabled}
-          className="min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs text-white placeholder:text-gray-600 focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="text-foreground placeholder:text-muted-foreground min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={3}
           onPaste={onPaste}
         />
@@ -134,14 +137,20 @@ export function TerminalInput({
           onClick={handleSend}
           disabled={disabled || !message.trim()}
           size="sm"
-          className="h-7 w-7 self-end bg-gray-700 p-0 hover:bg-gray-600"
+          className="bg-muted-foreground/20 hover:bg-muted-foreground/30 h-7 w-7 self-end p-0 dark:bg-gray-700 hover:dark:bg-gray-600"
         >
-          <Send className="h-3 w-3" />
+          {loading ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Send className="size-3" />
+          )}
         </Button>
       </div>
 
       {/* Help text */}
-      <div className="mt-1 text-xs text-gray-600">Press Cmd+Enter to send</div>
+      <div className="text-muted-foreground mt-1 text-xs">
+        Press Cmd+Enter to send
+      </div>
     </div>
   );
 }

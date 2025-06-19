@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState, ManagerGraphUpdate } from "../types.js";
+import {
+  ManagerGraphState,
+  ManagerGraphUpdate,
+} from "@open-swe/shared/open-swe/manager/types";
 import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
@@ -92,6 +95,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
       recursion_limit: 400,
     },
     ifNotExists: "create",
+    streamResumable: true,
   });
 
   return {

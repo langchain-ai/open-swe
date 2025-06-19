@@ -18,8 +18,8 @@ export default function ChatPage() {
     threads?.map(threadToDisplayInfo) ?? [];
 
   return (
-    <div className="h-screen overflow-y-hidden bg-black">
-      <Suspense fallback={<div>Loading...</div>}>
+    <div className="bg-background h-screen overflow-y-hidden">
+      <Suspense>
         <Toaster />
         <GitHubAppProvider>
           <DefaultView threads={displayThreads} />

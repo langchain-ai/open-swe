@@ -1,20 +1,25 @@
 import { isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 
 interface ActionsRendererProps {
   graphId: string;
   threadId: string;
-  setProgrammerThreadId?: (threadId: string) => void;
-  programmerThreadId?: string;
+  runId?: string;
+  setProgrammerSession?: (
+    session: ManagerGraphState["programmerSession"],
+  ) => void;
+  programmerSession?: ManagerGraphState["programmerSession"];
 }
 
 export function ActionsRenderer<State extends Record<string, unknown>>({
   graphId,
   threadId,
-  setProgrammerThreadId,
-  programmerThreadId,
+  runId,
+  setProgrammerSession,
+  programmerSession,
 }: ActionsRendererProps) {
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -23,6 +28,14 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
     threadId,
   });
 
+  const streamJoined = useRef(false);
+  useEffect(() => {
+    if (!streamJoined.current && runId) {
+      streamJoined.current = true;
+      stream.joinStream(runId).catch(console.error);
+    }
+  }, [runId]);
+
   const nonHumanMessages = stream.messages?.filter(
     (m) => !isHumanMessageSDK(m),
   );
@@ -30,11 +43,22 @@ export function ActionsRenderer<State extends Record<string, unknown>>({
   // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
     if (
-      stream.values?.programmerThreadId &&
-      typeof stream.values.programmerThreadId === "string" &&
-      !programmerThreadId
+      stream.values?.programmerSession &&
+      typeof stream.values.programmerSession === "object" &&
+      stream.values.programmerSession &&
+      (
+        stream.values
+          .programmerSession as ManagerGraphState["programmerSession"]
+      )?.runId &&
+      (
+        stream.values
+          .programmerSession as ManagerGraphState["programmerSession"]
+      )?.threadId &&
+      !programmerSession
     ) {
-      setProgrammerThreadId?.(stream.values.programmerThreadId as string);
+      const programmerSession = stream.values
+        .programmerSession as ManagerGraphState["programmerSession"];
+      setProgrammerSession?.(programmerSession);
     }
   }, [stream.values]);
 

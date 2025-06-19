@@ -24,6 +24,7 @@ import {
   Settings,
   FilePlus2,
 } from "lucide-react";
+import { ThemeToggle } from "../theme-toggle";
 import { useQueryState, parseAsBoolean, parseAsString } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import TaskListSidebar from "../task-list-sidebar";
@@ -414,6 +415,7 @@ export function Thread() {
                 >
                   <Settings className="size-4" />
                 </TooltipIconButton>
+                <ThemeToggle />
                 <GitHubOAuthButton />
               </div>
             </div>
