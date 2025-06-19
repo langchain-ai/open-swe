@@ -1,0 +1,91 @@
+import { z } from "zod";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@open-swe/shared/open-swe/planner/types";
+import { loadModel, Task } from "../../../utils/load-model.js";
+import { getMessageString } from "../../../utils/message/content.js";
+import { getUserRequest } from "../../../utils/user-request.js";
+import { BaseMessage } from "@langchain/core/messages";
+
+const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
+
+You've just finished gathering context to aid in generating a development plan to address the user's request. The context you've gathered is provided in the conversation history below.
+After this, the conversation history will be deleted, and you'll start executing on the plan.
+Your task is to carefully read over the conversation history, and take notes on the most important and useful actions you preformed which will be helpful to you when you go and execute on the plan.
+The notes you extract should be thoughtful, and should include technical details about the codebase, files, patterns, dependencies and setup instructions you discovered during the context gathering step, which you believe will be helpful when you go to execute on the plan.
+These notes should not be overly verbose, as you'll be able to gather additional context when executing.
+Your goal is to generate notes on all of the low-hanging fruit from the conversation history, to speed up the execution so that you don't need to duplicate work to gather context.
+
+You MUST adhere to the following criteria when generating your notes:
+- Do not retain any full code snippets.
+- Do not retain any full file contents.
+- Only take notes on the context provided below, and do not make up, or attempt to infer any information/context which is not explicitly provided.
+
+Here is the user's request
+## User request:
+{USER_REQUEST}
+
+Here is the conversation history:
+## Conversation history:
+{CONVERSATION_HISTORY}
+
+And here is the plan you just generated:
+## Proposed plan:
+{PROPOSED_PLAN}
+
+With all of this in mind, please carefully inspect the conversation history, and the plan you generated. Then, determine which actions and context from the conversation history will be most useful to you when you execute the plan. After you're done analyzing, call the \`write_technical_notes\` tool.
+`;
+
+const formatPrompt = (userRequest: string, conversationHistory: BaseMessage[], proposedPlan: string[]): string =>
+  systemPrompt.replace("{USER_REQUEST}", userRequest).replace("{CONVERSATION_HISTORY}", conversationHistory.map(getMessageString).join("\n")).replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`);
+
+const condenseContextToolSchema = z.object({
+  notes: z
+    .string()
+    .describe("The notes you've generated based on the conversation history."),
+});
+const condenseContextTool = {
+  name: "write_technical_notes",
+  description:
+    "Write technical notes based on the conversation history provided. Ensure these notes are concise, but still containing enough information to be useful to you when you go to execute the plan.",
+  schema: condenseContextToolSchema,
+};
+
+export async function notetaker(
+  state: PlannerGraphState,
+  config: GraphConfig,
+): Promise<PlannerGraphUpdate> {
+  const model = await loadModel(config, Task.SUMMARIZER);
+  const modelWithTools = model.bindTools([condenseContextTool], {
+    tool_choice: condenseContextTool.name,
+    parallel_tool_calls: false,
+  });
+
+  const userRequest = getUserRequest(state.messages);
+  const conversationHistoryStr = `Here is the full conversation history:
+
+${state.messages.map(getMessageString).join("\n")}`;
+
+  const response = await modelWithTools.invoke([
+    {
+      role: "system",
+      content: formatPrompt(userRequest || "No user request provided.", state.messages, state.proposedPlan),
+    },
+    {
+      role: "user",
+      content: conversationHistoryStr,
+    },
+  ]);
+
+  const toolCall = response.tool_calls?.[0];
+  if (!toolCall) {
+    throw new Error("Failed to generate plan");
+  }
+
+  return {
+    messages: [response],
+    contextGatheringNotes: (toolCall.args as z.infer<typeof condenseContextToolSchema>).notes,
+  };
+}

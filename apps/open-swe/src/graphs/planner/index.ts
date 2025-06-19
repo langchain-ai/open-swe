@@ -12,7 +12,7 @@ import {
   generatePlan,
   interruptProposedPlan,
   prepareGraphState,
-  summarizer,
+  notetaker,
   takeAction,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
@@ -24,10 +24,10 @@ function takeActionOrGeneratePlan(
 ): "take-plan-action" | "generate-plan" {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
-  // If the last message is a tool call, and we have executed less than 6 actions, take action.
+  // If the last message is a tool call, and we have executed less than 75 actions, take action.
   // Max actions count is calculated as: maxContextActions * 2 + 1
   // This is because each action generates 2 messages (AI request + tool result) plus 1 initial human message
-  const maxContextActions = config.configurable?.maxContextActions ?? 6;
+  const maxContextActions = config.configurable?.maxContextActions ?? 75;
   const maxActionsCount = maxContextActions * 2 + 1;
   if (
     isAIMessage(lastMessage) &&
@@ -37,6 +37,7 @@ function takeActionOrGeneratePlan(
     return "take-plan-action";
   }
 
+  console.log("BEING FORCED TO GENERATE A PLAN!!!!", config.configurable?.maxContextActions)
   // If the last message does not have tool calls, continue to generate plan without modifications.
   return "generate-plan";
 }
@@ -49,7 +50,7 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addNode("generate-plan-context-action", generateAction)
   .addNode("take-plan-action", takeAction)
   .addNode("generate-plan", generatePlan)
-  .addNode("summarizer", summarizer)
+  .addNode("notetaker", notetaker)
   .addNode("interrupt-proposed-plan", interruptProposedPlan)
   .addEdge(START, "prepare-graph-state")
   .addEdge("initialize-sandbox", "generate-plan-context-action")
@@ -59,8 +60,8 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
     ["take-plan-action", "generate-plan"],
   )
   .addEdge("take-plan-action", "generate-plan-context-action")
-  .addEdge("generate-plan", "summarizer")
-  .addEdge("summarizer", "interrupt-proposed-plan")
+  .addEdge("generate-plan", "notetaker")
+  .addEdge("notetaker", "interrupt-proposed-plan")
   .addEdge("interrupt-proposed-plan", END);
 
 export const graph = workflow.compile();

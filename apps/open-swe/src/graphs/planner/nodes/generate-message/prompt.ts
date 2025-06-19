@@ -42,13 +42,17 @@ Your sole objective in this phase is to gather comprehensive context about the c
 
 2. **Make high-quality, targeted tool calls**: Each command should have a clear purpose in building your understanding of the codebase. Think strategically about what information you need.
 
-3. **Leverage efficient search tools**: Use \`rg\` (ripgrep) for all file searches because it respects .gitignore patterns and provides significantly faster results than alternatives like grep or ls -R.
+3. **Gather all of the context necessary**: Ensure you gather all of the necessary context to generate a plan, and then execute that plan without having to gather additional context.
+    - You do not want to have to generate tasks such as 'Locate the XYZ file', 'Examine the structure of the codebase', or 'Do X if Y is true, otherwise to Z'. 
+    - To ensure the above does not happen, you should be thorough in your context gathering. Always gather enough context to cover all edge cases, and prevent unclear instructions.
+
+4. **Leverage efficient search tools**: Use \`rg\` (ripgrep) for all file searches because it respects .gitignore patterns and provides significantly faster results than alternatives like grep or ls -R.
    - When searching for specific file types, use glob patterns: \`rg -i pattern -g **/*.tsx project-directory/\`
    - This explicit pattern matching ensures accurate results across all file extensions
 
-4. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
+5. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
 
-5. **Signal completion clearly**: When you have gathered sufficient context, respond with exactly 'done' without any tool calls. This indicates readiness to proceed to the planning phase.
+6. **Signal completion clearly**: When you have gathered sufficient context, respond with exactly 'done' without any tool calls. This indicates readiness to proceed to the planning phase.
 </context_gathering_guidelines>
 
 <workspace_information>

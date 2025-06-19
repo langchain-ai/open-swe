@@ -161,8 +161,9 @@ When modifying files:
 ## Generated Plan with Summaries
 {PLAN_PROMPT_WITH_SUMMARIES}
 
-## Plan Generation Summary
-{PLAN_GENERATION_SUMMARY}
+## Plan Generation Notes
+These are notes you took while gathering context for the plan:
+{PLAN_GENERATION_NOTES}
 
 ## Current Task Status
 {PLAN_PROMPT}

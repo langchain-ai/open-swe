@@ -99,7 +99,7 @@ export async function prepareGraphState(
     .map((m: BaseMessage) => new RemoveMessage({ id: m.id ?? "" }));
   const summaryMessage = new AIMessage({
     id: uuidv4(),
-    content: state.planContextSummary,
+    content: state.contextGatheringNotes,
     additional_kwargs: {
       summaryMessage: true,
     },
@@ -111,7 +111,7 @@ export async function prepareGraphState(
       ...untrackedComments,
     ],
     // Reset plan context summary as it's now included in the messages array.
-    planContextSummary: "",
+    contextGatheringNotes: "",
   };
 
   return new Command({
