@@ -42,7 +42,7 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     },
     default: (): string[] => [],
   }),
-  planContextSummary: withLangGraph(z.custom<string>(), {
+  contextGatheringNotes: withLangGraph(z.custom<string>(), {
     reducer: {
       schema: z.custom<string>(),
       fn: (_state, update) => update,

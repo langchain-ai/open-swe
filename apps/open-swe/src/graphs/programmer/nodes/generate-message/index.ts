@@ -42,8 +42,8 @@ const formatPrompt = (state: GraphState): string => {
     )
     .replaceAll("{REPO_DIRECTORY}", repoDirectory)
     .replaceAll(
-      "{PLAN_GENERATION_SUMMARY}",
-      `<plan-generation-summary>\n${state.planContextSummary}\n</plan-generation-summary>`,
+      "{PLAN_GENERATION_NOTES}",
+      `<plan-generation-notes>\n${state.contextGatheringNotes}\n</plan-generation-notes>`,
     )
     .replaceAll(
       "{CODEBASE_TREE}",
