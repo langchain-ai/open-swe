@@ -57,6 +57,20 @@ function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
   }
 }
 
+function logWithOptionalIds(styledPrefix: string, message: string, data?: any) {
+  const ids = getThreadAndRunIds();
+  if (Object.keys(ids).length > 0) {
+    const logData = data !== undefined ? { ...data, ...ids } : ids;
+    console.log(`${styledPrefix} ${message}`, logData);
+  } else {
+    if (data !== undefined) {
+      console.log(`${styledPrefix} ${message}`, data);
+    } else {
+      console.log(`${styledPrefix} ${message}`);
+    }
+  }
+}
+
 export function createLogger(level: LogLevel, prefix: string) {
   const hash = simpleHash(prefix);
   const color = COLORS[hash % COLORS.length];
@@ -65,32 +79,12 @@ export function createLogger(level: LogLevel, prefix: string) {
   return {
     debug: (message: string, data?: any) => {
       if (level === LogLevel.DEBUG) {
-        const ids = getThreadAndRunIds();
-        if (Object.keys(ids).length > 0) {
-          const logData = data !== undefined ? { ...data, ...ids } : ids;
-          console.log(`${styledPrefix} ${message}`, logData);
-        } else {
-          if (data !== undefined) {
-            console.log(`${styledPrefix} ${message}`, data);
-          } else {
-            console.log(`${styledPrefix} ${message}`);
-          }
-        }
+        logWithOptionalIds(styledPrefix, message, data);
       }
     },
     info: (message: string, data?: any) => {
       if (level === LogLevel.INFO || level === LogLevel.DEBUG) {
-        const ids = getThreadAndRunIds();
-        if (Object.keys(ids).length > 0) {
-          const logData = data !== undefined ? { ...data, ...ids } : ids;
-          console.log(`${styledPrefix} ${message}`, logData);
-        } else {
-          if (data !== undefined) {
-            console.log(`${styledPrefix} ${message}`, data);
-          } else {
-            console.log(`${styledPrefix} ${message}`);
-          }
-        }
+        logWithOptionalIds(styledPrefix, message, data);
       }
     },
     warn: (message: string, data?: any) => {
@@ -99,17 +93,7 @@ export function createLogger(level: LogLevel, prefix: string) {
         level === LogLevel.INFO ||
         level === LogLevel.DEBUG
       ) {
-        const ids = getThreadAndRunIds();
-        if (Object.keys(ids).length > 0) {
-          const logData = data !== undefined ? { ...data, ...ids } : ids;
-          console.log(`${styledPrefix} ${message}`, logData);
-        } else {
-          if (data !== undefined) {
-            console.log(`${styledPrefix} ${message}`, data);
-          } else {
-            console.log(`${styledPrefix} ${message}`);
-          }
-        }
+        logWithOptionalIds(styledPrefix, message, data);
       }
     },
     error: (message: string, data?: any) => {
@@ -119,17 +103,7 @@ export function createLogger(level: LogLevel, prefix: string) {
         level === LogLevel.INFO ||
         level === LogLevel.DEBUG
       ) {
-        const ids = getThreadAndRunIds();
-        if (Object.keys(ids).length > 0) {
-          const logData = data !== undefined ? { ...data, ...ids } : ids;
-          console.log(`${styledPrefix} ${message}`, logData);
-        } else {
-          if (data !== undefined) {
-            console.log(`${styledPrefix} ${message}`, data);
-          } else {
-            console.log(`${styledPrefix} ${message}`);
-          }
-        }
+        logWithOptionalIds(styledPrefix, message, data);
       }
     },
   };
