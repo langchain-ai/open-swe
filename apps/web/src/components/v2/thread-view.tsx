@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, GitBranch, Send, User, Bot, Copy, CopyCheck } from "lucide-react";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { AnimatePresence, motion } from "framer-motion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadDisplayInfo } from "./types";
@@ -21,6 +22,50 @@ import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
+
+function MessageCopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <TooltipIconButton
+      onClick={(e) => handleCopy(e)}
+      variant="ghost"
+      tooltip="Copy content"
+      className="size-6 p-1"
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {copied ? (
+          <motion.div
+            key="check"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.15 }}
+          >
+            <CopyCheck className="h-3 w-3 text-green-500" />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="copy"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.15 }}
+          >
+            <Copy className="h-3 w-3" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </TooltipIconButton>
+  );
+}
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -242,4 +287,5 @@ export function ThreadView({
     </div>
   );
 }
+
 
