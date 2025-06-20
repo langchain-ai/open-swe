@@ -413,7 +413,6 @@ export function Thread() {
                   <Settings className="size-4" />
                 </TooltipIconButton>
                 <ThemeToggle />
-             
               </div>
             </div>
           )}
