@@ -19,7 +19,6 @@ export default function DemoPage(): React.ReactNode {
           <StreamProvider
             apiUrl={apiUrl}
             assistantId={assistantId}
-            githubToken=""
           >
             <Thread />
           </StreamProvider>

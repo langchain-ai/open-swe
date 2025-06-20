@@ -36,12 +36,10 @@ const StreamSession = ({
   children,
   apiUrl,
   assistantId,
-  githubToken,
 }: {
   children: ReactNode;
   apiUrl: string;
   assistantId: string;
-  githubToken: string;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [customEvents, setCustomEvents] = useState<CustomNodeEvent[]>([]);
@@ -87,13 +85,11 @@ export const StreamProvider: React.FC<{
   children: ReactNode;
   apiUrl: string;
   assistantId: string;
-  githubToken: string;
-}> = ({ children, apiUrl, assistantId, githubToken }) => {
+}> = ({ children, apiUrl, assistantId }) => {
   return (
     <StreamSession
       apiUrl={apiUrl}
       assistantId={assistantId}
-      githubToken={githubToken}
     >
       {children}
     </StreamSession>
