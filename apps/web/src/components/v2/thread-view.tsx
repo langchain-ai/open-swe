@@ -5,7 +5,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, GitBranch, Send, User, Bot, Copy, CopyCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  GitBranch,
+  Send,
+  User,
+  Bot,
+  Copy,
+  CopyCheck,
+} from "lucide-react";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { AnimatePresence, motion } from "framer-motion";
@@ -40,7 +48,10 @@ function MessageCopyButton({ content }: { content: string }) {
       tooltip="Copy content"
       className="size-6 p-1"
     >
-      <AnimatePresence mode="wait" initial={false}>
+      <AnimatePresence
+        mode="wait"
+        initial={false}
+      >
         {copied ? (
           <motion.div
             key="check"
@@ -297,7 +308,3 @@ export function ThreadView({
     </div>
   );
 }
-
-
-
-
