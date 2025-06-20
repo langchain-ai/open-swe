@@ -12,7 +12,7 @@ import { truncateOutput } from "../../../utils/truncate-outputs.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
-export async function takeAction(
+export async function takeActions(
   state: PlannerGraphState,
   _config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
@@ -28,75 +28,81 @@ export async function takeAction(
     [shellTool.name]: shellTool,
   };
 
-  const toolCall = lastMessage.tool_calls[0];
-  if (!toolCall) {
-    throw new Error("No tool call found.");
+  const toolCalls = lastMessage.tool_calls;
+  if (!toolCalls?.length) {
+    throw new Error("No tool calls found.");
   }
 
-  const tool = toolsMap[toolCall.name];
-  if (!tool) {
-    logger.error(`Unknown tool: ${toolCall.name}`);
-    const toolMessage = new ToolMessage({
-      tool_call_id: toolCall.id ?? "",
-      content: `Unknown tool: ${toolCall.name}`,
-      name: toolCall.name,
-      status: "error",
+  const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
+    const tool = toolsMap[toolCall.name];
+    if (!tool) {
+      logger.error(`Unknown tool: ${toolCall.name}`);
+      const toolMessage = new ToolMessage({
+        tool_call_id: toolCall.id ?? "",
+        content: `Unknown tool: ${toolCall.name}`,
+        name: toolCall.name,
+        status: "error",
+      });
+
+      return toolMessage;
+    }
+
+    logger.info("Executing planner tool action", {
+      ...toolCall,
     });
 
-    return {
-      messages: [toolMessage],
-    };
-  }
-
-  logger.info("Executing planner tool action", {
-    ...toolCall,
-  });
-
-  let result = "";
-  let toolCallStatus: "success" | "error" = "success";
-  try {
-    const toolResult =
-      // @ts-expect-error tool.invoke types are weird here...
-      (await tool.invoke(toolCall.args)) as {
-        result: string;
-        status: "success" | "error";
-      };
-    result = toolResult.result;
-    toolCallStatus = toolResult.status;
-  } catch (e) {
-    toolCallStatus = "error";
-    if (
-      e instanceof Error &&
-      e.message === "Received tool input did not match expected schema"
-    ) {
-      logger.error("Received tool input did not match expected schema", {
-        toolCall,
-        expectedSchema: zodSchemaToString(tool.schema),
-      });
-      result = formatBadArgsError(tool.schema, toolCall.args);
-    } else {
-      logger.error("Failed to call tool", {
-        ...(e instanceof Error
-          ? { name: e.name, message: e.message, stack: e.stack }
-          : { error: e }),
-      });
-      const errMessage = e instanceof Error ? e.message : "Unknown error";
-      result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+    let result = "";
+    let toolCallStatus: "success" | "error" = "success";
+    try {
+      const toolResult =
+        // @ts-expect-error tool.invoke types are weird here...
+        (await tool.invoke(toolCall.args)) as {
+          result: string;
+          status: "success" | "error";
+        };
+      result = toolResult.result;
+      toolCallStatus = toolResult.status;
+    } catch (e) {
+      toolCallStatus = "error";
+      if (
+        e instanceof Error &&
+        e.message === "Received tool input did not match expected schema"
+      ) {
+        logger.error("Received tool input did not match expected schema", {
+          toolCall,
+          expectedSchema: zodSchemaToString(tool.schema),
+        });
+        result = formatBadArgsError(tool.schema, toolCall.args);
+      } else {
+        logger.error("Failed to call tool", {
+          ...(e instanceof Error
+            ? { name: e.name, message: e.message, stack: e.stack }
+            : { error: e }),
+        });
+        const errMessage = e instanceof Error ? e.message : "Unknown error";
+        result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+      }
     }
-  }
 
-  const toolMessage = new ToolMessage({
-    tool_call_id: toolCall.id ?? "",
-    content: truncateOutput(result),
-    name: toolCall.name,
-    status: toolCallStatus,
+    const toolMessage = new ToolMessage({
+      tool_call_id: toolCall.id ?? "",
+      content: truncateOutput(result),
+      name: toolCall.name,
+      status: toolCallStatus,
+    });
+    return toolMessage;
   });
+
+  const toolCallResults = await Promise.all(toolCallResultsPromise);
 
   logger.info("Completed planner tool action", {
-    tool_call_id: toolCall.id,
-    status: toolCallStatus,
+    ...toolCallResults.map((tc) => ({
+      tool_call_id: tc.tool_call_id,
+      status: tc.status,
+    })),
   });
+
   return {
-    messages: [toolMessage],
+    messages: toolCallResults,
   };
 }

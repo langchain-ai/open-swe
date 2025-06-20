@@ -71,10 +71,10 @@ export async function generateAction(
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
-    ...(response.tool_calls?.[0] && {
-      name: response.tool_calls?.[0].name,
-      args: response.tool_calls?.[0].args,
-    }),
+    ...response.tool_calls?.map((tc) => ({
+      name: tc.name,
+      args: tc.args,
+    })),
   });
 
   return {
