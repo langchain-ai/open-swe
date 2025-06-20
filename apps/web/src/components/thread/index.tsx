@@ -49,7 +49,6 @@ import { TaskPlanView } from "../tasks";
 import { useTaskPlan } from "../tasks/useTaskPlan";
 import { isProposedPlanInterrupt } from "@/lib/plan-utils";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import AuthStatus from "../github/auth-status";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -394,7 +393,6 @@ export function Thread() {
                 >
                   <Settings className="size-4" />
                 </TooltipIconButton>
-                <AuthStatus />
               </div>
             </div>
           )}
@@ -448,7 +446,6 @@ export function Thread() {
               </div>
 
               <div className="col-span-2 flex items-center justify-end gap-2 text-gray-700">
-                <AuthStatus />
                 <OpenPRButton />
                 <TooltipIconButton
                   tooltip="Configuration"

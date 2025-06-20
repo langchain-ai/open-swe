@@ -18,6 +18,7 @@ interface SidebarButtonsProps {
   setConfigOpen: (open: boolean) => void;
   className?: string;
 }
+
 // TODO: Implement Using this component in the thread component instead of current implementation
 export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
   (
