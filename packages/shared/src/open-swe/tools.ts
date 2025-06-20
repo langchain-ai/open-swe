@@ -134,8 +134,9 @@ export function createRgToolFields(targetRepository: TargetRepository) {
   };
 }
 
-const tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
-export type RipgrepCommand = z.infer<typeof tmpRgToolSchema>;
+// Only used for type inference
+const _tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
+export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
 
 export function formatRgCommand(cmd: RipgrepCommand): string[] {
   const args = ["rg"];

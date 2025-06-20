@@ -64,7 +64,7 @@ export function createRgTool(
         if (response.exitCode === 1) {
           logger.info("Exit code 1. no results found", {
             ...response,
-          })
+          });
           successResult = "Exit code 1. No results found.";
         } else if (response.exitCode > 1) {
           logger.error("Failed to run rg command", {
