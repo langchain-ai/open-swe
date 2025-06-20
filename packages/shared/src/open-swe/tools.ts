@@ -100,3 +100,58 @@ export function createUpdatePlanToolFields() {
       "\nThe reasoning you pass to this tool will be used in the step that actually updates the plan, so ensure it is useful and concise.",
   };
 }
+
+export function createRgToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  // Main ripgrep command schema
+  const ripgrepCommandSchema = z.object({
+    pattern: z
+      .string()
+      .optional()
+      .describe(
+        "The search pattern (regex). Leave empty when using flags like --files or --type-list",
+      ),
+
+    paths: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Files or directories to search. If empty, searches current directory",
+      ),
+
+    flags: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Array of flags with their values. Examples: ["-i", "--type=rust", "-A", "3", "--files"]. Short flags like -i can be standalone, flags with values can be separate strings or use = for long flags',
+      ),
+  });
+
+  return {
+    name: "rg",
+    schema: ripgrepCommandSchema,
+    description: `Call this tool to run the rg command (ripgrep). This should ONLY be called if you want to search for files in the repository. The working directory this command will be executed in is \`${repoRoot}\`.`,
+  };
+}
+
+// Only used for type inference
+const _tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
+export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
+
+export function formatRgCommand(cmd: RipgrepCommand): string[] {
+  const args = ["rg"];
+
+  if (cmd.flags) {
+    args.push(...cmd.flags);
+  }
+
+  if (cmd.pattern) {
+    args.push(cmd.pattern);
+  }
+
+  if (cmd.paths) {
+    args.push(...cmd.paths);
+  }
+
+  return args;
+}

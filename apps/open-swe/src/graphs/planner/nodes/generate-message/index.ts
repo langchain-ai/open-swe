@@ -16,6 +16,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { createRgTool } from "../../../../tools/rg.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -43,7 +44,7 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [createShellTool(state)];
+  const tools = [createRgTool(state), createShellTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: false,

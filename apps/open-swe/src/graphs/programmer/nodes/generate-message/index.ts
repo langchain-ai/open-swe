@@ -20,6 +20,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { createRgTool } from "../../../../tools/rg.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -58,6 +59,7 @@ export async function generateAction(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [
+    createRgTool(state),
     createShellTool(state),
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
