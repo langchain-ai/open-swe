@@ -184,7 +184,7 @@ export function ThreadView({
             {filteredMessages.map((message) => (
               <div
                 key={message.id}
-                className="flex gap-3"
+                className="group flex gap-3"
                 onMouseEnter={() => setHoveredMessageId(message.id)}
                 onMouseLeave={() => setHoveredMessageId(null)}
               >
@@ -306,4 +306,5 @@ export function ThreadView({
     </div>
   );
 }
+
 
