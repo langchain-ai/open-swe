@@ -147,8 +147,6 @@ export function mapToolMessageToActionStepProps(
       paths: args.paths,
       output: getContentString(message.content),
       flags: args.flags,
-      useStdin: args.useStdin,
-      mode: args.mode,
     };
   }
   return {
@@ -187,8 +185,6 @@ function mapToolCallToActionStepProps(
       pattern: args.pattern,
       paths: args.paths,
       flags: args.flags,
-      useStdin: args.useStdin,
-      mode: args.mode,
     };
   }
 

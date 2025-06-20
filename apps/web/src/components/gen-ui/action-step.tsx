@@ -189,8 +189,6 @@ export function ActionStep(props: ActionStepProps) {
             pattern: props.pattern,
             paths: props.paths,
             flags: props.flags,
-            useStdin: props.useStdin ?? false,
-            mode: props.mode ?? "search",
           })?.join(" ") ?? "";
       } catch {
         // no-op

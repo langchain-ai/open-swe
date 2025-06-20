@@ -43,7 +43,15 @@ export function createRgTool(
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
 
         sandbox = await daytonaClient().get(sandboxSessionId);
-        const command = formatRgCommand(input);
+        const command = formatRgCommand({
+          pattern: input.pattern,
+          paths: input.paths,
+          flags: input.flags,
+        });
+        logger.info("Running rg command", {
+          command: command.join(" "),
+          repoRoot,
+        });
         const response = await sandbox.process.executeCommand(
           command.join(" "),
           repoRoot,
@@ -54,6 +62,9 @@ export function createRgTool(
         let successResult = response.result;
 
         if (response.exitCode === 1) {
+          logger.info("Exit code 1. no results found", {
+            ...response,
+          })
           successResult = "Exit code 1. No results found.";
         } else if (response.exitCode > 1) {
           logger.error("Failed to run rg command", {

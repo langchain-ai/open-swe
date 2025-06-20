@@ -103,57 +103,27 @@ export function createUpdatePlanToolFields() {
 
 export function createRgToolFields(targetRepository: TargetRepository) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
-  const ripgrepFlagSchema = z.object({
-    flag: z
-      .string()
-      .describe(
-        'The flag name without dashes. For short flags use single letter (e.g., "e" for -e), for long flags use the full name (e.g., "regexp" for --regexp). Some flags accept values, which should be provided in the value field.',
-      ),
-    value: z
-      .string()
-      .optional()
-      .describe(
-        'The value for flags that accept arguments. For example, with flag "type", value might be "rust". For flags that accept multiple values (like -e), create multiple flag objects.',
-      ),
-  });
-
   // Main ripgrep command schema
   const ripgrepCommandSchema = z.object({
     pattern: z
       .string()
       .optional()
       .describe(
-        "The regular expression pattern to search for. This is the main search term. Can be omitted when using --files or --type-list mode. For patterns starting with dash, use the flags array with -e instead. Supports full regex syntax based on the selected engine.",
+        "The search pattern (regex). Leave empty when using flags like --files or --type-list",
       ),
 
     paths: z
       .array(z.string())
       .optional()
       .describe(
-        "Array of file paths or directories to search in. If omitted, searches recursively in the current directory. Directories are searched recursively by default. Can include both files and directories. Paths override any ignore rules.",
+        "Files or directories to search. If empty, searches current directory",
       ),
 
     flags: z
-      .array(ripgrepFlagSchema)
+      .array(z.string())
       .optional()
       .describe(
-        'Array of command-line flags and their values. Each flag is an object with "flag" (the flag name) and optional "value" (for flags that take arguments). Examples: {flag: "type", value: "rust"} for --type=rust, {flag: "i"} for -i (case insensitive), {flag: "A", value: "3"} for -A 3 (3 lines after context).',
-      ),
-
-    useStdin: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe(
-        "If true, indicates that ripgrep should read from stdin instead of searching files. In this case, paths should be omitted. The pattern is still required unless using specific flags like --files.",
-      ),
-
-    mode: z
-      .enum(["search", "files", "type-list"])
-      .optional()
-      .default("search")
-      .describe(
-        'The operation mode. "search" is the default pattern search. "files" lists files that would be searched (--files flag). "type-list" shows all file types (--type-list flag). This helps determine which arguments are required.',
+        'Array of flags with their values. Examples: ["-i", "--type=rust", "-A", "3", "--files"]. Short flags like -i can be standalone, flags with values can be separate strings or use = for long flags',
       ),
   });
 
@@ -167,60 +137,19 @@ export function createRgToolFields(targetRepository: TargetRepository) {
 const tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
 export type RipgrepCommand = z.infer<typeof tmpRgToolSchema>;
 
-export function formatRgCommand(command: RipgrepCommand): string[] {
-  const args: string[] = ["rg"];
+export function formatRgCommand(cmd: RipgrepCommand): string[] {
+  const args = ["rg"];
 
-  // Add flags first
-  if (command.flags) {
-    for (const { flag, value } of command.flags) {
-      if (flag.length === 1) {
-        // Short flag
-        args.push(`-${flag}`);
-        if (value !== undefined) {
-          args.push(value);
-        }
-      } else {
-        // Long flag
-        if (value !== undefined) {
-          args.push(`--${flag}=${value}`);
-        } else {
-          args.push(`--${flag}`);
-        }
-      }
-    }
+  if (cmd.flags) {
+    args.push(...cmd.flags);
   }
 
-  // Add mode-specific flags if not already included
-  if (
-    command.mode === "files" &&
-    !command.flags?.some((f) => f.flag === "files")
-  ) {
-    args.push("--files");
-  } else if (
-    command.mode === "type-list" &&
-    !command.flags?.some((f) => f.flag === "type-list")
-  ) {
-    args.push("--type-list");
+  if (cmd.pattern) {
+    args.push(cmd.pattern);
   }
 
-  // Add pattern if in search mode and pattern is provided
-  if (
-    command.mode === "search" &&
-    command.pattern &&
-    !command.flags?.some(
-      (f) =>
-        f.flag === "e" ||
-        f.flag === "regexp" ||
-        f.flag === "f" ||
-        f.flag === "file",
-    )
-  ) {
-    args.push(command.pattern);
-  }
-
-  // Add paths
-  if (command.paths && command.paths.length > 0 && !command.useStdin) {
-    args.push(...command.paths);
+  if (cmd.paths) {
+    args.push(...cmd.paths);
   }
 
   return args;
