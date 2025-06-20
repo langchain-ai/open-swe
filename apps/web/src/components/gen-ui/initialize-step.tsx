@@ -1,11 +1,10 @@
 "use client";
+
 import {
   Loader2,
   CheckCircle,
   XCircle,
   GitBranch,
-  MessageSquare,
-  FileText,
   ChevronDown,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
