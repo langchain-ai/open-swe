@@ -2,11 +2,11 @@ import { initApiPassthrough } from "langgraph-nextjs-api-passthrough";
 import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_ID_COOKIE,
 } from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { NextRequest } from "next/server";
 import { getInstallationToken } from "@/utils/github";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
 
 function getGitHubAccessTokenOrThrow(
   req: NextRequest,

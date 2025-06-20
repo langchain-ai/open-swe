@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInstallationToken } from "../../../../../utils/github"; // Adjusted path
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 
 const GITHUB_API_URL = "https://api.github.com";
 
