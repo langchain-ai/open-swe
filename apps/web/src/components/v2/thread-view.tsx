@@ -84,6 +84,7 @@ export function ThreadView({
   const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
     "planner",
   );
+  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const plannerThreadId = stream.values?.plannerSession?.threadId;
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
@@ -287,5 +288,6 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
