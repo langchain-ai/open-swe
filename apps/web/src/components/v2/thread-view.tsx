@@ -174,6 +174,8 @@ export function ThreadView({
               <div
                 key={message.id}
                 className="flex gap-3"
+                onMouseEnter={() => setHoveredMessageId(message.id)}
+                onMouseLeave={() => setHoveredMessageId(null)}
               >
                 <div className="flex-shrink-0">
                   {message.type === "human" ? (
@@ -186,7 +188,7 @@ export function ThreadView({
                     </div>
                   )}
                 </div>
-                <div className="flex-1 space-y-1">
+                <div className="relative flex-1 space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground text-xs font-medium">
                       {message.type === "human" ? "You" : "Agent"}
@@ -195,6 +197,13 @@ export function ThreadView({
                   <div className="text-foreground text-sm leading-relaxed">
                     {getMessageContentString(message.content)}
                   </div>
+                  {hoveredMessageId === message.id && (
+                    <div className="absolute top-0 right-0">
+                      <MessageCopyButton
+                        content={getMessageContentString(message.content)}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -288,6 +297,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
