@@ -49,6 +49,7 @@ export function useProposedPlan(
         config: {
           recursion_limit: 400,
         },
+        streamResumable: true,
       },
     );
   };
@@ -69,6 +70,7 @@ export function useProposedPlan(
         config: {
           recursion_limit: 400,
         },
+        streamResumable: true,
       },
     );
   };

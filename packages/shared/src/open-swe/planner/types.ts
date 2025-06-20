@@ -1,7 +1,7 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
 import { MessagesZodState } from "@langchain/langgraph";
-import { TargetRepository, TaskPlan } from "../types.js";
+import { AgentSession, TargetRepository, TaskPlan } from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const PlannerGraphStateObj = MessagesZodState.extend({
@@ -42,7 +42,7 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     },
     default: (): string[] => [],
   }),
-  planContextSummary: withLangGraph(z.custom<string>(), {
+  contextGatheringNotes: withLangGraph(z.custom<string>(), {
     reducer: {
       schema: z.custom<string>(),
       fn: (_state, update) => update,
@@ -61,9 +61,9 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  programmerThreadId: withLangGraph(z.custom<string>(), {
+  programmerSession: withLangGraph(z.custom<AgentSession>(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.custom<AgentSession>(),
       fn: (_state, update) => update,
     },
   }),

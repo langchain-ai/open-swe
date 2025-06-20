@@ -3,83 +3,28 @@
 import type React from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  ArrowLeft,
-  Search,
-  Filter,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  GitBranch,
-  GitPullRequest,
-  Bug,
-  Calendar,
-  Clock,
-} from "lucide-react";
+import { ArrowLeft, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
   const router = useRouter();
-  const { threads } = useThreads<GraphState>();
+  const { threads, threadsLoading } = useThreads<GraphState>(
+    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
+  );
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
   // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] =
-    threads?.map(threadToDisplayInfo) ?? [];
-
-  const getStatusColor = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return "bg-blue-950 text-blue-400";
-      case "completed":
-        return "bg-green-950 text-green-400";
-      case "failed":
-        return "bg-red-950 text-red-400";
-      case "pending":
-        return "bg-yellow-950 text-yellow-400";
-      default:
-        return "bg-gray-800 text-gray-400";
-    }
-  };
-
-  const getStatusIcon = (status: ThreadDisplayInfo["status"]) => {
-    switch (status) {
-      case "running":
-        return <Loader2 className="h-4 w-4 animate-spin" />;
-      case "completed":
-        return <CheckCircle className="h-4 w-4" />;
-      case "failed":
-        return <XCircle className="h-4 w-4" />;
-      case "pending":
-        return <Clock className="h-4 w-4" />;
-      default:
-        return null;
-    }
-  };
-
-  const getPRStatusColor = (status: string) => {
-    switch (status) {
-      case "merged":
-        return "text-purple-400";
-      case "open":
-        return "text-green-400";
-      case "draft":
-        return "text-gray-400";
-      case "closed":
-        return "text-red-400";
-      default:
-        return "text-gray-400";
-    }
-  };
+  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
 
   // Filter and search threads
   const filteredThreads = displayThreads.filter((thread) => {
@@ -107,50 +52,51 @@ export default function AllThreadsPage() {
     pending: displayThreads.filter((t) => t.status === "pending").length,
   };
 
-  const handleThreadClick = (thread: ThreadDisplayInfo) => {
-    router.push(`/chat/${thread.id}`);
-  };
-
   return (
-    <div className="flex h-screen flex-col bg-black">
+    <div className="bg-background flex h-screen flex-col">
       {/* Header */}
-      <div className="border-b border-gray-900 bg-black px-4 py-3">
+      <div className="border-border bg-card border-b px-4 py-3">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 w-6 p-0 text-gray-600 hover:bg-gray-900 hover:text-gray-400"
+            className="text-muted-foreground hover:bg-muted hover:text-foreground h-6 w-6 p-0"
             onClick={() => router.push("/chat")}
           >
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
             <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="font-mono text-sm text-gray-400">All Threads</span>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-gray-600">
-              {filteredThreads.length} threads
+            <span className="text-muted-foreground font-mono text-sm">
+              All Threads
             </span>
+          </div>
+          <div className="ml-auto flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground text-xs">
+                {filteredThreads.length} threads
+              </span>
+            </div>
+            <ThemeToggle />
           </div>
         </div>
       </div>
 
       {/* Search and Filters */}
-      <div className="border-b border-gray-900 bg-gray-950 px-4 py-3">
+      <div className="border-border bg-muted/50 border-b px-4 py-3 dark:bg-gray-950">
         <div className="flex items-center gap-3">
           <div className="relative max-w-md flex-1">
-            <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform text-gray-500" />
+            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
             <Input
               placeholder="Search threads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="border-gray-700 bg-gray-900 pl-10 text-gray-300 placeholder:text-gray-600"
+              className="border-border bg-background text-foreground placeholder:text-muted-foreground pl-10 dark:bg-gray-900"
             />
           </div>
           <div className="flex items-center gap-1">
-            <Filter className="h-4 w-4 text-gray-500" />
-            <span className="mr-2 text-xs text-gray-500">Filter:</span>
+            <Filter className="text-muted-foreground h-4 w-4" />
+            <span className="text-muted-foreground mr-2 text-xs">Filter:</span>
             {(
               [
                 "all",
@@ -166,8 +112,8 @@ export default function AllThreadsPage() {
                 size="sm"
                 className={`h-7 text-xs ${
                   statusFilter === status
-                    ? "bg-gray-700 text-gray-200"
-                    : "text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                    ? "bg-muted text-foreground dark:bg-gray-700"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
                 onClick={() => setStatusFilter(status)}
               >
@@ -176,7 +122,7 @@ export default function AllThreadsPage() {
                   : status.charAt(0).toUpperCase() + status.slice(1)}
                 <Badge
                   variant="secondary"
-                  className="ml-1 bg-gray-800 text-xs text-gray-400"
+                  className="bg-muted/70 text-muted-foreground ml-1 text-xs dark:bg-gray-800"
                 >
                   {statusCounts[status]}
                 </Badge>
@@ -197,12 +143,12 @@ export default function AllThreadsPage() {
                 return (
                   <div key={status}>
                     <div className="mb-3 flex items-center gap-2">
-                      <h2 className="text-base font-semibold text-gray-300 capitalize">
+                      <h2 className="text-foreground text-base font-semibold capitalize">
                         {status} Threads
                       </h2>
                       <Badge
                         variant="secondary"
-                        className="bg-gray-800 text-xs text-gray-400"
+                        className="bg-muted/70 text-muted-foreground text-xs dark:bg-gray-800"
                       >
                         {threads.length}
                       </Badge>
@@ -212,10 +158,6 @@ export default function AllThreadsPage() {
                         <ThreadCard
                           key={thread.id}
                           thread={thread}
-                          onClick={() => handleThreadClick(thread)}
-                          getStatusColor={getStatusColor}
-                          getStatusIcon={getStatusIcon}
-                          getPRStatusColor={getPRStatusColor}
                         />
                       ))}
                     </div>
@@ -230,119 +172,38 @@ export default function AllThreadsPage() {
                 <ThreadCard
                   key={thread.id}
                   thread={thread}
-                  onClick={() => handleThreadClick(thread)}
-                  getStatusColor={getStatusColor}
-                  getStatusIcon={getStatusIcon}
-                  getPRStatusColor={getPRStatusColor}
                 />
               ))}
             </div>
           )}
 
-          {filteredThreads.length === 0 && (
+          {filteredThreads.length === 0 && !threadsLoading && (
             <div className="py-12 text-center">
-              <div className="mb-2 text-gray-500">No threads found</div>
-              <div className="text-xs text-gray-600">
+              <div className="text-muted-foreground mb-2">No threads found</div>
+              <div className="text-muted-foreground/70 text-xs">
                 {searchQuery
                   ? "Try adjusting your search query"
                   : "No threads match the selected filter"}
               </div>
             </div>
           )}
+
+          {threadsLoading && threads.length === 0 && (
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-foreground text-base font-semibold capitalize">
+                  Loading threads...
+                </h2>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 9 }).map((_, index) => (
+                  <ThreadCardLoading key={`all-threads-loading-${index}`} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
-  );
-}
-
-interface ThreadCardProps {
-  thread: ThreadDisplayInfo;
-  onClick: () => void;
-  getStatusColor: (status: ThreadDisplayInfo["status"]) => string;
-  getStatusIcon: (status: ThreadDisplayInfo["status"]) => React.ReactNode;
-  getPRStatusColor: (status: string) => string;
-}
-
-function ThreadCard({
-  thread,
-  onClick,
-  getStatusColor,
-  getStatusIcon,
-  getPRStatusColor,
-}: ThreadCardProps) {
-  return (
-    <Card
-      className="cursor-pointer border-gray-800 bg-gray-950 transition-shadow hover:bg-gray-900 hover:shadow-lg"
-      onClick={onClick}
-    >
-      <CardHeader className="p-3 pb-2">
-        <div className="flex items-start justify-between">
-          <div className="min-w-0 flex-1">
-            <CardTitle className="truncate text-sm font-medium text-gray-300">
-              {thread.title}
-            </CardTitle>
-            <div className="mt-1 flex items-center gap-1">
-              <GitBranch className="h-2 w-2 text-gray-600" />
-              <span className="truncate text-xs text-gray-500">
-                {thread.repository}
-              </span>
-            </div>
-          </div>
-          <Badge
-            variant="secondary"
-            className={`${getStatusColor(thread.status)} text-xs`}
-          >
-            <div className="flex items-center gap-1">
-              {getStatusIcon(thread.status)}
-              <span className="capitalize">{thread.status}</span>
-            </div>
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="p-3 pt-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-600">
-              {thread.taskCount} tasks
-            </span>
-            <span className="text-xs text-gray-600">•</span>
-            <div className="flex items-center gap-1">
-              <Calendar className="h-2 w-2 text-gray-600" />
-              <span className="text-xs text-gray-600">
-                {thread.lastActivity}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            {thread.githubIssue && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-5 w-5 p-0 text-gray-500 hover:text-gray-300"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.githubIssue!.url, "_blank");
-                }}
-              >
-                <Bug className="h-3 w-3" />
-              </Button>
-            )}
-            {thread.pullRequest && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`h-5 w-5 p-0 hover:text-gray-300 ${getPRStatusColor(thread.pullRequest.status)}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.pullRequest!.url, "_blank");
-                }}
-              >
-                <GitPullRequest className="h-3 w-3" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

@@ -1,4 +1,7 @@
-import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
+import {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@open-swe/shared/open-swe/planner/types";
 import { Command, END } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";
@@ -15,6 +18,7 @@ import {
   getMessageContentFromIssue,
   getUntrackedComments,
 } from "../../../utils/github/issue-messages.js";
+import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
@@ -89,13 +93,13 @@ export async function prepareGraphState(
     });
   }
 
-  // Remove all messages not marked as summaryMessage, and not human messages.
-  const removedNonSummaryMessages = state.messages
+  // Remove all messages not marked as summaryMessage, hidden, and not human messages.
+  const removedNonSummaryMessages = filterHiddenMessages(state.messages)
     .filter((m) => !m.additional_kwargs?.summaryMessage && !isHumanMessage(m))
     .map((m: BaseMessage) => new RemoveMessage({ id: m.id ?? "" }));
   const summaryMessage = new AIMessage({
     id: uuidv4(),
-    content: state.planContextSummary,
+    content: state.contextGatheringNotes,
     additional_kwargs: {
       summaryMessage: true,
     },
@@ -107,7 +111,7 @@ export async function prepareGraphState(
       ...untrackedComments,
     ],
     // Reset plan context summary as it's now included in the messages array.
-    planContextSummary: "",
+    contextGatheringNotes: "",
   };
 
   return new Command({

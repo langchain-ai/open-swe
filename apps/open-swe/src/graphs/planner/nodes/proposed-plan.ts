@@ -15,7 +15,10 @@ import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
 } from "@open-swe/shared/constants";
-import { PlannerGraphState, PlannerGraphUpdate } from "../types.js";
+import {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
@@ -73,7 +76,7 @@ export async function interruptProposedPlan(
   const userRequest = getUserRequest(state.messages);
 
   const runInput: GraphUpdate = {
-    planContextSummary: state.planContextSummary,
+    contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
     targetRepository: state.targetRepository,
     githubIssueId: state.githubIssueId,
@@ -109,13 +112,19 @@ export async function interruptProposedPlan(
   // Restart the sandbox.
   runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
 
-  await langGraphClient.runs.create(programmerThreadId, "programmer", {
-    input: runInput,
-    config: {
-      recursion_limit: 400,
+  const run = await langGraphClient.runs.create(
+    programmerThreadId,
+    "programmer",
+    {
+      input: runInput,
+      config: {
+        recursion_limit: 400,
+      },
+      ifNotExists: "create",
+      streamResumable: true,
+      streamMode: ["values", "messages", "custom"],
     },
-    ifNotExists: "create",
-  });
+  );
 
   await addTaskPlanToIssue(
     {
@@ -127,7 +136,10 @@ export async function interruptProposedPlan(
   );
 
   return {
-    programmerThreadId,
+    programmerSession: {
+      threadId: programmerThreadId,
+      runId: run.run_id,
+    },
     sandboxSessionId: runInput.sandboxSessionId,
     taskPlan: runInput.taskPlan,
   };

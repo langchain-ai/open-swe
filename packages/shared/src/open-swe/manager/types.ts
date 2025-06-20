@@ -1,5 +1,5 @@
 import { MessagesZodState } from "@langchain/langgraph";
-import { TargetRepository, TaskPlan } from "../types.js";
+import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
 import { z } from "zod";
 
 export const ManagerGraphStateObj = MessagesZodState.extend({
@@ -22,13 +22,13 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    */
   taskPlan: z.custom<TaskPlan>(),
   /**
-   * The programmer thread ID
+   * The programmer session
    */
-  programmerThreadId: z.string().optional(),
+  programmerSession: z.custom<AgentSession>().optional(),
   /**
-   * The planner thread ID
+   * The planner session
    */
-  plannerThreadId: z.string().optional(),
+  plannerSession: z.custom<AgentSession>().optional(),
   /**
    * The branch name to checkout and make changes on.
    * Can be user specified, or defaults to `open-swe/<manager-thread-id>

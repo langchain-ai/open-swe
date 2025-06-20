@@ -1,7 +1,7 @@
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
-const previousCompletedPlanPrompt = `Here is the complete list of previous requests made by the user, along with the tasks you generated to complete these requests, and the task summaries of each task you completed previously:
+const previousCompletedPlanPrompt = `Here is the list of tasks from the previous session. You've already completed all of these tasks. Use the tasks, and task summaries as context when generating a new plan:
 {PREVIOUS_PLAN}`;
 
 const previousProposedPlanPrompt = `Here is the complete list of the proposed plan you generated before the user sent their followup request:
@@ -24,11 +24,19 @@ const formatPreviousPlans = (tasks: TaskPlan): string => {
 
       return `<previous-task index="${task.taskIndex}">
   User request: ${task.request}
-  
+
   Overall task summary:\n</task-summary>\n${task.summary || "No overall task summary found"}\n</task-summary>
-  
-  Individual tasks you generated to complete this request:
-  ${activePlanItems.map((planItem) => `<plan-item index="${planItem.index}">${planItem.plan}</plan-item>`).join("\n")}
+
+  Individual tasks & their summaries you generated to complete this request:
+${activePlanItems
+  .map(
+    (planItem) => `
+  <plan-item index="${planItem.index}">
+    Plan: ${planItem.plan}
+    Summary: ${planItem.summary || "No summary found for this task."}
+  </plan-item>`,
+  )
+  .join("\n  ")}
 </previous-task>`;
     })
     .join("\n");

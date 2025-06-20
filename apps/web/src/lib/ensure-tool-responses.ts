@@ -1,7 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { Message, ToolMessage } from "@langchain/langgraph-sdk";
-
-export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 export function ensureToolCallsHaveResponses(messages: Message[]): Message[] {
   const newMessages: ToolMessage[] = [];

@@ -38,11 +38,11 @@ export function PlanViewer({
   return (
     <div className={cn("w-full space-y-3", className)}>
       <div className="mb-4 flex items-center gap-2">
-        <h3 className="text-sm font-medium text-white">
+        <h3 className="text-foreground text-sm font-medium">
           {isProposedPlan ? "Proposed" : "Execution"} Plan
         </h3>
         {!isProposedPlan && (
-          <span className="text-xs text-gray-400">
+          <span className="text-muted-foreground text-xs">
             {planItems.filter((item) => item.completed).length} of{" "}
             {planItems.length} completed
           </span>
@@ -61,47 +61,47 @@ export function PlanViewer({
                 className={cn(
                   "flex items-start gap-3 rounded-lg border p-3 transition-colors",
                   {
-                    "border-green-800 bg-green-900/30": status === "completed",
-                    "border-blue-800 bg-blue-900/30": status === "current",
-                    "border-gray-800 bg-gray-900/30": [
-                      "remaining",
-                      "proposed",
-                    ].includes(status),
+                    "border-green-300 bg-green-100/30 dark:border-green-800 dark:bg-green-900/30":
+                      status === "completed",
+                    "border-blue-300 bg-blue-100/30 dark:border-blue-800 dark:bg-blue-900/30":
+                      status === "current",
+                    "border-border bg-muted/30 dark:border-gray-800 dark:bg-gray-900/30":
+                      ["remaining", "proposed"].includes(status),
                   },
                 )}
               >
                 {/* Status Icon */}
                 <div className="mt-0.5 flex-shrink-0">
                   {status === "completed" && (
-                    <Check className="h-4 w-4 text-green-400" />
+                    <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
                   )}
                   {status === "current" && (
-                    <Play className="h-4 w-4 text-blue-400" />
+                    <Play className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                   )}
                   {["remaining", "proposed"].includes(status) && (
-                    <Clock className="h-4 w-4 text-gray-500" />
+                    <Clock className="text-muted-foreground h-4 w-4" />
                   )}
                 </div>
 
                 {/* Task Content */}
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center justify-between text-gray-400">
+                  <div className="text-muted-foreground mb-1 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-medium">
                         Step {item.index + 1}
                       </span>
                       {status === "current" && (
-                        <span className="rounded-full bg-blue-900/50 px-2 py-0.5 text-xs text-blue-300">
+                        <span className="rounded-full bg-blue-100/50 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
                           In Progress
                         </span>
                       )}
                       {status === "completed" && (
-                        <span className="rounded-full bg-green-900/50 px-2 py-0.5 text-xs text-green-300">
+                        <span className="rounded-full bg-green-100/50 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/50 dark:text-green-300">
                           Done
                         </span>
                       )}
                       {status === "proposed" && (
-                        <span className="rounded-full bg-gray-800 px-2 py-0.5 text-xs text-gray-300">
+                        <span className="bg-muted text-foreground/80 rounded-full px-2 py-0.5 text-xs dark:bg-gray-800 dark:text-gray-300">
                           Proposed
                         </span>
                       )}
@@ -162,13 +162,13 @@ export function PlanViewer({
                           });
                         });
                       }}
-                      className="text-gray-200"
+                      className="text-foreground/90 dark:text-gray-200"
                     />
                   ) : (
                     <p
                       className={cn("text-sm leading-relaxed", {
-                        "text-white": status === "current",
-                        "text-gray-300":
+                        "text-foreground": status === "current",
+                        "text-foreground/80":
                           status === "completed" ||
                           ["remaining", "proposed"].includes(status),
                       })}
@@ -179,11 +179,13 @@ export function PlanViewer({
 
                   {/* Summary for completed tasks */}
                   {item.summary && status === "completed" && (
-                    <div className="mt-2 rounded border border-green-800 bg-green-900/30 p-2">
-                      <p className="mb-1 text-xs font-medium text-green-300">
+                    <div className="mt-2 rounded border border-green-300 bg-green-100/30 p-2 dark:border-green-800 dark:bg-green-900/30">
+                      <p className="mb-1 text-xs font-medium text-green-700 dark:text-green-300">
                         Summary:
                       </p>
-                      <p className="text-xs text-green-400">{item.summary}</p>
+                      <p className="text-xs text-green-600 dark:text-green-400">
+                        {item.summary}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -193,7 +195,7 @@ export function PlanViewer({
         {isProposedPlan && (
           <div
             key="add-new-plan-item"
-            className="flex items-start gap-3 rounded-lg border border-gray-800 bg-gray-900/30 p-3 transition-colors"
+            className="border-border bg-muted/30 flex items-start gap-3 rounded-lg border p-3 transition-colors dark:border-gray-800 dark:bg-gray-900/30"
           >
             <Textarea
               placeholder="Add new plan item"
@@ -214,7 +216,7 @@ export function PlanViewer({
                 ]);
                 setNewPlanItem("");
               }}
-              className="mt-auto bg-inherit text-gray-200 transition-colors hover:bg-gray-800 hover:text-gray-100"
+              className="text-foreground/90 hover:bg-muted hover:text-foreground mt-auto bg-inherit transition-colors dark:text-gray-200 dark:hover:bg-gray-800 dark:hover:text-gray-100"
               size="sm"
               variant="outline"
             >
