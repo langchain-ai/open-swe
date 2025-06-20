@@ -96,6 +96,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     },
     ifNotExists: "create",
     streamResumable: true,
+    streamMode: ["values", "messages", "custom"],
   });
 
   return {
