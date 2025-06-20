@@ -43,7 +43,6 @@ type ShellActionProps = BaseActionProps &
     errorCode?: number;
   };
 
-// Apply patch specific props
 type PatchActionProps = BaseActionProps &
   Partial<ApplyPatchToolArgs> & {
     actionType: "apply-patch";
@@ -51,32 +50,33 @@ type PatchActionProps = BaseActionProps &
     fixedDiff?: string;
   };
 
-// Union type for all possible action props
-export type ActionStepProps =
+export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps;
 
-export function ActionStep(props: ActionStepProps) {
+export type ActionStepProps = {
+  actions: ActionItemProps[];
+  reasoningText?: string;
+  summaryText?: string;
+};
+
+function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
 
   const getStatusIcon = () => {
     switch (props.status) {
       case "loading":
-        return (
-          <div className="border-border h-3.5 w-3.5 rounded-full border" />
-        );
+        return <div className="border-border size-3.5 rounded-full border" />;
       case "generating":
         return (
-          <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
+          <Loader2 className="text-muted-foreground size-3.5 animate-spin" />
         );
       case "done":
         return props.success ? (
-          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+          <CheckCircle className="size-3.5 text-green-500" />
         ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-500" />
+          <XCircle className="size-3.5 text-red-500" />
         );
     }
   };
@@ -120,13 +120,13 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderIcon = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <Loader2 className="text-muted-foreground mr-2 h-3.5 w-3.5" />;
+      return <Loader2 className="text-muted-foreground mr-2 size-3.5" />;
     }
 
     return props.actionType === "shell" ? (
-      <Terminal className="text-muted-foreground mr-2 h-3.5 w-3.5" />
+      <Terminal className="text-muted-foreground mr-2 size-3.5" />
     ) : (
-      <FileCode className="text-muted-foreground mr-2 h-3.5 w-3.5" />
+      <FileCode className="text-muted-foreground mr-2 size-3.5" />
     );
   };
 
@@ -231,25 +231,8 @@ export function ActionStep(props: ActionStepProps) {
   };
 
   return (
-    <div className="border-border overflow-hidden rounded-md border">
-      {props.reasoningText && (
-        <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
-          <button
-            onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-          >
-            <MessageSquare className="h-3 w-3" />
-            {showReasoning ? "Hide reasoning" : "Show reasoning"}
-          </button>
-          {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
-              {props.reasoningText}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="border-border bg-card flex items-center border-b p-2 dark:bg-gray-800">
+    <div className="border-border mb-2 overflow-hidden rounded-md border last:mb-0">
+      <div className="border-border flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
         {renderHeaderIcon()}
         {renderHeaderContent()}
         <div className="flex items-center gap-2">
@@ -263,9 +246,9 @@ export function ActionStep(props: ActionStepProps) {
               className="text-muted-foreground hover:text-foreground"
             >
               {expanded ? (
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp className="size-3.5" />
               ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="size-3.5" />
               )}
             </button>
           )}
@@ -273,19 +256,60 @@ export function ActionStep(props: ActionStepProps) {
       </div>
 
       {renderContent()}
+    </div>
+  );
+}
 
-      {props.summaryText && props.status === "done" && (
+export function ActionStep(props: ActionStepProps) {
+  const [showReasoning, setShowReasoning] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+
+  const reasoningText =
+    "reasoningText" in props ? props.reasoningText : undefined;
+  const summaryText = "summaryText" in props ? props.summaryText : undefined;
+
+  const anyActionDone = props.actions.some(
+    (action: ActionItemProps) => action.status === "done",
+  );
+
+  return (
+    <div className="border-border overflow-hidden rounded-md border">
+      <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
+        <button
+          onClick={() => setShowReasoning(!showReasoning)}
+          className="flex cursor-pointer items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+        >
+          <MessageSquare className="h-3 w-3" />
+          {showReasoning ? "Hide reasoning" : "Show reasoning"}
+        </button>
+        {showReasoning && (
+          <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
+            {reasoningText || "No reasoning provided."}
+          </p>
+        )}
+      </div>
+
+      <div className="p-2">
+        {props.actions.map((action: ActionItemProps, index: number) => (
+          <ActionItem
+            key={index}
+            {...action}
+          />
+        ))}
+      </div>
+
+      {summaryText && anyActionDone && (
         <div className="border-t border-green-300 bg-green-100/50 p-2 dark:border-green-800 dark:bg-green-900/50">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+            className="flex cursor-pointer items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
             <p className="mt-1 text-xs font-normal text-green-700 dark:text-green-300">
-              {props.summaryText}
+              {summaryText}
             </p>
           )}
         </div>
