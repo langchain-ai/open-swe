@@ -95,7 +95,6 @@ export function ThreadView({
   const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
     "planner",
   );
-  const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
   const plannerThreadId = stream.values?.plannerSession?.threadId;
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
@@ -185,8 +184,6 @@ export function ThreadView({
               <div
                 key={message.id}
                 className="group flex gap-3"
-                onMouseEnter={() => setHoveredMessageId(message.id)}
-                onMouseLeave={() => setHoveredMessageId(null)}
               >
                 <div className="flex-shrink-0">
                   {message.type === "human" ? (
@@ -306,5 +303,6 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
