@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
+import AuthStatus from "@/components/github/auth-status";
 
 interface SidebarButtonsProps {
   historyOpen: boolean;
@@ -104,6 +105,7 @@ export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
             >
               <History className="size-5" />
             </TooltipIconButton>
+            <AuthStatus />
           </div>
         </div>
       </motion.div>

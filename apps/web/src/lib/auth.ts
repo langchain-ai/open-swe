@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
+import {
+  GITHUB_TOKEN_COOKIE,
+  GITHUB_TOKEN_TYPE_COOKIE,
+  GITHUB_INSTALLATION_ID_COOKIE,
+} from "@open-swe/shared/constants";
 
-export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
-export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
-export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_STATE_COOKIE = "github_installation_state";
 export const GITHUB_INSTALLATION_RETURN_TO_COOKIE = "installation_return_to";
 

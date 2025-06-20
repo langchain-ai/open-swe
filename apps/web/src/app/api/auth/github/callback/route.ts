@@ -2,9 +2,9 @@ import {
   GITHUB_AUTH_STATE_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_TOKEN_TYPE_COOKIE,
-} from "@/lib/auth";
+  GITHUB_TOKEN_COOKIE,
+} from "@open-swe/shared/constants";
 import { NextRequest, NextResponse } from "next/server";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 
 export async function GET(request: NextRequest) {
   try {
@@ -81,9 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Create the success response
-    const response = NextResponse.redirect(
-      new URL("/?auth=success", request.url),
-    );
+    const response = NextResponse.redirect(new URL("/chat", request.url));
 
     // Clear the state cookie as it's no longer needed
     response.cookies.set(GITHUB_AUTH_STATE_COOKIE, "", {
