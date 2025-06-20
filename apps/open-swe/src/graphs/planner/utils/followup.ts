@@ -28,11 +28,15 @@ const formatPreviousPlans = (tasks: TaskPlan): string => {
   Overall task summary:\n</task-summary>\n${task.summary || "No overall task summary found"}\n</task-summary>
 
   Individual tasks & their summaries you generated to complete this request:
-${activePlanItems.map((planItem) => `
+${activePlanItems
+  .map(
+    (planItem) => `
   <plan-item index="${planItem.index}">
     Plan: ${planItem.plan}
     Summary: ${planItem.summary || "No summary found for this task."}
-  </plan-item>`).join("\n  ")}
+  </plan-item>`,
+  )
+  .join("\n  ")}
 </previous-task>`;
     })
     .join("\n");

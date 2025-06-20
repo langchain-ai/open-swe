@@ -290,7 +290,7 @@ export function updateTaskSummary(
   }
 
   const activeTaskIndex = taskPlan.activeTaskIndex;
-  
+
   if (activeTaskIndex < 0 || activeTaskIndex >= taskPlan.tasks.length) {
     throw new Error(`Invalid active task index: ${activeTaskIndex}`);
   }
