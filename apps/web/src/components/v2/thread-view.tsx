@@ -208,13 +208,11 @@ export function ThreadView({
                   <div className="text-foreground text-sm leading-relaxed">
                     {getMessageContentString(message.content)}
                   </div>
-                  {hoveredMessageId === message.id && (
-                    <div className="absolute top-0 right-0">
-                      <MessageCopyButton
-                        content={getMessageContentString(message.content)}
-                      />
-                    </div>
-                  )}
+                  <div className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <MessageCopyButton
+                      content={getMessageContentString(message.content)}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
@@ -308,3 +306,4 @@ export function ThreadView({
     </div>
   );
 }
+
