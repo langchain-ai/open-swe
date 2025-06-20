@@ -46,7 +46,7 @@ export async function generateAction(
   const tools = [createShellTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: false,
+    parallel_tool_calls: true,
   });
 
   const [missingMessages, latestTaskPlan] = await Promise.all([
