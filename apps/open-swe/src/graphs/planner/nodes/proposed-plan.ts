@@ -122,7 +122,7 @@ export async function interruptProposedPlan(
       },
       ifNotExists: "create",
       streamResumable: true,
-    streamMode: ["values", "messages", "custom"],
+      streamMode: ["values", "messages", "custom"],
     },
   );
 
