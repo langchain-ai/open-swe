@@ -205,7 +205,7 @@ export function ThreadView({
                   <div className="text-foreground text-sm leading-relaxed">
                     {getMessageContentString(message.content)}
                   </div>
-                  <div className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="absolute top-0 right-0 opacity-0 transition-opacity group-hover:opacity-100">
                     <MessageCopyButton
                       content={getMessageContentString(message.content)}
                     />
@@ -303,6 +303,3 @@ export function ThreadView({
     </div>
   );
 }
-
-
-
