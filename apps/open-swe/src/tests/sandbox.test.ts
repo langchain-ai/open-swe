@@ -12,7 +12,10 @@ test("Can execute rg commands", async () => {
   const client = daytonaClient();
 
   console.log("Setting up sandbox...");
-  const sandbox = await client.create({ image: SNAPSHOT_NAME });
+  const sandbox = await client.create({
+    image: SNAPSHOT_NAME,
+    user: "daytona",
+  });
   // const sandbox = await client.get("0f0e878d-983c-4d26-9d58-41e63640150f")
   console.log("Setup sandbox:", sandbox.id);
 
@@ -28,8 +31,11 @@ test("Can execute rg commands", async () => {
   expect(cloneRes.exitCode).toBe(0);
 
   const testRes = await sandbox.process.executeCommand(
-    "rg --version && rg -i logger",
-    "/home/daytona",
+    `script --return --quiet -c "$(cat <<'OPEN_SWE_X'
+rg -i logger
+OPEN_SWE_X
+)" /dev/null`,
+    "/home/daytona/open-swe",
   );
   console.log(
     `test res status: ${testRes.exitCode}\ntest res output: ${testRes.result}`,

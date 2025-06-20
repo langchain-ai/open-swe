@@ -12,6 +12,13 @@ import {
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
+const wrapScript = (command: string): string => {
+  return `script --return --quiet -c "$(cat <<'OPEN_SWE_X'
+${command}
+OPEN_SWE_X
+)" /dev/null`;
+};
+
 const logger = createLogger(LogLevel.INFO, "RgTool");
 
 const DEFAULT_ENV = {
@@ -53,7 +60,7 @@ export function createRgTool(
           repoRoot,
         });
         const response = await sandbox.process.executeCommand(
-          command.join(" "),
+          wrapScript(command.join(" ")),
           repoRoot,
           DEFAULT_ENV,
           TIMEOUT_SEC,
