@@ -1,5 +1,5 @@
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 import {
-  GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_INSTALLATION_RETURN_TO_COOKIE,
   GITHUB_INSTALLATION_STATE_COOKIE,
 } from "@/lib/auth";

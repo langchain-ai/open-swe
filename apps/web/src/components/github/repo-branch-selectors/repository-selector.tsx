@@ -16,9 +16,9 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import type { Repository } from "@/utils/github";
 import { GitHubSVG } from "@/components/icons/github";
+import { Repository } from "@/utils/github";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 
 interface RepositorySelectorProps {
   disabled?: boolean;

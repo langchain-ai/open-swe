@@ -4,7 +4,7 @@ import {
   getInstallationRepositories,
   Repository,
 } from "@/utils/github";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 
 /**
  * Fetches repositories accessible to the GitHub App installation

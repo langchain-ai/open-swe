@@ -1,4 +1,4 @@
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
