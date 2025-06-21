@@ -13,7 +13,7 @@ import {
   interruptProposedPlan,
   prepareGraphState,
   notetaker,
-  takeAction,
+  takeActions,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -21,7 +21,7 @@ import { initializeSandbox } from "../shared/initialize-sandbox.js";
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
   config: GraphConfig,
-): "take-plan-action" | "generate-plan" {
+): "take-plan-actions" | "generate-plan" {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
   // If the last message is a tool call, and we have executed less than 75 actions, take action.
@@ -34,7 +34,7 @@ function takeActionOrGeneratePlan(
     lastMessage.tool_calls?.length &&
     messages.length < maxActionsCount
   ) {
-    return "take-plan-action";
+    return "take-plan-actions";
   }
 
   // If the last message does not have tool calls, continue to generate plan without modifications.
@@ -47,7 +47,7 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   })
   .addNode("initialize-sandbox", initializeSandbox)
   .addNode("generate-plan-context-action", generateAction)
-  .addNode("take-plan-action", takeAction)
+  .addNode("take-plan-actions", takeActions)
   .addNode("generate-plan", generatePlan)
   .addNode("notetaker", notetaker)
   .addNode("interrupt-proposed-plan", interruptProposedPlan)
@@ -56,9 +56,9 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addConditionalEdges(
     "generate-plan-context-action",
     takeActionOrGeneratePlan,
-    ["take-plan-action", "generate-plan"],
+    ["take-plan-actions", "generate-plan"],
   )
-  .addEdge("take-plan-action", "generate-plan-context-action")
+  .addEdge("take-plan-actions", "generate-plan-context-action")
   .addEdge("generate-plan", "notetaker")
   .addEdge("notetaker", "interrupt-proposed-plan")
   .addEdge("interrupt-proposed-plan", END);
