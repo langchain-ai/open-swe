@@ -47,7 +47,7 @@ export async function generateAction(
   const tools = [createRgTool(state), createShellTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: false,
+    parallel_tool_calls: true,
   });
 
   const [missingMessages, latestTaskPlan] = await Promise.all([
@@ -72,10 +72,10 @@ export async function generateAction(
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
-    ...(response.tool_calls?.[0] && {
-      name: response.tool_calls?.[0].name,
-      args: response.tool_calls?.[0].args,
-    }),
+    ...response.tool_calls?.map((tc) => ({
+      name: tc.name,
+      args: tc.args,
+    })),
   });
 
   return {

@@ -18,15 +18,14 @@ import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { Interrupt } from "./interrupt";
-import {
-  ActionStep,
-  type ActionStepProps,
-} from "@/components/gen-ui/action-step";
+import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
+import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
   createRgToolFields,
+  createSetTaskStatusToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -40,6 +39,8 @@ const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
 const rgTool = createRgToolFields(dummyRepo);
 type RgToolArgs = z.infer<typeof rgTool.schema>;
+const setTaskStatusTool = createSetTaskStatusToolFields();
+type SetTaskStatusToolArgs = z.infer<typeof setTaskStatusTool.schema>;
 
 function CustomComponent({
   message,
@@ -98,7 +99,7 @@ function parseAnthropicStreamedToolCalls(
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   thread: { messages: Message[] },
-): ActionStepProps {
+): ActionItemProps {
   const toolCall: ToolCall | undefined = thread.messages
     .filter(isAIMessageSDK)
     .flatMap((m) => m.tool_calls ?? [])
@@ -111,7 +112,7 @@ export function mapToolMessageToActionStepProps(
     ? getContentString(aiMessage.content)
     : undefined;
 
-  const status: ActionStepProps["status"] = "done";
+  const status: ActionItemProps["status"] = "done";
   const success = message.status === "success";
 
   if (toolCall?.name === shellTool.name) {
@@ -216,7 +217,6 @@ export function AssistantMessage({
 
   const messages = thread.messages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
-  const nextMessage = idx >= 0 ? messages[idx + 1] : undefined;
 
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
@@ -225,93 +225,124 @@ export function AssistantMessage({
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
 
-  // Helper: get tool call name from AI message (OpenAI or Anthropic)
-  const aiToolCallName = (() => {
+  const aiToolCalls: ToolCall[] = (() => {
     if (message && isAIMessageSDK(message)) {
-      return message.tool_calls?.[0]?.name;
+      return message.tool_calls || [];
     }
     if (anthropicStreamedToolCalls?.length) {
-      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
-        .name;
+      return anthropicStreamedToolCalls;
     }
-    return undefined;
+    return [];
   })();
 
-  const aiToolCallArgs = (() => {
-    if (message && isAIMessageSDK(message)) {
-      return message.tool_calls?.[0]?.args as
-        | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
-        | undefined;
-    }
-    if (anthropicStreamedToolCalls?.length) {
-      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
-        .args as
-        | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
-        | undefined;
-    }
-    return undefined;
-  })();
-
-  const toolResult =
-    nextMessage &&
-    isToolMessageSDK(nextMessage) &&
-    aiToolCallName &&
-    nextMessage.tool_call_id ===
-      (message && isAIMessageSDK(message)
-        ? message.tool_calls?.[0]?.id
-        : anthropicStreamedToolCalls?.length
-          ? anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1].id
-          : undefined)
-      ? nextMessage
-      : undefined;
-
-  if (
-    message &&
-    (aiToolCallName === shellTool.name ||
-      aiToolCallName === applyPatchTool.name ||
-      aiToolCallName === rgTool.name)
-  ) {
-    if (toolResult) {
-      return (
-        <ActionStep {...mapToolMessageToActionStepProps(toolResult, thread)} />
+  const toolResults = aiToolCalls
+    .map((toolCall) => {
+      const matchingToolMessage = messages.find(
+        (m) => isToolMessageSDK(m) && m.tool_call_id === toolCall.id,
       );
-    }
+
+      return matchingToolMessage as ToolMessage | undefined;
+    })
+    .filter((m): m is ToolMessage => !!m);
+
+  const shellOrPatchToolCalls = message
+    ? aiToolCalls.filter(
+        (tc) => tc.name === shellTool.name || tc.name === applyPatchTool.name,
+      )
+    : [];
+
+  const taskStatusToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === setTaskStatusTool.name)
+    : undefined;
+
+  // We can be sure that if the task status tool call is present, it will be the
+  // only tool call/result we need to render for this message.
+  if (taskStatusToolCall) {
+    const args = taskStatusToolCall.args as SetTaskStatusToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === taskStatusToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+    const completed = args.task_status === "completed";
+
     return (
-      <ActionStep
-        {...mapToolCallToActionStepProps(aiToolCallName, aiToolCallArgs)}
-        reasoningText={contentString}
-      />
+      <div className="flex flex-col gap-4">
+        <TaskSummary
+          status={status}
+          completed={completed}
+          summaryText={args.reasoning}
+        />
+      </div>
     );
   }
 
-  if (
-    message?.type === "tool" &&
-    (message.name === shellTool.name ||
-      message.name === applyPatchTool.name ||
-      message.name === rgTool.name) &&
-    idx > 0 &&
-    messages[idx - 1] &&
-    ((messages[idx - 1] &&
-      isAIMessageSDK(messages[idx - 1]) &&
-      (messages[idx - 1] as AIMessage).tool_calls?.some(
-        (tc) =>
-          tc.id === (message as ToolMessage).tool_call_id &&
-          (tc.name === shellTool.name ||
-            tc.name === applyPatchTool.name ||
-            tc.name === rgTool.name),
-      )) ||
-      (Array.isArray(messages[idx - 1].content) &&
-        parseAnthropicStreamedToolCalls(
-          messages[idx - 1].content as MessageContentComplex[],
-        )?.some(
-          (tc) =>
-            tc.id === (message as ToolMessage).tool_call_id &&
-            (tc.name === shellTool.name ||
-              tc.name === applyPatchTool.name ||
-              tc.name === rgTool.name),
-        )))
-  ) {
-    return null;
+  if (shellOrPatchToolCalls.length > 0) {
+    const actionItems = shellOrPatchToolCalls.map((toolCall) => {
+      const correspondingToolResult = toolResults.find(
+        (tr) => tr && tr.tool_call_id === toolCall.id,
+      );
+
+      const isShellTool = toolCall.name === shellTool.name;
+
+      if (correspondingToolResult) {
+        // If we have a tool result, map it to action props
+        return mapToolMessageToActionStepProps(correspondingToolResult, thread);
+      } else {
+        if (isShellTool) {
+          const args = toolCall.args as ShellToolArgs;
+          return {
+            actionType: "shell",
+            status: "generating",
+            command: args?.command || [],
+            workdir: args?.workdir,
+            timeout: args?.timeout,
+          } as ActionItemProps;
+        } else {
+          const args = toolCall.args as ApplyPatchToolArgs;
+          return {
+            actionType: "apply-patch",
+            status: "generating",
+            file_path: args?.file_path || "",
+            diff: args?.diff || "",
+          } as ActionItemProps;
+        }
+      }
+    });
+
+    return (
+      <div className="flex flex-col gap-4">
+        <ActionStep
+          actions={actionItems}
+          reasoningText={contentString}
+        />
+      </div>
+    );
+  }
+
+  if (message?.type === "tool" && idx > 0) {
+    const isPreviousToolCall = messages.slice(0, idx).some((prevMessage) => {
+      if (isAIMessageSDK(prevMessage) && prevMessage.tool_calls) {
+        return prevMessage.tool_calls.some(
+          (tc) => tc.id === (message as ToolMessage).tool_call_id,
+        );
+      }
+
+      if (Array.isArray(prevMessage.content)) {
+        const toolCalls = parseAnthropicStreamedToolCalls(
+          prevMessage.content as MessageContentComplex[],
+        );
+        return toolCalls?.some(
+          (tc) => tc.id === (message as ToolMessage).tool_call_id,
+        );
+      }
+
+      return false;
+    });
+
+    if (isPreviousToolCall) {
+      return null;
+    }
   }
 
   const isLastMessage =
@@ -319,18 +350,6 @@ export function AssistantMessage({
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-
-  const hasToolCalls =
-    message &&
-    "tool_calls" in message &&
-    message.tool_calls &&
-    message.tool_calls.length > 0;
-  const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
-    );
-  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
   if (isToolResult && hideToolCalls) {
@@ -359,17 +378,9 @@ export function AssistantMessage({
               </div>
             )}
 
-            {!hideToolCalls && (
+            {!hideToolCalls && aiToolCalls.length > 0 && (
               <span>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
-                )) ||
-                  (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
-                  )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
-                  ))}
+                <ToolCalls toolCalls={aiToolCalls} />
               </span>
             )}
 

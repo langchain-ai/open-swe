@@ -26,6 +26,8 @@ Your sole objective in this phase is to gather comprehensive context about the c
 5. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
 
 6. **Signal completion clearly**: When you have gathered sufficient context, respond with exactly 'done' without any tool calls. This indicates readiness to proceed to the planning phase.
+
+7. **Parallel tool calling**: It is highly recommended that you use parallel tool calling to gather context as quickly and efficiently as possible. When you know ahead of time there are multiple commands you want to run to gather context, of which they are independent and can be run in parallel, you should use parallel tool calling.
 </context_gathering_guidelines>
 
 <workspace_information>

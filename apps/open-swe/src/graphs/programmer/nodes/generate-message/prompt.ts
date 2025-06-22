@@ -40,6 +40,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 * **Dependencies**: Use the correct package manager; skip if installation fails
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
 * **History**: Use \`git log\` and \`git blame\` for additional context when needed
+* **Parallel Tool Calling**: You're allowed, and encouraged to call multiple tools at once, as long as they do not conflict, or depend on each other.
 
 ### Coding Standards
 

@@ -23,6 +23,7 @@ import {
 } from "../../../utils/current-task.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { createSetTaskStatusToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -40,26 +41,6 @@ Take all of this information, and determine whether or not you have completed th
 Once you've determined the status of the current task, call the \`set_task_status\` tool.
 `;
 
-const setTaskStatusToolSchema = z.object({
-  reasoning: z
-    .string()
-    .describe(
-      "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
-    ),
-  task_status: z
-    .enum(["completed", "not_completed"])
-    .describe(
-      "The status of the current task, based on the reasoning provided.",
-    ),
-});
-
-const setTaskStatusTool = {
-  name: "set_task_status",
-  description:
-    "The status of the current task, along with a concise reasoning summary to support the status.",
-  schema: setTaskStatusToolSchema,
-};
-
 const formatPrompt = (taskPlan: PlanItem[]): string => {
   return systemPrompt.replace(
     "{PLAN_PROMPT}",
@@ -71,6 +52,7 @@ export async function progressPlanStep(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  const setTaskStatusTool = createSetTaskStatusToolFields();
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
   const modelWithTools = model.bindTools([setTaskStatusTool], {
     tool_choice: setTaskStatusTool.name,
@@ -109,7 +91,7 @@ Once you've determined the status of the current task, call the \`set_task_statu
   }
 
   const isCompleted =
-    (toolCall.args as z.infer<typeof setTaskStatusToolSchema>).task_status ===
+    (toolCall.args as z.infer<typeof setTaskStatusTool.schema>).task_status ===
     "completed";
   const currentTask = getCurrentPlanItem(activePlanItems);
   const toolMessage = new ToolMessage({

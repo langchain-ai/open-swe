@@ -155,3 +155,27 @@ export function formatRgCommand(cmd: RipgrepCommand): string[] {
 
   return args;
 }
+
+export function createSetTaskStatusToolFields() {
+  const setTaskStatusToolSchema = z.object({
+    reasoning: z
+      .string()
+      .describe(
+        "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
+      ),
+    task_status: z
+      .enum(["completed", "not_completed"])
+      .describe(
+        "The status of the current task, based on the reasoning provided.",
+      ),
+  });
+
+  const setTaskStatusTool = {
+    name: "set_task_status",
+    description:
+      "The status of the current task, along with a concise reasoning summary to support the status.",
+    schema: setTaskStatusToolSchema,
+  };
+
+  return setTaskStatusTool;
+}
