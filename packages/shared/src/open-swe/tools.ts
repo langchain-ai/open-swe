@@ -198,7 +198,7 @@ export function createInstallDependenciesToolFields(
   return {
     name: "install_dependencies",
     description:
-      "Installs dependencies for the repository. You should only call this tool if you need to install dependencies for a specific task.",
+      "Installs dependencies for the repository. You should only call this tool if you need to install dependencies for a specific task. Ensure you only call this tool after gathering context on how to install dependencies, such as the package manager, proper install command, etc.",
     schema: installDependenciesToolSchema,
   };
 }

@@ -159,7 +159,10 @@ export async function openPullRequest(
   return {
     messages: newMessages,
     internalMessages: newMessages,
-    // If the sandbox was successfully deleted, we can remove it from the state.
-    ...(sandboxDeleted && { sandboxSessionId: undefined }),
+    // If the sandbox was successfully deleted, we can remove it from the state & reset the dependencies installed flag.
+    ...(sandboxDeleted && {
+      sandboxSessionId: undefined,
+      dependenciesInstalled: false,
+    }),
   };
 }

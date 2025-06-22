@@ -16,7 +16,7 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { INSTALL_DEPENDENCIES_TOOL_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
@@ -51,7 +51,11 @@ const formatPrompt = (state: GraphState): string => {
       state.codebaseTree || "No codebase tree generated yet.",
     )
     .replaceAll("{CURRENT_WORKING_DIRECTORY}", repoDirectory)
-    .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString());
+    .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString())
+    .replaceAll(
+      "{INSTALL_DEPENDENCIES_TOOL_PROMPT}",
+      !state.dependenciesInstalled ? INSTALL_DEPENDENCIES_TOOL_PROMPT : "",
+    );
 };
 
 export async function generateAction(
@@ -65,7 +69,10 @@ export async function generateAction(
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
-    createInstallDependenciesTool(state),
+    // Only provide the dependencies installed tool if they're not already installed.
+    ...(state.dependenciesInstalled
+      ? []
+      : [createInstallDependenciesTool(state)]),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",

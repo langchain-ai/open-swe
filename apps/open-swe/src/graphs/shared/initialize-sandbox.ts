@@ -28,6 +28,7 @@ type InitializeSandboxState = {
   sandboxSessionId?: string;
   codebaseTree?: string;
   messages?: BaseMessage[];
+  dependenciesInstalled?: boolean;
 };
 
 export async function initializeSandbox(
@@ -330,5 +331,6 @@ export async function initializeSandbox(
     targetRepository,
     codebaseTree,
     messages: createEventsMessage(),
+    dependenciesInstalled: false,
   };
 }
