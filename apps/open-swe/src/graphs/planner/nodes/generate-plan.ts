@@ -13,6 +13,7 @@ import {
 } from "../utils/followup.js";
 import { stopSandbox } from "../../../utils/sandbox.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
+import { z } from "zod";
 
 const systemPrompt = `You are a terminal-based agentic coding assistant built by LangChain, designed to enable natural language interaction with local codebases through wrapped LLM models.
 
@@ -123,9 +124,14 @@ export async function generatePlan(
     newSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
+  const proposedPlanArgs = response.tool_calls[0].args as z.infer<
+    typeof sessionPlanTool.schema
+  >;
+
   return {
     messages: [response],
-    proposedPlan: response.tool_calls[0].args.plan,
+    proposedPlanTitle: proposedPlanArgs.title,
+    proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
   };
 }

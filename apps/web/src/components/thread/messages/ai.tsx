@@ -20,12 +20,14 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
+import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
   createSetTaskStatusToolFields,
   createRgToolFields,
+  createOpenPrToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -41,6 +43,8 @@ const setTaskStatusTool = createSetTaskStatusToolFields();
 type SetTaskStatusToolArgs = z.infer<typeof setTaskStatusTool.schema>;
 const rgTool = createRgToolFields(dummyRepo);
 type RgToolArgs = z.infer<typeof rgTool.schema>;
+const openPrTool = createOpenPrToolFields();
+type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 
 function CustomComponent({
   message,
@@ -218,6 +222,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === setTaskStatusTool.name)
     : undefined;
 
+  const openPrToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
+    : undefined;
+
   // We can be sure that if the task status tool call is present, it will be the
   // only tool call/result we need to render for this message.
   if (taskStatusToolCall) {
@@ -235,6 +243,59 @@ export function AssistantMessage({
           status={status}
           completed={completed}
           summaryText={args.reasoning}
+        />
+      </div>
+    );
+  }
+
+  // Same for PR tool. If this is present, it's the only tool call we need to render.
+  if (openPrToolCall) {
+    let branch: string | undefined;
+    let targetBranch: string | undefined = "main";
+
+    if (message && isAIMessageSDK(message)) {
+      branch = message.additional_kwargs?.branch as string | undefined;
+      targetBranch =
+        (message.additional_kwargs?.targetBranch as string | undefined) ||
+        "main";
+    }
+
+    const args = openPrToolCall.args as OpenPrToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === openPrToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+
+    // Extract PR URL from the tool message content
+    // Format: "Created pull request: https://github.com/owner/repo/pull/123"
+    let prUrl: string | undefined = undefined;
+    if (correspondingToolResult) {
+      const content = getContentString(correspondingToolResult.content);
+      if (content.includes("Created pull request: ")) {
+        prUrl = content.split("Created pull request: ")[1].trim();
+      }
+    }
+
+    // Extract PR number from URL if available
+    let prNumber: number | undefined = undefined;
+    if (prUrl) {
+      const match = prUrl.match(/\/pull\/(\d+)/);
+      if (match && match[1]) {
+        prNumber = parseInt(match[1], 10);
+      }
+    }
+
+    return (
+      <div className="flex flex-col gap-4">
+        <PullRequestOpened
+          status={status}
+          title={args.title}
+          description={args.body}
+          url={prUrl}
+          prNumber={prNumber}
+          branch={branch}
+          targetBranch={targetBranch}
         />
       </div>
     );
