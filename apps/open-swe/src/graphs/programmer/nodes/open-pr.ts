@@ -129,6 +129,7 @@ export async function openPullRequest(
       ...response,
       additional_kwargs: {
         ...response.additional_kwargs,
+        // Required for the UI to render these fields.
         branch: branchName,
         targetBranch: state.targetRepository.branch,
       },

@@ -209,3 +209,25 @@ export function createInstallDependenciesToolFields(
     schema: installDependenciesToolSchema,
   };
 }
+
+export function createOpenPrToolFields() {
+  const openPrToolSchema = z.object({
+    title: z
+      .string()
+      .describe(
+        "The title of the pull request. Ensure this is a concise and thoughtful title. You should follow conventional commit title format (e.g. prefixing with '[open-swe] fix:', '[open-swe] feat:', '[open-swe] chore:', etc.). Remember to include the '[open-swe]' prefix in the title.",
+      ),
+    body: z
+      .string()
+      .optional()
+      .describe(
+        "The body of the pull request. This should provide a concise description what the PR changes. Do not over-explain, or add technical details unless they're the absolute minimum needed. The user should be able to quickly read your description, and understand what the PR does. Remember: if they want the technical details they can read the changed files, so you don't need to go into great detail here.",
+      ),
+  });
+
+  return {
+    name: "open_pr",
+    schema: openPrToolSchema,
+    description: "Use this tool to open a pull request.",
+  };
+}
