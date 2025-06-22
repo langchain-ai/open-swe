@@ -20,6 +20,8 @@ import { daytonaClient } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
+import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
+import { createRgTool } from "../../../tools/rg.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -41,9 +43,13 @@ export async function takeAction(
 
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
+  const rgTool = createRgTool(state);
+  const installDependenciesTool = createInstallDependenciesTool(state);
   const toolsMap = {
     [applyPatchTool.name]: applyPatchTool,
     [shellTool.name]: shellTool,
+    [rgTool.name]: rgTool,
+    [installDependenciesTool.name]: installDependenciesTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
@@ -107,6 +113,13 @@ export async function takeAction(
 
   const toolCallResults = await Promise.all(toolCallResultsPromise);
 
+  let wereDependenciesInstalled: boolean | null = null;
+  toolCallResults.forEach((toolCallResult) => {
+    if (toolCallResult.name === installDependenciesTool.name) {
+      wereDependenciesInstalled = toolCallResult.status === "success";
+    }
+  });
+
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
   const sandbox = await daytonaClient().get(state.sandboxSessionId);
@@ -142,6 +155,9 @@ export async function takeAction(
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
     codebaseTree,
+    ...(wereDependenciesInstalled !== null && {
+      dependenciesInstalled: wereDependenciesInstalled,
+    }),
   };
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",

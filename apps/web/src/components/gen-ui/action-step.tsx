@@ -11,10 +11,13 @@ import {
   ChevronUp,
   MessageSquare,
   FileText,
+  CloudDownload,
+  Search,
 } from "lucide-react";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
+  createInstallDependenciesToolFields,
   formatRgCommand,
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
@@ -26,6 +29,10 @@ const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
+const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
+type InstallDependenciesToolArgs = z.infer<
+  typeof installDependenciesTool.schema
+>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -59,11 +66,19 @@ type RgActionProps = BaseActionProps &
     errorCode?: number;
   };
 
+type InstallDependenciesActionProps = BaseActionProps &
+  Partial<InstallDependenciesToolArgs> & {
+    actionType: "install_dependencies";
+    output?: string;
+    errorCode?: number;
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps
-  | RgActionProps;
+  | RgActionProps
+  | InstallDependenciesActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -109,6 +124,8 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Patch applied" : "Patch failed";
       } else if (props.actionType === "rg") {
         return props.success ? "Search completed" : "Search failed";
+      } else if (props.actionType === "install_dependencies") {
+        return props.success ? "Dependencies installed" : "Installation failed";
       }
     }
 
@@ -119,7 +136,11 @@ function ActionItem(props: ActionItemProps) {
   const shouldShowToggle = () => {
     if (props.status !== "done") return false;
 
-    if (props.actionType === "shell" || props.actionType === "rg") {
+    if (
+      props.actionType === "shell" ||
+      props.actionType === "rg" ||
+      props.actionType === "install_dependencies"
+    ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
@@ -135,11 +156,15 @@ function ActionItem(props: ActionItemProps) {
       return <Loader2 className="text-muted-foreground mr-2 size-3.5" />;
     }
 
-    return props.actionType === "shell" ? (
-      <Terminal className="text-muted-foreground mr-2 size-3.5" />
-    ) : (
-      <FileCode className="text-muted-foreground mr-2 size-3.5" />
-    );
+    if (props.actionType === "install_dependencies") {
+      return <CloudDownload className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "apply-patch") {
+      return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "rg") {
+      return <Search className="text-muted-foreground mr-2 size-3.5" />;
+    } else {
+      return <Terminal className="text-muted-foreground mr-2 size-3.5" />;
+    }
   };
 
   // Render the header content based on action type
@@ -152,7 +177,10 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "shell") {
+    if (
+      props.actionType === "shell" ||
+      props.actionType === "install_dependencies"
+    ) {
       let commandStr = "";
       if (props.command) {
         if (Array.isArray(props.command)) {
@@ -215,7 +243,9 @@ function ActionItem(props: ActionItemProps) {
     if (!expanded) return null;
 
     if (
-      (props.actionType === "shell" || props.actionType === "rg") &&
+      (props.actionType === "shell" ||
+        props.actionType === "rg" ||
+        props.actionType === "install_dependencies") &&
       props.output
     ) {
       return (

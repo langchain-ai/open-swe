@@ -185,24 +185,27 @@ export function createSetTaskStatusToolFields() {
   return setTaskStatusTool;
 }
 
-export function createOpenPrToolFields() {
-  const openPrToolSchema = z.object({
-    title: z
+export function createInstallDependenciesToolFields(
+  targetRepository: TargetRepository,
+) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+
+  const installDependenciesToolSchema = z.object({
+    command: z
+      .array(z.string())
+      .describe("The command to run to install dependencies."),
+    workdir: z
       .string()
+      .default(repoRoot)
       .describe(
-        "The title of the pull request. Ensure this is a concise and thoughtful title. You should follow conventional commit title format (e.g. prefixing with '[open-swe] fix:', '[open-swe] feat:', '[open-swe] chore:', etc.). Remember to include the '[open-swe]' prefix in the title.",
-      ),
-    body: z
-      .string()
-      .optional()
-      .describe(
-        "The body of the pull request. This should provide a concise description what the PR changes. Do not over-explain, or add technical details unless they're the absolute minimum needed. The user should be able to quickly read your description, and understand what the PR does. Remember: if they want the technical details they can read the changed files, so you don't need to go into great detail here.",
+        `The working directory to run the command in. The default working directory this command will be executed in is the root of the repository: \`${repoRoot}\`. If you want to execute this install command inside a different location, pass a path to this field.`,
       ),
   });
 
   return {
-    name: "open_pr",
-    schema: openPrToolSchema,
-    description: "Use this tool to open a pull request.",
+    name: "install_dependencies",
+    description:
+      "Installs dependencies for the repository. You should only call this tool if you need to install dependencies for a specific task. Ensure you only call this tool after gathering context on how to install dependencies, such as the package manager, proper install command, etc.",
+    schema: installDependenciesToolSchema,
   };
 }
