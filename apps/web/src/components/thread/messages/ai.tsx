@@ -26,6 +26,7 @@ import {
   createShellToolFields,
   createSetTaskStatusToolFields,
   createRgToolFields,
+  createInstallDependenciesToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -41,6 +42,10 @@ const setTaskStatusTool = createSetTaskStatusToolFields();
 type SetTaskStatusToolArgs = z.infer<typeof setTaskStatusTool.schema>;
 const rgTool = createRgToolFields(dummyRepo);
 type RgToolArgs = z.infer<typeof rgTool.schema>;
+const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
+type InstallDependenciesToolArgs = z.infer<
+  typeof installDependenciesTool.schema
+>;
 
 function CustomComponent({
   message,
@@ -148,6 +153,17 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
+  } else if (toolCall?.name === installDependenciesTool.name) {
+    const args = toolCall.args as InstallDependenciesToolArgs;
+    return {
+      actionType: "install_dependencies",
+      status,
+      success,
+      command: args.command || "",
+      workdir: args.workdir || "",
+      output: getContentString(message.content),
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -210,7 +226,8 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === rgTool.name,
+          tc.name === rgTool.name ||
+          tc.name === installDependenciesTool.name,
       )
     : [];
 
@@ -248,6 +265,8 @@ export function AssistantMessage({
 
       const isShellTool = toolCall.name === shellTool.name;
       const isRgTool = toolCall.name === rgTool.name;
+      const isInstallDependenciesTool =
+        toolCall.name === installDependenciesTool.name;
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
@@ -259,6 +278,15 @@ export function AssistantMessage({
           status: "generating",
           pattern: args?.pattern || "",
           paths: args?.paths || [],
+          output: "",
+        } as ActionItemProps;
+      } else if (isInstallDependenciesTool) {
+        const args = toolCall.args as InstallDependenciesToolArgs;
+        return {
+          actionType: "install_dependencies",
+          status: "generating",
+          command: args?.command || "",
+          workdir: args?.workdir || "",
           output: "",
         } as ActionItemProps;
       } else {

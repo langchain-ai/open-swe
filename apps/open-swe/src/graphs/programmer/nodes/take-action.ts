@@ -20,7 +20,7 @@ import { daytonaClient } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
-import { createInstallDependenciesTool } from "../../../tools/install_dependencies.js";
+import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createRgTool } from "../../../tools/rg.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");

@@ -186,7 +186,9 @@ export function createInstallDependenciesToolFields(
   const repoRoot = getRepoAbsolutePath(targetRepository);
 
   const installDependenciesToolSchema = z.object({
-    command: z.string().describe("The command to run to install dependencies."),
+    command: z
+      .array(z.string())
+      .describe("The command to run to install dependencies."),
     workdir: z
       .string()
       .default(repoRoot)

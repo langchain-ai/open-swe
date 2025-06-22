@@ -40,7 +40,7 @@ export function createInstallDependenciesTool(
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
 
         sandbox = await daytonaClient().get(sandboxSessionId);
-        const command = input.command;
+        const command = input.command.join(" ");
         const workdir = input.workdir || repoRoot;
         logger.info("Running install dependencies command", {
           command,

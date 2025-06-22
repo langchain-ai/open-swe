@@ -21,7 +21,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
-import { createInstallDependenciesTool } from "../../../../tools/install_dependencies.js";
+import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 

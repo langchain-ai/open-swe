@@ -6,18 +6,17 @@ export function truncateOutput(
   output: string,
   options?: {
     /**
-     * @default 10000
+     * @default 2500
      */
     numStartCharacters?: number;
 
     /**
-     * @default 10000
+     * @default 2500
      */
     numEndCharacters?: number;
   },
 ) {
-  const { numStartCharacters = 10000, numEndCharacters = 10000 } =
-    options ?? {};
+  const { numStartCharacters = 2500, numEndCharacters = 2500 } = options ?? {};
 
   if (numStartCharacters < 0 || numEndCharacters < 0) {
     throw new Error("numStartCharacters and numEndCharacters must be >= 0");
