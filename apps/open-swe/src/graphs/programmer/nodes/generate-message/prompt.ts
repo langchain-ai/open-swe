@@ -1,4 +1,5 @@
 export const INSTALL_DEPENDENCIES_TOOL_PROMPT = `* Use \`install_dependencies\` to install dependencies (skip if installation fails). IMPORTANT: You should only call this tool if you're executing a task which REQUIRES installing dependencies. Keep in mind that not all tasks will require installing dependencies.`;
+export const DEPENDENCIES_INSTALLED_PROMPT = `* Dependencies have already been installed. *`;
 
 export const SYSTEM_PROMPT = `# Identity
 

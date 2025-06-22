@@ -16,7 +16,11 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { INSTALL_DEPENDENCIES_TOOL_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import {
+  DEPENDENCIES_INSTALLED_PROMPT,
+  INSTALL_DEPENDENCIES_TOOL_PROMPT,
+  SYSTEM_PROMPT,
+} from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
@@ -54,7 +58,9 @@ const formatPrompt = (state: GraphState): string => {
     .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString())
     .replaceAll(
       "{INSTALL_DEPENDENCIES_TOOL_PROMPT}",
-      !state.dependenciesInstalled ? INSTALL_DEPENDENCIES_TOOL_PROMPT : "",
+      !state.dependenciesInstalled
+        ? INSTALL_DEPENDENCIES_TOOL_PROMPT
+        : DEPENDENCIES_INSTALLED_PROMPT,
     );
 };
 
