@@ -68,11 +68,14 @@ export function createRgTool(
 
         let successResult = response.result;
 
-        if (response.exitCode === 1) {
+        if (
+          response.exitCode === 1 ||
+          (response.exitCode === 127 && response.result.startsWith("sh: 1: "))
+        ) {
           logger.info("Exit code 1. no results found", {
             ...response,
           });
-          successResult = "Exit code 1. No results found.";
+          successResult = `Exit code 1. No results found.\n\n${response.result}`;
         } else if (response.exitCode > 1) {
           logger.error("Failed to run rg command", {
             error: response.result,
@@ -96,7 +99,7 @@ export function createRgTool(
             error: errorFields,
           });
           throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`,
+            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
           );
         }
 

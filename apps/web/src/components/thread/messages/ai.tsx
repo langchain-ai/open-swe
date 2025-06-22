@@ -24,8 +24,8 @@ import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
-  createRgToolFields,
   createSetTaskStatusToolFields,
+  createRgToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -37,10 +37,10 @@ const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
-const rgTool = createRgToolFields(dummyRepo);
-type RgToolArgs = z.infer<typeof rgTool.schema>;
 const setTaskStatusTool = createSetTaskStatusToolFields();
 type SetTaskStatusToolArgs = z.infer<typeof setTaskStatusTool.schema>;
+const rgTool = createRgToolFields(dummyRepo);
+type RgToolArgs = z.infer<typeof rgTool.schema>;
 
 function CustomComponent({
   message,
@@ -143,55 +143,15 @@ export function mapToolMessageToActionStepProps(
       actionType: "rg",
       status,
       success,
-      reasoningText,
-      pattern: args.pattern,
-      paths: args.paths,
+      pattern: args.pattern || "",
+      paths: args.paths || [],
       output: getContentString(message.content),
-      flags: args.flags,
+      reasoningText,
     };
   }
   return {
     status: "loading",
     summaryText: reasoningText,
-  };
-}
-
-function mapToolCallToActionStepProps(
-  toolCallName: string,
-  toolCallArgs:
-    | Partial<ShellToolArgs | ApplyPatchToolArgs | RgToolArgs>
-    | undefined,
-): ActionStepProps {
-  if (toolCallName === shellTool.name) {
-    const args = toolCallArgs as ShellToolArgs;
-    return {
-      actionType: "shell",
-      status: "generating",
-      command: args.command || [],
-      workdir: args.workdir,
-    };
-  } else if (toolCallName === applyPatchTool.name) {
-    const args = toolCallArgs as ApplyPatchToolArgs;
-    return {
-      actionType: "apply-patch",
-      status: "generating",
-      file_path: args.file_path || "",
-      diff: args.diff,
-    };
-  } else if (toolCallName === rgTool.name) {
-    const args = toolCallArgs as RgToolArgs;
-    return {
-      actionType: "rg",
-      status: "generating",
-      pattern: args.pattern,
-      paths: args.paths,
-      flags: args.flags,
-    };
-  }
-
-  return {
-    status: "loading",
-    summaryText: "",
   };
 }
 
@@ -245,9 +205,12 @@ export function AssistantMessage({
     })
     .filter((m): m is ToolMessage => !!m);
 
-  const shellOrPatchToolCalls = message
+  const actionableToolCalls = message
     ? aiToolCalls.filter(
-        (tc) => tc.name === shellTool.name || tc.name === applyPatchTool.name,
+        (tc) =>
+          tc.name === shellTool.name ||
+          tc.name === applyPatchTool.name ||
+          tc.name === rgTool.name,
       )
     : [];
 
@@ -277,17 +240,27 @@ export function AssistantMessage({
     );
   }
 
-  if (shellOrPatchToolCalls.length > 0) {
-    const actionItems = shellOrPatchToolCalls.map((toolCall) => {
+  if (actionableToolCalls.length > 0) {
+    const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
       const correspondingToolResult = toolResults.find(
         (tr) => tr && tr.tool_call_id === toolCall.id,
       );
 
       const isShellTool = toolCall.name === shellTool.name;
+      const isRgTool = toolCall.name === rgTool.name;
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
         return mapToolMessageToActionStepProps(correspondingToolResult, thread);
+      } else if (isRgTool) {
+        const args = toolCall.args as RgToolArgs;
+        return {
+          actionType: "rg",
+          status: "generating",
+          pattern: args?.pattern || "",
+          paths: args?.paths || [],
+          output: "",
+        } as ActionItemProps;
       } else {
         if (isShellTool) {
           const args = toolCall.args as ShellToolArgs;
@@ -299,12 +272,13 @@ export function AssistantMessage({
             timeout: args?.timeout,
           } as ActionItemProps;
         } else {
-          const args = toolCall.args as ApplyPatchToolArgs;
+          // Must be apply_patch tool
+          const patchArgs = toolCall.args as ApplyPatchToolArgs;
           return {
             actionType: "apply-patch",
             status: "generating",
-            file_path: args?.file_path || "",
-            diff: args?.diff || "",
+            file_path: patchArgs?.file_path || "",
+            diff: patchArgs?.diff || "",
           } as ActionItemProps;
         }
       }
@@ -313,7 +287,9 @@ export function AssistantMessage({
     return (
       <div className="flex flex-col gap-4">
         <ActionStep
-          actions={actionItems}
+          actions={actionItems.filter(
+            (item): item is ActionItemProps => item !== undefined,
+          )}
           reasoningText={contentString}
         />
       </div>
