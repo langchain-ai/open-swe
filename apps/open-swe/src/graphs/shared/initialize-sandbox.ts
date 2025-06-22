@@ -13,7 +13,6 @@ import {
 import { getCodebaseTree } from "../../utils/tree.js";
 import {
   DO_NOT_RENDER_ID_PREFIX,
-  SNAPSHOT_NAME,
 } from "@open-swe/shared/constants";
 import {
   CustomNodeEvent,
@@ -21,6 +20,7 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
+import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -207,7 +207,7 @@ export async function initializeSandbox(
   emitStepEvent(baseCreateSandboxAction, "pending");
   let sandbox: Sandbox;
   try {
-    sandbox = await daytonaClient().create({ image: SNAPSHOT_NAME });
+    sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
     emitStepEvent(baseCreateSandboxAction, "success");
   } catch {
     emitStepEvent(

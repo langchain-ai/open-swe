@@ -41,6 +41,7 @@ export async function takeAction(
 
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
+  const installDependenciesTool = createInstallDependenciesTool(state);
   const toolsMap = {
     [applyPatchTool.name]: applyPatchTool,
     [shellTool.name]: shellTool,
