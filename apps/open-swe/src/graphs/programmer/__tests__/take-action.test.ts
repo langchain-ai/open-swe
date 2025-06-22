@@ -1,96 +1,10 @@
 import { AIMessage, ToolMessage, HumanMessage } from "@langchain/core/messages";
 import { describe, expect, test } from "@jest/globals";
-
-// Import the functions we want to test
-// Note: We need to extract these functions for testing
-// This is a mock implementation for testing purposes
-const {
-  groupToolMessagesByAIMessage,
+import {
   calculateErrorRate,
+  groupToolMessagesByAIMessage,
   shouldDiagnoseError,
-} = (() => {
-  // Mock implementation of isAIMessage and isToolMessage for testing
-  const isAIMessage = (message: any): boolean => message._getType() === "ai";
-  const isToolMessage = (message: any): boolean =>
-    message._getType() === "tool";
-
-  /**
-   * Group tool messages by their parent AI message
-   */
-  function groupToolMessagesByAIMessage(messages: Array<any>): ToolMessage[][] {
-    const groups: ToolMessage[][] = [];
-    let currentGroup: ToolMessage[] = [];
-    let processingToolsForAI = false;
-
-    for (let i = 0; i < messages.length; i++) {
-      const message = messages[i];
-
-      if (isAIMessage(message)) {
-        // If we were already processing tools for a previous AI message, save that group
-        if (currentGroup.length > 0) {
-          groups.push([...currentGroup]);
-          currentGroup = [];
-        }
-        processingToolsForAI = true;
-      } else if (
-        isToolMessage(message) &&
-        processingToolsForAI &&
-        !message.additional_kwargs?.is_diagnosis
-      ) {
-        currentGroup.push(message);
-      } else if (!isToolMessage(message) && processingToolsForAI) {
-        // We've encountered a non-tool message after an AI message, end the current group
-        if (currentGroup.length > 0) {
-          groups.push([...currentGroup]);
-          currentGroup = [];
-        }
-        processingToolsForAI = false;
-      }
-    }
-
-    // Add the last group if it exists
-    if (currentGroup.length > 0) {
-      groups.push(currentGroup);
-    }
-
-    return groups;
-  }
-
-  /**
-   * Calculate the error rate for a group of tool messages
-   */
-  function calculateErrorRate(group: ToolMessage[]): number {
-    if (group.length === 0) return 0;
-    const errorCount = group.filter((m) => m.status === "error").length;
-    return errorCount / group.length;
-  }
-
-  /**
-   * Whether or not to route to the diagnose error step
-   */
-  function shouldDiagnoseError(messages: Array<any>) {
-    // Group tool messages by their parent AI message
-    const toolGroups = groupToolMessagesByAIMessage(messages);
-
-    // If we don't have at least 3 groups, we can't make a determination
-    if (toolGroups.length < 3) return false;
-
-    // Get the last three groups
-    const lastThreeGroups = toolGroups.slice(-3);
-
-    // Check if all of the last three groups have an error rate >= 75%
-    const ERROR_THRESHOLD = 0.75; // 75%
-    return lastThreeGroups.every(
-      (group) => calculateErrorRate(group) >= ERROR_THRESHOLD,
-    );
-  }
-
-  return {
-    groupToolMessagesByAIMessage,
-    calculateErrorRate,
-    shouldDiagnoseError,
-  };
-})();
+} from "../utils/tool-message-error.js";
 
 // Helper function to create a tool message with the specified parameters
 function createToolMessage(
@@ -104,11 +18,8 @@ function createToolMessage(
     content: `Result of ${name}`,
     name,
     status,
+    ...(is_diagnosis ? { additional_kwargs: { is_diagnosis: true } } : {}),
   });
-
-  if (is_diagnosis) {
-    message.additional_kwargs = { is_diagnosis: true };
-  }
 
   return message;
 }
@@ -117,11 +28,12 @@ describe("Error diagnosis logic", () => {
   describe("groupToolMessagesByAIMessage", () => {
     test("should group tool messages by their parent AI message", () => {
       const messages = [
-        new AIMessage({ content: "AI message 1" }), // AI message 1
+        new HumanMessage({ content: "Human response" }),
+        new AIMessage({ content: "AI message 1" }),
         createToolMessage("1", "tool1", "success"),
         createToolMessage("2", "tool2", "error"),
         new HumanMessage({ content: "Human response" }),
-        new AIMessage({ content: "AI message 2" }), // AI message 2
+        new AIMessage({ content: "AI message 2" }),
         createToolMessage("3", "tool3", "success"),
         createToolMessage("4", "tool4", "success"),
         createToolMessage("5", "tool5", "error"),
@@ -136,9 +48,10 @@ describe("Error diagnosis logic", () => {
 
     test("should filter out diagnostic tool messages", () => {
       const messages = [
+        new HumanMessage({ content: "Human response" }),
         new AIMessage({ content: "AI message" }),
         createToolMessage("1", "tool1", "success"),
-        createToolMessage("2", "tool2", "error", true), // Diagnostic tool
+        createToolMessage("2", "tool2", "error", true),
         createToolMessage("3", "tool3", "error"),
       ];
 
@@ -180,7 +93,8 @@ describe("Error diagnosis logic", () => {
   describe("shouldDiagnoseError", () => {
     test("should return false if less than 3 groups", () => {
       const messages = [
-        new AIMessage({ content: "AI message 1" }), // AI message 1
+        new HumanMessage({ content: "Human response" }),
+        new AIMessage({ content: "AI message 1" }),
         createToolMessage("1", "tool1", "error"),
         createToolMessage("2", "tool2", "error"),
         new AIMessage({ content: "AI message 2" }), // AI message 2
@@ -193,6 +107,7 @@ describe("Error diagnosis logic", () => {
 
     test("should return true if last three groups all have >= 75% error rate", () => {
       const messages = [
+        new HumanMessage({ content: "Human response" }),
         new AIMessage({ content: "AI message 1" }), // AI message 1 (not part of last 3)
         createToolMessage("1", "tool1", "success"),
         createToolMessage("2", "tool2", "success"),
