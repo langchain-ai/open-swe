@@ -14,6 +14,7 @@ import {
   getActivePlanItems,
   getActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
+import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -67,6 +68,15 @@ Given all of this, please respond with the concise conclusion. Do not include an
     state.taskPlan,
     activeTaskId,
     getMessageContentString(response.content),
+  );
+  // Update the github issue to include the new overall task summary.
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    updatedTaskPlan,
   );
 
   return {

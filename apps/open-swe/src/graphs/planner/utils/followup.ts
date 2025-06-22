@@ -24,11 +24,19 @@ const formatPreviousPlans = (tasks: TaskPlan): string => {
 
       return `<previous-task index="${task.taskIndex}">
   User request: ${task.request}
-  
+
   Overall task summary:\n</task-summary>\n${task.summary || "No overall task summary found"}\n</task-summary>
-  
-  Individual tasks you generated to complete this request:
-  ${activePlanItems.map((planItem) => `<plan-item index="${planItem.index}">${planItem.plan}</plan-item>`).join("\n")}
+
+  Individual tasks & their summaries you generated to complete this request:
+${activePlanItems
+  .map(
+    (planItem) => `
+  <plan-item index="${planItem.index}">
+    Plan: ${planItem.plan}
+    Summary: ${planItem.summary || "No summary found for this task."}
+  </plan-item>`,
+  )
+  .join("\n  ")}
 </previous-task>`;
     })
     .join("\n");

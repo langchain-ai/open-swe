@@ -48,14 +48,14 @@ export type Step = {
  * Maps custom events to step objects for UI rendering. Skipped steps are filtered out.
  */
 export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
-  return INIT_STEPS.map((stepName) => {
+  return INIT_STEPS.flatMap((stepName) => {
     const event = [...events]
       .filter((e) => e.action === stepName)
       .sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )[0];
-    if (!event) return { name: stepName, status: "waiting" as const };
+    if (!event) return [];
     if (event.data.status === "skipped")
       return { name: stepName, status: "skipped" as const };
     if (event.data.status === "pending")
@@ -69,6 +69,6 @@ export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
         error:
           typeof event.data.error === "string" ? event.data.error : undefined,
       };
-    return { name: stepName, status: "waiting" as const };
+    return [];
   }).filter((step) => step.status !== "skipped");
 }
