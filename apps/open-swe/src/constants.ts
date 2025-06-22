@@ -9,4 +9,4 @@ export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxParams = {
   },
   user: "daytona",
   image: SNAPSHOT_NAME,
-}
+};

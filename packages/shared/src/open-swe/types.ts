@@ -205,16 +205,16 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-    /**
+  /**
    * Whether or not the dependencies have been installed already in the sandbox.
    */
-    dependenciesInstalled: withLangGraph(z.custom<boolean>(), {
-      reducer: {
-        schema: z.custom<boolean>(),
-        fn: (_state, update) => update,
-      },
-      default: () => false,
-    }),
+  dependenciesInstalled: withLangGraph(z.custom<boolean>(), {
+    reducer: {
+      schema: z.custom<boolean>(),
+      fn: (_state, update) => update,
+    },
+    default: () => false,
+  }),
 
   // ---NOT USED---
   ui: z

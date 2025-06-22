@@ -60,14 +60,14 @@ test("Installing dependencies", async () => {
   try {
     const repoUrlWithToken = `https://x-access-token:${githubToken}@github.com/langchain-ai/open-swe.git`;
     const cloneCommand = `git clone ${repoUrlWithToken}`;
-  
+
     console.log("Cloning repo...");
     const cloneRes = await sandbox.process.executeCommand(
       cloneCommand,
       SANDBOX_ROOT_DIR,
     );
     expect(cloneRes.exitCode).toBe(0);
-  
+
     const installCommand = "yarn install";
     const installRes = await sandbox.process.executeCommand(
       installCommand,
@@ -78,7 +78,9 @@ test("Installing dependencies", async () => {
     console.log(
       `install res status: ${installRes.exitCode}\ninstall res output: ${installRes.result}`,
     );
-    console.log(`Install res exit code: ${installRes.exitCode}\nInstall res output: ${installRes.result}`);
+    console.log(
+      `Install res exit code: ${installRes.exitCode}\nInstall res output: ${installRes.result}`,
+    );
     expect(installRes.exitCode).toBe(0);
   } finally {
     await sandbox.delete();

@@ -11,9 +11,7 @@ import {
   pullLatestChanges,
 } from "../../utils/github/git.js";
 import { getCodebaseTree } from "../../utils/tree.js";
-import {
-  DO_NOT_RENDER_ID_PREFIX,
-} from "@open-swe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import {
   CustomNodeEvent,
   INITIALIZE_NODE_ID,

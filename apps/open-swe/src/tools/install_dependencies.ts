@@ -6,9 +6,7 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import {
-  createInstallDependenciesToolFields,
-} from "@open-swe/shared/open-swe/tools";
+import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "InstallDependenciesTool");
