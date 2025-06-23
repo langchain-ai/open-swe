@@ -38,8 +38,16 @@ const StreamSession = ({ children }: { children: ReactNode }) => {
   const { refreshThreads } = useThreadsContext();
 
   const streamValue = useTypedStream({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "/api",
-    assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "manager",
+    apiUrl:
+      process.env.NEXT_PUBLIC_API_URL ??
+      (() => {
+        throw new Error("NEXT_PUBLIC_API_URL is required");
+      })(),
+    assistantId:
+      process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ??
+      (() => {
+        throw new Error("NEXT_PUBLIC_MANAGER_ASSISTANT_ID is required");
+      })(),
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {

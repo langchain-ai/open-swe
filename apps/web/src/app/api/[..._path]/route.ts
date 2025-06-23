@@ -42,7 +42,6 @@ async function getGitHubInstallationTokenOrThrow(
     /\\n/g,
     "\n",
   );
-
   if (!appId || !privateAppKey) {
     throw new Error("GitHub App ID or Private App Key is not configured.");
   }
@@ -56,7 +55,6 @@ async function getGitHubInstallationTokenOrThrow(
 }
 
 // This file acts as a proxy for requests to your LangGraph server.
-// It automatically injects GitHub authentication headers from secure HTTP-only cookies.
 // Read the [Going to Production](https://github.com/langchain-ai/agent-chat-ui?tab=readme-ov-file#going-to-production) section for more information.
 
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
@@ -72,12 +70,10 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         );
       }
 
-      const headers = {
+      return {
         [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
         [GITHUB_INSTALLATION_TOKEN_COOKIE]:
           await getGitHubInstallationTokenOrThrow(req, encryptionKey),
       };
-
-      return headers;
     },
   });
