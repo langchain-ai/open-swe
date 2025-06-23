@@ -32,9 +32,10 @@ import {
 } from "../ui/tooltip";
 import { Label } from "../ui/label";
 import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
-import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
+import { QuickActions } from "./quick-actions";
+import { useState } from "react";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -43,6 +44,7 @@ interface DefaultViewProps {
 
 export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const router = useRouter();
+  const [quickActionPrompt, setQuickActionPrompt] = useState("");
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const assistantId: string | undefined =
     process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "";
@@ -115,6 +117,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   contentBlocks={contentBlocks}
                   setContentBlocks={setContentBlocks}
                   onPaste={handlePaste}
+                  quickActionPrompt={quickActionPrompt}
+                  setQuickActionPrompt={setQuickActionPrompt}
                 />
                 <div className="flex items-center gap-1">
                   <TooltipProvider>
@@ -177,45 +181,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               </div>
             )}
           </div>
-
-          {/* Quick Actions */}
-          <div>
-            <h2 className="text-foreground mb-3 text-base font-semibold">
-              Quick Actions
-            </h2>
-            <div className="grid gap-3 md:grid-cols-3">
-              <Card className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950">
-                <CardHeader className="px-3">
-                  <CardTitle className="text-foreground text-sm">
-                    Debug Code
-                  </CardTitle>
-                  <CardDescription className="text-muted-foreground text-xs">
-                    Find and fix issues in your codebase
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-              <Card className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950">
-                <CardHeader className="px-3">
-                  <CardTitle className="text-foreground text-sm">
-                    Add Feature
-                  </CardTitle>
-                  <CardDescription className="text-muted-foreground text-xs">
-                    Implement new functionality
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-              <Card className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950">
-                <CardHeader className="px-3">
-                  <CardTitle className="text-foreground text-sm">
-                    Refactor Code
-                  </CardTitle>
-                  <CardDescription className="text-muted-foreground text-xs">
-                    Improve code structure and performance
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </div>
-          </div>
+          <QuickActions setQuickActionPrompt={setQuickActionPrompt} />
         </div>
       </div>
     </div>

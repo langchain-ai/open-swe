@@ -41,6 +41,8 @@ Generated via: \`git ls-files | tree --fromfile -L 3\`
 </codebase_tree>
 </workspace_information>
 
+{CUSTOM_RULES}
+
 <task_context>
 The user's request appears as the first message in the conversation below. Your context gathering should specifically target information needed to address this request effectively.
 </task_context>`;

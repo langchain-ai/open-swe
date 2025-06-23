@@ -126,6 +126,13 @@ export type TargetRepository = {
   baseCommit?: string;
 };
 
+export type CustomRules = {
+  generalRules?: string;
+  repositoryStructure?: string;
+  dependenciesAndInstallation?: string;
+  testingInstructions?: string;
+};
+
 export const GraphAnnotation = MessagesZodState.extend({
   /**
    * The internal messages. These are the messages which are
@@ -218,6 +225,15 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => false,
+  }),
+  /**
+   * User defined rules.
+   */
+  customRules: withLangGraph(z.custom<CustomRules>().optional(), {
+    reducer: {
+      schema: z.custom<CustomRules>().optional(),
+      fn: (_state, update) => update,
+    },
   }),
 
   // ---NOT USED---

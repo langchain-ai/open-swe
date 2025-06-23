@@ -1,7 +1,11 @@
 import { v4 as uuidv4 } from "uuid";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getGitHubTokensFromConfig } from "../../utils/github-tokens.js";
-import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
+import {
+  CustomRules,
+  GraphConfig,
+  TargetRepository,
+} from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { daytonaClient } from "../../utils/sandbox.js";
 import {
@@ -19,6 +23,7 @@ import {
 import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
+import { getCustomRules } from "../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -29,6 +34,7 @@ type InitializeSandboxState = {
   codebaseTree?: string;
   messages?: BaseMessage[];
   dependenciesInstalled?: boolean;
+  customRules?: CustomRules;
 };
 
 export async function initializeSandbox(
@@ -166,10 +172,12 @@ export async function initializeSandbox(
       try {
         const codebaseTree = await getCodebaseTree(existingSandbox.id);
         emitStepEvent(baseGenerateCodebaseTreeAction, "success");
+
         return {
           sandboxSessionId: existingSandbox.id,
           codebaseTree,
           messages: createEventsMessage(),
+          customRules: await getCustomRules(existingSandbox, absoluteRepoDir),
         };
       } catch {
         emitStepEvent(
@@ -332,5 +340,6 @@ export async function initializeSandbox(
     codebaseTree,
     messages: createEventsMessage(),
     dependenciesInstalled: false,
+    customRules: await getCustomRules(sandbox, absoluteRepoDir),
   };
 }

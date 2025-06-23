@@ -17,6 +17,7 @@ import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
+import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -36,7 +37,8 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
       getRepoAbsolutePath(state.targetRepository),
-    );
+    )
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 }
 
 export async function generateAction(

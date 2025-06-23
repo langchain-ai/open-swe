@@ -87,4 +87,6 @@ Generated via: \`git ls-files | tree --fromfile -L 3\`
 Location: {REPO_DIRECTORY}
 
 {CODEBASE_TREE}
-</codebase_structure>`;
+</codebase_structure>
+
+{CUSTOM_RULES}`;

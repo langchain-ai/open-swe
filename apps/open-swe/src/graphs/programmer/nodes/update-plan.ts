@@ -3,6 +3,7 @@ import {
   GraphConfig,
   PlanItem,
   GraphUpdate,
+  CustomRules,
 } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { z } from "zod";
@@ -19,6 +20,7 @@ import { getMessageString } from "../../../utils/message/content.js";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
+import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -50,6 +52,8 @@ You MUST adhere to the following criteria when generating the plan:
 - You should call the \`update_plan\` tool, passing in each plan item in the order they should be executed in.
 - To remove an item from the plan, you should not include it in the \`update_plan\` tool call.
 
+{CUSTOM_RULES}
+
 With all of this in mind, please call the \`update_plan\` tool with the updated plan.
 `;
 
@@ -72,11 +76,13 @@ const formatSystemPrompt = (
   userRequest: string,
   reasoning: string,
   planItems: PlanItem[],
+  customRules?: CustomRules,
 ) => {
   return systemPrompt
     .replace("{USER_REQUEST}", userRequest)
     .replace("{PLAN}", formatPlanPrompt(planItems, { includeSummaries: true }))
-    .replace("{REASONING}", reasoning);
+    .replace("{REASONING}", reasoning)
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(customRules));
 };
 
 const formatUserMessage = (messages: BaseMessage[]): string => {

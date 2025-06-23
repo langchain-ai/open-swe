@@ -1,13 +1,18 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
 import { MessagesZodState } from "@langchain/langgraph";
-import { AgentSession, TargetRepository, TaskPlan } from "../types.js";
+import {
+  AgentSession,
+  CustomRules,
+  TargetRepository,
+  TaskPlan,
+} from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const PlannerGraphStateObj = MessagesZodState.extend({
-  sandboxSessionId: withLangGraph(z.custom<string>(), {
+  sandboxSessionId: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
@@ -23,9 +28,9 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  codebaseTree: withLangGraph(z.custom<string>(), {
+  codebaseTree: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
@@ -42,22 +47,22 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     },
     default: (): string[] => [],
   }),
-  contextGatheringNotes: withLangGraph(z.custom<string>(), {
+  contextGatheringNotes: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
     default: () => "",
   }),
-  branchName: withLangGraph(z.custom<string>(), {
+  branchName: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
-  planChangeRequest: withLangGraph(z.custom<string>(), {
+  planChangeRequest: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
@@ -67,12 +72,18 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  proposedPlanTitle: withLangGraph(z.custom<string>(), {
+  proposedPlanTitle: withLangGraph(z.string(), {
     reducer: {
-      schema: z.custom<string>(),
+      schema: z.string(),
       fn: (_state, update) => update,
     },
     default: () => "",
+  }),
+  customRules: withLangGraph(z.custom<CustomRules>().optional(), {
+    reducer: {
+      schema: z.custom<CustomRules>().optional(),
+      fn: (_state, update) => update,
+    },
   }),
 });
 

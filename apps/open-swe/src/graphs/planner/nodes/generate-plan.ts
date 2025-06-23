@@ -14,6 +14,7 @@ import {
 import { stopSandbox } from "../../../utils/sandbox.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { z } from "zod";
+import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 
 const systemPrompt = `You are a terminal-based agentic coding assistant built by LangChain, designed to enable natural language interaction with local codebases through wrapped LLM models.
 
@@ -62,6 +63,8 @@ Structure your plan items as clear directives, for example:
 - "Modify the authentication middleware in /src/auth.js to add rate limiting using the Express rate-limit package"
 </output_format>
 
+{CUSTOM_RULES}
+
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
 
 function formatSystemPrompt(state: PlannerGraphState): string {
@@ -78,7 +81,8 @@ function formatSystemPrompt(state: PlannerGraphState): string {
             "\n\n"
         : "",
     )
-    .replace("{USER_REQUEST}", userRequest);
+    .replace("{USER_REQUEST}", userRequest)
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 }
 
 export async function generatePlan(

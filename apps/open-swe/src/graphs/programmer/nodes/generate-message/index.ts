@@ -26,6 +26,7 @@ import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
+import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -61,7 +62,8 @@ const formatPrompt = (state: GraphState): string => {
       !state.dependenciesInstalled
         ? INSTALL_DEPENDENCIES_TOOL_PROMPT
         : DEPENDENCIES_INSTALLED_PROMPT,
-    );
+    )
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 };
 
 export async function generateAction(
