@@ -38,10 +38,8 @@ async function getGitHubInstallationTokenOrThrow(
   }
 
   const appId = process.env.GITHUB_APP_ID;
-  const privateAppKey = process.env.GITHUB_APP_PRIVATE_KEY?.replace(
-    /\\n/g,
-    "\n",
-  );
+  const privateAppKey = process.env.GITHUB_APP_PRIVATE_KEY;
+
   if (!appId || !privateAppKey) {
     throw new Error("GitHub App ID or Private App Key is not configured.");
   }
