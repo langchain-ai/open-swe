@@ -2,15 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { Repository } from "@/utils/github";
-import { useSearchParams } from "next/navigation";
 
 export default function GitHubPage() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
-  const searchParams = useSearchParams();
-  const isSetup = searchParams.get("setup") === "true";
 
   useEffect(() => {
     const checkInstallation = async () => {
@@ -72,13 +69,10 @@ export default function GitHubPage() {
 
       {!isInstalled ? (
         <div className="mb-6 rounded-lg bg-white p-6 shadow-md dark:bg-gray-900">
-          <h2 className="mb-4 text-xl font-semibold">
-            {isSetup ? "Welcome! Complete Your Setup" : "Install GitHub App"}
-          </h2>
+          <h2 className="mb-4 text-xl font-semibold">Install GitHub App</h2>
           <p className="mb-4">
-            {isSetup
-              ? "You're almost ready to start coding! Install our GitHub App to grant access to your repositories and enable AI-powered development."
-              : "To access your GitHub repositories, you need to install our GitHub App and grant it access to the repositories you want to use."}
+            To access your GitHub repositories, you need to install our GitHub
+            App and grant it access to the repositories you want to use.
           </p>
           <button
             onClick={handleInstall}
