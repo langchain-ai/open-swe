@@ -1,7 +1,6 @@
 "use client";
-
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { InstallAppButton } from "./install-app-button";
+import { InstallationPrompt } from "./installation-prompt";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 
@@ -49,14 +48,7 @@ export function RepositoryList({ className = "" }: RepositoryListProps) {
   if (!isInstalled) {
     return (
       <div className={`p-4 ${className}`}>
-        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
-          <h3 className="mb-2 font-medium">GitHub App Not Installed</h3>
-          <p className="mb-4 text-sm text-amber-800">
-            You need to install our GitHub App to grant access to your
-            repositories.
-          </p>
-          <InstallAppButton>Install GitHub App</InstallAppButton>
-        </div>
+        <InstallationPrompt />
       </div>
     );
   }
