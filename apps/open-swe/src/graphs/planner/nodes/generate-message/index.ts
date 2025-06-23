@@ -18,6 +18,7 @@ import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
+import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -46,7 +47,11 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [createRgTool(state), createShellTool(state)];
+  const tools = [
+    createRgTool(state),
+    createShellTool(state),
+    createPlannerNotesTool(),
+  ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
