@@ -29,6 +29,7 @@ import {
   createRgToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
+  createTakePlannerNotesFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -50,6 +51,8 @@ const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
 >;
+const plannerNotesTool = createTakePlannerNotesFields();
+type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 
 function CustomComponent({
   message,
@@ -168,6 +171,15 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
+  } else if (toolCall?.name === plannerNotesTool.name) {
+    const args = toolCall.args as PlannerNotesToolArgs;
+    return {
+      actionType: "planner_notes",
+      status,
+      success,
+      notes: args.notes || [],
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -231,7 +243,8 @@ export function AssistantMessage({
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
           tc.name === rgTool.name ||
-          tc.name === installDependenciesTool.name,
+          tc.name === installDependenciesTool.name ||
+          tc.name === plannerNotesTool.name,
       )
     : [];
 
@@ -349,6 +362,13 @@ export function AssistantMessage({
           command: args?.command || "",
           workdir: args?.workdir || "",
           output: "",
+        } as ActionItemProps;
+      } else if (toolCall.name === plannerNotesTool.name) {
+        const args = toolCall.args as PlannerNotesToolArgs;
+        return {
+          actionType: "planner_notes",
+          status: "generating",
+          notes: args?.notes || [],
         } as ActionItemProps;
       } else {
         if (isShellTool) {

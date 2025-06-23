@@ -18,6 +18,7 @@ import {
   createApplyPatchToolFields,
   createShellToolFields,
   createInstallDependenciesToolFields,
+  createTakePlannerNotesFields,
   formatRgCommand,
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
@@ -33,6 +34,8 @@ const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
 >;
+const plannerNotesTool = createTakePlannerNotesFields();
+type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -73,12 +76,18 @@ type InstallDependenciesActionProps = BaseActionProps &
     errorCode?: number;
   };
 
+type PlannerNotesActionProps = BaseActionProps &
+  Partial<PlannerNotesToolArgs> & {
+    actionType: "planner_notes";
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps
   | RgActionProps
-  | InstallDependenciesActionProps;
+  | InstallDependenciesActionProps
+  | PlannerNotesActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -126,6 +135,8 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Search completed" : "Search failed";
       } else if (props.actionType === "install_dependencies") {
         return props.success ? "Dependencies installed" : "Installation failed";
+      } else if (props.actionType === "planner_notes") {
+        return props.success ? "Notes saved" : "Failed to save notes";
       }
     }
 
@@ -144,6 +155,8 @@ function ActionItem(props: ActionItemProps) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
+    } else if (props.actionType === "planner_notes") {
+      return !!(props.notes && props.notes.length > 0);
     }
 
     return false;
@@ -156,7 +169,9 @@ function ActionItem(props: ActionItemProps) {
       return <Loader2 className="text-muted-foreground mr-2 size-3.5" />;
     }
 
-    if (props.actionType === "install_dependencies") {
+    if (props.actionType === "planner_notes") {
+      return <FileText className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "install_dependencies") {
       return <CloudDownload className="text-muted-foreground mr-2 size-3.5" />;
     } else if (props.actionType === "apply-patch") {
       return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
@@ -174,6 +189,16 @@ function ActionItem(props: ActionItemProps) {
         <span className="text-foreground/80 text-xs font-normal">
           Preparing action...
         </span>
+      );
+    }
+
+    if (props.actionType === "planner_notes") {
+      return (
+        <div className="flex-1">
+          <span className="text-foreground/80 text-xs font-normal">
+            Planner Notes
+          </span>
+        </div>
       );
     }
 
@@ -287,6 +312,25 @@ function ActionItem(props: ActionItemProps) {
               />
             </div>
           )}
+        </div>
+      );
+    } else if (
+      props.actionType === "planner_notes" &&
+      props.notes &&
+      props.notes.length > 0
+    ) {
+      return (
+        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
+          <ul className="list-disc pl-5 text-xs font-normal">
+            {props.notes.map((note, i) => (
+              <li
+                key={i}
+                className="text-foreground/90 mb-1 whitespace-pre-wrap"
+              >
+                {note}
+              </li>
+            ))}
+          </ul>
         </div>
       );
     }
