@@ -1,15 +1,14 @@
 <general_rules>
-- Always use Yarn 3.5.1 as the package manager - never use npm or other package managers
-- Run all commands from the repository root using Turbo orchestration (yarn dev, yarn build, yarn lint, yarn format)
+- Always use Yarn as the package manager - never use npm or other package managers
+- Run all general commands (e.g. not for starting a server) from the repository root using Turbo orchestration (yarn build, yarn lint, yarn format)
 - Before creating new utilities or shared functions, search in packages/shared/src to see if one already exists
 - When importing from the shared package, use the @open-swe/shared namespace with specific module paths
-- Always copy .env.example files to .env and fill in required values before running applications
 - Follow strict TypeScript practices - the codebase uses strict mode across all packages
 - Use ESLint and Prettier for code quality - run yarn lint:fix and yarn format before committing
-- Console logging is prohibited in the open-swe app (ESLint error) - use proper logging mechanisms instead
-- Build the shared package first before other packages can consume it (yarn build handles this automatically)
-- Use proper Git practices - all changes are auto-committed, work only within the existing repository
+- Console logging is prohibited in the open-swe app (ESLint error) - use the `createLogger` function to create a new logger instance instead
+- Build the shared package first before other packages can consume it (yarn build from the root handles this automatically via turbo repo)
 - Follow existing code patterns and maintain consistency with the established architecture
+- Include as few inline comments as possible
 </general_rules>
 
 <repository_structure>
@@ -19,10 +18,9 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 - Core LangChain/LangGraph agent implementation with TypeScript
 - Contains three graphs: programmer, planner, and manager (configured in langgraph.json)
 - Uses strict ESLint rules including no-console errors
-- Requires environment variables for GitHub tokens and API keys
 
 **apps/web**: Next.js 15 web interface
-- React 19 frontend with Radix UI components and Tailwind CSS
+- React 19 frontend with Shadcn UI components (wrapped Radix UI) and Tailwind CSS
 - Modern web stack with TypeScript, ESLint, and Prettier with Tailwind plugin
 - Serves as the user interface for the LangGraph agent
 
@@ -39,22 +37,19 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 </repository_structure>
 
 <dependencies_and_installation>
-**Package Manager**: Use Yarn 3.5.1 exclusively (configured in .yarnrc.yml)
+**Package Manager**: Use Yarn exclusively (configured in .yarnrc.yml)
 
 **Installation Process**:
-1. Run `yarn install` from the repository root - this handles all workspace dependencies automatically
-2. Copy .env.example files to .env in both apps/open-swe and apps/web directories
-3. Fill in required environment variables (GITHUB_TOKEN_ENCRYPTION_KEY must match between apps)
-4. Run `yarn build` to build all packages in correct dependency order
+- Run `yarn install` from the repository root - this handles all workspace dependencies automatically
 
 **Key Dependencies**:
 - LangChain ecosystem: @langchain/langgraph, @langchain/anthropic for agent functionality
 - Next.js 15 with React 19 for web interface
-- Radix UI and Tailwind CSS for component library and styling
+- Shadcn UI (wrapped Radix UI) and Tailwind CSS for component library and styling
 - TypeScript with strict mode across all packages
 - Jest with ts-jest for testing framework
 
-**Workspace Structure**: Dependencies are managed at the root level with version resolutions enforced globally. Individual packages reference the shared package via @open-swe/shared workspace dependency.
+**Workspace Structure**: Dependencies are managed on a per-package basis, meaning dependencies should only be installed in their specific app/package. Individual packages reference the shared package via @open-swe/shared workspace dependency.
 </dependencies_and_installation>
 
 <testing_instructions>
