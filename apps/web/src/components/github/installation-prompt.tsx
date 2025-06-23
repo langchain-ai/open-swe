@@ -3,6 +3,7 @@
 import { InstallAppButton } from "./install-app-button";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface InstallationPromptProps {
   title?: string;
@@ -21,13 +22,14 @@ export function InstallationPrompt({
   className = "",
   variant = "default",
 }: InstallationPromptProps) {
-  const baseClasses =
-    "rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20";
-  const bannerClasses =
-    variant === "banner" ? "flex items-center justify-between" : "";
-
   return (
-    <div className={`${baseClasses} ${bannerClasses} ${className}`}>
+    <div
+      className={cn(
+        "rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20",
+        variant === "banner" && "flex items-center justify-between",
+        className,
+      )}
+    >
       {variant === "banner" ? (
         <>
           <div>

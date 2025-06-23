@@ -2130,6 +2130,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@octokit/openapi-types@npm:^20.0.0":
+  version: 20.0.0
+  resolution: "@octokit/openapi-types@npm:20.0.0"
+  checksum: 23ff7613750f8b5790a0cbed5a2048728a7909e50d726932831044908357a932c7fc0613fb7b86430a49d31b3d03a180632ea5dd936535bfbc1176391a199e96
+  languageName: node
+  linkType: hard
+
 "@octokit/openapi-types@npm:^25.1.0":
   version: 25.1.0
   resolution: "@octokit/openapi-types@npm:25.1.0"
@@ -2199,6 +2206,15 @@ __metadata:
     "@octokit/plugin-request-log": ^6.0.0
     "@octokit/plugin-rest-endpoint-methods": ^16.0.0
   checksum: 6a7eff019c0889b23c0820831936e5dc8fa7643bdf0e98ba073b36a10f5602b9f283ca2c74ec8172b8529d0647dfa4a7857dcd81ca028b303937f26750a6c7f6
+  languageName: node
+  linkType: hard
+
+"@octokit/types@npm:^12.0.0":
+  version: 12.6.0
+  resolution: "@octokit/types@npm:12.6.0"
+  dependencies:
+    "@octokit/openapi-types": ^20.0.0
+  checksum: 850235f425584499a2266d5c585c1c2462ae11e25c650567142f3342cb9ce589c8c8fed87705811ca93271fd28c68e1fa77b88b67b97015d7b63d269fa46ed05
   languageName: node
   linkType: hard
 
@@ -2284,6 +2300,8 @@ __metadata:
     "@langchain/core": ^0.3.56
     "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.83
+    "@octokit/rest": ^22.0.0
+    "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
     "@types/node": ^22.13.5
     dotenv: ^16.4.7

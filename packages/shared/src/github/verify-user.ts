@@ -22,7 +22,7 @@ export async function verifyGithubUser(
       return undefined;
     }
     return user;
-  } catch (_error) {
+  } catch {
     return undefined;
   }
 }

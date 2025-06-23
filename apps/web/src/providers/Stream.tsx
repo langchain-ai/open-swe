@@ -32,22 +32,14 @@ async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const StreamSession = ({
-  children,
-  apiUrl,
-  assistantId,
-}: {
-  children: ReactNode;
-  apiUrl: string;
-  assistantId: string;
-}) => {
+const StreamSession = ({ children }: { children: ReactNode }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [customEvents, setCustomEvents] = useState<CustomNodeEvent[]>([]);
   const { refreshThreads } = useThreadsContext();
 
   const streamValue = useTypedStream({
-    apiUrl,
-    assistantId,
+    apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "/api",
+    assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "manager",
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {
@@ -83,17 +75,8 @@ const StreamSession = ({
 
 export const StreamProvider: React.FC<{
   children: ReactNode;
-  apiUrl: string;
-  assistantId: string;
-}> = ({ children, apiUrl, assistantId }) => {
-  return (
-    <StreamSession
-      apiUrl={apiUrl}
-      assistantId={assistantId}
-    >
-      {children}
-    </StreamSession>
-  );
+}> = ({ children }) => {
+  return <StreamSession>{children}</StreamSession>;
 };
 
 export const useStreamContext = (): StreamContextType => {

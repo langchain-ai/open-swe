@@ -73,7 +73,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
-          {/* GitHub Installation Banner - Prominent placement for new users */}
           <GitHubInstallationBanner />
           {/* Terminal Chat Input */}
           <Card

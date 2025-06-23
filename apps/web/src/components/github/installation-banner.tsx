@@ -3,6 +3,7 @@
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationPrompt } from "./installation-prompt";
 import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
 
 export function GitHubInstallationBanner() {
   const { isInstalled, isLoading } = useGitHubAppProvider();
@@ -43,15 +44,13 @@ export function GitHubInstallationBanner() {
     : "Install our GitHub App to grant access to your repositories and enable AI-powered development.";
 
   return (
-    <div className={isNewUser ? "animate-pulse" : ""}>
-      <InstallationPrompt
-        title={title}
-        description={description}
-        variant="banner"
-        showDismiss={true}
-        onDismiss={handleDismiss}
-        className={isNewUser ? "border-2 border-amber-300 shadow-lg" : ""}
-      />
-    </div>
+    <InstallationPrompt
+      title={title}
+      description={description}
+      variant="banner"
+      showDismiss={true}
+      onDismiss={handleDismiss}
+      className={cn(isNewUser && "border-2 border-amber-300 shadow-lg")}
+    />
   );
 }

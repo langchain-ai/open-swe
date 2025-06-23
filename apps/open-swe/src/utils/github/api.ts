@@ -112,7 +112,7 @@ export async function createPullRequest({
       base: repoBaseBranch,
     });
 
-    pullRequest = pullRequestData;
+    pullRequest = pullRequestData as GitHubPullRequest;
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
   } catch (error) {
     if (error instanceof Error && error.message.includes("already exists")) {
@@ -178,7 +178,7 @@ export async function getIssue({
       issue_number: issueNumber,
     });
 
-    return issue;
+    return issue as GitHubIssue;
   } catch (error) {
     logger.error(`Failed to get issue`, {
       error,
@@ -212,14 +212,14 @@ export async function getIssueComments({
     });
 
     if (!filterBotComments) {
-      return comments;
+      return comments as GitHubIssueComment[];
     }
 
     return comments.filter((comment) => {
       return (
         comment.user?.type !== "Bot" || !comment.user?.name?.includes("[bot]")
       );
-    });
+    }) as GitHubIssueComment[];
   } catch (error) {
     logger.error(`Failed to get issue comments`, {
       error,
@@ -253,7 +253,7 @@ export async function createIssue({
       body,
     });
 
-    return issue;
+    return issue as GitHubIssue;
   } catch (error) {
     logger.error(`Failed to create issue`, {
       error,
@@ -294,7 +294,7 @@ export async function updateIssue({
       ...(title && { title }),
     });
 
-    return issue;
+    return issue as GitHubIssue;
   } catch (error) {
     logger.error(`Failed to update issue`, {
       error,
@@ -332,7 +332,7 @@ export async function createIssueComment({
       body,
     });
 
-    return comment;
+    return comment as GitHubIssueComment;
   } catch (error) {
     logger.error(`Failed to create issue comment`, {
       error,

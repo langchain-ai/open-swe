@@ -47,19 +47,12 @@ async function getGitHubInstallationTokenOrThrow(
     throw new Error("GitHub App ID or Private App Key is not configured.");
   }
 
-  try {
-    const token = await getInstallationToken(
-      installationIdCookie,
-      appId,
-      privateAppKey,
-    );
-    return encryptGitHubToken(token, encryptionKey);
-  } catch (error) {
-    console.error("Failed to get GitHub installation token:", error);
-    throw new Error(
-      "Failed to get GitHub installation token. The GitHub App may need to be reinstalled.",
-    );
-  }
+  const token = await getInstallationToken(
+    installationIdCookie,
+    appId,
+    privateAppKey,
+  );
+  return encryptGitHubToken(token, encryptionKey);
 }
 
 // This file acts as a proxy for requests to your LangGraph server.
@@ -79,51 +72,12 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         );
       }
 
-      try {
-        const headers = {
-          [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(
-            req,
-            encryptionKey,
-          ),
-          [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-            await getGitHubInstallationTokenOrThrow(req, encryptionKey),
-        };
+      const headers = {
+        [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
+        [GITHUB_INSTALLATION_TOKEN_COOKIE]:
+          await getGitHubInstallationTokenOrThrow(req, encryptionKey),
+      };
 
-        return headers;
-      } catch (error) {
-        console.error("Authentication error in API proxy:", error);
-        throw error; // This will cause the request to fail with proper error messaging
-      }
-    },
-    bodyParameters: async (req, body) => {
-      const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
-      if (!encryptionKey) {
-        return body; // Return unchanged if no encryption key
-      }
-
-      try {
-        const configurable = {
-          [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(
-            req,
-            encryptionKey,
-          ),
-          [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-            await getGitHubInstallationTokenOrThrow(req, encryptionKey),
-        };
-
-        // Inject configurable into request body
-        const modifiedBody = {
-          ...body,
-          configurable: {
-            ...body?.configurable,
-            ...configurable,
-          },
-        };
-
-        return modifiedBody;
-      } catch (error) {
-        console.error("Configuration error in API proxy:", error);
-        return body; // Return unchanged body on error
-      }
+      return headers;
     },
   });
