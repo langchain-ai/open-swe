@@ -2,7 +2,7 @@
 
 import type React from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Dispatch, SetStateAction, useState } from "react";
+import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Send } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
@@ -23,6 +23,8 @@ interface TerminalInputProps {
   contentBlocks: Base64ContentBlock[];
   setContentBlocks: Dispatch<SetStateAction<Base64ContentBlock[]>>;
   onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
+  quickActionPrompt?: string;
+  setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
 }
 
 export function TerminalInput({
@@ -33,6 +35,8 @@ export function TerminalInput({
   contentBlocks,
   setContentBlocks,
   onPaste,
+  quickActionPrompt,
+  setQuickActionPrompt,
 }: TerminalInputProps) {
   const { push } = useRouter();
   const [message, setMessage] = useState("");
@@ -112,6 +116,14 @@ export function TerminalInput({
       handleSend();
     }
   };
+
+  useEffect(() => {
+    if (quickActionPrompt && message !== quickActionPrompt) {
+      setMessage(quickActionPrompt);
+      // Clear quick action prompt
+      setQuickActionPrompt?.("");
+    }
+  }, [quickActionPrompt]);
 
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">

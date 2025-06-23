@@ -7,16 +7,22 @@ import { PlanItem, Task, TaskPlan, PlanRevision } from "./types.js";
  *
  * @param request The original user request text that initiated this task
  * @param planItems The plan items to include in the new task
- * @param existingTaskPlan Optional existing TaskPlan to add the new task to
- * @param parentTaskId Optional ID of a parent task if this task is derived from another
+ * @param options Optional existing TaskPlan to add the new task to
+ * @param options.parentTaskId Optional ID of a parent task if this task is derived from another
+ * @param options.existingTaskPlan Optional existing TaskPlan to add the new task to
  * @returns The updated TaskPlan with the new task added
  */
 export function createNewTask(
   request: string,
+  title: string,
   planItems: PlanItem[],
-  existingTaskPlan?: TaskPlan,
-  parentTaskId?: string,
+  options?: {
+    existingTaskPlan?: TaskPlan;
+    parentTaskId?: string;
+  },
 ): TaskPlan {
+  const { existingTaskPlan, parentTaskId } = options ?? {};
+
   // Create the initial plan revision
   const initialRevision: PlanRevision = {
     revisionIndex: 0,
@@ -30,6 +36,7 @@ export function createNewTask(
     id: uuidv4(),
     taskIndex: existingTaskPlan ? existingTaskPlan.tasks.length : 0,
     request,
+    title,
     createdAt: Date.now(),
     completed: false,
     planRevisions: [initialRevision],

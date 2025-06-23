@@ -92,7 +92,12 @@ export async function interruptProposedPlan(
       completed: false,
     }));
 
-    runInput.taskPlan = createNewTask(userRequest, planItems, state.taskPlan);
+    runInput.taskPlan = createNewTask(
+      userRequest,
+      state.proposedPlanTitle,
+      planItems,
+      { existingTaskPlan: state.taskPlan },
+    );
   } else if (interruptRes.type === "edit") {
     const editedPlan = (interruptRes.args as ActionRequest).args.plan
       .split(PLAN_INTERRUPT_DELIMITER)
@@ -104,7 +109,12 @@ export async function interruptProposedPlan(
       completed: false,
     }));
 
-    runInput.taskPlan = createNewTask(userRequest, planItems, state.taskPlan);
+    runInput.taskPlan = createNewTask(
+      userRequest,
+      state.proposedPlanTitle,
+      planItems,
+      { existingTaskPlan: state.taskPlan },
+    );
   } else {
     throw new Error("Unknown interrupt type." + interruptRes.type);
   }

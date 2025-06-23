@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { CustomRules, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -8,6 +8,7 @@ import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { BaseMessage } from "@langchain/core/messages";
+import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -22,6 +23,8 @@ You MUST adhere to the following criteria when generating your notes:
 - Do not retain any full code snippets.
 - Do not retain any full file contents.
 - Only take notes on the context provided below, and do not make up, or attempt to infer any information/context which is not explicitly provided.
+
+{CUSTOM_RULES}
 
 Here is the user's request
 ## User request:
@@ -42,6 +45,7 @@ const formatPrompt = (
   userRequest: string,
   conversationHistory: BaseMessage[],
   proposedPlan: string[],
+  customRules?: CustomRules,
 ): string =>
   systemPrompt
     .replace("{USER_REQUEST}", userRequest)
@@ -49,7 +53,8 @@ const formatPrompt = (
       "{CONVERSATION_HISTORY}",
       conversationHistory.map(getMessageString).join("\n"),
     )
-    .replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`);
+    .replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`)
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(customRules));
 
 const condenseContextToolSchema = z.object({
   notes: z
@@ -85,6 +90,7 @@ ${state.messages.map(getMessageString).join("\n")}`;
         userRequest || "No user request provided.",
         state.messages,
         state.proposedPlan,
+        state.customRules,
       ),
     },
     {

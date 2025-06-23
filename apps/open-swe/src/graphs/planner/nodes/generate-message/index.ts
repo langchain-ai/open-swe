@@ -16,6 +16,8 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { createRgTool } from "../../../../tools/rg.js";
+import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -35,7 +37,8 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
       getRepoAbsolutePath(state.targetRepository),
-    );
+    )
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 }
 
 export async function generateAction(
@@ -43,10 +46,10 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [createShellTool(state)];
+  const tools = [createRgTool(state), createShellTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: false,
+    parallel_tool_calls: true,
   });
 
   const [missingMessages, latestTaskPlan] = await Promise.all([
@@ -71,10 +74,10 @@ export async function generateAction(
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
-    ...(response.tool_calls?.[0] && {
-      name: response.tool_calls?.[0].name,
-      args: response.tool_calls?.[0].args,
-    }),
+    ...response.tool_calls?.map((tc) => ({
+      name: tc.name,
+      args: tc.args,
+    })),
   });
 
   return {

@@ -16,10 +16,17 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import {
+  DEPENDENCIES_INSTALLED_PROMPT,
+  INSTALL_DEPENDENCIES_TOOL_PROMPT,
+  SYSTEM_PROMPT,
+} from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { createRgTool } from "../../../../tools/rg.js";
+import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
+import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -49,7 +56,14 @@ const formatPrompt = (state: GraphState): string => {
       state.codebaseTree || "No codebase tree generated yet.",
     )
     .replaceAll("{CURRENT_WORKING_DIRECTORY}", repoDirectory)
-    .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString());
+    .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString())
+    .replaceAll(
+      "{INSTALL_DEPENDENCIES_TOOL_PROMPT}",
+      !state.dependenciesInstalled
+        ? INSTALL_DEPENDENCIES_TOOL_PROMPT
+        : DEPENDENCIES_INSTALLED_PROMPT,
+    )
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 };
 
 export async function generateAction(
@@ -58,14 +72,19 @@ export async function generateAction(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [
+    createRgTool(state),
     createShellTool(state),
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
+    // Only provide the dependencies installed tool if they're not already installed.
+    ...(state.dependenciesInstalled
+      ? []
+      : [createInstallDependenciesTool(state)]),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: false,
+    parallel_tool_calls: true,
   });
 
   const [missingMessages, latestTaskPlan] = await Promise.all([
@@ -98,10 +117,10 @@ export async function generateAction(
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
-    ...(response.tool_calls?.[0] && {
-      name: response.tool_calls?.[0].name,
-      args: response.tool_calls?.[0].args,
-    }),
+    ...(response.tool_calls?.map((tc) => ({
+      name: tc.name,
+      args: tc.args,
+    })) || []),
   });
 
   const newMessagesList = [...missingMessages, response];

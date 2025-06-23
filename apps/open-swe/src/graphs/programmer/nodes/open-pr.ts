@@ -14,11 +14,12 @@ import { z } from "zod";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { ToolMessage } from "@langchain/core/messages";
+import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { daytonaClient, deleteSandbox } from "../../../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -33,26 +34,6 @@ And here is the user's original request:
 {USER_REQUEST}
 
 With all of this in mind, please use the \`open_pr\` tool to open a pull request.`;
-
-const openPrToolSchema = z.object({
-  title: z
-    .string()
-    .describe(
-      "The title of the pull request. Ensure this is a concise and thoughtful title. You should follow conventional commit title format (e.g. prefixing with '[open-swe] fix:', '[open-swe] feat:', '[open-swe] chore:', etc.). Remember to include the '[open-swe]' prefix in the title.",
-    ),
-  body: z
-    .string()
-    .optional()
-    .describe(
-      "The body of the pull request. This should provide a concise description what the PR changes. Do not over-explain, or add technical details unless they're the absolute minimum needed. The user should be able to quickly read your description, and understand what the PR does. Remember: if they want the technical details they can read the changed files, so you don't need to go into great detail here.",
-    ),
-});
-
-const openPrTool = {
-  name: "open_pr",
-  schema: openPrToolSchema,
-  description: "Use this tool to open a pull request.",
-};
 
 const formatPrompt = (taskPlan: PlanItem[], userRequest: string): string => {
   const completedTasks = taskPlan.filter((task) => task.completed);
@@ -102,6 +83,7 @@ export async function openPullRequest(
     );
   }
 
+  const openPrTool = createOpenPrToolFields();
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
@@ -124,7 +106,7 @@ export async function openPullRequest(
     );
   }
 
-  const { title, body } = toolCall.args as z.infer<typeof openPrToolSchema>;
+  const { title, body } = toolCall.args as z.infer<typeof openPrTool.schema>;
 
   const pr = await createPullRequest({
     owner,
@@ -143,7 +125,15 @@ export async function openPullRequest(
   }
 
   const newMessages = [
-    response,
+    new AIMessage({
+      ...response,
+      additional_kwargs: {
+        ...response.additional_kwargs,
+        // Required for the UI to render these fields.
+        branch: branchName,
+        targetBranch: state.targetRepository.branch,
+      },
+    }),
     new ToolMessage({
       tool_call_id: toolCall.id ?? "",
       content: pr
@@ -159,7 +149,10 @@ export async function openPullRequest(
   return {
     messages: newMessages,
     internalMessages: newMessages,
-    // If the sandbox was successfully deleted, we can remove it from the state.
-    ...(sandboxDeleted && { sandboxSessionId: undefined }),
+    // If the sandbox was successfully deleted, we can remove it from the state & reset the dependencies installed flag.
+    ...(sandboxDeleted && {
+      sandboxSessionId: undefined,
+      dependenciesInstalled: false,
+    }),
   };
 }

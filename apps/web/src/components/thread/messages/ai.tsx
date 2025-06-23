@@ -18,14 +18,17 @@ import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { Interrupt } from "./interrupt";
-import {
-  ActionStep,
-  type ActionStepProps,
-} from "@/components/gen-ui/action-step";
+import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
+import { TaskSummary } from "@/components/gen-ui/task-summary";
+import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
+  createSetTaskStatusToolFields,
+  createRgToolFields,
+  createOpenPrToolFields,
+  createInstallDependenciesToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -37,6 +40,16 @@ const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
+const setTaskStatusTool = createSetTaskStatusToolFields();
+type SetTaskStatusToolArgs = z.infer<typeof setTaskStatusTool.schema>;
+const rgTool = createRgToolFields(dummyRepo);
+type RgToolArgs = z.infer<typeof rgTool.schema>;
+const openPrTool = createOpenPrToolFields();
+type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
+const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
+type InstallDependenciesToolArgs = z.infer<
+  typeof installDependenciesTool.schema
+>;
 
 function CustomComponent({
   message,
@@ -95,7 +108,7 @@ function parseAnthropicStreamedToolCalls(
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   thread: { messages: Message[] },
-): ActionStepProps {
+): ActionItemProps {
   const toolCall: ToolCall | undefined = thread.messages
     .filter(isAIMessageSDK)
     .flatMap((m) => m.tool_calls ?? [])
@@ -108,7 +121,7 @@ export function mapToolMessageToActionStepProps(
     ? getContentString(aiMessage.content)
     : undefined;
 
-  const status: ActionStepProps["status"] = "done";
+  const status: ActionItemProps["status"] = "done";
   const success = message.status === "success";
 
   if (toolCall?.name === shellTool.name) {
@@ -132,6 +145,28 @@ export function mapToolMessageToActionStepProps(
       diff: args.diff,
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
+    };
+  } else if (toolCall?.name === rgTool.name) {
+    const args = toolCall.args as RgToolArgs;
+    return {
+      actionType: "rg",
+      status,
+      success,
+      pattern: args.pattern || "",
+      paths: args.paths || [],
+      output: getContentString(message.content),
+      reasoningText,
+    };
+  } else if (toolCall?.name === installDependenciesTool.name) {
+    const args = toolCall.args as InstallDependenciesToolArgs;
+    return {
+      actionType: "install_dependencies",
+      status,
+      success,
+      command: args.command || "",
+      workdir: args.workdir || "",
+      output: getContentString(message.content),
+      reasoningText,
     };
   }
   return {
@@ -162,7 +197,6 @@ export function AssistantMessage({
 
   const messages = thread.messages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
-  const nextMessage = idx >= 0 ? messages[idx + 1] : undefined;
 
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
@@ -171,97 +205,209 @@ export function AssistantMessage({
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
 
-  // Helper: get tool call name from AI message (OpenAI or Anthropic)
-  const aiToolCallName = (() => {
+  const aiToolCalls: ToolCall[] = (() => {
     if (message && isAIMessageSDK(message)) {
-      return message.tool_calls?.[0]?.name;
+      return message.tool_calls || [];
     }
     if (anthropicStreamedToolCalls?.length) {
-      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
-        .name;
+      return anthropicStreamedToolCalls;
     }
-    return undefined;
+    return [];
   })();
 
-  const aiToolCallArgs = (() => {
-    if (message && isAIMessageSDK(message)) {
-      return message.tool_calls?.[0]?.args;
-    }
-    if (anthropicStreamedToolCalls?.length) {
-      return anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1]
-        .args;
-    }
-    return undefined;
-  })();
-
-  const toolResult =
-    nextMessage &&
-    isToolMessageSDK(nextMessage) &&
-    aiToolCallName &&
-    nextMessage.tool_call_id ===
-      (message && isAIMessageSDK(message)
-        ? message.tool_calls?.[0]?.id
-        : anthropicStreamedToolCalls?.length
-          ? anthropicStreamedToolCalls[anthropicStreamedToolCalls.length - 1].id
-          : undefined)
-      ? nextMessage
-      : undefined;
-
-  if (
-    message &&
-    (aiToolCallName === shellTool.name ||
-      aiToolCallName === applyPatchTool.name)
-  ) {
-    if (toolResult) {
-      return (
-        <ActionStep {...mapToolMessageToActionStepProps(toolResult, thread)} />
+  const toolResults = aiToolCalls
+    .map((toolCall) => {
+      const matchingToolMessage = messages.find(
+        (m) => isToolMessageSDK(m) && m.tool_call_id === toolCall.id,
       );
-    }
+
+      return matchingToolMessage as ToolMessage | undefined;
+    })
+    .filter((m): m is ToolMessage => !!m);
+
+  const actionableToolCalls = message
+    ? aiToolCalls.filter(
+        (tc) =>
+          tc.name === shellTool.name ||
+          tc.name === applyPatchTool.name ||
+          tc.name === rgTool.name ||
+          tc.name === installDependenciesTool.name,
+      )
+    : [];
+
+  const taskStatusToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === setTaskStatusTool.name)
+    : undefined;
+
+  const openPrToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
+    : undefined;
+
+  // We can be sure that if the task status tool call is present, it will be the
+  // only tool call/result we need to render for this message.
+  if (taskStatusToolCall) {
+    const args = taskStatusToolCall.args as SetTaskStatusToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === taskStatusToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+    const completed = args.task_status === "completed";
+
     return (
-      <ActionStep
-        actionType={aiToolCallName === shellTool.name ? "shell" : "apply-patch"}
-        status="generating"
-        command={
-          aiToolCallName === shellTool.name ? aiToolCallArgs?.command || [] : []
-        }
-        workdir={
-          aiToolCallName === shellTool.name ? aiToolCallArgs?.workdir : ""
-        }
-        file_path={
-          aiToolCallName === applyPatchTool.name
-            ? aiToolCallArgs?.file_path || ""
-            : ""
-        }
-        diff={
-          aiToolCallName === applyPatchTool.name ? aiToolCallArgs?.diff : ""
-        }
-        reasoningText={contentString}
-      />
+      <div className="flex flex-col gap-4">
+        <TaskSummary
+          status={status}
+          completed={completed}
+          summaryText={args.reasoning}
+        />
+      </div>
     );
   }
 
-  if (
-    message?.type === "tool" &&
-    (message.name === shellTool.name || message.name === applyPatchTool.name) &&
-    idx > 0 &&
-    messages[idx - 1] &&
-    ((messages[idx - 1] &&
-      isAIMessageSDK(messages[idx - 1]) &&
-      (messages[idx - 1] as AIMessage).tool_calls?.some(
-        (tc) =>
-          tc.id === (message as ToolMessage).tool_call_id &&
-          (tc.name === shellTool.name || tc.name === applyPatchTool.name),
-      )) ||
-      (Array.isArray(messages[idx - 1].content) &&
-        parseAnthropicStreamedToolCalls(
-          messages[idx - 1].content as MessageContentComplex[],
-        )?.some(
-          (tc) =>
-            tc.id === (message as ToolMessage).tool_call_id &&
-            (tc.name === shellTool.name || tc.name === applyPatchTool.name),
-        )))
-  ) {
-    return null;
+  // Same for PR tool. If this is present, it's the only tool call we need to render.
+  if (openPrToolCall) {
+    let branch: string | undefined;
+    let targetBranch: string | undefined = "main";
+
+    if (message && isAIMessageSDK(message)) {
+      branch = message.additional_kwargs?.branch as string | undefined;
+      targetBranch =
+        (message.additional_kwargs?.targetBranch as string | undefined) ||
+        "main";
+    }
+
+    const args = openPrToolCall.args as OpenPrToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === openPrToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+
+    // Extract PR URL from the tool message content
+    // Format: "Created pull request: https://github.com/owner/repo/pull/123"
+    let prUrl: string | undefined = undefined;
+    if (correspondingToolResult) {
+      const content = getContentString(correspondingToolResult.content);
+      if (content.includes("Created pull request: ")) {
+        prUrl = content.split("Created pull request: ")[1].trim();
+      }
+    }
+
+    // Extract PR number from URL if available
+    let prNumber: number | undefined = undefined;
+    if (prUrl) {
+      const match = prUrl.match(/\/pull\/(\d+)/);
+      if (match && match[1]) {
+        prNumber = parseInt(match[1], 10);
+      }
+    }
+
+    return (
+      <div className="flex flex-col gap-4">
+        <PullRequestOpened
+          status={status}
+          title={args.title}
+          description={args.body}
+          url={prUrl}
+          prNumber={prNumber}
+          branch={branch}
+          targetBranch={targetBranch}
+        />
+      </div>
+    );
+  }
+
+  if (actionableToolCalls.length > 0) {
+    const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
+      const correspondingToolResult = toolResults.find(
+        (tr) => tr && tr.tool_call_id === toolCall.id,
+      );
+
+      const isShellTool = toolCall.name === shellTool.name;
+      const isRgTool = toolCall.name === rgTool.name;
+      const isInstallDependenciesTool =
+        toolCall.name === installDependenciesTool.name;
+
+      if (correspondingToolResult) {
+        // If we have a tool result, map it to action props
+        return mapToolMessageToActionStepProps(correspondingToolResult, thread);
+      } else if (isRgTool) {
+        const args = toolCall.args as RgToolArgs;
+        return {
+          actionType: "rg",
+          status: "generating",
+          pattern: args?.pattern || "",
+          paths: args?.paths || [],
+          output: "",
+        } as ActionItemProps;
+      } else if (isInstallDependenciesTool) {
+        const args = toolCall.args as InstallDependenciesToolArgs;
+        return {
+          actionType: "install_dependencies",
+          status: "generating",
+          command: args?.command || "",
+          workdir: args?.workdir || "",
+          output: "",
+        } as ActionItemProps;
+      } else {
+        if (isShellTool) {
+          const args = toolCall.args as ShellToolArgs;
+          return {
+            actionType: "shell",
+            status: "generating",
+            command: args?.command || [],
+            workdir: args?.workdir,
+            timeout: args?.timeout,
+          } as ActionItemProps;
+        } else {
+          // Must be apply_patch tool
+          const patchArgs = toolCall.args as ApplyPatchToolArgs;
+          return {
+            actionType: "apply-patch",
+            status: "generating",
+            file_path: patchArgs?.file_path || "",
+            diff: patchArgs?.diff || "",
+          } as ActionItemProps;
+        }
+      }
+    });
+
+    return (
+      <div className="flex flex-col gap-4">
+        <ActionStep
+          actions={actionItems.filter(
+            (item): item is ActionItemProps => item !== undefined,
+          )}
+          reasoningText={contentString}
+        />
+      </div>
+    );
+  }
+
+  if (message?.type === "tool" && idx > 0) {
+    const isPreviousToolCall = messages.slice(0, idx).some((prevMessage) => {
+      if (isAIMessageSDK(prevMessage) && prevMessage.tool_calls) {
+        return prevMessage.tool_calls.some(
+          (tc) => tc.id === (message as ToolMessage).tool_call_id,
+        );
+      }
+
+      if (Array.isArray(prevMessage.content)) {
+        const toolCalls = parseAnthropicStreamedToolCalls(
+          prevMessage.content as MessageContentComplex[],
+        );
+        return toolCalls?.some(
+          (tc) => tc.id === (message as ToolMessage).tool_call_id,
+        );
+      }
+
+      return false;
+    });
+
+    if (isPreviousToolCall) {
+      return null;
+    }
   }
 
   const isLastMessage =
@@ -269,18 +415,6 @@ export function AssistantMessage({
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
-
-  const hasToolCalls =
-    message &&
-    "tool_calls" in message &&
-    message.tool_calls &&
-    message.tool_calls.length > 0;
-  const toolCallsHaveContents =
-    hasToolCalls &&
-    message.tool_calls?.some(
-      (tc) => tc.args && Object.keys(tc.args).length > 0,
-    );
-  const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
   if (isToolResult && hideToolCalls) {
@@ -309,17 +443,9 @@ export function AssistantMessage({
               </div>
             )}
 
-            {!hideToolCalls && (
+            {!hideToolCalls && aiToolCalls.length > 0 && (
               <span>
-                {(hasToolCalls && toolCallsHaveContents && (
-                  <ToolCalls toolCalls={message.tool_calls} />
-                )) ||
-                  (hasAnthropicToolCalls && (
-                    <ToolCalls toolCalls={anthropicStreamedToolCalls} />
-                  )) ||
-                  (hasToolCalls && (
-                    <ToolCalls toolCalls={message.tool_calls} />
-                  ))}
+                <ToolCalls toolCalls={aiToolCalls} />
               </span>
             )}
 

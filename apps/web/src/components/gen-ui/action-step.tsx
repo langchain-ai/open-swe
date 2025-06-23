@@ -11,10 +11,15 @@ import {
   ChevronUp,
   MessageSquare,
   FileText,
+  CloudDownload,
+  Search,
 } from "lucide-react";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
+  createInstallDependenciesToolFields,
+  formatRgCommand,
+  RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 
@@ -24,6 +29,10 @@ const shellTool = createShellToolFields(dummyRepo);
 type ShellToolArgs = z.infer<typeof shellTool.schema>;
 const applyPatchTool = createApplyPatchToolFields(dummyRepo);
 type ApplyPatchToolArgs = z.infer<typeof applyPatchTool.schema>;
+const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
+type InstallDependenciesToolArgs = z.infer<
+  typeof installDependenciesTool.schema
+>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -43,7 +52,6 @@ type ShellActionProps = BaseActionProps &
     errorCode?: number;
   };
 
-// Apply patch specific props
 type PatchActionProps = BaseActionProps &
   Partial<ApplyPatchToolArgs> & {
     actionType: "apply-patch";
@@ -51,32 +59,49 @@ type PatchActionProps = BaseActionProps &
     fixedDiff?: string;
   };
 
-// Union type for all possible action props
-export type ActionStepProps =
+type RgActionProps = BaseActionProps &
+  Partial<RipgrepCommand> & {
+    actionType: "rg";
+    output?: string;
+    errorCode?: number;
+  };
+
+type InstallDependenciesActionProps = BaseActionProps &
+  Partial<InstallDependenciesToolArgs> & {
+    actionType: "install_dependencies";
+    output?: string;
+    errorCode?: number;
+  };
+
+export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
-  | PatchActionProps;
+  | PatchActionProps
+  | RgActionProps
+  | InstallDependenciesActionProps;
 
-export function ActionStep(props: ActionStepProps) {
+export type ActionStepProps = {
+  actions: ActionItemProps[];
+  reasoningText?: string;
+  summaryText?: string;
+};
+
+function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
 
   const getStatusIcon = () => {
     switch (props.status) {
       case "loading":
-        return (
-          <div className="border-border h-3.5 w-3.5 rounded-full border" />
-        );
+        return <div className="border-border size-3.5 rounded-full border" />;
       case "generating":
         return (
-          <Loader2 className="text-muted-foreground h-3.5 w-3.5 animate-spin" />
+          <Loader2 className="text-muted-foreground size-3.5 animate-spin" />
         );
       case "done":
         return props.success ? (
-          <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+          <CheckCircle className="size-3.5 text-green-500" />
         ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-500" />
+          <XCircle className="size-3.5 text-red-500" />
         );
     }
   };
@@ -97,6 +122,10 @@ export function ActionStep(props: ActionStepProps) {
         return props.success ? "Command completed" : "Command failed";
       } else if (props.actionType === "apply-patch") {
         return props.success ? "Patch applied" : "Patch failed";
+      } else if (props.actionType === "rg") {
+        return props.success ? "Search completed" : "Search failed";
+      } else if (props.actionType === "install_dependencies") {
+        return props.success ? "Dependencies installed" : "Installation failed";
       }
     }
 
@@ -107,7 +136,11 @@ export function ActionStep(props: ActionStepProps) {
   const shouldShowToggle = () => {
     if (props.status !== "done") return false;
 
-    if (props.actionType === "shell") {
+    if (
+      props.actionType === "shell" ||
+      props.actionType === "rg" ||
+      props.actionType === "install_dependencies"
+    ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
@@ -120,14 +153,18 @@ export function ActionStep(props: ActionStepProps) {
   const renderHeaderIcon = () => {
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <Loader2 className="text-muted-foreground mr-2 h-3.5 w-3.5" />;
+      return <Loader2 className="text-muted-foreground mr-2 size-3.5" />;
     }
 
-    return props.actionType === "shell" ? (
-      <Terminal className="text-muted-foreground mr-2 h-3.5 w-3.5" />
-    ) : (
-      <FileCode className="text-muted-foreground mr-2 h-3.5 w-3.5" />
-    );
+    if (props.actionType === "install_dependencies") {
+      return <CloudDownload className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "apply-patch") {
+      return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "rg") {
+      return <Search className="text-muted-foreground mr-2 size-3.5" />;
+    } else {
+      return <Terminal className="text-muted-foreground mr-2 size-3.5" />;
+    }
   };
 
   // Render the header content based on action type
@@ -140,7 +177,10 @@ export function ActionStep(props: ActionStepProps) {
       );
     }
 
-    if (props.actionType === "shell") {
+    if (
+      props.actionType === "shell" ||
+      props.actionType === "install_dependencies"
+    ) {
       let commandStr = "";
       if (props.command) {
         if (Array.isArray(props.command)) {
@@ -168,6 +208,25 @@ export function ActionStep(props: ActionStepProps) {
           </code>
         </div>
       );
+    } else if (props.actionType === "rg") {
+      let formattedRgCommand = "";
+      try {
+        formattedRgCommand =
+          formatRgCommand({
+            pattern: props.pattern,
+            paths: props.paths,
+            flags: props.flags,
+          })?.join(" ") ?? "";
+      } catch {
+        // no-op
+      }
+      return (
+        <div className="flex-1">
+          <code className="text-foreground/80 text-xs font-normal">
+            {formattedRgCommand}
+          </code>
+        </div>
+      );
     } else {
       return (
         <code className="text-foreground/80 flex-1 text-xs font-normal">
@@ -183,7 +242,12 @@ export function ActionStep(props: ActionStepProps) {
 
     if (!expanded) return null;
 
-    if (props.actionType === "shell" && props.output) {
+    if (
+      (props.actionType === "shell" ||
+        props.actionType === "rg" ||
+        props.actionType === "install_dependencies") &&
+      props.output
+    ) {
       return (
         <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
           <pre className="text-xs font-normal whitespace-pre-wrap">
@@ -231,25 +295,8 @@ export function ActionStep(props: ActionStepProps) {
   };
 
   return (
-    <div className="border-border overflow-hidden rounded-md border">
-      {props.reasoningText && (
-        <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
-          <button
-            onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-          >
-            <MessageSquare className="h-3 w-3" />
-            {showReasoning ? "Hide reasoning" : "Show reasoning"}
-          </button>
-          {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
-              {props.reasoningText}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className="border-border bg-card flex items-center border-b p-2 dark:bg-gray-800">
+    <div className="border-border mb-2 overflow-hidden rounded-md border last:mb-0">
+      <div className="border-border flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
         {renderHeaderIcon()}
         {renderHeaderContent()}
         <div className="flex items-center gap-2">
@@ -263,9 +310,9 @@ export function ActionStep(props: ActionStepProps) {
               className="text-muted-foreground hover:text-foreground"
             >
               {expanded ? (
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp className="size-3.5" />
               ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="size-3.5" />
               )}
             </button>
           )}
@@ -273,19 +320,60 @@ export function ActionStep(props: ActionStepProps) {
       </div>
 
       {renderContent()}
+    </div>
+  );
+}
 
-      {props.summaryText && props.status === "done" && (
+export function ActionStep(props: ActionStepProps) {
+  const [showReasoning, setShowReasoning] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+
+  const reasoningText =
+    "reasoningText" in props ? props.reasoningText : undefined;
+  const summaryText = "summaryText" in props ? props.summaryText : undefined;
+
+  const anyActionDone = props.actions.some(
+    (action: ActionItemProps) => action.status === "done",
+  );
+
+  return (
+    <div className="border-border overflow-hidden rounded-md border">
+      <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
+        <button
+          onClick={() => setShowReasoning(!showReasoning)}
+          className="flex cursor-pointer items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+        >
+          <MessageSquare className="h-3 w-3" />
+          {showReasoning ? "Hide reasoning" : "Show reasoning"}
+        </button>
+        {showReasoning && (
+          <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
+            {reasoningText || "No reasoning provided."}
+          </p>
+        )}
+      </div>
+
+      <div className="p-2">
+        {props.actions.map((action: ActionItemProps, index: number) => (
+          <ActionItem
+            key={index}
+            {...action}
+          />
+        ))}
+      </div>
+
+      {summaryText && anyActionDone && (
         <div className="border-t border-green-300 bg-green-100/50 p-2 dark:border-green-800 dark:bg-green-900/50">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+            className="flex cursor-pointer items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
             <p className="mt-1 text-xs font-normal text-green-700 dark:text-green-300">
-              {props.summaryText}
+              {summaryText}
             </p>
           )}
         </div>
