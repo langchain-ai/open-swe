@@ -130,9 +130,6 @@ export default function AuthStatus() {
     );
   }
 
-  // Step 2: GitHub App Installation (only show if authenticated but app not installed)
-  // Only show modal if we've definitively determined the app is not installed
-  // Don't show while we're still loading or have cached positive status
   if (isAuth && hasGitHubAppInstalled === false && !isTokenLoading) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
@@ -182,7 +179,6 @@ export default function AuthStatus() {
     );
   }
 
-  // Only render StreamSession when we have a valid token
   if (!githubToken) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
