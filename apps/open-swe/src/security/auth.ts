@@ -8,8 +8,12 @@ import {
   GITHUB_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
 import { decryptGitHubToken } from "@open-swe/shared/crypto";
+import { checkRateLimit, incrementUserRequestCount } from "../utils/rate-limiter.js";
 
 const STUDIO_USER_ID = "langgraph-studio-user";
+
+// Array of display names for users who should bypass rate limiting
+const RATE_LIMIT_EXEMPT_USERS: string[] = [];
 
 // Helper function to check if user is studio user
 const isStudioUser = (userIdentity: string): boolean => {
@@ -112,12 +116,36 @@ export const auth = new Auth()
   })
 
   // THREADS: create operations with metadata
-  .on("threads:create", ({ value, user }) =>
-    createWithOwnerMetadata(value, user),
-  )
-  .on("threads:create_run", ({ value, user }) =>
-    createWithOwnerMetadata(value, user),
-  )
+  .on("threads:create", async ({ value, user }) => {
+    // Skip rate limiting for studio users and exempt users
+    if (!isStudioUser(user.identity) && !RATE_LIMIT_EXEMPT_USERS.includes(user.display_name)) {
+      // Check if user has exceeded rate limit
+      if (await checkRateLimit(user.identity)) {
+        throw new HTTPException(429, "You are out of free credits. Please upgrade your plan to continue.");
+      }
+      
+      // Increment user's request count
+      await incrementUserRequestCount(user.identity);
+    }
+    
+    // Proceed with normal metadata creation
+    return createWithOwnerMetadata(value, user);
+  })
+  .on("threads:create_run", async ({ value, user }) => {
+    // Skip rate limiting for studio users and exempt users
+    if (!isStudioUser(user.identity) && !RATE_LIMIT_EXEMPT_USERS.includes(user.display_name)) {
+      // Check if user has exceeded rate limit
+      if (await checkRateLimit(user.identity)) {
+        throw new HTTPException(429, "You are out of free credits. Please upgrade your plan to continue.");
+      }
+      
+      // Increment user's request count
+      await incrementUserRequestCount(user.identity);
+    }
+    
+    // Proceed with normal metadata creation
+    return createWithOwnerMetadata(value, user);
+  })
 
   // THREADS: read, update, delete, search operations
   .on("threads:read", ({ user }) => createOwnerFilter(user))
@@ -140,3 +168,6 @@ export const auth = new Auth()
   .on("store", ({ user }) => {
     return { owner: user.identity };
   });
+
+
+
