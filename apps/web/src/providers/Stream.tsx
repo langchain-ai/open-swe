@@ -37,17 +37,18 @@ const StreamSession = ({ children }: { children: ReactNode }) => {
   const [customEvents, setCustomEvents] = useState<CustomNodeEvent[]>([]);
   const { refreshThreads } = useThreadsContext();
 
+  if (
+    !process.env.NEXT_PUBLIC_API_URL ||
+    !process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID
+  ) {
+    throw new Error(
+      "Both NEXT_PUBLIC_API_URL and NEXT_PUBLIC_MANAGER_ASSISTANT_ID environment variables must be defined.",
+    );
+  }
+
   const streamValue = useTypedStream({
-    apiUrl:
-      process.env.NEXT_PUBLIC_API_URL ??
-      (() => {
-        throw new Error("NEXT_PUBLIC_API_URL is required");
-      })(),
-    assistantId:
-      process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ??
-      (() => {
-        throw new Error("NEXT_PUBLIC_MANAGER_ASSISTANT_ID is required");
-      })(),
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {
