@@ -6,7 +6,6 @@ export async function middleware(request: NextRequest) {
   const token = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   const user = token ? await verifyGithubUser(token) : null;
 
-  // Redirect authenticated users from home to chat
   if (request.nextUrl.pathname === "/") {
     if (user) {
       const url = request.nextUrl.clone();
@@ -15,7 +14,6 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Protect chat routes - redirect unauthenticated users to home
   if (request.nextUrl.pathname.startsWith("/chat")) {
     if (!user) {
       const url = request.nextUrl.clone();
