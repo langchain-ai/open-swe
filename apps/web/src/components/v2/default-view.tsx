@@ -26,6 +26,7 @@ import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
 import { useState } from "react";
+import { GitHubLogoutButton } from "../github/github-oauth-button";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -69,6 +70,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <div className="bg-muted h-1 w-1 rounded-full"></div>
             </div>
             <ThemeToggle />
+            <GitHubLogoutButton />
           </div>
         </div>
       </div>
