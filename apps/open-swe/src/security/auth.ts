@@ -1,5 +1,8 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
-import { verifyGithubUser, GithubUser } from "./github-auth.js";
+import {
+  verifyGithubUser,
+  GithubUser,
+} from "@open-swe/shared/github/verify-user";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
