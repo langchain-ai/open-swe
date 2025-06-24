@@ -100,7 +100,6 @@ export default function AuthStatus() {
     window.location.href = "/api/github/installation";
   };
 
-
   if (!isAuth) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
