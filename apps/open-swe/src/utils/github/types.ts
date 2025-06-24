@@ -1,10 +1,10 @@
-import type { Endpoints } from "@octokit/types";
+import type { RestEndpointMethodTypes } from "@octokit/rest";
 
 export type GitHubIssue =
-  Endpoints["GET /repos/{owner}/{repo}/issues/{issue_number}"]["response"]["data"];
+  RestEndpointMethodTypes["issues"]["get"]["response"]["data"];
 
 export type GitHubIssueComment =
-  Endpoints["GET /repos/{owner}/{repo}/issues/{issue_number}/comments"]["response"]["data"][number];
+  RestEndpointMethodTypes["issues"]["listComments"]["response"]["data"][number];
 
 export type GitHubPullRequest =
-  Endpoints["POST /repos/{owner}/{repo}/pulls"]["response"]["data"];
+  RestEndpointMethodTypes["pulls"]["create"]["response"]["data"];

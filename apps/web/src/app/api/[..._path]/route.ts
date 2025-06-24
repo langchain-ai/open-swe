@@ -1,12 +1,12 @@
 import { initApiPassthrough } from "langgraph-nextjs-api-passthrough";
 import {
   GITHUB_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { NextRequest } from "next/server";
 import { getInstallationToken } from "@/utils/github";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@/lib/auth";
 
 function getGitHubAccessTokenOrThrow(
   req: NextRequest,
@@ -15,7 +15,9 @@ function getGitHubAccessTokenOrThrow(
   const token = req.cookies.get(GITHUB_TOKEN_COOKIE)?.value ?? "";
 
   if (!token) {
-    throw new Error("No GitHub access token cookie found.");
+    throw new Error(
+      "No GitHub access token found. User must authenticate first.",
+    );
   }
 
   return encryptGitHubToken(token, encryptionKey);
@@ -28,12 +30,16 @@ async function getGitHubInstallationTokenOrThrow(
   const installationIdCookie = req.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,
   )?.value;
+
   if (!installationIdCookie) {
-    throw new Error("No GitHub installation ID cookie found.");
+    throw new Error(
+      "No GitHub installation ID found. GitHub App must be installed first.",
+    );
   }
 
   const appId = process.env.GITHUB_APP_ID;
   const privateAppKey = process.env.GITHUB_APP_PRIVATE_KEY;
+
   if (!appId || !privateAppKey) {
     throw new Error("GitHub App ID or Private App Key is not configured.");
   }

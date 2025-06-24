@@ -1,4 +1,4 @@
-import { GITHUB_AUTH_STATE_COOKIE } from "@/lib/auth";
+import { GITHUB_AUTH_STATE_COOKIE } from "@open-swe/shared/constants";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(_request: NextRequest) {

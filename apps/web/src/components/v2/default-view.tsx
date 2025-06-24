@@ -1,5 +1,4 @@
 "use client";
-
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,17 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  CheckCircle,
-  XCircle,
-  Loader2,
-  GitBranch,
-  GitPullRequest,
-  Bug,
-  FilePlus2,
-  Archive,
-} from "lucide-react";
+import { FilePlus2, Archive } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo } from "./types";
 import { TerminalInput } from "./terminal-input";
@@ -34,6 +23,7 @@ import { Label } from "../ui/label";
 import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
+import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
 import { useState } from "react";
 
@@ -86,6 +76,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
+          <GitHubInstallationBanner />
           {/* Terminal Chat Input */}
           <Card
             className={cn(

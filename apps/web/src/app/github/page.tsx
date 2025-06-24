@@ -68,7 +68,7 @@ export default function GitHubPage() {
       )}
 
       {!isInstalled ? (
-        <div className="mb-6 rounded-lg bg-white p-6 shadow-md">
+        <div className="mb-6 rounded-lg bg-white p-6 shadow-md dark:bg-gray-900">
           <h2 className="mb-4 text-xl font-semibold">Install GitHub App</h2>
           <p className="mb-4">
             To access your GitHub repositories, you need to install our GitHub
@@ -76,7 +76,7 @@ export default function GitHubPage() {
           </p>
           <button
             onClick={handleInstall}
-            className="rounded bg-black px-4 py-2 text-white hover:bg-gray-800"
+            className="rounded bg-black px-4 py-2 text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200"
           >
             Install GitHub App
           </button>

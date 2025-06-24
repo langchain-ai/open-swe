@@ -17,7 +17,6 @@ import {
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
-  XIcon,
   Settings,
   FilePlus2,
 } from "lucide-react";
@@ -30,7 +29,6 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { ContentBlocksPreview } from "./ContentBlocksPreview";
-import { GitHubOAuthButton } from "../github/github-oauth-button";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import TaskList from "../task-list";
 import { ConfigurationSidebar } from "../configuration-sidebar";
@@ -54,6 +52,7 @@ import {
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import AuthStatus from "../github/auth-status";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -403,6 +402,7 @@ export function Thread() {
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center gap-2 text-gray-700">
+                <AuthStatus />
                 <TooltipIconButton
                   tooltip="Configuration"
                   variant="ghost"
@@ -413,7 +413,6 @@ export function Thread() {
                   <Settings className="size-4" />
                 </TooltipIconButton>
                 <ThemeToggle />
-                <GitHubOAuthButton />
               </div>
             </div>
           )}
@@ -467,7 +466,7 @@ export function Thread() {
               </div>
 
               <div className="col-span-2 flex items-center justify-end gap-2 text-gray-700">
-                <GitHubOAuthButton />
+                <AuthStatus />
                 <OpenPRButton />
                 <TooltipIconButton
                   tooltip="Configuration"

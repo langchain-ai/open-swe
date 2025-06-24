@@ -1,8 +1,5 @@
 import { Octokit } from "@octokit/rest";
 import { Endpoints } from "@octokit/types";
-import { createLogger, LogLevel } from "../utils/logger.js";
-
-const logger = createLogger(LogLevel.INFO, "GithubAuth");
 
 export type GithubUser = Endpoints["GET /user"]["response"]["data"];
 
@@ -20,19 +17,12 @@ export async function verifyGithubUser(
 
   try {
     const octokit = new Octokit({ auth: accessToken });
-
     const { data: user } = await octokit.users.getAuthenticated();
-
     if (!user || !user.login) {
-      logger.error(
-        "GitHub token is invalid or user information could not be retrieved.",
-      );
       return undefined;
     }
-
     return user;
-  } catch (error) {
-    logger.error("An error occurred during GitHub user verification:", error);
+  } catch {
     return undefined;
   }
 }
