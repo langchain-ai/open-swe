@@ -245,6 +245,8 @@ export function createTakePlannerNotesFields() {
     name: "take_notes",
     schema: plannerContextNotesSchema,
     description:
-      "Use this tool to write & save technical notes on the planner context. This should be called if you come across context you think will be highly useful to the programmer when they are actually implementing the plan, and you want to ensure it's not lost.",
+      "Use this tool to write & save technical notes on the planner context.\n" +
+      "This should be called if you come across context you think will be highly useful to the programmer when they are actually implementing the plan, and you want to ensure it's not lost.\n" +
+      "Do not duplicate any information present in the user provided 'custom rules', as we want to avoid duplicating context.",
   };
 }

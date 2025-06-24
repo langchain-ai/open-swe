@@ -15,6 +15,8 @@ const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the c
 <planner_notes>
 {PLANNER_NOTES}
 </planner_notes>`;
+const CUSTOM_RULES_EXTRA_CONTEXT =
+  "- Carefully read over the user's custom rules to ensure you don't duplicate or repeat information found in that section, as you will always have access to it (even after the planning step!).";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -25,14 +27,15 @@ The notes you extract should be thoughtful, and should include technical details
 These notes should not be overly verbose, as you'll be able to gather additional context when executing.
 Your goal is to generate notes on all of the low-hanging fruit from the conversation history, to speed up the execution so that you don't need to duplicate work to gather context.
 
+{CUSTOM_RULES}
+
+{PLANNER_NOTES}
+
 You MUST adhere to the following criteria when generating your notes:
 - Do not retain any full code snippets.
 - Do not retain any full file contents.
 - Only take notes on the context provided below, and do not make up, or attempt to infer any information/context which is not explicitly provided.
-
-{CUSTOM_RULES}
-
-{PLANNER_NOTES}
+{EXTRA_RULES}
 
 Here is the user's request
 ## User request:
@@ -66,12 +69,22 @@ const formatPrompt = (state: PlannerGraphState): string => {
       "{PROPOSED_PLAN}",
       state.proposedPlan.map((p) => `  - ${p}`).join("\n"),
     )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replaceAll(
+      "{CUSTOM_RULES}",
+      formatCustomRulesPrompt(
+        state.customRules,
+        "Keep in mind these user provided rules will always be available to you, so any context present here should NOT be included in your notes as to not duplicate information.",
+      ),
+    )
     .replaceAll(
       "{PLANNER_NOTES}",
       plannerNotes.length
         ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
         : "",
+    )
+    .replaceAll(
+      "{EXTRA_RULES}",
+      state.customRules ? CUSTOM_RULES_EXTRA_CONTEXT : "",
     );
 };
 

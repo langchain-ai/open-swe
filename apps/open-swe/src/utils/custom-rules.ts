@@ -26,7 +26,9 @@ const ALL_TAGS = [
   TESTING_INSTRUCTIONS_CLOSE_TAG,
 ];
 
-export function parseCustomRulesFromString(contents: string): CustomRules {
+export function parseCustomRulesFromString(
+  contents: string,
+): CustomRules | undefined {
   if (ALL_TAGS.every((tag) => !contents.includes(tag))) {
     // Text file has no custom rules. Return all as general rules
     return {
@@ -76,6 +78,15 @@ export function parseCustomRulesFromString(contents: string): CustomRules {
         TESTING_INSTRUCTIONS_OPEN_TAG.length,
       contents.indexOf(TESTING_INSTRUCTIONS_CLOSE_TAG),
     );
+  }
+
+  if (
+    !generalRules &&
+    !repositoryStructure &&
+    !dependenciesAndInstallation &&
+    !testingInstructions
+  ) {
+    return undefined;
   }
 
   return {
@@ -129,20 +140,28 @@ export async function getCustomRules(
 
 export const CUSTOM_RULES_PROMPT = `<custom_rules>
 The following are custom rules provided by the user.
+{EXTRA_CONTEXT}
 {GENERAL_RULES}
 {REPOSITORY_STRUCTURE}
 {TESTING_INSTRUCTIONS}
 {DEPENDENCIES_AND_INSTALLATION}
 </custom_rules>`;
 
-export function formatCustomRulesPrompt(customRules?: CustomRules): string {
+export function formatCustomRulesPrompt(
+  customRules?: CustomRules,
+  extraContextStr?: string,
+): string {
   if (!customRules) return "";
   return CUSTOM_RULES_PROMPT.replace(
-    "{GENERAL_RULES}",
-    customRules.generalRules
-      ? `<general_rules>\n${customRules.generalRules}\n</general_rules>`
-      : "",
+    "{EXTRA_CONTEXT}",
+    extraContextStr ? extraContextStr : "",
   )
+    .replace(
+      "{GENERAL_RULES}",
+      customRules.generalRules
+        ? `<general_rules>\n${customRules.generalRules}\n</general_rules>`
+        : "",
+    )
     .replace(
       "{REPOSITORY_STRUCTURE}",
       customRules.repositoryStructure
