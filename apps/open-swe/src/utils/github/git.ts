@@ -380,6 +380,38 @@ export async function getChangedFilesStatus(
     .filter((line) => line !== "");
 }
 
+export async function stashAndClearChanges(
+  absoluteRepoDir: string,
+  sandbox: Sandbox,
+): Promise<ExecuteResponse | false> {
+  try {
+    const gitStashOutput = await sandbox.process.executeCommand(
+      "git stash && git reset --hard",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+
+    if (gitStashOutput.exitCode !== 0) {
+      logger.error(`Failed to stash and clear changes`, {
+        gitStashOutput,
+      });
+    }
+    return gitStashOutput;
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to stash and clear changes`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+    return errorFields ?? false;
+  }
+}
+
 export async function checkoutBranchAndCommit(
   config: GraphConfig,
   targetRepository: TargetRepository,

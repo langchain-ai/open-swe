@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CustomRules, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -7,8 +7,16 @@ import {
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { BaseMessage } from "@langchain/core/messages";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
+import { getPlannerNotes } from "../utils/get-notes.js";
+
+const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
+
+<planner_notes>
+{PLANNER_NOTES}
+</planner_notes>`;
+const CUSTOM_RULES_EXTRA_CONTEXT =
+  "- Carefully read over the user's custom rules to ensure you don't duplicate or repeat information found in that section, as you will always have access to it (even after the planning step!).";
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -19,12 +27,15 @@ The notes you extract should be thoughtful, and should include technical details
 These notes should not be overly verbose, as you'll be able to gather additional context when executing.
 Your goal is to generate notes on all of the low-hanging fruit from the conversation history, to speed up the execution so that you don't need to duplicate work to gather context.
 
+{CUSTOM_RULES}
+
+{PLANNER_NOTES}
+
 You MUST adhere to the following criteria when generating your notes:
 - Do not retain any full code snippets.
 - Do not retain any full file contents.
 - Only take notes on the context provided below, and do not make up, or attempt to infer any information/context which is not explicitly provided.
-
-{CUSTOM_RULES}
+{EXTRA_RULES}
 
 Here is the user's request
 ## User request:
@@ -41,20 +52,41 @@ And here is the plan you just generated:
 With all of this in mind, please carefully inspect the conversation history, and the plan you generated. Then, determine which actions and context from the conversation history will be most useful to you when you execute the plan. After you're done analyzing, call the \`write_technical_notes\` tool.
 `;
 
-const formatPrompt = (
-  userRequest: string,
-  conversationHistory: BaseMessage[],
-  proposedPlan: string[],
-  customRules?: CustomRules,
-): string =>
-  systemPrompt
+const formatPrompt = (state: PlannerGraphState): string => {
+  const userRequest =
+    getUserRequest(state.messages) || "No user request provided.";
+  const plannerNotes = getPlannerNotes(state.messages)
+    .map((n) => `  - ${n}`)
+    .join("\n");
+
+  return systemPrompt
     .replace("{USER_REQUEST}", userRequest)
     .replace(
       "{CONVERSATION_HISTORY}",
-      conversationHistory.map(getMessageString).join("\n"),
+      state.messages.map(getMessageString).join("\n"),
     )
-    .replace("{PROPOSED_PLAN}", `  - ${proposedPlan.join("\n  - ")}`)
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(customRules));
+    .replace(
+      "{PROPOSED_PLAN}",
+      state.proposedPlan.map((p) => `  - ${p}`).join("\n"),
+    )
+    .replaceAll(
+      "{CUSTOM_RULES}",
+      formatCustomRulesPrompt(
+        state.customRules,
+        "Keep in mind these user provided rules will always be available to you, so any context present here should NOT be included in your notes as to not duplicate information.",
+      ),
+    )
+    .replaceAll(
+      "{PLANNER_NOTES}",
+      plannerNotes.length
+        ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
+        : "",
+    )
+    .replaceAll(
+      "{EXTRA_RULES}",
+      state.customRules ? CUSTOM_RULES_EXTRA_CONTEXT : "",
+    );
+};
 
 const condenseContextToolSchema = z.object({
   notes: z
@@ -78,7 +110,6 @@ export async function notetaker(
     parallel_tool_calls: false,
   });
 
-  const userRequest = getUserRequest(state.messages);
   const conversationHistoryStr = `Here is the full conversation history:
 
 ${state.messages.map(getMessageString).join("\n")}`;
@@ -86,12 +117,7 @@ ${state.messages.map(getMessageString).join("\n")}`;
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt(
-        userRequest || "No user request provided.",
-        state.messages,
-        state.proposedPlan,
-        state.customRules,
-      ),
+      content: formatPrompt(state),
     },
     {
       role: "user",

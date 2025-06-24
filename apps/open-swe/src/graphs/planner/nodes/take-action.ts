@@ -10,6 +10,13 @@ import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createRgTool } from "../../../tools/rg.js";
+import {
+  getChangedFilesStatus,
+  stashAndClearChanges,
+} from "../../../utils/github/git.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { daytonaClient } from "../../../utils/sandbox.js";
+import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -26,9 +33,11 @@ export async function takeActions(
 
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
+  const plannerNotesTool = createPlannerNotesTool();
   const toolsMap = {
     [shellTool.name]: shellTool,
     [rgTool.name]: rgTool,
+    [plannerNotesTool.name]: plannerNotesTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
@@ -96,7 +105,34 @@ export async function takeActions(
     return toolMessage;
   });
 
-  const toolCallResults = await Promise.all(toolCallResultsPromise);
+  let toolCallResults = await Promise.all(toolCallResultsPromise);
+  const sandbox = await daytonaClient().get(state.sandboxSessionId);
+  const repoPath = getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+  if (changedFiles?.length > 0) {
+    logger.warn(
+      "Changes found in the codebase after taking action. Reverting.",
+      {
+        changedFiles,
+      },
+    );
+    await stashAndClearChanges(repoPath, sandbox);
+
+    // Rewrite the tool call contents to include a changed files warning.
+    toolCallResults = toolCallResults.map(
+      (tc) =>
+        new ToolMessage({
+          ...tc,
+          content: `**WARNING**: THIS TOOL, OR A PREVIOUS TOOL HAS CHANGED FILES IN THE REPO.
+Remember that you are only permitted to take **READ** actions during the planning step. The changes have been reverted.
+
+Please ensure you only take read actions during the planning step to gather context. You may also call the \`take_notes\` tool at any time to record important information for the programmer step.
+
+Command Output:\n
+${tc.content}`,
+        }),
+    );
+  }
 
   logger.info("Completed planner tool action", {
     ...toolCallResults.map((tc) => ({

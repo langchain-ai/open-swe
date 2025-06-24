@@ -15,6 +15,13 @@ import { stopSandbox } from "../../../utils/sandbox.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
+import { getPlannerNotes } from "../utils/get-notes.js";
+
+const PLANNER_NOTES_PROMPT = `Here is a collection of technical notes you took while gathering context for the plan. Ensure you take these into account when writing your plan.
+
+<planner_notes>
+{PLANNER_NOTES}
+</planner_notes>`;
 
 const systemPrompt = `You are a terminal-based agentic coding assistant built by LangChain, designed to enable natural language interaction with local codebases through wrapped LLM models.
 
@@ -65,13 +72,17 @@ Structure your plan items as clear directives, for example:
 
 {CUSTOM_RULES}
 
+{PLANNER_NOTES}
+
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const userRequest = getUserRequest(state.messages);
-
+  const plannerNotes = getPlannerNotes(state.messages)
+    .map((n) => `- ${n}`)
+    .join("\n");
   return systemPrompt
     .replace(
       "{FOLLOWUP_MESSAGE_PROMPT}",
@@ -82,7 +93,13 @@ function formatSystemPrompt(state: PlannerGraphState): string {
         : "",
     )
     .replace("{USER_REQUEST}", userRequest)
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replaceAll(
+      "{PLANNER_NOTES}",
+      plannerNotes.length
+        ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
+        : "",
+    );
 }
 
 export async function generatePlan(
