@@ -157,7 +157,7 @@ export function TerminalInput({
           disabled={disabled || !message.trim() || !selectedRepository}
           size="sm"
           variant="brand"
-          className="h-8 w-8s self-start mt-1 mr-1 p-0 transition-all duration-200 disabled:opacity-50"
+          className="w-8s mt-1 mr-1 h-8 self-start p-0 transition-all duration-200 disabled:opacity-50"
         >
           {loading ? (
             <Loader2 className="size-3 animate-spin" />
