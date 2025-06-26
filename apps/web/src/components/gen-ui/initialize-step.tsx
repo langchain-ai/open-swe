@@ -41,9 +41,15 @@ export function InitializeStep({
 
   const stepStatusIcon = {
     waiting: (
-      <div className={cn("h-3.5 w-3.5 rounded-full border border-gray-300")} />
+      <div
+        className={cn(
+          "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
+        )}
+      />
     ),
-    generating: <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />,
+    generating: (
+      <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
+    ),
     success: <CheckCircle className="h-3.5 w-3.5 text-green-500" />,
     error: <XCircle className="h-3.5 w-3.5 text-red-500" />,
   };
@@ -53,11 +59,15 @@ export function InitializeStep({
       case "loading":
         return (
           <div
-            className={cn("h-3.5 w-3.5 rounded-full border border-gray-300")}
+            className={cn(
+              "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
+            )}
           />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
+        return (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
+        );
       case "done":
         return success ? (
           <CheckCircle className="h-3.5 w-3.5 text-green-500" />
@@ -79,11 +89,11 @@ export function InitializeStep({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
+    <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
       {/* Collapse/Expand Icon */}
-      <div className="relative flex items-center border-b border-gray-200 bg-gray-50 p-2">
-        <GitBranch className="mr-2 h-3.5 w-3.5 text-gray-500" />
-        <span className="flex-1 text-xs font-normal text-gray-800">
+      <div className="relative flex items-center border-b border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+        <GitBranch className="mr-2 h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+        <span className="flex-1 text-xs font-normal text-gray-800 dark:text-gray-200">
           {getStatusText()}
         </span>
         {getStatusIcon()}
@@ -118,7 +128,7 @@ export function InitializeStep({
                     ] ?? (
                       <div
                         className={cn(
-                          "h-3.5 w-3.5 rounded-full border border-gray-300",
+                          "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
                         )}
                       />
                     )}
@@ -128,7 +138,7 @@ export function InitializeStep({
                       "font-normal",
                       step.status === "error"
                         ? "text-red-500"
-                        : "text-gray-800",
+                        : "text-gray-800 dark:text-gray-200",
                     )}
                   >
                     {step.name}

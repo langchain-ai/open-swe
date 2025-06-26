@@ -27,7 +27,7 @@
     "@langchain/core": "^0.3.56",
     "@langchain/google-genai": "^0.2.9",
     "@langchain/langgraph": "^0.3.3",
-    "@langchain/langgraph-sdk": "^0.0.84",
+    "@langchain/langgraph-sdk": "^0.0.85",
     "@langchain/openai": "^0.5.10",
     "@octokit/rest": "^22.0.0",
     "@open-swe/shared": "*",

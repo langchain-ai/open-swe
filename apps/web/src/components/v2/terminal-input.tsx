@@ -155,13 +155,13 @@ export function TerminalInput({
         <Button
           onClick={handleSend}
           disabled={disabled || !message.trim() || !selectedRepository}
-          size="sm"
-          className="bg-muted-foreground/20 hover:bg-muted-foreground/30 h-7 w-7 self-end p-0 dark:bg-gray-700 hover:dark:bg-gray-600"
+          size="icon"
+          variant="brand"
         >
           {loading ? (
-            <Loader2 className="size-3 animate-spin" />
+            <Loader2 className="size-4 animate-spin" />
           ) : (
-            <Send className="size-3" />
+            <Send className="size-4" />
           )}
         </Button>
       </div>

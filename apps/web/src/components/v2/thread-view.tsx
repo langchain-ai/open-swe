@@ -1,14 +1,15 @@
 "use client";
-
 import { v4 as uuidv4 } from "uuid";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
   GitBranch,
   Send,
+  Terminal,
+  Clock,
   User,
   Bot,
   Copy,
@@ -23,10 +24,16 @@ import { ThreadDisplayInfo } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import { HumanMessage } from "@langchain/core/messages";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { StickToBottom } from "use-stick-to-bottom";
+import {
+  StickyToBottomContent,
+  ScrollToBottom,
+} from "../../utils/scroll-utils";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -100,9 +107,23 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
 
-  if (!stream.messages?.length) {
-    return null;
-  }
+  const prevMessageLength = useRef(0);
+  useEffect(() => {
+    if (
+      stream.messages &&
+      stream.messages.length !== prevMessageLength.current
+    ) {
+      prevMessageLength.current = stream.messages.length;
+    }
+  }, [stream.messages]);
+
+  useEffect(() => {
+    // Auto-scroll to bottom when tab switches (requirement fulfilled)
+    // StickToBottom handles the actual scrolling via scrollToBottom()
+  }, [selectedTab]);
+
+  // Don't early return for empty messages - show loading/empty state instead
+  // This prevents blank pages when navigating to existing threads
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -179,40 +200,58 @@ export function ThreadView({
         {/* Left Side - Chat Interface */}
         <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
           {/* Chat Messages */}
-          <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            {filteredMessages.map((message) => (
-              <div
-                key={message.id}
-                className="group flex gap-3"
-              >
-                <div className="flex-shrink-0">
-                  {message.type === "human" ? (
-                    <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
-                      <User className="text-muted-foreground h-3 w-3" />
-                    </div>
-                  ) : (
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
-                      <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
-                    </div>
-                  )}
-                </div>
-                <div className="relative flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground text-xs font-medium">
-                      {message.type === "human" ? "You" : "Agent"}
-                    </span>
+          <div className="relative flex-1">
+            <StickToBottom
+              className="absolute inset-0"
+              initial={false}
+            >
+              <StickyToBottomContent
+                className="h-full overflow-y-auto"
+                contentClassName="space-y-4 p-4"
+                content={
+                  <>
+                    {filteredMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className="group flex gap-3"
+                      >
+                        <div className="flex-shrink-0">
+                          {message.type === "human" ? (
+                            <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
+                              <User className="text-muted-foreground h-3 w-3" />
+                            </div>
+                          ) : (
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
+                              <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="relative flex-1 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground text-xs font-medium">
+                              {message.type === "human" ? "You" : "Agent"}
+                            </span>
+                          </div>
+                          <div className="text-foreground text-sm leading-relaxed">
+                            {getMessageContentString(message.content)}
+                          </div>
+                          <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
+                            <MessageCopyButton
+                              content={getMessageContentString(message.content)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                }
+                footer={
+                  <div className="absolute right-0 left-0 bottom-4 flex justify-center w-full">
+                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
                   </div>
-                  <div className="text-foreground text-sm leading-relaxed">
-                    {getMessageContentString(message.content)}
-                  </div>
-                  <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <MessageCopyButton
-                      content={getMessageContentString(message.content)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
+                }
+              />
+            </StickToBottom>
           </div>
 
           {/* Chat Input - Fixed at bottom */}
@@ -233,10 +272,10 @@ export function ThreadView({
               <Button
                 onClick={handleSendMessage}
                 disabled={!chatInput.trim()}
-                size="sm"
-                className="bg-muted hover:bg-muted/80 h-10 w-10 self-end p-0 dark:bg-gray-700 hover:dark:bg-gray-600"
+                size="icon"
+                variant="brand"
               >
-                <Send className="h-4 w-4" />
+                <Send className="size-4" />
               </Button>
             </div>
             <div className="text-muted-foreground mt-2 text-xs">
@@ -247,56 +286,87 @@ export function ThreadView({
 
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto p-4">
-            <Tabs
-              defaultValue="planner"
-              className="w-full"
-              value={selectedTab}
-              onValueChange={(value) =>
-                setSelectedTab(value as "planner" | "programmer")
-              }
+          <div className="relative flex-1">
+            <StickToBottom
+              className="absolute inset-0"
+              initial={true}
             >
-              <TabsList className="bg-muted/70 dark:bg-gray-800">
-                <TabsTrigger value="planner">Planner</TabsTrigger>
-                <TabsTrigger value="programmer">Programmer</TabsTrigger>
-              </TabsList>
-              <TabsContent value="planner">
-                <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
-                  <CardContent className="space-y-2 p-3 pt-0">
-                    {plannerThreadId &&
-                      plannerRunId &&
-                      PLANNER_ASSISTANT_ID && (
-                        <ActionsRenderer<PlannerGraphState>
-                          graphId={PLANNER_ASSISTANT_ID}
-                          threadId={plannerThreadId}
-                          runId={plannerRunId}
-                          setProgrammerSession={setProgrammerSession}
-                          programmerSession={programmerSession}
-                          setSelectedTab={setSelectedTab}
-                        />
-                      )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="programmer">
-                <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
-                  <CardContent className="space-y-2 p-3 pt-0">
-                    {programmerSession && PROGRAMMER_ASSISTANT_ID && (
-                      <ActionsRenderer<PlannerGraphState>
-                        graphId={PROGRAMMER_ASSISTANT_ID}
-                        threadId={programmerSession.threadId}
-                        runId={programmerSession.runId}
-                      />
-                    )}
-                    {!programmerSession && (
-                      <div className="text-muted-foreground text-xs">
-                        No programmer session
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+              <StickyToBottomContent
+                className="h-full overflow-y-auto"
+                contentClassName="space-y-4 p-4"
+                content={
+                  <Tabs
+                    defaultValue="planner"
+                    className="w-full"
+                    value={selectedTab}
+                    onValueChange={(value) =>
+                      setSelectedTab(value as "planner" | "programmer")
+                    }
+                  >
+                    <TabsList className="bg-muted/70 dark:bg-gray-800">
+                      <TabsTrigger value="planner">Planner</TabsTrigger>
+                      <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="planner">
+                      <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
+                        <CardContent className="space-y-2 p-3 pt-0">
+                          {plannerThreadId &&
+                            plannerRunId &&
+                            PLANNER_ASSISTANT_ID && (
+                              <ActionsRenderer<PlannerGraphState>
+                                graphId={PLANNER_ASSISTANT_ID}
+                                threadId={plannerThreadId}
+                                runId={plannerRunId}
+                                setProgrammerSession={setProgrammerSession}
+                                programmerSession={programmerSession}
+                                setSelectedTab={setSelectedTab}
+                              />
+                            )}
+                          {!(
+                            plannerThreadId &&
+                            plannerRunId &&
+                            PLANNER_ASSISTANT_ID
+                          ) && (
+                            <div className="flex items-center justify-center gap-2 py-8">
+                              <Clock className="text-muted-foreground size-4" />
+                              <span className="text-muted-foreground text-sm">
+                                No planner session
+                              </span>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                    <TabsContent value="programmer">
+                      <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
+                        <CardContent className="space-y-2 p-3 pt-0">
+                          {programmerSession && PROGRAMMER_ASSISTANT_ID && (
+                            <ActionsRenderer<GraphState>
+                              graphId={PROGRAMMER_ASSISTANT_ID}
+                              threadId={programmerSession.threadId}
+                              runId={programmerSession.runId}
+                            />
+                          )}
+                          {!programmerSession && (
+                            <div className="flex items-center justify-center gap-2 py-8">
+                              <Terminal className="text-muted-foreground size-4" />
+                              <span className="text-muted-foreground text-sm">
+                                No programmer session
+                              </span>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  </Tabs>
+                }
+                footer={
+                  <div className="absolute right-0 left-0 bottom-4 flex justify-center w-full">
+                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                  </div>
+                }
+              />
+            </StickToBottom>
           </div>
         </div>
       </div>
