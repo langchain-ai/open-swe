@@ -33,6 +33,10 @@ function takeReviewActionsOrEnd(
   return END;
 }
 
+// Add nodes for:
+// generating final review
+// initializing state (get head branch name, changed files, updated codebase tree)
+// conditional edge for routing back to programmer
 const workflow = new StateGraph(ReviewerGraphStateObj, GraphConfiguration)
   .addNode("generate-review-actions", generateReviewActions)
   .addNode("take-review-actions", takeReviewerActions)

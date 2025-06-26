@@ -7,10 +7,6 @@ import {
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import {
-  formatFollowupMessagePrompt,
-  isFollowupRequest,
-} from "../../utils/followup.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -18,19 +14,11 @@ import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js
 import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
-  // It's a followup if there's more than one human message.
-  const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  return SYSTEM_PROMPT.replace(
-    "{FOLLOWUP_MESSAGE_PROMPT}",
-    isFollowup
-      ? formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan)
-      : "",
-  )
+  return SYSTEM_PROMPT
     .replaceAll(
       "{CODEBASE_TREE}",
       state.codebaseTree || "No codebase tree generated yet.",
@@ -39,7 +27,11 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       "{CURRENT_WORKING_DIRECTORY}",
       getRepoAbsolutePath(state.targetRepository),
     )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replaceAll("{CHANGED_FILES}", "TODO: ADD")
+    .replaceAll("{HEAD_BRANCH_NAME}", "TODO: ADD")
+    .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", "TODO: ADD")
+    .replaceAll("{USER_REQUEST}", "TODO: ADD");
 }
 
 export async function generateReviewActions(
@@ -50,7 +42,6 @@ export async function generateReviewActions(
   const tools = [
     createRgTool(state),
     createShellTool(state),
-    createPlannerNotesTool(),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
