@@ -272,11 +272,10 @@ export function ThreadView({
               <Button
                 onClick={handleSendMessage}
                 disabled={!chatInput.trim()}
-                size="sm"
+                size="icon"
                 variant="brand"
-                className="h-10 w-10 self-end p-0 transition-all duration-200 disabled:opacity-50"
               >
-                <Send className="h-4 w-4" />
+                <Send className="size-4" />
               </Button>
             </div>
             <div className="text-muted-foreground mt-2 text-xs">
