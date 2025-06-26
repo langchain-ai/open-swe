@@ -16,7 +16,6 @@ import {
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
-import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -33,11 +32,9 @@ export async function takeReviewerActions(
 
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
-  const plannerNotesTool = createPlannerNotesTool();
   const toolsMap = {
     [shellTool.name]: shellTool,
     [rgTool.name]: rgTool,
-    [plannerNotesTool.name]: plannerNotesTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
