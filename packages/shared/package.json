@@ -19,7 +19,7 @@
   "dependencies": {
     "@langchain/core": "^0.3.56",
     "@langchain/langgraph": "^0.3.3",
-    "@langchain/langgraph-sdk": "^0.0.83",
+    "@langchain/langgraph-sdk": "^0.0.85",
     "@octokit/rest": "^22.0.0",
     "zod": "^3.25.32"
   },

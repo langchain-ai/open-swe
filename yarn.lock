@@ -1803,9 +1803,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph-sdk@npm:^0.0.83":
-  version: 0.0.83
-  resolution: "@langchain/langgraph-sdk@npm:0.0.83"
+"@langchain/langgraph-sdk@npm:^0.0.85":
+  version: 0.0.85
+  resolution: "@langchain/langgraph-sdk@npm:0.0.85"
   dependencies:
     "@types/json-schema": ^7.0.15
     p-queue: ^6.6.2
@@ -1819,7 +1819,7 @@ __metadata:
       optional: true
     react:
       optional: true
-  checksum: c6d037b8b9486456a8180d892e8b05ad3c2332456d7d237597720ebe42dd6b126f1aed963a0d2a681405724b7b8e0eac0607994b8e527d2f0e756e4c9e30c19e
+  checksum: f6d206c718cf4cb5d69dd677f2afa38325fdd69b485310a6beb61f06f24b2b4a8c0446eacbe7911c02cedc8bd4b719e22894c6f9b93572e6665c6a609cc9f511
   languageName: node
   linkType: hard
 
@@ -2264,7 +2264,7 @@ __metadata:
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-cli": latest
-    "@langchain/langgraph-sdk": ^0.0.84
+    "@langchain/langgraph-sdk": ^0.0.85
     "@langchain/openai": ^0.5.10
     "@octokit/rest": ^22.0.0
     "@open-swe/shared": "*"
@@ -2299,7 +2299,7 @@ __metadata:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
     "@langchain/langgraph": ^0.3.3
-    "@langchain/langgraph-sdk": ^0.0.83
+    "@langchain/langgraph-sdk": ^0.0.85
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
@@ -2324,7 +2324,7 @@ __metadata:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
     "@langchain/langgraph": ^0.3.3
-    "@langchain/langgraph-sdk": ^0.0.83
+    "@langchain/langgraph-sdk": ^0.0.85
     "@open-swe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14
     "@radix-ui/react-avatar": ^1.1.3

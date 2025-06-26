@@ -20,7 +20,7 @@
     "typescript": "^5"
   },
   "resolutions": {
-    "@langchain/langgraph-sdk": "^0.0.83",
+    "@langchain/langgraph-sdk": "^0.0.85",
     "@langchain/core": "^0.3.58"
   },
   "packageManager": "yarn@3.5.1"
