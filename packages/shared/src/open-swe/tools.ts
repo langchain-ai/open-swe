@@ -253,7 +253,9 @@ export function createTakePlannerNotesFields() {
 
 export function createMarkTaskCompletedFields() {
   const markTaskCompletedSchema = z.object({
-    review: z.string().describe(
+    review: z
+      .string()
+      .describe(
         "Your final review for the completed task. This should be concise, but descriptive.",
       ),
   });
@@ -268,10 +270,14 @@ export function createMarkTaskCompletedFields() {
 
 export function createMarkTaskIncompleteFields() {
   const markTaskIncompleteSchema = z.object({
-    review: z.string().describe(
+    review: z
+      .string()
+      .describe(
         "Your final review for the completed task. This should be concise, but descriptive.",
       ),
-    additional_actions: z.array(z.string()).describe(
+    additional_actions: z
+      .array(z.string())
+      .describe(
         "A list of additional actions to take which will successfully satisfy your review, and complete the task.",
       ),
   });

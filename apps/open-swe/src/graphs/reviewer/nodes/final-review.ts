@@ -17,6 +17,7 @@ import { loadModel, Task } from "../../../utils/load-model.js";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { getMessageString } from "../../../utils/message/content.js";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -50,10 +51,10 @@ const formatSystemPrompt = (state: ReviewerGraphState) => {
   const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
-  return SYSTEM_PROMPT.replace(
-    "{REVIEW_ACTIONS}",
-    "ADD CONVERSATION HISTORY HERE",
-  )
+  const messagesString = state.internalMessages
+    .map(getMessageString)
+    .join("\n");
+  return SYSTEM_PROMPT.replace("{REVIEW_ACTIONS}", messagesString)
     .replace("{USER_REQUEST}", userRequest)
     .replace("{PLANNED_TASKS}", tasksString);
 };
