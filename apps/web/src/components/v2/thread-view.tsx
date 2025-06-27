@@ -1,10 +1,10 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
+import { ArrowLeft, GitBranch, Terminal, Clock, Loader2 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadDisplayInfo } from "./types";
@@ -22,6 +22,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
+import { toast } from "sonner";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -47,6 +48,62 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  // Get planner and programmer streams with built-in reconnection
+  const plannerStream = useStream<PlannerGraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PLANNER_ASSISTANT_ID || "",
+    reconnectOnMount: true,
+    threadId: plannerThreadId,
+  });
+
+  const programmerStream = useStream<GraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PROGRAMMER_ASSISTANT_ID || "",
+    reconnectOnMount: true,
+    threadId: programmerSession?.threadId,
+  });
+
+  // Join specific runs when they become available (built-in SDK method)
+  useEffect(() => {
+    if (plannerRunId) {
+      plannerStream.joinStream(plannerRunId).catch(console.error);
+    }
+  }, [plannerRunId]);
+
+  useEffect(() => {
+    if (programmerSession?.runId) {
+      programmerStream.joinStream(programmerSession.runId).catch(console.error);
+    }
+  }, [programmerSession?.runId]);
+
+  // Cancel functions using SDK client methods
+  const cancelPlannerRun = async () => {
+    if (!plannerThreadId || !plannerRunId) return;
+
+    try {
+      await plannerStream.client.runs.cancel(plannerThreadId, plannerRunId);
+      toast.success("Planner run cancelled successfully");
+    } catch (error) {
+      console.error("Error cancelling planner run:", error);
+      toast.error("Failed to cancel planner run");
+    }
+  };
+
+  const cancelProgrammerRun = async () => {
+    if (!programmerSession?.threadId || !programmerSession?.runId) return;
+
+    try {
+      await programmerStream.client.runs.cancel(
+        programmerSession.threadId,
+        programmerSession.runId,
+      );
+      toast.success("Programmer run cancelled successfully");
+    } catch (error) {
+      console.error("Error cancelling programmer run:", error);
+      toast.error("Failed to cancel programmer run");
+    }
+  };
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -125,6 +182,7 @@ export function ThreadView({
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
+          stream={stream}
         />
 
         {/* Right Side - Actions & Plan */}
@@ -146,10 +204,44 @@ export function ThreadView({
                       setSelectedTab(value as "planner" | "programmer")
                     }
                   >
-                    <TabsList className="bg-muted/70 dark:bg-gray-800">
-                      <TabsTrigger value="planner">Planner</TabsTrigger>
-                      <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between">
+                      <TabsList className="bg-muted/70 dark:bg-gray-800">
+                        <TabsTrigger value="planner">Planner</TabsTrigger>
+                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                      </TabsList>
+
+                      <div className="flex gap-2">
+                        {selectedTab === "planner" &&
+                          plannerThreadId &&
+                          plannerRunId &&
+                          plannerStream.isLoading && (
+                            <Button
+                              onClick={cancelPlannerRun}
+                              size="sm"
+                              variant="destructive"
+                              className="h-8 px-3 text-xs"
+                            >
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              Stop Planner
+                            </Button>
+                          )}
+
+                        {selectedTab === "programmer" &&
+                          programmerSession &&
+                          programmerStream.isLoading && (
+                            <Button
+                              onClick={cancelProgrammerRun}
+                              size="sm"
+                              variant="destructive"
+                              className="h-8 px-3 text-xs"
+                            >
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              Stop Programmer
+                            </Button>
+                          )}
+                      </div>
+                    </div>
+
                     <TabsContent value="planner">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">

@@ -5,9 +5,12 @@ import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, Copy, CopyCheck, Send, User } from "lucide-react";
+import { Bot, Copy, CopyCheck, Send, User, Loader2 } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
+import { useStream } from "@langchain/langgraph-sdk/react";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { cn } from "@/lib/utils";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -61,6 +64,7 @@ interface ManagerChatProps {
   chatInput: string;
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
+  stream: ReturnType<typeof useStream<ManagerGraphState>>;
 }
 
 export function ManagerChat({
@@ -68,6 +72,7 @@ export function ManagerChat({
   chatInput,
   setChatInput,
   handleSendMessage,
+  stream,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
@@ -135,21 +140,36 @@ export function ManagerChat({
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                handleSendMessage();
+                if (stream.isLoading) {
+                  stream.stop();
+                } else {
+                  handleSendMessage();
+                }
               }
             }}
           />
           <Button
-            onClick={handleSendMessage}
-            disabled={!chatInput.trim()}
-            size="icon"
-            variant="brand"
+            onClick={stream.isLoading ? () => stream.stop() : handleSendMessage}
+            disabled={stream.isLoading ? false : !chatInput.trim()}
+            size={stream.isLoading ? "sm" : "icon"}
+            variant={stream.isLoading ? "destructive" : "brand"}
+            className={cn(
+              "self-end transition-all duration-200 disabled:opacity-50",
+              stream.isLoading ? "h-12 px-4 py-2" : "h-10 w-10 p-0",
+            )}
           >
-            <Send className="size-4" />
+            {stream.isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Cancel
+              </>
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </Button>
         </div>
         <div className="text-muted-foreground mt-2 text-xs">
-          Press Cmd+Enter to send
+          Press Cmd+Enter to {stream.isLoading ? "cancel" : "send"}
         </div>
       </div>
     </div>
