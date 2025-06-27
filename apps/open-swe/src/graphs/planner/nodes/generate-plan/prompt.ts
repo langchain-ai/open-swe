@@ -26,6 +26,7 @@ Create your plan following these guidelines:
    - The specific task to accomplish
    - Key technical details needed for execution
    - File paths, function names, or other concrete references from the context you've gathered.
+   - If you're mentioning a file, or code within a file that already exists, you are required to include the file path in the plan item.
     - This is incredibly important as we do not want to force the programmer to search for this information again, if you've already found it.
 
 2. **Write actionable items that:**
@@ -35,7 +36,7 @@ Create your plan following these guidelines:
    - Are not open ended, and require additional context to execute
 
 3. **Optimize for efficiency by:**
-   - Completing the request in the minimum number of steps
+   - Completing the request in the minimum number of steps. This is absolutely vital to the success of the plan. You should generate as few plan items as possible.
    - Reusing existing code and patterns wherever possible
    - Writing reusable components when code will be used multiple times
 
@@ -50,7 +51,6 @@ Create your plan following these guidelines:
 6. **Combine simple, related steps:**
    - If you have multiple simple steps that are related, and should be executed one after the other, combine them into a single step.
    - For example, if you have multiple steps to run a linter, formatter, etc., combine them into a single step. The same goes for passing arguments, or editing files.
-
 </instructions>
 
 <output_format>

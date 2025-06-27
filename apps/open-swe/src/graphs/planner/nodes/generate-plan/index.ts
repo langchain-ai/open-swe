@@ -25,15 +25,14 @@ function formatSystemPrompt(state: PlannerGraphState): string {
   const plannerNotes = getPlannerNotes(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
-  return SYSTEM_PROMPT
-    .replace(
-      "{FOLLOWUP_MESSAGE_PROMPT}",
-      isFollowup
-        ? "\n" +
-            formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) +
-            "\n\n"
-        : "",
-    )
+  return SYSTEM_PROMPT.replace(
+    "{FOLLOWUP_MESSAGE_PROMPT}",
+    isFollowup
+      ? "\n" +
+          formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan) +
+          "\n\n"
+      : "",
+  )
     .replace("{USER_REQUEST}", userRequest)
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll(
