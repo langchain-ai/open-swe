@@ -146,9 +146,28 @@ export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
 export function formatRgCommand(cmd: RipgrepCommand): string[] {
   const args = ["rg"];
 
+  // Always include these flags
+  const requiredFlags = ["--color", "never", "--line-number", "--heading"];
+
+  // Add user-provided flags, ensuring we don't duplicate the required ones
   if (cmd.flags) {
-    args.push(...cmd.flags);
+    // Filter out any flags that would duplicate our required flags
+    const filteredFlags = cmd.flags.filter((flag) => {
+      // Check for exact matches or flags that start with our required prefixes
+      return (
+        !requiredFlags.includes(flag) &&
+        !flag.startsWith("--color=") &&
+        flag !== "--line-number" &&
+        flag !== "-n" &&
+        flag !== "--heading"
+      );
+    });
+
+    args.push(...filteredFlags);
   }
+
+  // Add the required flags
+  args.push(...requiredFlags);
 
   if (cmd.pattern) {
     args.push(cmd.pattern);
