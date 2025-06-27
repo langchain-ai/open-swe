@@ -19,15 +19,15 @@ function takeReviewActionsOrFinalReview(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): "take-review-actions" | "final-review" {
-  const { messages } = state;
-  const lastMessage = messages[messages.length - 1];
+  const { reviewerMessages } = state;
+  const lastMessage = reviewerMessages[reviewerMessages.length - 1];
 
   const maxReviewActions = config.configurable?.maxReviewActions ?? 30;
   const maxActionsCount = maxReviewActions * 2 + 1;
   if (
     isAIMessage(lastMessage) &&
     lastMessage.tool_calls?.length &&
-    messages.length < maxActionsCount
+    reviewerMessages.length < maxActionsCount
   ) {
     return "take-review-actions";
   }

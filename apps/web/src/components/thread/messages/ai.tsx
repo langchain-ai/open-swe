@@ -21,6 +21,7 @@ import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
+import { MarkTaskCompleted, MarkTaskIncomplete } from "@/components/gen-ui/task-review";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -30,6 +31,8 @@ import {
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
+  createMarkTaskCompletedFields,
+  createMarkTaskIncompleteFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -53,6 +56,10 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const markTaskCompletedTool = createMarkTaskCompletedFields();
+type MarkTaskCompletedToolArgs = z.infer<typeof markTaskCompletedTool.schema>;
+const markTaskIncompleteTool = createMarkTaskIncompleteFields();
+type MarkTaskIncompleteToolArgs = z.infer<typeof markTaskIncompleteTool.schema>;
 
 function CustomComponent({
   message,
@@ -255,6 +262,14 @@ export function AssistantMessage({
   const openPrToolCall = message
     ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
     : undefined;
+    
+  const markTaskCompletedToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === markTaskCompletedTool.name)
+    : undefined;
+    
+  const markTaskIncompleteToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === markTaskIncompleteTool.name)
+    : undefined;
 
   // We can be sure that if the task status tool call is present, it will be the
   // only tool call/result we need to render for this message.
@@ -326,6 +341,47 @@ export function AssistantMessage({
           prNumber={prNumber}
           branch={branch}
           targetBranch={targetBranch}
+        />
+      </div>
+    );
+  }
+  
+  // If task completed review tool call is present, render the task review component
+  if (markTaskCompletedToolCall) {
+    const args = markTaskCompletedToolCall.args as MarkTaskCompletedToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === markTaskCompletedToolCall.id
+    );
+    
+    const status = correspondingToolResult ? "done" : "generating";
+    
+    return (
+      <div className="flex flex-col gap-4">
+        <MarkTaskCompleted
+          status={status}
+          review={args.review}
+          reasoningText={contentString}
+        />
+      </div>
+    );
+  }
+  
+  // If task incomplete review tool call is present, render the task review component
+  if (markTaskIncompleteToolCall) {
+    const args = markTaskIncompleteToolCall.args as MarkTaskIncompleteToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === markTaskIncompleteToolCall.id
+    );
+    
+    const status = correspondingToolResult ? "done" : "generating";
+    
+    return (
+      <div className="flex flex-col gap-4">
+        <MarkTaskIncomplete
+          status={status}
+          review={args.review}
+          additionalActions={args.additional_actions}
+          reasoningText={contentString}
         />
       </div>
     );

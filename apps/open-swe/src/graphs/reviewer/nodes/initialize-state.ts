@@ -13,22 +13,25 @@ export async function initializeState(
 ): Promise<ReviewerGraphUpdate> {
   const repoRoot = getRepoAbsolutePath(state.targetRepository);
   logger.info("Initializing state for reviewer");
-  // get the head branch name, then get the changed files
+  // get the base branch name, then get the changed files
   const sandbox = await daytonaClient().get(state.sandboxSessionId);
 
-  const headBranchNameRes = await sandbox.process.executeCommand(
-    "git rev-parse --abbrev-ref HEAD",
-    repoRoot,
-  );
-  if (headBranchNameRes.exitCode !== 0) {
-    throw new Error(
-      `Failed to get head branch name: ${JSON.stringify(headBranchNameRes, null, 2)}`,
+  let baseBranchName = state.targetRepository.branch;
+  if (!baseBranchName) {
+    const baseBranchNameRes = await sandbox.process.executeCommand(
+      "git config init.defaultBranch",
+      repoRoot,
     );
+    if (baseBranchNameRes.exitCode !== 0) {
+      throw new Error(
+        `Failed to get base branch name: ${JSON.stringify(baseBranchNameRes, null, 2)}`,
+      );
+    }
+    baseBranchName = baseBranchNameRes.result.trim();
   }
-  const headBranchName = headBranchNameRes.result.trim();
 
   const changedFilesRes = await sandbox.process.executeCommand(
-    `git diff ${headBranchName} --name-only`,
+    `git diff ${baseBranchName} --name-only`,
     repoRoot,
   );
   if (changedFilesRes.exitCode !== 0) {
@@ -51,7 +54,7 @@ export async function initializeState(
 
   logger.info("Finished getting state for reviewer");
   return {
-    headBranchName,
+    baseBranchName,
     changedFiles,
     codebaseTree,
   };

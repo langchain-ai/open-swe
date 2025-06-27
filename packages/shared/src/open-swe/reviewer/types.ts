@@ -56,7 +56,7 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  headBranchName: withLangGraph(z.string(), {
+  baseBranchName: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,

@@ -18,6 +18,7 @@ import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
+import { ToolMessage } from "@langchain/core/messages";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -84,14 +85,16 @@ export async function finalReview(
     throw new Error("No tool call review generated");
   }
 
-  const messagesStateUpdate: ReviewerGraphUpdate = {
-    messages: [response],
-    reviewerMessages: [response],
-  };
-
   if (toolCall.name === completedTool.name) {
     // Marked as completed. No further actions necessary.
-    return messagesStateUpdate;
+    const toolMessage = new ToolMessage({
+      tool_call_id: toolCall.id ?? "",
+      content: "Successfully marked task as completed."
+    })
+    return {
+      messages: [response, toolMessage],
+      reviewerMessages: [response, toolMessage],
+    };
   }
 
   if (toolCall.name !== incompleteTool.name) {
@@ -128,8 +131,14 @@ export async function finalReview(
     updatedTaskPlan,
   );
 
+  const toolMessage = new ToolMessage({
+    tool_call_id: toolCall.id ?? "",
+    content: "Marked task as incomplete."
+  })
+
   return {
     taskPlan: updatedTaskPlan,
-    ...messagesStateUpdate,
+    messages: [response, toolMessage],
+    reviewerMessages: [response, toolMessage],
   };
 }

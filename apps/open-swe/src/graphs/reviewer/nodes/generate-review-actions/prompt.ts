@@ -23,7 +23,7 @@ This will redirect you to a final review step where you'll submit your final rev
 2. **Make high-quality, targeted tool calls**: Each command should have a clear purpose in reviewing the actions taken by the Programmer Assistant.
 
 3. **Use git commands to gather context**: Below you're provided with a section '<changed_files>', which lists all of the files that were modified/created/deleted in the current branch.
-    - Ensure you use this, paired with commands such as 'git diff {HEAD_BRANCH_NAME} <file_path>' to inspect a diff of a file to gather context about the changes made by the Programmer Assistant.
+    - Ensure you use this, paired with commands such as 'git diff {BASE_BRANCH_NAME} <file_path>' to inspect a diff of a file to gather context about the changes made by the Programmer Assistant.
 
 3. **Gather all of the context necessary**: Ensure you gather all of the necessary context to properly review the changes made by the Programmer Assistant.
 
@@ -42,7 +42,7 @@ This will redirect you to a final review step where you'll submit your final rev
 <workspace_information>
 **Current Working Directory**: {CURRENT_WORKING_DIRECTORY}
 **Repository Status**: Already cloned and accessible in the current directory
-**Head Branch Name**: {HEAD_BRANCH_NAME}
+**Base Branch Name**: {BASE_BRANCH_NAME}
 
 **Codebase Structure** (3 levels deep, respecting .gitignore):
 Generated via: \`git ls-files | tree --fromfile -L 3\`
@@ -51,7 +51,7 @@ Generated via: \`git ls-files | tree --fromfile -L 3\`
 </codebase_tree>
 
 **Changed Files**:
-Generated via: \`git diff {HEAD_BRANCH_NAME} --name-only\`
+Generated via: \`git diff {BASE_BRANCH_NAME} --name-only\`
 <changed_files>
 {CHANGED_FILES}
 </changed_files>

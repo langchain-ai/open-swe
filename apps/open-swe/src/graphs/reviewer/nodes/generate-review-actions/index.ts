@@ -32,7 +32,7 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
     )
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll("{CHANGED_FILES}", state.changedFiles)
-    .replaceAll("{HEAD_BRANCH_NAME}", state.headBranchName)
+    .replaceAll("{BASE_BRANCH_NAME}", state.baseBranchName)
     .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", tasksString)
     .replaceAll("{USER_REQUEST}", userRequest);
 }
