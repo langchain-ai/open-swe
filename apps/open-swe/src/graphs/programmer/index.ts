@@ -17,6 +17,8 @@ import {
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
+import { graph as reviewerGraph } from "../reviewer/index.js";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
 /**
  * Routes to the next appropriate node after taking action.
@@ -24,11 +26,11 @@ import { initializeSandbox } from "../shared/initialize-sandbox.js";
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"open-pr" | "take-action" | "request-help" | Send} The next node to execute, or END if the process should stop.
+ * @returns {"reviewer-subgraph" | "take-action" | "request-help" | Send} The next node to execute, or END if the process should stop.
  */
-async function routeGeneratedAction(
+function routeGeneratedAction(
   state: GraphState,
-): Promise<"open-pr" | "take-action" | "request-help" | Send> {
+): "reviewer-subgraph" | "take-action" | "request-help" | Send {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
 
@@ -54,7 +56,23 @@ async function routeGeneratedAction(
   }
 
   // No tool calls, create PR then end.
-  return "open-pr";
+  return "reviewer-subgraph";
+}
+
+/**
+ * Conditional edge called after the reviewer. If there are no more actions to take, then open a PR.
+ * Otherwise, route to generate actions to continue with the new tasks.
+ */
+function routeGenerateActionsOrEnd(
+  state: GraphState,
+): "open-pr" | "generate-action" {
+  const activePlanItems = getActivePlanItems(state.taskPlan);
+  const allCompleted = activePlanItems.every((p) => p.completed);
+  if (allCompleted) {
+    return "open-pr";
+  }
+
+  return "generate-action";
 }
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
@@ -74,6 +92,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("request-help", requestHelp, {
     ends: ["generate-action", END],
   })
+  .addNode("reviewer-subgraph", reviewerGraph)
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
   .addEdge(START, "initialize")
@@ -81,12 +100,17 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
-    "open-pr",
+    "reviewer-subgraph",
     "update-plan",
   ])
   .addEdge("update-plan", "generate-action")
-  .addEdge("generate-conclusion", "open-pr")
+  .addEdge("generate-conclusion", "reviewer-subgraph")
+  .addEdge("reviewer-subgraph", "open-pr")
   .addEdge("diagnose-error", "generate-action")
+  .addConditionalEdges("reviewer-subgraph", routeGenerateActionsOrEnd, [
+    "open-pr",
+    "generate-action",
+  ])
   .addEdge("open-pr", END);
 
 // Zod types are messed up

@@ -2,9 +2,9 @@ import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createShellTool } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
-  PlannerGraphState,
-  PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+  ReviewerGraphState,
+  ReviewerGraphUpdate,
+} from "@open-swe/shared/open-swe/reviewer/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
@@ -20,9 +20,9 @@ import { daytonaClient } from "../../../utils/sandbox.js";
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeReviewerActions(
-  state: PlannerGraphState,
+  state: ReviewerGraphState,
   _config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<ReviewerGraphUpdate> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 

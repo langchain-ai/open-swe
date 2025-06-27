@@ -1,15 +1,25 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
-import { MessagesZodState } from "@langchain/langgraph";
+import { Messages, messagesStateReducer, MessagesZodState } from "@langchain/langgraph";
 import {
-  AgentSession,
   CustomRules,
   TargetRepository,
   TaskPlan,
 } from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
+import { BaseMessage } from "@langchain/core/messages";
 
 export const ReviewerGraphStateObj = MessagesZodState.extend({
+  internalMessages: withLangGraph(z.custom<BaseMessage[]>(), {
+    reducer: {
+      schema: z.custom<Messages>(),
+      fn: messagesStateReducer,
+    },
+    jsonSchemaExtra: {
+      langgraph_type: "messages",
+    },
+    default: () => [],
+  }),
   sandboxSessionId: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
@@ -40,44 +50,23 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  proposedPlan: withLangGraph(z.custom<string[]>(), {
-    reducer: {
-      schema: z.custom<string[]>(),
-      fn: (_state, update) => update,
-    },
-    default: (): string[] => [],
-  }),
-  contextGatheringNotes: withLangGraph(z.string(), {
-    reducer: {
-      schema: z.string(),
-      fn: (_state, update) => update,
-    },
-    default: () => "",
-  }),
   branchName: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
-  planChangeRequest: withLangGraph(z.string(), {
+  headBranchName: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,
     },
   }),
-  programmerSession: withLangGraph(z.custom<AgentSession>(), {
-    reducer: {
-      schema: z.custom<AgentSession>(),
-      fn: (_state, update) => update,
-    },
-  }),
-  proposedPlanTitle: withLangGraph(z.string(), {
+  changedFiles: withLangGraph(z.string(), {
     reducer: {
       schema: z.string(),
       fn: (_state, update) => update,
     },
-    default: () => "",
   }),
   customRules: withLangGraph(z.custom<CustomRules>().optional(), {
     reducer: {

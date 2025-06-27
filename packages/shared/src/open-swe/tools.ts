@@ -250,3 +250,36 @@ export function createTakePlannerNotesFields() {
       "Do not duplicate any information present in the user provided 'custom rules', as we want to avoid duplicating context.",
   };
 }
+
+export function createMarkTaskCompletedFields() {
+  const markTaskCompletedSchema = z.object({
+    review: z.string().describe(
+        "Your final review for the completed task. This should be concise, but descriptive.",
+      ),
+  });
+
+  return {
+    name: "mark_task_completed",
+    schema: markTaskCompletedSchema,
+    description:
+      "Use this tool to mark a task as completed. This should be called if you determine that the task has been successfully completed.",
+  };
+}
+
+export function createMarkTaskIncompleteFields() {
+  const markTaskIncompleteSchema = z.object({
+    review: z.string().describe(
+        "Your final review for the completed task. This should be concise, but descriptive.",
+      ),
+    additional_actions: z.array(z.string()).describe(
+        "A list of additional actions to take which will successfully satisfy your review, and complete the task.",
+      ),
+  });
+
+  return {
+    name: "mark_task_completed",
+    schema: markTaskIncompleteSchema,
+    description:
+      "Use this tool to mark a task as incomplete. This should be called if you determine that the task has not been successfully completed, and you have additional tasks the programmer should take to successfully complete the task.",
+  };
+}
