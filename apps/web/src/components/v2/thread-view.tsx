@@ -126,7 +126,6 @@ export function ThreadView({
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
         />
-
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
           <div className="relative flex-1">

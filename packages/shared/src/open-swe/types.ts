@@ -267,6 +267,15 @@ export const GraphConfigurationMetadata: {
         "Maximum number of context gathering actions during planning",
     },
   },
+  maxReviewActions: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 30,
+      min: 1,
+      max: 250,
+      description: "Maximum number of review actions during planning",
+    },
+  },
   plannerModelName: {
     x_open_swe_ui_config: {
       type: "select",
@@ -408,6 +417,16 @@ export const GraphConfiguration = z.object({
     .number()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata.maxContextActions),
+  /**
+   * The maximum number of context gathering actions to take during review.
+   * Each action consists of 2 messages (request & result), plus 1 human message.
+   * Total messages = maxReviewActions * 2 + 1
+   * @default 30
+   */
+  maxReviewActions: z
+    .number()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata.maxReviewActions),
 
   /**
    * The model ID to use for the planning step.
