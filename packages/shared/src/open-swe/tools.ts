@@ -250,3 +250,15 @@ export function createTakePlannerNotesFields() {
       "Do not duplicate any information present in the user provided 'custom rules', as we want to avoid duplicating context.",
   };
 }
+
+export function createDiagnoseErrorToolFields() {
+  const diagnoseErrorToolSchema = z.object({
+    diagnosis: z.string().describe("The diagnosis of the error."),
+  });
+
+  return {
+    name: "diagnose_error",
+    description: "Diagnoses an error given a diagnosis.",
+    schema: diagnoseErrorToolSchema,
+  };
+}

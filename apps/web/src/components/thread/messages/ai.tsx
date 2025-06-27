@@ -31,6 +31,7 @@ import {
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
+  createDiagnoseErrorToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -55,16 +56,9 @@ type InstallDependenciesToolArgs = z.infer<
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 
-// Diagnose error tool schema
-const diagnoseErrorToolSchema = z.object({
-  diagnosis: z.string(),
-});
-type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorToolSchema>;
-const diagnoseErrorTool = {
-  name: "diagnose_error",
-  description: "Diagnoses an error given a diagnosis.",
-  schema: diagnoseErrorToolSchema,
-};
+// Diagnose error tool
+const diagnoseErrorTool = createDiagnoseErrorToolFields();
+type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 function CustomComponent({
   message,
@@ -299,7 +293,6 @@ export function AssistantMessage({
       (tr) => tr && tr.tool_call_id === diagnoseErrorToolCall.id,
     );
 
-    // Only render if we have a tool result marked as diagnosis
     if (correspondingToolResult?.additional_kwargs?.is_diagnosis === true) {
       const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
       const reasoningText = getContentString(content);
