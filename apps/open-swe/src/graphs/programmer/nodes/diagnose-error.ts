@@ -9,6 +9,7 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
+import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
@@ -56,15 +57,7 @@ const userPrompt = `Here is the full conversation history from the steps taken t
 
 Please carefully go over all of this information, and provide a helpful explanation of exactly what the issue is, and how you can fix it. When you are ready to provide your diagnosis, call the \`diagnose_error\` tool.`;
 
-const diagnoseErrorToolSchema = z.object({
-  diagnosis: z.string().describe("The diagnosis of the error."),
-});
-
-const diagnoseErrorTool = {
-  name: "diagnose_error",
-  description: "Diagnoses an error given a diagnosis.",
-  schema: diagnoseErrorToolSchema,
-};
+const diagnoseErrorTool = createDiagnoseErrorToolFields();
 
 const formatSystemPrompt = (
   lastFailedActionContent: string,
@@ -138,7 +131,7 @@ export async function diagnoseError(
   }
 
   logger.info("Diagnosed error successfully.", {
-    diagnosis: (toolCall.args as z.infer<typeof diagnoseErrorToolSchema>)
+    diagnosis: (toolCall.args as z.infer<typeof diagnoseErrorTool.schema>)
       .diagnosis,
   });
 
