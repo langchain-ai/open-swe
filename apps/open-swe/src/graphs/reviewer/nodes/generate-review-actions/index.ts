@@ -9,9 +9,6 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
-import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
-import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getUserRequest } from "../../../../utils/user-request.js";
@@ -51,22 +48,14 @@ export async function generateReviewActions(
     parallel_tool_calls: true,
   });
 
-  const [missingMessages, latestTaskPlan] = await Promise.all([
-    getMissingMessages(state, config),
-    getTaskPlanFromIssue(state, config),
-  ]);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
       {
-        role: "system",
-        content: formatSystemPrompt({
-          ...state,
-          taskPlan: latestTaskPlan ?? state.taskPlan,
-        }),
+        role: "user",
+        content: formatSystemPrompt(state),
       },
-      ...filterHiddenMessages(state.messages),
-      ...missingMessages,
+      ...state.reviewerMessages,
     ]);
 
   logger.info("Generated review actions", {
@@ -79,13 +68,8 @@ export async function generateReviewActions(
     })),
   });
 
-  const messagesStateUpdate: ReviewerGraphUpdate = {
-    messages: [...missingMessages, response],
-    internalMessages: [...missingMessages, response],
-  };
-
   return {
-    ...messagesStateUpdate,
-    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    messages: [response],
+    reviewerMessages: [response],
   };
 }

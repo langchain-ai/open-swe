@@ -23,8 +23,8 @@ export async function takeReviewerActions(
   state: ReviewerGraphState,
   _config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const { messages } = state;
-  const lastMessage = messages[messages.length - 1];
+  const { reviewerMessages } = state;
+  const lastMessage = reviewerMessages[reviewerMessages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
@@ -138,12 +138,8 @@ ${tc.content}`,
     })),
   });
 
-  const messagesStateUpdate: ReviewerGraphUpdate = {
-    messages: toolCallResults,
-    internalMessages: toolCallResults,
-  };
-
   return {
-    ...messagesStateUpdate,
+    messages: toolCallResults,
+    reviewerMessages: toolCallResults,
   };
 }

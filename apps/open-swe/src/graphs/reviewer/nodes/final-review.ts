@@ -51,7 +51,7 @@ const formatSystemPrompt = (state: ReviewerGraphState) => {
   const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
-  const messagesString = state.internalMessages
+  const messagesString = state.reviewerMessages
     .map(getMessageString)
     .join("\n");
   return SYSTEM_PROMPT.replace("{REVIEW_ACTIONS}", messagesString)
@@ -86,7 +86,7 @@ export async function finalReview(
 
   const messagesStateUpdate: ReviewerGraphUpdate = {
     messages: [response],
-    internalMessages: [response],
+    reviewerMessages: [response],
   };
 
   if (toolCall.name === completedTool.name) {

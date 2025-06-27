@@ -10,7 +10,7 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
 export const ReviewerGraphStateObj = MessagesZodState.extend({
-  internalMessages: withLangGraph(z.custom<BaseMessage[]>(), {
+  reviewerMessages: withLangGraph(z.custom<BaseMessage[]>(), {
     reducer: {
       schema: z.custom<Messages>(),
       fn: messagesStateReducer,
