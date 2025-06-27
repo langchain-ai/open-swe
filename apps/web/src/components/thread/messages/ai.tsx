@@ -21,7 +21,10 @@ import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
-import { MarkTaskCompleted, MarkTaskIncomplete } from "@/components/gen-ui/task-review";
+import {
+  MarkTaskCompleted,
+  MarkTaskIncomplete,
+} from "@/components/gen-ui/task-review";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -262,11 +265,11 @@ export function AssistantMessage({
   const openPrToolCall = message
     ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
     : undefined;
-    
+
   const markTaskCompletedToolCall = message
     ? aiToolCalls.find((tc) => tc.name === markTaskCompletedTool.name)
     : undefined;
-    
+
   const markTaskIncompleteToolCall = message
     ? aiToolCalls.find((tc) => tc.name === markTaskIncompleteTool.name)
     : undefined;
@@ -345,16 +348,16 @@ export function AssistantMessage({
       </div>
     );
   }
-  
+
   // If task completed review tool call is present, render the task review component
   if (markTaskCompletedToolCall) {
     const args = markTaskCompletedToolCall.args as MarkTaskCompletedToolArgs;
     const correspondingToolResult = toolResults.find(
-      (tr) => tr && tr.tool_call_id === markTaskCompletedToolCall.id
+      (tr) => tr && tr.tool_call_id === markTaskCompletedToolCall.id,
     );
-    
+
     const status = correspondingToolResult ? "done" : "generating";
-    
+
     return (
       <div className="flex flex-col gap-4">
         <MarkTaskCompleted
@@ -365,16 +368,16 @@ export function AssistantMessage({
       </div>
     );
   }
-  
+
   // If task incomplete review tool call is present, render the task review component
   if (markTaskIncompleteToolCall) {
     const args = markTaskIncompleteToolCall.args as MarkTaskIncompleteToolArgs;
     const correspondingToolResult = toolResults.find(
-      (tr) => tr && tr.tool_call_id === markTaskIncompleteToolCall.id
+      (tr) => tr && tr.tool_call_id === markTaskIncompleteToolCall.id,
     );
-    
+
     const status = correspondingToolResult ? "done" : "generating";
-    
+
     return (
       <div className="flex flex-col gap-4">
         <MarkTaskIncomplete
