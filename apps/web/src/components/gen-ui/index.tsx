@@ -7,7 +7,6 @@ import { TaskSummary } from "./task-summary";
 
 export default {
   "action-step": ActionStep,
-  "diagnose-error": DiagnoseError,
   "initialize-step": InitializeStep,
   "push-changes": PushChanges,
   "replanning-step": ReplanningStep,

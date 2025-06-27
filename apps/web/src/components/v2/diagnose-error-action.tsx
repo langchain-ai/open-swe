@@ -1,6 +1,6 @@
 "use client";
 
-import "../app/globals.css";
+import { useState } from "react";
 import {
   AlertTriangle,
   Loader2,
@@ -8,36 +8,33 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
-import { useState } from "react";
 
-type DiagnoseErrorProps = {
+type DiagnoseErrorActionProps = {
   status: "loading" | "generating" | "done";
   diagnosis?: string;
-  recommendation?: string;
   reasoningText?: string;
   summaryText?: string;
 };
 
-export function DiagnoseError({
+export function DiagnoseErrorAction({
   status,
   diagnosis,
-  recommendation,
   reasoningText,
   summaryText,
-}: DiagnoseErrorProps) {
+}: DiagnoseErrorActionProps) {
   const [showReasoning, setShowReasoning] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
 
   const getStatusIcon = () => {
     switch (status) {
       case "loading":
-        return (
-          <div className="h-3.5 w-3.5 rounded-full border border-gray-300" />
-        );
+        return <div className="border-border size-3.5 rounded-full border" />;
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
+        return (
+          <Loader2 className="text-muted-foreground size-3.5 animate-spin" />
+        );
       case "done":
-        return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+        return <CheckCircle className="size-3.5 text-green-500" />;
     }
   };
 
@@ -53,27 +50,27 @@ export function DiagnoseError({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
+    <div className="border-border overflow-hidden rounded-md border">
       {reasoningText && (
-        <div className="border-b border-blue-100 bg-blue-50 p-2">
+        <div className="border-b border-blue-100 bg-blue-50 p-2 dark:border-blue-800 dark:bg-blue-950">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
+            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800">
+            <p className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-300">
               {reasoningText}
             </p>
           )}
         </div>
       )}
 
-      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2">
-        <AlertTriangle className="mr-2 h-3.5 w-3.5 text-amber-500" />
-        <span className="flex-1 text-xs font-normal text-gray-800">
+      <div className="border-border flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
+        <AlertTriangle className="mr-2 size-3.5 text-amber-500" />
+        <span className="text-foreground/80 flex-1 text-xs font-normal">
           {getStatusText()}
         </span>
         {getStatusIcon()}
@@ -82,36 +79,27 @@ export function DiagnoseError({
       {status === "done" && diagnosis && (
         <div className="p-2">
           <div className="mb-2">
-            <h3 className="mb-1 text-xs font-normal text-gray-500">
+            <h3 className="text-muted-foreground mb-1 text-xs font-normal">
               Diagnosis
             </h3>
-            <p className="text-xs font-normal text-gray-800">{diagnosis}</p>
+            <p className="text-foreground/80 text-xs font-normal">
+              {diagnosis}
+            </p>
           </div>
-
-          {recommendation && (
-            <div>
-              <h3 className="mb-1 text-xs font-normal text-gray-500">
-                Recommendation
-              </h3>
-              <p className="text-xs font-normal text-gray-800">
-                {recommendation}
-              </p>
-            </div>
-          )}
         </div>
       )}
 
       {summaryText && status === "done" && (
-        <div className="border-t border-green-100 bg-green-50 p-2">
+        <div className="border-t border-green-100 bg-green-50 p-2 dark:border-green-800 dark:bg-green-950">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800"
+            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-800">
+            <p className="mt-1 text-xs font-normal text-green-800 dark:text-green-300">
               {summaryText}
             </p>
           )}
