@@ -4,11 +4,15 @@ import {
 } from "@open-swe/shared/open-swe/reviewer/types";
 import { daytonaClient } from "../../../utils/sandbox.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
 export async function initializeState(
   state: ReviewerGraphState,
 ): Promise<ReviewerGraphUpdate> {
   const repoRoot = getRepoAbsolutePath(state.targetRepository);
+  logger.info("Initializing state for reviewer");
   // get the head branch name, then get the changed files
   const sandbox = await daytonaClient().get(state.sandboxSessionId);
 
@@ -45,6 +49,7 @@ export async function initializeState(
   }
   const codebaseTree = codebaseTreeRes.result.trim();
 
+  logger.info("Finished getting state for reviewer");
   return {
     headBranchName,
     changedFiles,

@@ -17,7 +17,7 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
 
-const logger = createLogger(LogLevel.INFO, "TakeAction");
+const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
 export async function takeReviewerActions(
   state: ReviewerGraphState,
@@ -56,7 +56,7 @@ export async function takeReviewerActions(
       return toolMessage;
     }
 
-    logger.info("Executing planner tool action", {
+    logger.info("Executing review action", {
       ...toolCall,
     });
 
@@ -131,14 +131,19 @@ ${tc.content}`,
     );
   }
 
-  logger.info("Completed planner tool action", {
+  logger.info("Completed review action", {
     ...toolCallResults.map((tc) => ({
       tool_call_id: tc.tool_call_id,
       status: tc.status,
     })),
   });
 
-  return {
+  const messagesStateUpdate: ReviewerGraphUpdate = {
     messages: toolCallResults,
+    internalMessages: toolCallResults,
+  };
+
+  return {
+    ...messagesStateUpdate,
   };
 }

@@ -18,7 +18,7 @@ import { getUserRequest } from "../../../../utils/user-request.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { formatPlanPromptWithSummaries } from "../../../../utils/plan-prompt.js";
 
-const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
+const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
 function formatSystemPrompt(state: ReviewerGraphState): string {
   const userRequest = getUserRequest(state.messages);
@@ -69,7 +69,7 @@ export async function generateReviewActions(
       ...missingMessages,
     ]);
 
-  logger.info("Generated planning message", {
+  logger.info("Generated review actions", {
     ...(getMessageContentString(response.content) && {
       content: getMessageContentString(response.content),
     }),
@@ -79,8 +79,13 @@ export async function generateReviewActions(
     })),
   });
 
-  return {
+  const messagesStateUpdate: ReviewerGraphUpdate = {
     messages: [...missingMessages, response],
+    internalMessages: [...missingMessages, response],
+  };
+
+  return {
+    ...messagesStateUpdate,
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
