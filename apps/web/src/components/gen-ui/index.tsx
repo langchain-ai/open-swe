@@ -1,5 +1,4 @@
 import { ActionStep } from "./action-step";
-import { DiagnoseError } from "./diagnose-error";
 import { InitializeStep } from "./initialize-step";
 import { PushChanges } from "./push-changes";
 import { ReplanningStep } from "./replanning-step";
