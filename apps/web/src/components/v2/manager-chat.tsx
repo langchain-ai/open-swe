@@ -74,7 +74,7 @@ export function ManagerChat({
       <div className="relative flex-1">
         <StickToBottom
           className="absolute inset-0"
-          initial={false}
+          initial={true}
         >
           <StickyToBottomContent
             className="h-full overflow-y-auto"
