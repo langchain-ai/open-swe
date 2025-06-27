@@ -283,7 +283,7 @@ export function createMarkTaskIncompleteFields() {
   });
 
   return {
-    name: "mark_task_completed",
+    name: "mark_task_incomplete",
     schema: markTaskIncompleteSchema,
     description:
       "Use this tool to mark a task as incomplete. This should be called if you determine that the task has not been successfully completed, and you have additional tasks the programmer should take to successfully complete the task.",
