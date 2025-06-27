@@ -22,7 +22,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
-import { toast } from "sonner";
+import { useCancelStream } from "@/hooks/useCancelStream";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -77,33 +77,20 @@ export function ThreadView({
     }
   }, [programmerSession?.runId]);
 
-  // Cancel functions using SDK client methods
-  const cancelPlannerRun = async () => {
-    if (!plannerThreadId || !plannerRunId) return;
+  // Cancel hooks with better error handling
+  const { cancelRun: cancelPlannerRun } = useCancelStream({
+    stream: plannerStream,
+    threadId: plannerThreadId,
+    runId: plannerRunId,
+    streamName: "Planner",
+  });
 
-    try {
-      await plannerStream.client.runs.cancel(plannerThreadId, plannerRunId);
-      toast.success("Planner run cancelled successfully");
-    } catch (error) {
-      console.error("Error cancelling planner run:", error);
-      toast.error("Failed to cancel planner run");
-    }
-  };
-
-  const cancelProgrammerRun = async () => {
-    if (!programmerSession?.threadId || !programmerSession?.runId) return;
-
-    try {
-      await programmerStream.client.runs.cancel(
-        programmerSession.threadId,
-        programmerSession.runId,
-      );
-      toast.success("Programmer run cancelled successfully");
-    } catch (error) {
-      console.error("Error cancelling programmer run:", error);
-      toast.error("Failed to cancel programmer run");
-    }
-  };
+  const { cancelRun: cancelProgrammerRun } = useCancelStream({
+    stream: programmerStream,
+    threadId: programmerSession?.threadId,
+    runId: programmerSession?.runId,
+    streamName: "Programmer",
+  });
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
