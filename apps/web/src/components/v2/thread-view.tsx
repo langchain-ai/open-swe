@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -22,6 +22,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
+import { CancelStreamButton } from "./cancel-stream-button";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -47,6 +48,32 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  const plannerStream = useStream<PlannerGraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PLANNER_ASSISTANT_ID || "",
+    reconnectOnMount: true,
+    threadId: plannerThreadId,
+  });
+
+  const programmerStream = useStream<GraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PROGRAMMER_ASSISTANT_ID || "",
+    reconnectOnMount: true,
+    threadId: programmerSession?.threadId,
+  });
+
+  useEffect(() => {
+    if (plannerRunId) {
+      plannerStream.joinStream(plannerRunId).catch(console.error);
+    }
+  }, [plannerRunId]);
+
+  useEffect(() => {
+    if (programmerSession?.runId) {
+      programmerStream.joinStream(programmerSession.runId).catch(console.error);
+    }
+  }, [programmerSession?.runId]);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -125,6 +152,7 @@ export function ThreadView({
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
+          stream={stream}
         />
 
         {/* Right Side - Actions & Plan */}
@@ -146,10 +174,45 @@ export function ThreadView({
                       setSelectedTab(value as "planner" | "programmer")
                     }
                   >
-                    <TabsList className="bg-muted/70 dark:bg-gray-800">
-                      <TabsTrigger value="planner">Planner</TabsTrigger>
-                      <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between">
+                      <TabsList className="bg-muted/70 dark:bg-gray-800">
+                        <TabsTrigger value="planner">Planner</TabsTrigger>
+                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                      </TabsList>
+
+                      <div className="flex gap-2">
+                        <CancelStreamButton
+                          stream={plannerStream}
+                          threadId={plannerThreadId}
+                          runId={plannerRunId}
+                          streamName="Planner"
+                          isVisible={
+                            selectedTab === "planner" &&
+                            Boolean(
+                              plannerThreadId &&
+                                plannerRunId &&
+                                plannerStream.isLoading,
+                            )
+                          }
+                        />
+
+                        <CancelStreamButton
+                          stream={programmerStream}
+                          threadId={programmerSession?.threadId}
+                          runId={programmerSession?.runId}
+                          streamName="Programmer"
+                          isVisible={
+                            selectedTab === "programmer" &&
+                            Boolean(
+                              programmerSession?.threadId &&
+                                programmerSession?.runId &&
+                                programmerStream.isLoading,
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+
                     <TabsContent value="planner">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
