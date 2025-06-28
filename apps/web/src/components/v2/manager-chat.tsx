@@ -11,6 +11,7 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { cn } from "@/lib/utils";
+import { useCancelStream } from "@/hooks/useCancelStream";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -65,6 +66,8 @@ interface ManagerChatProps {
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
+  threadId?: string;
+  runId?: string;
 }
 
 export function ManagerChat({
@@ -73,7 +76,23 @@ export function ManagerChat({
   setChatInput,
   handleSendMessage,
   stream,
+  threadId,
+  runId,
 }: ManagerChatProps) {
+  const { cancelRun } = useCancelStream({
+    stream,
+    threadId,
+    runId,
+    streamName: "Manager",
+  });
+
+  const handleCancel = () => {
+    if (threadId && runId) {
+      cancelRun();
+    } else {
+      stream.stop();
+    }
+  };
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
       <div className="relative flex-1">
@@ -141,7 +160,7 @@ export function ManagerChat({
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
                 if (stream.isLoading) {
-                  stream.stop();
+                  handleCancel();
                 } else {
                   handleSendMessage();
                 }
@@ -149,7 +168,7 @@ export function ManagerChat({
             }}
           />
           <Button
-            onClick={stream.isLoading ? () => stream.stop() : handleSendMessage}
+            onClick={stream.isLoading ? handleCancel : handleSendMessage}
             disabled={stream.isLoading ? false : !chatInput.trim()}
             size={stream.isLoading ? "sm" : "icon"}
             variant={stream.isLoading ? "destructive" : "brand"}

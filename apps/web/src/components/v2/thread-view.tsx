@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Terminal, Clock, Loader2 } from "lucide-react";
+import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadDisplayInfo } from "./types";
@@ -22,7 +22,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
-import { useCancelStream } from "@/hooks/useCancelStream";
+import { CancelStreamButton } from "./cancel-stream-button";
 
 const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
 const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
@@ -76,21 +76,6 @@ export function ThreadView({
       programmerStream.joinStream(programmerSession.runId).catch(console.error);
     }
   }, [programmerSession?.runId]);
-
-  // Cancel hooks with better error handling
-  const { cancelRun: cancelPlannerRun } = useCancelStream({
-    stream: plannerStream,
-    threadId: plannerThreadId,
-    runId: plannerRunId,
-    streamName: "Planner",
-  });
-
-  const { cancelRun: cancelProgrammerRun } = useCancelStream({
-    stream: programmerStream,
-    threadId: programmerSession?.threadId,
-    runId: programmerSession?.runId,
-    streamName: "Programmer",
-  });
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -198,34 +183,35 @@ export function ThreadView({
                       </TabsList>
 
                       <div className="flex gap-2">
-                        {selectedTab === "planner" &&
-                          plannerThreadId &&
-                          plannerRunId &&
-                          plannerStream.isLoading && (
-                            <Button
-                              onClick={cancelPlannerRun}
-                              size="sm"
-                              variant="destructive"
-                              className="h-8 px-3 text-xs"
-                            >
-                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                              Stop Planner
-                            </Button>
-                          )}
+                        <CancelStreamButton
+                          stream={plannerStream}
+                          threadId={plannerThreadId}
+                          runId={plannerRunId}
+                          streamName="Planner"
+                          isVisible={
+                            selectedTab === "planner" &&
+                            Boolean(
+                              plannerThreadId &&
+                                plannerRunId &&
+                                plannerStream.isLoading,
+                            )
+                          }
+                        />
 
-                        {selectedTab === "programmer" &&
-                          programmerSession &&
-                          programmerStream.isLoading && (
-                            <Button
-                              onClick={cancelProgrammerRun}
-                              size="sm"
-                              variant="destructive"
-                              className="h-8 px-3 text-xs"
-                            >
-                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                              Stop Programmer
-                            </Button>
-                          )}
+                        <CancelStreamButton
+                          stream={programmerStream}
+                          threadId={programmerSession?.threadId}
+                          runId={programmerSession?.runId}
+                          streamName="Programmer"
+                          isVisible={
+                            selectedTab === "programmer" &&
+                            Boolean(
+                              programmerSession?.threadId &&
+                                programmerSession?.runId &&
+                                programmerStream.isLoading,
+                            )
+                          }
+                        />
                       </div>
                     </div>
 
