@@ -8,7 +8,7 @@ interface CancelStreamButtonProps {
   threadId?: string;
   runId?: string;
   streamName: string;
-  isVisible?: boolean; // Optional override for visibility
+  isVisible?: boolean;
 }
 
 export function CancelStreamButton({
@@ -25,7 +25,6 @@ export function CancelStreamButton({
     streamName,
   });
 
-  // Show button when stream is loading and we have required IDs
   const shouldShow = isVisible ?? (stream.isLoading && threadId && runId);
 
   if (!shouldShow) {

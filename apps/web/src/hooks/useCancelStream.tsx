@@ -26,18 +26,15 @@ export function useCancelStream({
         description: "The running operation has been stopped",
       });
     } catch (error) {
-      // Check if this is an expected cancellation error vs actual error
       const isAbortError =
         error instanceof Error &&
         (error.name === "AbortError" || error.message.includes("abort"));
 
       if (isAbortError) {
-        // Expected cancellation - show neutral notification
         toast.info(`${streamName} operation cancelled`, {
           description: "The stream was successfully stopped",
         });
       } else {
-        // Actual error - show error notification
         console.error(`Error cancelling ${streamName} run:`, error);
         toast.error(`Failed to cancel ${streamName}`, {
           description:

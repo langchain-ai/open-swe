@@ -49,7 +49,6 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
 
-  // Get planner and programmer streams with built-in reconnection
   const plannerStream = useStream<PlannerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: PLANNER_ASSISTANT_ID || "",
@@ -64,7 +63,6 @@ export function ThreadView({
     threadId: programmerSession?.threadId,
   });
 
-  // Join specific runs when they become available (built-in SDK method)
   useEffect(() => {
     if (plannerRunId) {
       plannerStream.joinStream(plannerRunId).catch(console.error);
