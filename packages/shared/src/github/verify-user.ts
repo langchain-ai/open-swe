@@ -26,3 +26,23 @@ export async function verifyGithubUser(
     return undefined;
   }
 }
+
+export async function verifyGithubUserId(
+  installationToken: string,
+  userId: number,
+  userLogin: string,
+): Promise<GithubUser | undefined> {
+  try {
+    const octokit = new Octokit({ auth: installationToken });
+    const { data: user } = await octokit.users.getById({ account_id: userId });
+    if (!user || !user.login) {
+      return undefined;
+    }
+    if (user.login !== userLogin) {
+      return undefined;
+    }
+    return user;
+  } catch {
+    return undefined;
+  }
+}

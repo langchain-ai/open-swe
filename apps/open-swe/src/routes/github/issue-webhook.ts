@@ -1,8 +1,18 @@
+import { v4 as uuidv4 } from "uuid";
 import { Context } from "hono";
 import { BlankEnv, BlankInput } from "hono/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { GitHubApp } from "../../utils/github-app.js";
 import { Webhooks } from "@octokit/webhooks";
+import { createLangGraphClient } from "../../utils/langgraph-client.js";
+import {
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
+  MANAGER_GRAPH_ID,
+} from "@open-swe/shared/constants";
+import { encryptGitHubToken } from "@open-swe/shared/crypto";
+import { HumanMessage } from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -16,8 +26,26 @@ const webhooks = new Webhooks({
 
 const LABEL_NAME = "open-swe";
 
+const getOpenSweAppUrl = (threadId: string) => {
+  if (!process.env.OPEN_SWE_APP_URL) {
+    return "";
+  }
+  try {
+    const baseUrl = new URL(process.env.OPEN_SWE_APP_URL);
+    baseUrl.pathname = `/chat/${threadId}`;
+    return baseUrl.toString();
+  } catch {
+    return "";
+  }
+};
+
 // Handle label added to issue
 webhooks.on("issues.labeled", async ({ payload }) => {
+  if (!process.env.GITHUB_TOKEN_ENCRYPTION_KEY) {
+    throw new Error(
+      "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
+    );
+  }
   if (payload.label?.name !== LABEL_NAME) {
     return;
   }
@@ -55,21 +83,70 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       userLogin: payload.sender.login,
     };
 
+    const langGraphClient = createLangGraphClient({
+      defaultHeaders: {
+        [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptGitHubToken(
+          token,
+          process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
+        ),
+        [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
+        [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
+      },
+    });
+
+    const thread = await langGraphClient.threads.create({
+      graphId: MANAGER_GRAPH_ID,
+    });
+    const run = await langGraphClient.runs.create(
+      thread.thread_id,
+      MANAGER_GRAPH_ID,
+      {
+        input: {
+          messages: [
+            new HumanMessage({
+              id: uuidv4(),
+              content: `**${issueData.issueTitle}**\n\n${issueData.issueBody}`,
+              additional_kwargs: {
+                isOriginalIssue: true,
+                githubIssueId: issueData.issueNumber,
+              },
+            }),
+          ],
+          githubIssueId: issueData.issueNumber,
+          targetRepository: {
+            owner: issueData.owner,
+            repo: issueData.repo,
+          },
+        },
+        config: {
+          recursion_limit: 400,
+        },
+        ifNotExists: "create",
+        streamResumable: true,
+        streamMode: ["values", "messages", "custom"],
+      },
+    );
+
     // Trigger your AI agent workflow
     logger.info("CREATE NEW RUN!!", {
-      ...issueData,
-      installationToken: token,
-      octokit, // Pass the authenticated Octokit instance
+      thread_id: thread.thread_id,
+      run_id: run.run_id,
+      issue_number: issueData.issueNumber,
+      owner: issueData.owner,
+      repo: issueData.repo,
+      user_id: issueData.userId,
+      user_login: issueData.userLogin,
     });
 
     logger.info("Creating comment...");
+    const appUrl = getOpenSweAppUrl(thread.thread_id);
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
       {
         owner: issueData.owner,
         repo: issueData.repo,
         issue_number: issueData.issueNumber,
-        body: "🤖 Open SWE has been triggered for this issue. Processing...",
+        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrl ? `View run in Open SWE [here](${appUrl})` : ""}`,
       },
     );
   } catch (error) {

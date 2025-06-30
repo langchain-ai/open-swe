@@ -15,9 +15,9 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
   const encryptedGitHubToken = config.configurable[GITHUB_TOKEN_COOKIE];
   const encryptedInstallationToken =
     config.configurable[GITHUB_INSTALLATION_TOKEN_COOKIE];
-  if (!encryptedGitHubToken || !encryptedInstallationToken) {
+  if (!encryptedInstallationToken) {
     throw new Error(
-      "Missing required x-github-access-token or x-github-installation-token in configuration.",
+      `Missing required ${GITHUB_INSTALLATION_TOKEN_COOKIE} in configuration.`,
     );
   }
 
@@ -30,10 +30,9 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
   }
 
   // Decrypt the GitHub token
-  const githubAccessToken = decryptGitHubToken(
-    encryptedGitHubToken,
-    encryptionKey,
-  );
+  const githubAccessToken = encryptedGitHubToken
+    ? decryptGitHubToken(encryptedGitHubToken, encryptionKey)
+    : "";
   const githubInstallationToken = decryptGitHubToken(
     encryptedInstallationToken,
     encryptionKey,
