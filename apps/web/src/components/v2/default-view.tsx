@@ -27,6 +27,7 @@ import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
 import { useState } from "react";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -37,8 +38,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const router = useRouter();
   const [quickActionPrompt, setQuickActionPrompt] = useState("");
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
-  const assistantId: string | undefined =
-    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "";
+  const assistantId: string | undefined = MANAGER_GRAPH_ID;
   const {
     contentBlocks,
     setContentBlocks,
@@ -49,8 +49,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
 
-  if (!apiUrl || !assistantId) {
-    return <div>Missing API URL or Assistant ID</div>;
+  if (!apiUrl) {
+    return <div>Missing API URL environment variable</div>;
   }
 
   return (
