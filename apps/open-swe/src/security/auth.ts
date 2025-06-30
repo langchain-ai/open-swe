@@ -8,6 +8,7 @@ import {
   GITHUB_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
 import { decryptGitHubToken } from "@open-swe/shared/crypto";
+import { Webhooks } from "@octokit/webhooks";
 
 const STUDIO_USER_ID = "langgraph-studio-user";
 
@@ -35,6 +36,59 @@ const createWithOwnerMetadata = (value: any, user: { identity: string }) => {
   return { owner: user.identity };
 };
 
+async function verifyGitHubWebhookOrThrow(request: Request) {
+  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error("Missing GITHUB_WEBHOOK_SECRET environment variable.");
+  }
+  const webhooks = new Webhooks({
+    secret,
+  });
+
+  const githubDeliveryHeader = request.headers.get("x-github-delivery");
+  const githubEventHeader = request.headers.get("x-github-event");
+  const githubSignatureHeader = request.headers.get("x-hub-signature-256");
+  if (!githubDeliveryHeader || !githubEventHeader || !githubSignatureHeader) {
+    throw new HTTPException(401, {
+      message: "Missing GitHub webhook headers.",
+    });
+  }
+
+  const requestClone = request.clone();
+  const payload = await requestClone.text();
+
+  const signature = await webhooks.sign(payload);
+  const isValid = await webhooks.verify(payload, signature);
+  if (!isValid) {
+    console.error("Failed to verify GitHub webhook");
+    throw new HTTPException(401, {
+      message: "Invalid GitHub webhook signature.",
+    });
+  }
+
+  return {
+    identity: "x-internal-github-bot",
+    is_authenticated: true,
+    display_name: "GitHub Bot",
+    permissions: [
+      "threads:create",
+      "threads:create_run",
+      "threads:read",
+      "threads:delete",
+      "threads:update",
+      "threads:search",
+      "assistants:create",
+      "assistants:read",
+      "assistants:delete",
+      "assistants:update",
+      "assistants:search",
+      "deployments:read",
+      "deployments:search",
+      "store:access",
+    ],
+  };
+}
+
 export const auth = new Auth()
   .authenticate(async (request: Request) => {
     if (request.method === "OPTIONS") {
@@ -45,6 +99,13 @@ export const auth = new Auth()
         display_name: "CORS Preflight",
       };
     }
+
+    const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
+    if (ghSecretHashHeader) {
+      // This will either return a valid user, or throw an error
+      return await verifyGitHubWebhookOrThrow(request);
+    }
+
     const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
     if (!encryptionKey) {
       throw new Error(

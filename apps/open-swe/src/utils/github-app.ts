@@ -1,23 +1,25 @@
-import { App } from '@octokit/app';
-import { Octokit } from '@octokit/core';
+import { App } from "@octokit/app";
+import { Octokit } from "@octokit/core";
 
 export class GitHubApp {
   app: App;
-  
+
   constructor() {
     const appId = process.env.GITHUB_APP_ID;
     const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
     if (!appId || !privateKey || !webhookSecret) {
-      throw new Error("GitHub App ID, Private Key, or Webhook Secret is not configured.");
+      throw new Error(
+        "GitHub App ID, Private Key, or Webhook Secret is not configured.",
+      );
     }
 
     this.app = new App({
       appId,
       privateKey,
       webhooks: {
-        secret: webhookSecret
-      }
+        secret: webhookSecret,
+      },
     });
   }
 
@@ -30,15 +32,15 @@ export class GitHubApp {
     expiresAt: string;
   }> {
     const octokit = await this.app.getInstallationOctokit(installationId);
-    
+
     // The installation access token is available on the auth property
-    const auth = await octokit.auth({
-      type: 'installation'
-    }) as any;
-    
+    const auth = (await octokit.auth({
+      type: "installation",
+    })) as any;
+
     return {
       token: auth.token,
-      expiresAt: auth.expiresAt
+      expiresAt: auth.expiresAt,
     };
   }
 }
