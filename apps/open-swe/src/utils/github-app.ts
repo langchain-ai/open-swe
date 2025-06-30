@@ -1,12 +1,17 @@
 import { App } from "@octokit/app";
 import { Octokit } from "@octokit/core";
 
+const replaceNewlinesWithBackslashN = (str: string) =>
+  str.replace(/\n/g, "\\n");
+
 export class GitHubApp {
   app: App;
 
   constructor() {
     const appId = process.env.GITHUB_APP_ID;
-    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY
+      ? replaceNewlinesWithBackslashN(process.env.GITHUB_APP_PRIVATE_KEY)
+      : undefined;
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
     if (!appId || !privateKey || !webhookSecret) {
       throw new Error(
