@@ -27,6 +27,14 @@ export async function verifyGithubUser(
   }
 }
 
+/**
+ * Verifies a GitHub user ID using the app installation token. Checks that the provided
+ * user ID is valid, and the provided login matches the user's login.
+ * @param installationToken The GitHub installation token.
+ * @param userId The GitHub user ID.
+ * @param userLogin The GitHub user login.
+ * @returns A promise that resolves with the user object if valid, otherwise undefined.
+ */
 export async function verifyGithubUserId(
   installationToken: string,
   userId: number,
