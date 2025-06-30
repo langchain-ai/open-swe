@@ -24,7 +24,8 @@ const webhooks = new Webhooks({
   secret: GITHUB_WEBHOOK_SECRET,
 });
 
-const LABEL_NAME = "open-swe";
+const LABEL_NAME =
+  process.env.NODE_ENV === "production" ? "open-swe" : "open-swe-dev";
 
 const getOpenSweAppUrl = (threadId: string) => {
   if (!process.env.OPEN_SWE_APP_URL) {
