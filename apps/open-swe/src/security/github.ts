@@ -13,18 +13,18 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     secret,
   });
 
-  const githubDeliveryHeader = request.headers.get("x-github-delivery");
-  const githubEventHeader = request.headers.get("x-github-event");
-  const githubSignatureHeader = request.headers.get("x-hub-signature-256");
+  const requestClone = request.clone();
+
+  const githubDeliveryHeader = requestClone.headers.get("x-github-delivery");
+  const githubEventHeader = requestClone.headers.get("x-github-event");
+  const githubSignatureHeader = requestClone.headers.get("x-hub-signature-256");
   if (!githubDeliveryHeader || !githubEventHeader || !githubSignatureHeader) {
     throw new HTTPException(401, {
       message: "Missing GitHub webhook headers.",
     });
   }
 
-  const requestClone = request.clone();
   const payload = await requestClone.text();
-
   const signature = await webhooks.sign(payload);
   const isValid = await webhooks.verify(payload, signature);
   if (!isValid) {

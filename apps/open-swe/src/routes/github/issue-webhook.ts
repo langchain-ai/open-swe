@@ -186,13 +186,6 @@ export async function issueWebhookHandler(
       id: eventHeaders.id,
       name: eventHeaders.name as any,
       payload,
-      // payload: {
-      //   installation: {
-      //     id: Number(eventHeaders.installationId),
-      //     node_id: payload.installation?.node_id,
-      //   },
-      //   ...payload,
-      // } as any,
     });
 
     return c.json({ received: true });
