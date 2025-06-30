@@ -12,6 +12,8 @@ import { getUserRequest } from "../../../utils/user-request.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
 } from "@open-swe/shared/constants";
@@ -70,6 +72,10 @@ export async function interruptProposedPlan(
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
       [GITHUB_INSTALLATION_TOKEN_COOKIE]:
         config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+      [GITHUB_USER_ID_HEADER]:
+        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
+      [GITHUB_USER_LOGIN_HEADER]:
+        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
     },
   });
 

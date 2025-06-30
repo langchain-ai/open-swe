@@ -35,6 +35,8 @@ You MUST adhere to the following criteria when generating your notes:
 - Do not retain any full code snippets.
 - Do not retain any full file contents.
 - Only take notes on the context provided below, and do not make up, or attempt to infer any information/context which is not explicitly provided.
+- If mentioning specific code from the repo, ensure you also provide the path to the file the code is in.
+- Carefully inspect the proposed plan. Your notes should be focused on context which will be most useful to you when you execute the plan. You may reference specific proposed plan items in your notes.
 {EXTRA_RULES}
 
 Here is the user's request
