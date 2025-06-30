@@ -13,6 +13,7 @@ import {
 } from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
+import { getOpenSWELabel } from "../../utils/github/label.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -23,9 +24,6 @@ const githubApp = new GitHubApp();
 const webhooks = new Webhooks({
   secret: GITHUB_WEBHOOK_SECRET,
 });
-
-const LABEL_NAME =
-  process.env.NODE_ENV === "production" ? "open-swe" : "open-swe-dev";
 
 const getOpenSweAppUrl = (threadId: string) => {
   if (!process.env.OPEN_SWE_APP_URL) {
@@ -74,7 +72,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
     );
   }
-  if (payload.label?.name !== LABEL_NAME) {
+  if (payload.label?.name !== getOpenSWELabel()) {
     return;
   }
 
