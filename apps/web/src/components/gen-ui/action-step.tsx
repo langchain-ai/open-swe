@@ -95,6 +95,14 @@ export type ActionStepProps = {
   summaryText?: string;
 };
 
+const ACTION_GENERATING_TEXT_MAP = {
+  [shellTool.name]: "Executing...",
+  [applyPatchTool.name]: "Applying patch...",
+  ["rg"]: "Searching...",
+  [installDependenciesTool.name]: "Installing dependencies...",
+  [plannerNotesTool.name]: "Saving notes...",
+};
+
 function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -121,9 +129,7 @@ function ActionItem(props: ActionItemProps) {
     }
 
     if (props.status === "generating") {
-      return props.actionType === "shell"
-        ? "Executing..."
-        : "Applying patch...";
+      return ACTION_GENERATING_TEXT_MAP[props.actionType];
     }
 
     if (props.status === "done") {
