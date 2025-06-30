@@ -14,13 +14,11 @@ const webhooks = new Webhooks({
   secret: GITHUB_WEBHOOK_SECRET,
 });
 
+const LABEL_NAME = "open-swe";
+
 // Handle label added to issue
 webhooks.on("issues.labeled", async ({ payload }) => {
-  console.log("issues.labeled");
-  console.dir(payload, { depth: null });
-
-  // Check if the added label is 'open-swe'
-  if (payload.label?.name !== "open-swe") {
+  if (payload.label?.name !== LABEL_NAME) {
     return;
   }
 
@@ -88,7 +86,14 @@ const getPayload = (body: string): Record<string, any> | null => {
   }
 };
 
-const getHeaders = (c: Context): { id: string; name: string, installationId: string, targetType: string } | null => {
+const getHeaders = (
+  c: Context,
+): {
+  id: string;
+  name: string;
+  installationId: string;
+  targetType: string;
+} | null => {
   const headers = c.req.header();
   const webhookId = headers["x-github-delivery"] || "";
   const webhookEvent = headers["x-github-event"] || "";

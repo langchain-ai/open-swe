@@ -14,7 +14,10 @@ export function createOwnerFilter(user: { identity: string }) {
 }
 
 // Helper function for create operations that set metadata
-export function createWithOwnerMetadata(value: any, user: { identity: string }) {
+export function createWithOwnerMetadata(
+  value: any,
+  user: { identity: string },
+) {
   if (isStudioUser(user.identity)) {
     return;
   }
@@ -22,4 +25,4 @@ export function createWithOwnerMetadata(value: any, user: { identity: string }) 
   value.metadata ??= {};
   value.metadata.owner = user.identity;
   return { owner: user.identity };
-};
+}

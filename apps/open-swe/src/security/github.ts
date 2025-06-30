@@ -1,5 +1,8 @@
 import { HTTPException } from "@langchain/langgraph-sdk/auth";
 import { Webhooks } from "@octokit/webhooks";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "GitHubWebhookAuth");
 
 export async function verifyGitHubWebhookOrThrow(request: Request) {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
@@ -25,7 +28,7 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
   const signature = await webhooks.sign(payload);
   const isValid = await webhooks.verify(payload, signature);
   if (!isValid) {
-    console.error("Failed to verify GitHub webhook");
+    logger.error("Failed to verify GitHub webhook");
     throw new HTTPException(401, {
       message: "Invalid GitHub webhook signature.",
     });
