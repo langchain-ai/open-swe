@@ -1,48 +1,55 @@
-const encoder = new TextEncoder();
+import { HTTPException } from "@langchain/langgraph-sdk/auth";
+import { Webhooks } from "@octokit/webhooks";
 
-export async function verifySignature(
-  secret: string,
-  header: string,
-  payload: string,
-) {
-  const parts = header.split("=");
-  const sigHex = parts[1];
+export async function verifyGitHubWebhookOrThrow(request: Request) {
+  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error("Missing GITHUB_WEBHOOK_SECRET environment variable.");
+  }
+  const webhooks = new Webhooks({
+    secret,
+  });
 
-  const algorithm = { name: "HMAC", hash: { name: "SHA-256" } };
-
-  const keyBytes = encoder.encode(secret);
-  const extractable = false;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    keyBytes,
-    algorithm,
-    extractable,
-    ["sign", "verify"],
-  );
-
-  const sigBytes = hexToBytes(sigHex);
-  const dataBytes = encoder.encode(payload);
-  const equal = await crypto.subtle.verify(
-    algorithm.name,
-    key,
-    sigBytes,
-    dataBytes,
-  );
-
-  return equal;
-}
-
-function hexToBytes(hex: string) {
-  const len = hex.length / 2;
-  const bytes = new Uint8Array(len);
-
-  let index = 0;
-  for (let i = 0; i < hex.length; i += 2) {
-    const c = hex.slice(i, i + 2);
-    const b = parseInt(c, 16);
-    bytes[index] = b;
-    index += 1;
+  const githubDeliveryHeader = request.headers.get("x-github-delivery");
+  const githubEventHeader = request.headers.get("x-github-event");
+  const githubSignatureHeader = request.headers.get("x-hub-signature-256");
+  if (!githubDeliveryHeader || !githubEventHeader || !githubSignatureHeader) {
+    throw new HTTPException(401, {
+      message: "Missing GitHub webhook headers.",
+    });
   }
 
-  return bytes;
+  const requestClone = request.clone();
+  const payload = await requestClone.text();
+
+  const signature = await webhooks.sign(payload);
+  const isValid = await webhooks.verify(payload, signature);
+  if (!isValid) {
+    console.error("Failed to verify GitHub webhook");
+    throw new HTTPException(401, {
+      message: "Invalid GitHub webhook signature.",
+    });
+  }
+
+  return {
+    identity: "x-internal-github-bot",
+    is_authenticated: true,
+    display_name: "GitHub Bot",
+    permissions: [
+      "threads:create",
+      "threads:create_run",
+      "threads:read",
+      "threads:delete",
+      "threads:update",
+      "threads:search",
+      "assistants:create",
+      "assistants:read",
+      "assistants:delete",
+      "assistants:update",
+      "assistants:search",
+      "deployments:read",
+      "deployments:search",
+      "store:access",
+    ],
+  };
 }

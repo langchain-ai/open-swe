@@ -80,23 +80,24 @@ webhooks.on("issues.labeled", async ({ payload }) => {
 });
 
 const getPayload = (body: string): Record<string, any> | null => {
-  const parsedQueryParams = new URLSearchParams(body);
-  const payloadString = parsedQueryParams.get("payload");
-  if (!payloadString) {
+  try {
+    const payload = JSON.parse(body);
+    return payload;
+  } catch {
     return null;
   }
-  const payload = JSON.parse(payloadString);
-  return payload;
 };
 
-const getHeaders = (c: Context): { id: string; name: string } | null => {
+const getHeaders = (c: Context): { id: string; name: string, installationId: string, targetType: string } | null => {
   const headers = c.req.header();
   const webhookId = headers["x-github-delivery"] || "";
   const webhookEvent = headers["x-github-event"] || "";
-  if (!webhookId || !webhookEvent) {
+  const installationId = headers["x-github-hook-installation-target-id"] || "";
+  const targetType = headers["x-github-hook-installation-target-type"] || "";
+  if (!webhookId || !webhookEvent || !installationId || !targetType) {
     return null;
   }
-  return { id: webhookId, name: webhookEvent };
+  return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
 export async function issueWebhookHandler(
@@ -119,7 +120,13 @@ export async function issueWebhookHandler(
     await webhooks.receive({
       id: eventHeaders.id,
       name: eventHeaders.name as any,
-      payload,
+      payload: {
+        installation: {
+          id: Number(eventHeaders.installationId),
+          node_id: payload.installation?.node_id,
+        },
+        ...payload,
+      } as any,
     });
 
     return c.json({ received: true });
