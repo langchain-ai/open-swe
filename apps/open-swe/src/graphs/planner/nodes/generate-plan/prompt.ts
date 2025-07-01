@@ -14,6 +14,9 @@ LangGraph builds stateful, multi-step workflows with LLMs. Core components:
 - **Memory**: Checkpointing enables persistence and conversation memory across sessions
 - **Human-in-the-loop**: interrupt() pauses execution for human input, resume with Command(resume=data)
 
+**LangGraph Documentation Access:**
+You have access to the 'langgraph_docs_read' tool. Use it when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
+
 <context>{FOLLOWUP_MESSAGE_PROMPT}
 You have already gathered comprehensive context from the repository through the conversation history below. All previous messages will be deleted after this planning step, so your plan must be self-contained and actionable without referring back to this context.
 </context>
@@ -64,6 +67,7 @@ When ready, call the 'session_plan' tool with your plan. Each plan item should b
 Structure your plan items as clear directives, for example:
 - "Implement function X in file Y that performs Z using the existing pattern from file A"
 - "Modify the authentication middleware in /src/auth.js to add rate limiting using the Express rate-limit package"
+- "Create a LangGraph StateGraph in /src/workflow.py that implements multi-agent conversation flow"
 </output_format>
 
 {CUSTOM_RULES}

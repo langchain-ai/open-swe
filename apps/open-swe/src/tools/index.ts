@@ -4,4 +4,5 @@ export {
   createUpdatePlanToolFields,
   createSessionPlanToolFields,
   createRequestHumanHelpToolFields,
+  createLangGraphDocsReadFields
 } from "@open-swe/shared/open-swe/tools";

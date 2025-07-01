@@ -1,5 +1,6 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createShellTool } from "../../../tools/index.js";
+import { createLangGraphDocsReadTool } from "../../../tools/read-langgraph-docs.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   PlannerGraphState,
@@ -34,10 +35,12 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
+  const langGraphDocsReadTool = createLangGraphDocsReadTool(_config);
   const toolsMap = {
     [shellTool.name]: shellTool,
     [rgTool.name]: rgTool,
     [plannerNotesTool.name]: plannerNotesTool,
+    [langGraphDocsReadTool.name]: langGraphDocsReadTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
