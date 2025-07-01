@@ -22,6 +22,7 @@ import {
   formatRgCommand,
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
+import { createLangGraphDocsReadFields } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 
 // Used only for Zod type inference.
@@ -36,6 +37,8 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const langGraphDocsReadTool = createLangGraphDocsReadFields();
+type LangGraphDocsReadToolArgs = z.infer<typeof langGraphDocsReadTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -81,13 +84,19 @@ type PlannerNotesActionProps = BaseActionProps &
     actionType: "planner_notes";
   };
 
+type LangGraphDocsReadActionProps = BaseActionProps &
+  Partial<LangGraphDocsReadToolArgs> & {
+    actionType: "langgraph_docs_read";
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps
   | RgActionProps
   | InstallDependenciesActionProps
-  | PlannerNotesActionProps;
+  | PlannerNotesActionProps
+  | LangGraphDocsReadActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -101,6 +110,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   ["rg"]: "Searching...",
   [installDependenciesTool.name]: "Installing dependencies...",
   [plannerNotesTool.name]: "Saving notes...",
+  [langGraphDocsReadTool.name]: "Reading LangGraph documentation...",
 };
 
 function ActionItem(props: ActionItemProps) {
@@ -143,6 +153,8 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Dependencies installed" : "Installation failed";
       } else if (props.actionType === "planner_notes") {
         return props.success ? "Notes saved" : "Failed to save notes";
+      } else if (props.actionType === "langgraph_docs_read") {
+        return props.success ? "Documentation read" : "Failed to read documentation";
       }
     }
 
@@ -163,6 +175,8 @@ function ActionItem(props: ActionItemProps) {
       return !!props.diff;
     } else if (props.actionType === "planner_notes") {
       return !!(props.notes && props.notes.length > 0);
+    } else if (props.actionType === "langgraph_docs_read") {
+      return true; // Always show toggle for documentation results
     }
 
     return false;
@@ -183,6 +197,8 @@ function ActionItem(props: ActionItemProps) {
       return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
     } else if (props.actionType === "rg") {
       return <Search className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "langgraph_docs_read") {
+      return <FileText className="text-muted-foreground mr-2 size-3.5" />;
     } else {
       return <Terminal className="text-muted-foreground mr-2 size-3.5" />;
     }
@@ -256,6 +272,14 @@ function ActionItem(props: ActionItemProps) {
           <code className="text-foreground/80 text-xs font-normal">
             {formattedRgCommand}
           </code>
+        </div>
+      );
+    } else if (props.actionType === "langgraph_docs_read") {
+      return (
+        <div className="flex-1">
+          <span className="text-foreground/80 text-xs font-normal">
+            {props.query || "Reading documentation..."}
+          </span>
         </div>
       );
     } else {
@@ -337,6 +361,17 @@ function ActionItem(props: ActionItemProps) {
               </li>
             ))}
           </ul>
+        </div>
+      );
+    } else if (props.actionType === "langgraph_docs_read") {
+      return (
+        <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
+          <div className="text-muted-foreground mb-2 text-xs font-bold">
+            Query: {props.query}
+          </div>
+          <div className="text-xs font-normal whitespace-pre-wrap">
+            Documentation results would appear here...
+          </div>
         </div>
       );
     }

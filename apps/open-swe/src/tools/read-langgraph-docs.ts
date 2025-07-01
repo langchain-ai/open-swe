@@ -1,6 +1,5 @@
 import { tool } from "@langchain/core/tools";
 import { createLangGraphDocsReadFields } from "@open-swe/shared/open-swe/tools";
-import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { LANGGRAPH_DOCUMENTATION } from "@open-swe/shared/constants";

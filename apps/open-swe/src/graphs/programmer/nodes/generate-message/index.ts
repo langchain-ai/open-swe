@@ -10,6 +10,7 @@ import {
   createRequestHumanHelpToolFields,
   createUpdatePlanToolFields,
 } from "../../../../tools/index.js";
+import { createLangGraphDocsReadTool } from "../../../../tools/read-langgraph-docs.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
@@ -77,6 +78,7 @@ export async function generateAction(
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
+    createLangGraphDocsReadTool(config),
     // Only provide the dependencies installed tool if they're not already installed.
     ...(state.dependenciesInstalled
       ? []

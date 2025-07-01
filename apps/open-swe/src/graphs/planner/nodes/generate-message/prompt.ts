@@ -11,6 +11,9 @@ Your sole objective in this phase is to gather comprehensive context about the c
 {FOLLOWUP_MESSAGE_PROMPT}
 
 <context_gathering_guidelines>
+**LangGraph Documentation Access:**
+You have access to the 'langgraph_docs_read' tool. Use it when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
+
 1. **Use only read operations**: Execute commands that inspect and analyze the codebase without modifying any files. This ensures we understand the current state before making changes.
 
 2. **Make high-quality, targeted tool calls**: Each command should have a clear purpose in building your understanding of the codebase. Think strategically about what information you need.

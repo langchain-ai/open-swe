@@ -16,6 +16,9 @@ LangGraph builds stateful, multi-step workflows with LLMs. Core components:
 - **Memory**: Checkpointing enables persistence and conversation memory across sessions
 - **Human-in-the-loop**: interrupt() pauses execution for human input, resume with Command(resume=data)
 
+**LangGraph Documentation Access:**
+You have access to the 'langgraph_docs_read' tool. Use it when implementing AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs to verify syntax and get implementation examples.
+
 # Instructions
 ## Core Behavior
 * **Persistence**: Keep working until the current task is completely resolved. Only terminate when you are certain the task is complete.
@@ -46,6 +49,7 @@ LangGraph builds stateful, multi-step workflows with LLMs. Core components:
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
 * **History**: Use \`git log\` and \`git blame\` for additional context when needed
 * **Parallel Tool Calling**: You're allowed, and encouraged to call multiple tools at once, as long as they do not conflict, or depend on each other.
+* **LangGraph Implementation**: Use the 'langgraph_docs_read' tool when implementing LangGraph code to ensure correct API usage and syntax
 
 ### Coding Standards
 When modifying files:
@@ -57,6 +61,7 @@ When modifying files:
 * Never add copyright/license headers unless requested
 * Ignore unrelated bugs or broken tests
 * Write concise and clear code. Do not write overly verbose code.
+* For LangGraph code: Always verify API usage with documentation tool before implementation
 
 ### Communication Guidelines
 * For coding tasks: Focus on implementation and provide brief summaries
