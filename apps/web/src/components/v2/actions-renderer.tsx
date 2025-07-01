@@ -7,11 +7,13 @@ import {
   isCustomNodeEvent,
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
+  ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
+import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 
@@ -74,6 +76,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const initializeEvents = customNodeEvents.filter(
     (e) => e.nodeId === INITIALIZE_NODE_ID,
   );
+  
+  const acceptedPlanEvents = customNodeEvents.filter(
+    (e) => e.nodeId === ACCEPTED_PLAN_NODE_ID,
+  );
+
   const steps = mapCustomEventsToSteps(initializeEvents);
   const allSuccess =
     steps.length > 0 && steps.every((s) => s.status === "success");
@@ -90,6 +97,17 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     );
     // If there are no custom init events found in messages, or we already have steps from custom events, return
     if (!customInitEvents?.length || initializeEvents.length) {
+      return;
+    }
+    setCustomNodeEvents(customInitEvents);
+  }, [stream.messages]);
+
+  useEffect(() => {
+    const customAcceptedPlanEvents = getCustomNodeEventsFromMessages(
+      stream.messages,
+      ACCEPTED_PLAN_NODE_ID,
+    );
+    if (!customAcceptedPlanEvents?.length || acceptedPlanEvents.length) {
       return;
     }
     setCustomNodeEvents(customInitEvents);
@@ -145,6 +163,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           handleRegenerate={() => {}}
         />
       ))}
+      {acceptedPlanEvents.length > 0 && (
+        <AcceptedPlanStep events={acceptedPlanEvents} />
+      )}
     </div>
   );
 }
+
