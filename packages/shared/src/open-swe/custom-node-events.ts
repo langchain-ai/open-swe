@@ -73,4 +73,3 @@ export function mapCustomEventsToSteps(events: CustomNodeEvent[]) {
     return [];
   }).filter((step) => step.status !== "skipped");
 }
-

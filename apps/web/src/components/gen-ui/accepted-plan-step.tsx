@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  CheckCircle,
-  ChevronDown,
-  FileText,
-  Circle,
-} from "lucide-react";
+import { CheckCircle, ChevronDown, FileText, Circle } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
@@ -46,9 +41,7 @@ export function AcceptedPlanStep({
     if (item.completed) {
       return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
     }
-    return (
-      <Circle className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
-    );
+    return <Circle className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />;
   };
 
   return (
@@ -74,7 +67,7 @@ export function AcceptedPlanStep({
           />
         </Button>
       </div>
-      
+
       {/* Content */}
       {!collapsed && (
         <div className="p-2">
@@ -85,7 +78,7 @@ export function AcceptedPlanStep({
               </h4>
             </div>
           )}
-          
+
           {planItems.length > 0 && (
             <ul className="space-y-2">
               {planItems
@@ -95,7 +88,7 @@ export function AcceptedPlanStep({
                     key={item.index}
                     className="flex items-start text-xs"
                   >
-                    <span className="mr-2 mt-0.5 flex-shrink-0">
+                    <span className="mt-0.5 mr-2 flex-shrink-0">
                       {getPlanItemIcon(item)}
                     </span>
                     <span className="font-normal text-gray-800 dark:text-gray-200">
@@ -110,4 +103,3 @@ export function AcceptedPlanStep({
     </div>
   );
 }
-

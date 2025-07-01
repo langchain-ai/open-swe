@@ -76,7 +76,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const initializeEvents = customNodeEvents.filter(
     (e) => e.nodeId === INITIALIZE_NODE_ID,
   );
-  
+
   const acceptedPlanEvents = customNodeEvents.filter(
     (e) => e.nodeId === ACCEPTED_PLAN_NODE_ID,
   );
@@ -169,4 +169,3 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     </div>
   );
 }
-
