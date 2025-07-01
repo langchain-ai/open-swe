@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -26,7 +26,6 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
-import { CancelStreamButton } from "./cancel-stream-button";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -50,35 +49,14 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
 
+  const [plannerLoading, setPlannerLoading] = useState(false);
+  const [programmerLoading, setProgrammerLoading] = useState(false);
+  const plannerCancelRef = useRef<(() => void) | null>(null);
+  const programmerCancelRef = useRef<(() => void) | null>(null);
+
   const cancelRun = () => {
     stream.stop();
   };
-
-  const plannerStream = useStream<PlannerGraphState>({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: PLANNER_GRAPH_ID || "",
-    reconnectOnMount: true,
-    threadId: plannerThreadId,
-  });
-
-  const programmerStream = useStream<GraphState>({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: PROGRAMMER_GRAPH_ID || "",
-    reconnectOnMount: true,
-    threadId: programmerSession?.threadId,
-  });
-
-  useEffect(() => {
-    if (plannerRunId) {
-      plannerStream.joinStream(plannerRunId).catch(console.error);
-    }
-  }, [plannerRunId]);
-
-  useEffect(() => {
-    if (programmerSession?.runId) {
-      programmerStream.joinStream(programmerSession.runId).catch(console.error);
-    }
-  }, [programmerSession?.runId]);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -187,35 +165,29 @@ export function ThreadView({
                       </TabsList>
 
                       <div className="flex gap-2">
-                        <CancelStreamButton
-                          stream={plannerStream}
-                          threadId={plannerThreadId}
-                          runId={plannerRunId}
-                          streamName="Planner"
-                          isVisible={
-                            selectedTab === "planner" &&
-                            Boolean(
-                              plannerThreadId &&
-                                plannerRunId &&
-                                plannerStream.isLoading,
-                            )
-                          }
-                        />
+                        {selectedTab === "planner" &&
+                          plannerLoading &&
+                          plannerCancelRef.current && (
+                            <Button
+                              onClick={() => plannerCancelRef.current?.()}
+                              variant="destructive"
+                              size="sm"
+                            >
+                              Cancel Planner
+                            </Button>
+                          )}
 
-                        <CancelStreamButton
-                          stream={programmerStream}
-                          threadId={programmerSession?.threadId}
-                          runId={programmerSession?.runId}
-                          streamName="Programmer"
-                          isVisible={
-                            selectedTab === "programmer" &&
-                            Boolean(
-                              programmerSession?.threadId &&
-                                programmerSession?.runId &&
-                                programmerStream.isLoading,
-                            )
-                          }
-                        />
+                        {selectedTab === "programmer" &&
+                          programmerLoading &&
+                          programmerCancelRef.current && (
+                            <Button
+                              onClick={() => programmerCancelRef.current?.()}
+                              variant="destructive"
+                              size="sm"
+                            >
+                              Cancel Programmer
+                            </Button>
+                          )}
                       </div>
                     </div>
 
@@ -230,6 +202,10 @@ export function ThreadView({
                               setProgrammerSession={setProgrammerSession}
                               programmerSession={programmerSession}
                               setSelectedTab={setSelectedTab}
+                              onLoadingChange={setPlannerLoading}
+                              onStreamReady={(cancelFn) => {
+                                plannerCancelRef.current = cancelFn;
+                              }}
                             />
                           )}
                           {!(plannerThreadId && plannerRunId) && (
@@ -251,6 +227,10 @@ export function ThreadView({
                               graphId={PROGRAMMER_GRAPH_ID}
                               threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
+                              onLoadingChange={setProgrammerLoading}
+                              onStreamReady={(cancelFn) => {
+                                programmerCancelRef.current = cancelFn;
+                              }}
                             />
                           )}
                           {!programmerSession && (

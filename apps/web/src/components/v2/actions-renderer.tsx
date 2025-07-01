@@ -3,6 +3,7 @@ import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
   CustomNodeEvent,
@@ -24,6 +25,8 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
+  onLoadingChange?: (isLoading: boolean) => void;
+  onStreamReady?: (cancelFn: () => void) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -55,6 +58,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   setProgrammerSession,
   programmerSession,
   setSelectedTab,
+  onLoadingChange,
+  onStreamReady,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
@@ -69,6 +74,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
+  });
+
+  const { cancelRun } = useCancelStream({
+    stream,
+    threadId,
+    runId,
+    streamName: graphId === "planner" ? "Planner" : "Programmer",
   });
 
   const initializeEvents = customNodeEvents.filter(
@@ -104,6 +116,16 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       stream.joinStream(runId).catch(console.error);
     }
   }, [runId]);
+
+  // Notify parent of loading state changes
+  useEffect(() => {
+    onLoadingChange?.(stream.isLoading);
+  }, [stream.isLoading, onLoadingChange]);
+
+  // Provide cancel function to parent
+  useEffect(() => {
+    onStreamReady?.(cancelRun);
+  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
