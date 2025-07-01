@@ -6,24 +6,20 @@ import {
   Loader2,
   CheckCircle,
   MessageSquare,
-  FileText,
 } from "lucide-react";
 
 type DiagnoseErrorActionProps = {
   status: "loading" | "generating" | "done";
   diagnosis?: string;
   reasoningText?: string;
-  summaryText?: string;
 };
 
 export function DiagnoseErrorAction({
   status,
   diagnosis,
   reasoningText,
-  summaryText,
 }: DiagnoseErrorActionProps) {
   const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -86,23 +82,6 @@ export function DiagnoseErrorAction({
               {diagnosis}
             </p>
           </div>
-        </div>
-      )}
-
-      {summaryText && status === "done" && (
-        <div className="border-t border-green-100 bg-green-50 p-2 dark:border-green-800 dark:bg-green-950">
-          <button
-            onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300"
-          >
-            <FileText className="h-3 w-3" />
-            {showSummary ? "Hide summary" : "Show summary"}
-          </button>
-          {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-800 dark:text-green-300">
-              {summaryText}
-            </p>
-          )}
         </div>
       )}
     </div>

@@ -293,35 +293,18 @@ export function AssistantMessage({
       (tr) => tr && tr.tool_call_id === diagnoseErrorToolCall.id,
     );
 
-    if (correspondingToolResult?.additional_kwargs?.is_diagnosis === true) {
-      const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
-      const reasoningText = getContentString(content);
+    const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
+    const reasoningText = getContentString(content);
 
-      return (
-        <div className="flex flex-col gap-4">
-          <DiagnoseErrorAction
-            status="done"
-            diagnosis={args.diagnosis}
-            reasoningText={reasoningText}
-          />
-        </div>
-      );
-    }
-
-    if (diagnoseErrorToolCall && !correspondingToolResult) {
-      const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
-      const reasoningText = getContentString(content);
-
-      return (
-        <div className="flex flex-col gap-4">
-          <DiagnoseErrorAction
-            status="generating"
-            diagnosis={args.diagnosis}
-            reasoningText={reasoningText}
-          />
-        </div>
-      );
-    }
+    return (
+      <div className="flex flex-col gap-4">
+        <DiagnoseErrorAction
+          status={correspondingToolResult ? "done" : "generating"}
+          diagnosis={args.diagnosis}
+          reasoningText={reasoningText}
+        />
+      </div>
+    );
   }
 
   if (openPrToolCall) {
