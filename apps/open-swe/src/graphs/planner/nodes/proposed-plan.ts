@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { AIMessage } from "@langchain/core/messages";
 import { Command, END, interrupt } from "@langchain/langgraph";
 import { GraphUpdate, GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
@@ -16,6 +17,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
+  DO_NOT_RENDER_ID_PREFIX,
 } from "@open-swe/shared/constants";
 import {
   PlannerGraphState,
@@ -23,6 +25,11 @@ import {
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+
+import {
+  CustomNodeEvent,
+  ACCEPTED_PLAN_NODE_ID,
+} from "@open-swe/shared/open-swe/custom-node-events";
 
 export async function interruptProposedPlan(
   state: PlannerGraphState,
@@ -81,6 +88,7 @@ export async function interruptProposedPlan(
 
   const userRequest = getUserRequest(state.messages);
 
+  let planItems: Array<{ index: number; plan: string; completed: boolean }>;
   const runInput: GraphUpdate = {
     contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
@@ -92,7 +100,7 @@ export async function interruptProposedPlan(
   const programmerThreadId = uuidv4();
 
   if (interruptRes.type === "accept") {
-    const planItems = proposedPlan.map((p, index) => ({
+    planItems = proposedPlan.map((p, index) => ({
       index,
       plan: p,
       completed: false,
@@ -109,7 +117,7 @@ export async function interruptProposedPlan(
       .split(PLAN_INTERRUPT_DELIMITER)
       .map((step: string) => step.trim());
 
-    const planItems = editedPlan.map((p: string, index: number) => ({
+    planItems = editedPlan.map((p: string, index: number) => ({
       index,
       plan: p,
       completed: false,
@@ -151,6 +159,30 @@ export async function interruptProposedPlan(
     runInput.taskPlan,
   );
 
+  // Create custom node event for accepted plan
+  const acceptedPlanEvent: CustomNodeEvent = {
+    nodeId: ACCEPTED_PLAN_NODE_ID,
+    actionId: uuidv4(),
+    action: "Plan accepted",
+    createdAt: new Date().toISOString(),
+    data: {
+      status: "success",
+      planTitle: state.proposedPlanTitle,
+      planItems: planItems,
+      interruptType: interruptRes.type,
+    },
+  };
+
+  // Create AIMessage with accepted plan data
+  const acceptedPlanMessage = new AIMessage({
+    id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+    content: "",
+    additional_kwargs: {
+      hidden: true,
+      customNodeEvents: [acceptedPlanEvent],
+    },
+  });
+
   return {
     programmerSession: {
       threadId: programmerThreadId,
@@ -158,5 +190,7 @@ export async function interruptProposedPlan(
     },
     sandboxSessionId: runInput.sandboxSessionId,
     taskPlan: runInput.taskPlan,
+    messages: [acceptedPlanMessage],
   };
 }
+
