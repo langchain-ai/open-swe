@@ -11,8 +11,6 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { cn } from "@/lib/utils";
-import { useCancelStream } from "@/hooks/useCancelStream";
-
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -66,8 +64,7 @@ interface ManagerChatProps {
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
-  threadId?: string;
-  runId?: string;
+  cancelRun: () => void;
 }
 
 export function ManagerChat({
@@ -76,22 +73,10 @@ export function ManagerChat({
   setChatInput,
   handleSendMessage,
   stream,
-  threadId,
-  runId,
+  cancelRun,
 }: ManagerChatProps) {
-  const { cancelRun } = useCancelStream({
-    stream,
-    threadId,
-    runId,
-    streamName: "Manager",
-  });
-
   const handleCancel = () => {
-    if (threadId && runId) {
-      cancelRun();
-    } else {
-      stream.stop();
-    }
+    cancelRun();
   };
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
@@ -157,13 +142,13 @@ export function ManagerChat({
             placeholder="Type your message..."
             className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm dark:bg-gray-900"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !stream.isLoading
+              ) {
                 e.preventDefault();
-                if (stream.isLoading) {
-                  handleCancel();
-                } else {
-                  handleSendMessage();
-                }
+                handleSendMessage();
               }
             }}
           />
@@ -172,10 +157,7 @@ export function ManagerChat({
             disabled={stream.isLoading ? false : !chatInput.trim()}
             size={stream.isLoading ? "sm" : "icon"}
             variant={stream.isLoading ? "destructive" : "brand"}
-            className={cn(
-              "self-end transition-all duration-200 disabled:opacity-50",
-              stream.isLoading ? "h-12 px-4 py-2" : "h-10 w-10 p-0",
-            )}
+            className={cn(stream.isLoading ? "h-12 px-4 py-2" : "")}
           >
             {stream.isLoading ? (
               <>
@@ -188,7 +170,7 @@ export function ManagerChat({
           </Button>
         </div>
         <div className="text-muted-foreground mt-2 text-xs">
-          Press Cmd+Enter to {stream.isLoading ? "cancel" : "send"}
+          Press Cmd+Enter to send
         </div>
       </div>
     </div>

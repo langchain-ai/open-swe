@@ -50,16 +50,20 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
 
+  const cancelRun = () => {
+    stream.stop();
+  };
+
   const plannerStream = useStream<PlannerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: PLANNER_ASSISTANT_ID || "",
+    assistantId: PLANNER_GRAPH_ID || "",
     reconnectOnMount: true,
     threadId: plannerThreadId,
   });
 
   const programmerStream = useStream<GraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: PROGRAMMER_ASSISTANT_ID || "",
+    assistantId: PROGRAMMER_GRAPH_ID || "",
     reconnectOnMount: true,
     threadId: programmerSession?.threadId,
   });
@@ -154,6 +158,7 @@ export function ThreadView({
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
           stream={stream}
+          cancelRun={cancelRun}
         />
 
         {/* Right Side - Actions & Plan */}

@@ -26,9 +26,9 @@ export function useCancelStream({
         description: "The running operation has been stopped",
       });
     } catch (error) {
+      const errorStr = String(error);
       const isAbortError =
-        error instanceof Error &&
-        (error.name === "AbortError" || error.message.includes("abort"));
+        errorStr.includes("AbortError") || errorStr.includes("abort");
 
       if (isAbortError) {
         toast.info(`${streamName} operation cancelled`, {
@@ -37,8 +37,7 @@ export function useCancelStream({
       } else {
         console.error(`Error cancelling ${streamName} run:`, error);
         toast.error(`Failed to cancel ${streamName}`, {
-          description:
-            error instanceof Error ? error.message : "Unknown error occurred",
+          description: errorStr || "Unknown error occurred",
         });
       }
     }
