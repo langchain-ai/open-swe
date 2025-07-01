@@ -10,7 +10,10 @@ import {
   ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import {
+  DO_NOT_RENDER_ID_PREFIX,
+  PLANNER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
@@ -91,26 +94,29 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }
 
   useEffect(() => {
-    const customInitEvents = getCustomNodeEventsFromMessages(
-      stream.messages,
-      INITIALIZE_NODE_ID,
-    );
-    // If there are no custom init events found in messages, or we already have steps from custom events, return
-    if (!customInitEvents?.length || initializeEvents.length) {
+    const allCustomEvents = getCustomNodeEventsFromMessages(stream.messages);
+    if (!allCustomEvents?.length) {
       return;
     }
-    setCustomNodeEvents(customInitEvents);
-  }, [stream.messages]);
 
-  useEffect(() => {
-    const customAcceptedPlanEvents = getCustomNodeEventsFromMessages(
-      stream.messages,
-      ACCEPTED_PLAN_NODE_ID,
-    );
-    if (!customAcceptedPlanEvents?.length || acceptedPlanEvents.length) {
-      return;
-    }
-    setCustomNodeEvents(customInitEvents);
+    setCustomNodeEvents((prev) => {
+      // If no existing events, set all new events
+      if (prev.length === 0) {
+        return allCustomEvents;
+      }
+
+      // Merge new events with existing ones, avoiding duplicates
+      const existingActionIds = new Set(prev.map((e) => e.actionId));
+      const newEvents = allCustomEvents.filter(
+        (e) => !existingActionIds.has(e.actionId),
+      );
+
+      if (newEvents.length > 0) {
+        return [...prev, ...newEvents];
+      }
+
+      return prev;
+    });
   }, [stream.messages]);
 
   const streamJoined = useRef(false);
@@ -140,9 +146,17 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           programmerSession?.threadId)
     ) {
       setProgrammerSession?.(stream.values.programmerSession);
-      setSelectedTab?.("programmer");
+
+      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
+      // This allows the accepted plan step to be visible before switching
+      if (graphId === PLANNER_GRAPH_ID) {
+        // Add a small delay to allow the accepted plan step to render first
+        setTimeout(() => {
+          setSelectedTab?.("programmer");
+        }, 2000);
+      }
     }
-  }, [stream.values]);
+  }, [stream.values, graphId]);
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -164,7 +178,19 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         />
       ))}
       {acceptedPlanEvents.length > 0 && (
-        <AcceptedPlanStep events={acceptedPlanEvents} />
+        <AcceptedPlanStep
+          planTitle={acceptedPlanEvents[0]?.data?.planTitle as string}
+          planItems={
+            acceptedPlanEvents[0]?.data?.planItems as Array<{
+              index: number;
+              plan: string;
+              completed: boolean;
+            }>
+          }
+          interruptType={
+            acceptedPlanEvents[0]?.data?.interruptType as "accept" | "edit"
+          }
+        />
       )}
     </div>
   );
