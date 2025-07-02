@@ -356,6 +356,288 @@ def validate_user(
 # Standard graph setup with CustomState...
 \`\`\`
 
+## Time Travel and State History
+LangGraph's checkpointing enables time travel - rewinding to previous states and exploring alternative paths.
+
+\`\`\`python
+# Get state history
+for state in graph.get_state_history(config):
+    print(f"Messages: {len(state.values['messages'])}, Next: {state.next}")
+    if len(state.values["messages"]) == 6:  # Select specific state
+        target_state = state
+
+# Resume from specific checkpoint using checkpoint_id
+events = graph.stream(None, target_state.config, stream_mode="values")
+
+# Manual state inspection
+snapshot = graph.get_state(config)
+current_state = snapshot.values
+next_node = snapshot.next
+checkpoint_id = snapshot.config["configurable"]["checkpoint_id"]
+\`\`\`
+
+## Workflow Patterns
+
+### Prompt Chaining
+Sequential LLM calls where each processes the output of the previous one.
+
+\`\`\`python
+class State(TypedDict):
+    topic: str
+    joke: str
+    improved_joke: str
+
+def generate_joke(state: State):
+    msg = llm.invoke(f"Write a joke about {state['topic']}")
+    return {"joke": msg.content}
+
+def improve_joke(state: State):
+    msg = llm.invoke(f"Make this funnier: {state['joke']}")
+    return {"improved_joke": msg.content}
+
+# Add conditional logic
+def check_quality(state: State) -> str:
+    return "improve" if "?" not in state["joke"] else "end"
+
+graph_builder.add_conditional_edges(
+    "generate_joke", 
+    check_quality, 
+    {"improve": "improve_joke", "end": END}
+)
+\`\`\`
+
+### Parallelization
+Multiple LLMs work simultaneously, then results are aggregated.
+
+\`\`\`python
+class State(TypedDict):
+    topic: str
+    joke: str
+    story: str
+    poem: str
+    combined: str
+
+def call_llm_joke(state: State):
+    msg = llm.invoke(f"Write a joke about {state['topic']}")
+    return {"joke": msg.content}
+
+def call_llm_story(state: State):
+    msg = llm.invoke(f"Write a story about {state['topic']}")
+    return {"story": msg.content}
+
+def aggregator(state: State):
+    combined = f"Story: {state['story']}\\nJoke: {state['joke']}"
+    return {"combined": combined}
+
+# Multiple edges from START for parallel execution
+graph_builder.add_edge(START, "call_llm_joke")
+graph_builder.add_edge(START, "call_llm_story")
+graph_builder.add_edge("call_llm_joke", "aggregator")
+graph_builder.add_edge("call_llm_story", "aggregator")
+\`\`\`
+
+### Routing
+Classify input and direct to specialized follow-up tasks.
+
+\`\`\`python
+from typing_extensions import Literal
+
+class Route(BaseModel):
+    choice: Literal["poem", "story", "joke"] = Field(description="Route choice")
+
+router = llm.with_structured_output(Route)
+
+def route_input(state: State):
+    decision = router.invoke([
+        SystemMessage("Route to poem, story, or joke based on request"),
+        HumanMessage(state["input"])
+    ])
+    return {"decision": decision.choice}
+
+def route_decision(state: State) -> str:
+    if state["decision"] == "poem":
+        return "poem_node"
+    elif state["decision"] == "story":
+        return "story_node"
+    return "joke_node"
+
+graph_builder.add_conditional_edges(
+    "route_input",
+    route_decision,
+    {"poem_node": "poem_node", "story_node": "story_node", "joke_node": "joke_node"}
+)
+\`\`\`
+
+### Orchestrator-Worker Pattern
+Central orchestrator breaks down tasks and delegates to workers using Send API.
+
+\`\`\`python
+from langgraph.constants import Send
+from typing import Annotated, List
+import operator
+
+class Section(BaseModel):
+    name: str
+    description: str
+
+class State(TypedDict):
+    topic: str
+    sections: list[Section]
+    completed_sections: Annotated[list, operator.add]  # Workers write here
+    final_report: str
+
+class WorkerState(TypedDict):
+    section: Section
+    completed_sections: Annotated[list, operator.add]
+
+def orchestrator(state: State):
+    """Plan the work and create sections"""
+    sections = planner.invoke(f"Plan sections for {state['topic']}")
+    return {"sections": sections.sections}
+
+def worker(state: WorkerState):
+    """Worker writes one section"""
+    content = llm.invoke(f"Write section: {state['section'].name}")
+    return {"completed_sections": [content.content]}
+
+def assign_workers(state: State):
+    """Create workers dynamically using Send API"""
+    return [Send("worker", {"section": s}) for s in state["sections"]]
+
+graph_builder.add_conditional_edges("orchestrator", assign_workers, ["worker"])
+\`\`\`
+
+### Evaluator-Optimizer
+One LLM generates responses while another evaluates and provides feedback in a loop.
+
+\`\`\`python
+class Feedback(BaseModel):
+    grade: Literal["good", "bad"] = Field(description="Quality assessment")
+    feedback: str = Field(description="Improvement suggestions")
+
+evaluator = llm.with_structured_output(Feedback)
+
+def generator(state: State):
+    prompt = f"Write about {state['topic']}"
+    if state.get("feedback"):
+        prompt += f" considering: {state['feedback']}"
+    msg = llm.invoke(prompt)
+    return {"content": msg.content}
+
+def evaluate(state: State):
+    grade = evaluator.invoke(f"Evaluate: {state['content']}")
+    return {"grade": grade.grade, "feedback": grade.feedback}
+
+def should_continue(state: State) -> str:
+    return "generator" if state["grade"] == "bad" else END
+
+graph_builder.add_conditional_edges(
+    "evaluate", 
+    should_continue, 
+    {"generator": "generator", END: END}
+)
+\`\`\`
+
+## Prebuilt Agent Components
+LangGraph provides prebuilt components for common agent patterns.
+
+\`\`\`python
+from langgraph.prebuilt import create_react_agent
+from langchain_core.tools import tool
+
+@tool
+def calculator(expression: str) -> float:
+    """Evaluate mathematical expressions."""
+    return eval(expression)
+
+# Prebuilt ReAct agent
+agent = create_react_agent(llm, tools=[calculator])
+
+# Usage
+response = agent.invoke({"messages": "What is 15 * 23?"})
+\`\`\`
+
+## Agent Execution Patterns
+
+### Basic Execution
+\`\`\`python
+# Synchronous
+response = agent.invoke({"messages": "Hello"})
+
+# Asynchronous  
+response = await agent.ainvoke({"messages": "Hello"})
+
+# Streaming
+for chunk in agent.stream({"messages": "Hello"}):
+    print(chunk)
+
+# Async streaming
+async for chunk in agent.astream({"messages": "Hello"}):
+    print(chunk)
+\`\`\`
+
+### Input Formats
+\`\`\`python
+# String input (converted to HumanMessage)
+agent.invoke({"messages": "Hello"})
+
+# Message dictionary
+agent.invoke({"messages": {"role": "user", "content": "Hello"}})
+
+# List of messages
+agent.invoke({"messages": [{"role": "user", "content": "Hello"}]})
+
+# With custom state fields
+agent.invoke({
+    "messages": "Hello",
+    "user_name": "Alice",
+    "context": {"key": "value"}
+})
+\`\`\`
+
+### Recursion Limits
+\`\`\`python
+from langgraph.errors import GraphRecursionError
+
+# Set recursion limit to prevent infinite loops
+max_iterations = 5
+recursion_limit = 2 * max_iterations + 1
+
+try:
+    response = agent.invoke(
+        {"messages": "Complex task"},
+        {"recursion_limit": recursion_limit}
+    )
+except GraphRecursionError:
+    print("Agent stopped due to max iterations")
+
+# Or configure at agent level
+agent_with_limit = agent.with_config(recursion_limit=recursion_limit)
+\`\`\`
+
+## Advanced Features
+
+### Multi-Agent Systems
+\`\`\`python
+# Supervisor pattern - coordinates multiple specialist agents
+# Swarm pattern - agents collaborate dynamically
+# Use langgraph-supervisor and langgraph-swarm packages
+\`\`\`
+
+### Memory Integration
+\`\`\`python
+# Short-term memory (session-based)
+# Long-term memory (persistent across sessions)
+# Use langmem package for advanced memory features
+\`\`\`
+
+### Deployment and Monitoring
+\`\`\`python
+# LangGraph Platform for production deployment
+# LangGraph Studio for visual debugging
+# Built-in streaming and human-in-the-loop capabilities
+\`\`\`
+
 ## Key Rules
 1. **State updates**: Return dict with keys to update
 2. **Reducers**: \`add_messages\` appends, others overwrite
@@ -363,4 +645,7 @@ def validate_user(
 4. **Memory**: Requires \`thread_id\` in config
 5. **Resume**: Use \`Command(resume=data)\` after interrupt
 6. **State from tools**: Use \`Command(update=state_dict)\`
-`;
+7. **Time travel**: Use \`get_state_history()\` and checkpoint_id for rewinding
+8. **Workflow patterns**: Choose based on task structure (sequential, parallel, conditional)
+9. **Send API**: Use for dynamic worker creation in orchestrator patterns
+10. **Recursion limits**: Set to prevent infinite loops in agent execution`;
