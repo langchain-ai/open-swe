@@ -1,19 +1,21 @@
 import { UseStream } from "@langchain/langgraph-sdk/react";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 import { toast } from "sonner";
 
-interface UseCancelStreamProps {
-  stream: UseStream<Record<string, unknown>>;
+interface UseCancelStreamProps<State extends PlannerGraphState | GraphState> {
+  stream: UseStream<State>;
   threadId?: string;
   runId?: string;
   streamName: "Planner" | "Programmer";
 }
 
-export function useCancelStream({
+export function useCancelStream<State extends PlannerGraphState | GraphState>({
   stream,
   threadId,
   runId,
   streamName,
-}: UseCancelStreamProps) {
+}: UseCancelStreamProps<State>) {
   const cancelRun = async () => {
     if (!threadId || !runId) {
       toast.error(`Cannot cancel ${streamName}: Missing thread or run ID`);

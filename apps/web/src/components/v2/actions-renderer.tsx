@@ -76,7 +76,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     },
   });
 
-  const { cancelRun } = useCancelStream({
+  const { cancelRun } = useCancelStream<State>({
     stream,
     threadId,
     runId,

@@ -7,7 +7,7 @@ interface CancelStreamButtonProps {
   stream: UseStream<any>;
   threadId?: string;
   runId?: string;
-  streamName: string;
+  streamName: "Planner" | "Programmer";
   isVisible?: boolean;
 }
 

@@ -139,11 +139,7 @@ export function ManagerChat({
             placeholder="Type your message..."
             className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm dark:bg-gray-900"
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                (e.metaKey || e.ctrlKey) &&
-                !isLoading
-              ) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
                 e.preventDefault();
                 handleSendMessage();
               }

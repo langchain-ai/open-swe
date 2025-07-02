@@ -136,7 +136,7 @@ export function ThreadView({
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
-          stream={stream}
+          isLoading={stream.isLoading}
           cancelRun={cancelRun}
         />
         {/* Right Side - Actions & Plan */}
@@ -169,7 +169,7 @@ export function ThreadView({
                           plannerLoading &&
                           plannerCancelRef.current && (
                             <Button
-                              onClick={() => plannerCancelRef.current()}
+                              onClick={() => plannerCancelRef.current?.()}
                               variant="destructive"
                               size="sm"
                             >
@@ -181,7 +181,7 @@ export function ThreadView({
                           programmerLoading &&
                           programmerCancelRef.current && (
                             <Button
-                              onClick={() => programmerCancelRef.current()}
+                              onClick={() => programmerCancelRef.current?.()}
                               variant="destructive"
                               size="sm"
                             >
