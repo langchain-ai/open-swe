@@ -2,38 +2,17 @@ import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
 import {
   verifyGithubUser,
   GithubUser,
+  verifyGithubUserId,
 } from "@open-swe/shared/github/verify-user";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
 } from "@open-swe/shared/constants";
 import { decryptGitHubToken } from "@open-swe/shared/crypto";
-
-const STUDIO_USER_ID = "langgraph-studio-user";
-
-// Helper function to check if user is studio user
-const isStudioUser = (userIdentity: string): boolean => {
-  return userIdentity === STUDIO_USER_ID;
-};
-
-// Helper function for operations that only need owner filtering
-const createOwnerFilter = (user: { identity: string }) => {
-  if (isStudioUser(user.identity)) {
-    return;
-  }
-  return { owner: user.identity };
-};
-
-// Helper function for create operations that set metadata
-const createWithOwnerMetadata = (value: any, user: { identity: string }) => {
-  if (isStudioUser(user.identity)) {
-    return;
-  }
-
-  value.metadata ??= {};
-  value.metadata.owner = user.identity;
-  return { owner: user.identity };
-};
+import { verifyGitHubWebhookOrThrow } from "./github.js";
+import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 
 export const auth = new Auth()
   .authenticate(async (request: Request) => {
@@ -45,6 +24,13 @@ export const auth = new Auth()
         display_name: "CORS Preflight",
       };
     }
+
+    const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
+    if (ghSecretHashHeader) {
+      // This will either return a valid user, or throw an error
+      return await verifyGitHubWebhookOrThrow(request);
+    }
+
     const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
     if (!encryptionKey) {
       throw new Error(
@@ -52,13 +38,6 @@ export const auth = new Auth()
       );
     }
 
-    // Parse Authorization header
-    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
-    if (!encryptedAccessToken) {
-      throw new HTTPException(401, {
-        message: "GitHub access token header missing",
-      });
-    }
     // We don't do anything with this token right now, but still confirm it
     // exists as it will cause issues later on if it's not present.
     const encryptedInstallationToken = request.headers.get(
@@ -70,24 +49,37 @@ export const auth = new Auth()
       });
     }
 
-    // Validate GitHub access token
     let user: GithubUser | undefined;
-    try {
+
+    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
+    if (!encryptedAccessToken) {
+      // If there isn't a user access token, check to see if the user info is in headers.
+      // This would indicate a bot created the request.
+      const userIdHeader = request.headers.get(GITHUB_USER_ID_HEADER);
+      const userLoginHeader = request.headers.get(GITHUB_USER_LOGIN_HEADER);
+      if (!userIdHeader || !userLoginHeader) {
+        throw new HTTPException(401, {
+          message: "Github-User-Id or Github-User-Login header missing",
+        });
+      }
+      user = await verifyGithubUserId(
+        decryptGitHubToken(encryptedInstallationToken, encryptionKey),
+        Number(userIdHeader),
+        userLoginHeader,
+      );
+    } else {
       // Ensure we decrypt the token before passing to the verification function.
       user = await verifyGithubUser(
         decryptGitHubToken(encryptedAccessToken, encryptionKey),
       );
-      if (!user) {
-        throw new HTTPException(401, {
-          message:
-            "Invalid GitHub token or user is not a member of the required organization.",
-        });
-      }
-    } catch (e: any) {
+    }
+
+    if (!user) {
       throw new HTTPException(401, {
-        message: `Authentication error: ${e.message}`,
+        message: "User not found",
       });
     }
+
     return {
       identity: user.id.toString(),
       is_authenticated: true,

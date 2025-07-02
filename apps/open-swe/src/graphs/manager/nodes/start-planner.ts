@@ -8,6 +8,8 @@ import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
@@ -27,6 +29,10 @@ export async function startPlanner(
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
       [GITHUB_INSTALLATION_TOKEN_COOKIE]:
         config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+      [GITHUB_USER_ID_HEADER]:
+        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
+      [GITHUB_USER_LOGIN_HEADER]:
+        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
     },
   });
 

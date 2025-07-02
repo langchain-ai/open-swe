@@ -14,6 +14,7 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -51,14 +52,7 @@ export function TerminalInput({
   });
 
   const handleSend = async () => {
-    const assistantId = process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID;
-    if (!assistantId) {
-      toast.error("No assistant ID found", {
-        richColors: true,
-        closeButton: true,
-      });
-      return;
-    }
+    const assistantId = MANAGER_GRAPH_ID;
     if (!selectedRepository) {
       toast.error("Please select a repository first", {
         richColors: true,

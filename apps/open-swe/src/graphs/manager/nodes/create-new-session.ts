@@ -8,6 +8,8 @@ import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fie
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
 } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
@@ -75,6 +77,10 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
       [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
       [GITHUB_INSTALLATION_TOKEN_COOKIE]:
         config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+      [GITHUB_USER_ID_HEADER]:
+        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
+      [GITHUB_USER_LOGIN_HEADER]:
+        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
     },
   });
 

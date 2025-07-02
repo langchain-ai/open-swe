@@ -2,6 +2,12 @@
 import { spawn } from "child_process";
 import * as path from "path";
 
+const REQUIRED_ENV = {
+  GITHUB_APP_ID: "test",
+  GITHUB_APP_PRIVATE_KEY: "test",
+  GITHUB_WEBHOOK_SECRET: "test",
+};
+
 /**
  * Checks if the development server starts successfully.
  * This script starts the dev server and monitors the output for 30 seconds
@@ -18,6 +24,7 @@ function checkDevServer(): Promise<void> {
       cwd: targetCwd,
       shell: true,
       stdio: "pipe",
+      env: REQUIRED_ENV,
     });
 
     let errorDetected = false;

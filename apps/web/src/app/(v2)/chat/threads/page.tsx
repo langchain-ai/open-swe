@@ -12,14 +12,13 @@ import { useThreads } from "@/hooks/useThreads";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
   const router = useRouter();
-  const { threads, threadsLoading } = useThreads<GraphState>(
-    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
-  );
+  const { threads, threadsLoading } = useThreads<GraphState>(MANAGER_GRAPH_ID);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
