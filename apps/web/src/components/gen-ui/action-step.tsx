@@ -176,7 +176,7 @@ function ActionItem(props: ActionItemProps) {
     } else if (props.actionType === "planner_notes") {
       return !!(props.notes && props.notes.length > 0);
     } else if (props.actionType === "langgraph_docs_read") {
-      return true; // Always show toggle for documentation results
+      return true;
     }
 
     return false;
