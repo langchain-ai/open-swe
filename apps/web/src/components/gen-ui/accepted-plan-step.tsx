@@ -117,7 +117,7 @@ export function AcceptedPlanStep({
           collapsed ? "max-h-0" : "max-h-[500px]",
         )}
       >
-        <div className="space-y-4 p-4">
+        <div className="max-h-[468px] space-y-4 overflow-y-auto p-4">
           {planTitle && (
             <div className="bg-card/50 rounded-lg border p-3">
               <h4 className="text-foreground mb-1 text-sm font-medium">
