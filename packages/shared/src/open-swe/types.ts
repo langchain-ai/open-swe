@@ -16,6 +16,8 @@ import {
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
@@ -395,6 +397,16 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_USER_ID_HEADER]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
+  [GITHUB_USER_LOGIN_HEADER]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -550,6 +562,20 @@ export const GraphConfiguration = z.object({
     .langgraph.metadata(
       GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
     ),
+  /**
+   * The user's GitHub ID. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_USER_ID_HEADER]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_ID_HEADER]),
+  /**
+   * The user's GitHub login. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_USER_LOGIN_HEADER]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER]),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

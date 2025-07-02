@@ -15,16 +15,17 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import { HumanMessage } from "@langchain/core/messages";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import {
+  DO_NOT_RENDER_ID_PREFIX,
+  PROGRAMMER_GRAPH_ID,
+  PLANNER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { StickToBottom } from "use-stick-to-bottom";
 import {
   StickyToBottomContent,
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
-
-const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
-const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -152,23 +153,17 @@ export function ThreadView({
                     <TabsContent value="planner">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
-                          {plannerThreadId &&
-                            plannerRunId &&
-                            PLANNER_ASSISTANT_ID && (
-                              <ActionsRenderer<PlannerGraphState>
-                                graphId={PLANNER_ASSISTANT_ID}
-                                threadId={plannerThreadId}
-                                runId={plannerRunId}
-                                setProgrammerSession={setProgrammerSession}
-                                programmerSession={programmerSession}
-                                setSelectedTab={setSelectedTab}
-                              />
-                            )}
-                          {!(
-                            plannerThreadId &&
-                            plannerRunId &&
-                            PLANNER_ASSISTANT_ID
-                          ) && (
+                          {plannerThreadId && plannerRunId && (
+                            <ActionsRenderer<PlannerGraphState>
+                              graphId={PLANNER_GRAPH_ID}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              setProgrammerSession={setProgrammerSession}
+                              programmerSession={programmerSession}
+                              setSelectedTab={setSelectedTab}
+                            />
+                          )}
+                          {!(plannerThreadId && plannerRunId) && (
                             <div className="flex items-center justify-center gap-2 py-8">
                               <Clock className="text-muted-foreground size-4" />
                               <span className="text-muted-foreground text-sm">
@@ -182,9 +177,9 @@ export function ThreadView({
                     <TabsContent value="programmer">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
-                          {programmerSession && PROGRAMMER_ASSISTANT_ID && (
+                          {programmerSession && (
                             <ActionsRenderer<GraphState>
-                              graphId={PROGRAMMER_ASSISTANT_ID}
+                              graphId={PROGRAMMER_GRAPH_ID}
                               threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
                             />

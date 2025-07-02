@@ -1,6 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import { createLogger, LogLevel } from "../logger.js";
 import { GitHubIssue, GitHubIssueComment, GitHubPullRequest } from "./types.js";
+import { getOpenSWELabel } from "./label.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-API");
 
@@ -141,7 +142,7 @@ export async function createPullRequest({
       owner,
       repo,
       issue_number: pullRequest.number,
-      labels: ["open-swe"],
+      labels: [getOpenSWELabel()],
     });
     logger.info("Added 'open-swe' label to pull request", {
       pullRequestNumber: pullRequest.number,

@@ -12,3 +12,10 @@ export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
 export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
+
+export const MANAGER_GRAPH_ID = "manager";
+export const PLANNER_GRAPH_ID = "planner";
+export const PROGRAMMER_GRAPH_ID = "programmer";
+
+export const GITHUB_USER_ID_HEADER = "x-github-user-id";
+export const GITHUB_USER_LOGIN_HEADER = "x-github-user-login";

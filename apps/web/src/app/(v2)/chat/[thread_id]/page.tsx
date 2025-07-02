@@ -5,6 +5,7 @@ import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
 import { useThreads } from "@/hooks/useThreads";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { useRouter } from "next/navigation";
@@ -24,14 +25,12 @@ export default function ThreadPage({
   const { thread_id } = use(params);
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
-    assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID ?? "",
+    assistantId: MANAGER_GRAPH_ID,
     threadId: thread_id,
     reconnectOnMount: true,
   });
 
-  const { threads, threadsLoading } = useThreads<GraphState>(
-    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
-  );
+  const { threads, threadsLoading } = useThreads<GraphState>(MANAGER_GRAPH_ID);
   // Find the thread by ID
   const thread = threads.find((t) => t.thread_id === thread_id);
 
