@@ -20,6 +20,47 @@ import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 
+interface AcceptedPlanEventData {
+  planTitle: string;
+  planItems: Array<{
+    index: number;
+    plan: string;
+    completed: boolean;
+  }>;
+  interruptType: "accept" | "edit";
+}
+
+type AcceptedPlanEvent = CustomNodeEvent & {
+  data: AcceptedPlanEventData;
+};
+
+function isAcceptedPlanEvent(
+  event: CustomNodeEvent,
+): event is AcceptedPlanEvent {
+  const { data } = event;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    typeof data.planTitle === "string" &&
+    Array.isArray(data.planItems) &&
+    data.planItems.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof item.index === "number" &&
+        typeof item.plan === "string" &&
+        typeof item.completed === "boolean",
+    ) &&
+    (data.interruptType === "accept" || data.interruptType === "edit")
+  );
+}
+
+function isAcceptedPlanEvents(
+  events: CustomNodeEvent[],
+): events is AcceptedPlanEvent[] {
+  return events.every(isAcceptedPlanEvent);
+}
+
 interface ActionsRendererProps {
   graphId: string;
   threadId: string;
@@ -177,21 +218,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           handleRegenerate={() => {}}
         />
       ))}
-      {acceptedPlanEvents.length > 0 && (
-        <AcceptedPlanStep
-          planTitle={acceptedPlanEvents[0]?.data?.planTitle as string}
-          planItems={
-            acceptedPlanEvents[0]?.data?.planItems as Array<{
-              index: number;
-              plan: string;
-              completed: boolean;
-            }>
-          }
-          interruptType={
-            acceptedPlanEvents[0]?.data?.interruptType as "accept" | "edit"
-          }
-        />
-      )}
+      {acceptedPlanEvents.length > 0 &&
+        isAcceptedPlanEvents(acceptedPlanEvents) && (
+          <AcceptedPlanStep
+            planTitle={acceptedPlanEvents[0].data.planTitle}
+            planItems={acceptedPlanEvents[0].data.planItems}
+            interruptType={acceptedPlanEvents[0].data.interruptType}
+          />
+        )}
     </div>
   );
 }

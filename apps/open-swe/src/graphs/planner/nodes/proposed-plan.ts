@@ -159,7 +159,6 @@ export async function interruptProposedPlan(
     runInput.taskPlan,
   );
 
-  // Create custom node event for accepted plan
   const acceptedPlanEvent: CustomNodeEvent = {
     nodeId: ACCEPTED_PLAN_NODE_ID,
     actionId: uuidv4(),
@@ -173,7 +172,6 @@ export async function interruptProposedPlan(
     },
   };
 
-  // Create AIMessage with accepted plan data
   const acceptedPlanMessage = new AIMessage({
     id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
     content: "",
