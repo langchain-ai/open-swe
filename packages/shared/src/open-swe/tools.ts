@@ -290,3 +290,15 @@ export function createLangGraphDocsReadFields() {
   };
 }
 
+
+export function createDiagnoseErrorToolFields() {
+  const diagnoseErrorToolSchema = z.object({
+    diagnosis: z.string().describe("The diagnosis of the error."),
+  });
+
+  return {
+    name: "diagnose_error",
+    description: "Diagnoses an error given a diagnosis.",
+    schema: diagnoseErrorToolSchema,
+  };
+}

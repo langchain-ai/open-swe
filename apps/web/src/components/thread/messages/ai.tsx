@@ -21,6 +21,7 @@ import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
+import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -30,6 +31,7 @@ import {
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
+  createDiagnoseErrorToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -53,6 +55,9 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+
+const diagnoseErrorTool = createDiagnoseErrorToolFields();
+type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 function CustomComponent({
   message,
@@ -256,6 +261,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
     : undefined;
 
+  const diagnoseErrorToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === diagnoseErrorTool.name)
+    : undefined;
+
   // We can be sure that if the task status tool call is present, it will be the
   // only tool call/result we need to render for this message.
   if (taskStatusToolCall) {
@@ -278,7 +287,25 @@ export function AssistantMessage({
     );
   }
 
-  // Same for PR tool. If this is present, it's the only tool call we need to render.
+  if (diagnoseErrorToolCall) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === diagnoseErrorToolCall.id,
+    );
+
+    const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <DiagnoseErrorAction
+          status={correspondingToolResult ? "done" : "generating"}
+          diagnosis={args.diagnosis}
+          reasoningText={reasoningText}
+        />
+      </div>
+    );
+  }
+
   if (openPrToolCall) {
     let branch: string | undefined;
     let targetBranch: string | undefined = "main";
