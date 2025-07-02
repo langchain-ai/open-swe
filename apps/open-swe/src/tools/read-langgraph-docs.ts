@@ -77,8 +77,6 @@ export function createLangGraphDocsReadTool(
           responseLength: response.content.length 
         });
 
-        console.log("[LANGGRAPH DOCS READ TOOL] RESPONSE: ", response.content[0]);
-
         return {
           result: getMessageContentString(response.content),
           status: "success",
