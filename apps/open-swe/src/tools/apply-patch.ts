@@ -31,7 +31,9 @@ export function createApplyPatchTool(state: GraphState) {
       const sandbox = await daytonaClient().get(sandboxSessionId);
 
       const { success: readFileSuccess, output: readFileOutput } =
-        await readFile(sandbox, file_path, {
+        await readFile({
+          sandbox,
+          filePath: file_path,
           workDir,
         });
       if (!readFileSuccess) {
@@ -84,7 +86,10 @@ export function createApplyPatchTool(state: GraphState) {
       }
 
       const { success: writeFileSuccess, output: writeFileOutput } =
-        await writeFile(sandbox, file_path, patchedContent, {
+        await writeFile({
+          sandbox,
+          filePath: file_path,
+          content: patchedContent,
           workDir,
         });
       if (!writeFileSuccess) {
