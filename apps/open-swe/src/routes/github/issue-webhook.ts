@@ -151,13 +151,16 @@ webhooks.on("issues.labeled", async ({ payload }) => {
 
     logger.info("Creating comment...");
     const appUrl = getOpenSweAppUrl(threadId);
+    const appUrlCommentText = appUrl
+      ? `View run in Open SWE [here](${appUrl}) (this URL will only work for @${issueData.userLogin})`
+      : "";
     await octokit.request(
       "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
       {
         owner: issueData.owner,
         repo: issueData.repo,
         issue_number: issueData.issueNumber,
-        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrl ? `View run in Open SWE [here](${appUrl})` : ""}`,
+        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}`,
       },
     );
   } catch (error) {
