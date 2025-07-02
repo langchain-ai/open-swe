@@ -55,6 +55,7 @@ export function ThreadView({
   const programmerCancelRef = useRef<(() => void) | null>(null);
 
   const cancelRun = () => {
+    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
     stream.stop();
   };
 
@@ -169,7 +170,7 @@ export function ThreadView({
                           plannerLoading &&
                           plannerCancelRef.current && (
                             <Button
-                              onClick={() => plannerCancelRef.current?.()}
+                              onClick={() => plannerCancelRef.current()}
                               variant="destructive"
                               size="sm"
                             >
@@ -181,7 +182,7 @@ export function ThreadView({
                           programmerLoading &&
                           programmerCancelRef.current && (
                             <Button
-                              onClick={() => programmerCancelRef.current?.()}
+                              onClick={() => programmerCancelRef.current()}
                               variant="destructive"
                               size="sm"
                             >

@@ -2,10 +2,10 @@ import { UseStream } from "@langchain/langgraph-sdk/react";
 import { toast } from "sonner";
 
 interface UseCancelStreamProps {
-  stream: UseStream<any>;
+  stream: UseStream<Record<string, unknown>>;
   threadId?: string;
   runId?: string;
-  streamName: string; // "Planner" | "Programmer"
+  streamName: "Planner" | "Programmer";
 }
 
 export function useCancelStream({
@@ -27,8 +27,7 @@ export function useCancelStream({
       });
     } catch (error) {
       const errorStr = String(error);
-      const isAbortError =
-        errorStr.includes("AbortError") || errorStr.includes("abort");
+      const isAbortError = errorStr.toLowerCase().includes("abort");
 
       if (isAbortError) {
         toast.info(`${streamName} operation cancelled`, {

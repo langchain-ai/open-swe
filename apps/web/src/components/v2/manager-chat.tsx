@@ -63,7 +63,7 @@ interface ManagerChatProps {
   chatInput: string;
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
-  stream: ReturnType<typeof useStream<ManagerGraphState>>;
+  isLoading: boolean;
   cancelRun: () => void;
 }
 
@@ -72,12 +72,9 @@ export function ManagerChat({
   chatInput,
   setChatInput,
   handleSendMessage,
-  stream,
+  isLoading,
   cancelRun,
 }: ManagerChatProps) {
-  const handleCancel = () => {
-    cancelRun();
-  };
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
       <div className="relative flex-1">
@@ -145,7 +142,7 @@ export function ManagerChat({
               if (
                 e.key === "Enter" &&
                 (e.metaKey || e.ctrlKey) &&
-                !stream.isLoading
+                !isLoading
               ) {
                 e.preventDefault();
                 handleSendMessage();
@@ -153,19 +150,19 @@ export function ManagerChat({
             }}
           />
           <Button
-            onClick={stream.isLoading ? handleCancel : handleSendMessage}
-            disabled={stream.isLoading ? false : !chatInput.trim()}
-            size={stream.isLoading ? "sm" : "icon"}
-            variant={stream.isLoading ? "destructive" : "brand"}
-            className={cn(stream.isLoading ? "h-12 px-4 py-2" : "")}
+            onClick={isLoading ? cancelRun : handleSendMessage}
+            disabled={isLoading ? false : !chatInput.trim()}
+            size={isLoading ? "sm" : "icon"}
+            variant={isLoading ? "destructive" : "brand"}
+            className={cn(isLoading ? "h-12 px-4 py-2" : "")}
           >
-            {stream.isLoading ? (
+            {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Cancel
               </>
             ) : (
-              <Send className="h-4 w-4" />
+              <Send className="size-4" />
             )}
           </Button>
         </div>

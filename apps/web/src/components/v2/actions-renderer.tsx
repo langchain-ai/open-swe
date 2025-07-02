@@ -117,12 +117,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [runId]);
 
-  // Notify parent of loading state changes
   useEffect(() => {
     onLoadingChange?.(stream.isLoading);
   }, [stream.isLoading, onLoadingChange]);
 
-  // Provide cancel function to parent
   useEffect(() => {
     onStreamReady?.(cancelRun);
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
