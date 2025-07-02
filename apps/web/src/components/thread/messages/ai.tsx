@@ -56,7 +56,6 @@ type InstallDependenciesToolArgs = z.infer<
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 
-// Diagnose error tool
 const diagnoseErrorTool = createDiagnoseErrorToolFields();
 type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
