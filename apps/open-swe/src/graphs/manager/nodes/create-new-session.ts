@@ -10,6 +10,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  MANAGER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
@@ -91,7 +92,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     messages: inputMessages,
     branchName: state.branchName ?? getBranchName(config),
   };
-  await langGraphClient.runs.create(newManagerThreadId, "manager", {
+  await langGraphClient.runs.create(newManagerThreadId, MANAGER_GRAPH_ID, {
     input: {},
     command: {
       update: commandUpdate,

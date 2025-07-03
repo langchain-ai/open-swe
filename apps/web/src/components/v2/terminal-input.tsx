@@ -15,6 +15,7 @@ import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -26,6 +27,8 @@ interface TerminalInputProps {
   onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   quickActionPrompt?: string;
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
+  autoAcceptPlan: boolean;
+  setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
 }
 
 export function TerminalInput({
@@ -38,6 +41,8 @@ export function TerminalInput({
   onPaste,
   quickActionPrompt,
   setQuickActionPrompt,
+  autoAcceptPlan,
+  setAutoAcceptPlan,
 }: TerminalInputProps) {
   const { push } = useRouter();
   const [message, setMessage] = useState("");
@@ -52,7 +57,6 @@ export function TerminalInput({
   });
 
   const handleSend = async () => {
-    const assistantId = MANAGER_GRAPH_ID;
     if (!selectedRepository) {
       toast.error("Please select a repository first", {
         richColors: true,
@@ -75,27 +79,34 @@ export function TerminalInput({
 
       try {
         const newThreadId = uuidv4();
-        const run = await stream.client.runs.create(newThreadId, assistantId, {
-          input: {
-            messages: [newHumanMessage],
-            targetRepository: selectedRepository,
-          },
-          config: {
-            recursion_limit: 400,
-            configurable: {
-              ...getConfig(DEFAULT_CONFIG_KEY),
+        const runInput: ManagerGraphUpdate = {
+          messages: [newHumanMessage],
+          targetRepository: selectedRepository,
+          autoAcceptPlan,
+        };
+        const run = await stream.client.runs.create(
+          newThreadId,
+          MANAGER_GRAPH_ID,
+          {
+            input: runInput,
+            config: {
+              recursion_limit: 400,
+              configurable: {
+                ...getConfig(DEFAULT_CONFIG_KEY),
+              },
             },
+            ifNotExists: "create",
+            streamResumable: true,
+            streamMode: ["values", "messages", "custom"],
           },
-          ifNotExists: "create",
-          streamResumable: true,
-          streamMode: ["values", "messages", "custom"],
-        });
+        );
 
         // set session storage so the stream can be resumed after redirect.
         sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
         push(`/chat/${newThreadId}`);
         setMessage("");
         setContentBlocks([]);
+        setAutoAcceptPlan(false);
       } catch (e) {
         console.error(e);
       } finally {
@@ -121,36 +132,25 @@ export function TerminalInput({
 
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
-      <div className="text-foreground flex items-start gap-1">
-        <span className="text-muted-foreground">open-swe</span>
-        <span className="text-muted-foreground/70">@</span>
-        <span className="text-muted-foreground">github</span>
-        <span className="text-muted-foreground/70">:</span>
+      <div className="text-foreground flex items-center gap-1">
+        <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1">
+          <span className="text-muted-foreground">open-swe</span>
+          <span className="text-muted-foreground/70">@</span>
+          <span className="text-muted-foreground">github</span>
+        </div>
 
         {/* Repository & Branch Selectors */}
         <RepositoryBranchSelectors />
 
         {/* Prompt */}
         <span className="text-muted-foreground">$</span>
-      </div>
 
-      {/* Multiline Input */}
-      <div className="mt-1 flex gap-2">
-        <Textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyPress}
-          placeholder={placeholder}
-          disabled={disabled}
-          className="text-foreground placeholder:text-muted-foreground min-h-[40px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-          rows={3}
-          onPaste={onPaste}
-        />
         <Button
           onClick={handleSend}
           disabled={disabled || !message.trim() || !selectedRepository}
           size="icon"
           variant="brand"
+          className="ml-auto size-8"
         >
           {loading ? (
             <Loader2 className="size-4 animate-spin" />
@@ -158,6 +158,20 @@ export function TerminalInput({
             <Send className="size-4" />
           )}
         </Button>
+      </div>
+
+      {/* Multiline Input */}
+      <div className="mt-2 flex gap-2">
+        <Textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyPress}
+          placeholder={placeholder}
+          disabled={disabled}
+          className="text-foreground placeholder:text-muted-foreground min-h-[80px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          rows={6}
+          onPaste={onPaste}
+        />
       </div>
 
       {/* Help text */}
