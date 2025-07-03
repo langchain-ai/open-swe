@@ -22,12 +22,8 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 
 interface AcceptedPlanEventData {
   planTitle: string;
-  planItems: Array<{
-    index: number;
-    plan: string;
-    completed: boolean;
-  }>;
-  interruptType: "accept" | "edit";
+  planItems: PlanItem[];
+  interruptType: HumanResponse["type"];
 }
 
 type AcceptedPlanEvent = CustomNodeEvent & {
