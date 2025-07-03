@@ -48,7 +48,7 @@ export async function takeActions(
 
   const allTools = [shellTool, rgTool, plannerNotesTool, ...mcpTools];
   const toolsMap = Object.fromEntries(
-    allTools.map(tool => [tool.name, tool])
+    allTools.map((tool) => [tool.name, tool]),
   );
 
   const toolCalls = lastMessage.tool_calls;
@@ -83,7 +83,6 @@ export async function takeActions(
           result: string;
           status: "success" | "error";
         };
-      console.log("TOOL RESULT", toolResult);
       if (typeof toolResult === "string") {
         result = toolResult;
         toolCallStatus = "success";

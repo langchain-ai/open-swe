@@ -94,7 +94,9 @@ export async function generateAction(
       ? []
       : [createInstallDependenciesTool(state)]),
   ];
-  logger.info(`MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`);
+  logger.info(
+    `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
+  );
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",

@@ -22,7 +22,6 @@ import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 import { mcpClient } from "../../../../utils/mcp-client.js";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 
-
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
@@ -65,7 +64,9 @@ export async function generateAction(
     createPlannerNotesTool(),
     ...mcpTools,
   ];
-  logger.info(`MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`);
+  logger.info(
+    `MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`,
+  );
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",

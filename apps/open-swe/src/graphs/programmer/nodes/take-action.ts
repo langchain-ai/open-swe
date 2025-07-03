@@ -57,9 +57,15 @@ export async function takeAction(
     logger.error(`Error getting MCP tools: ${error}`);
   }
 
-  const allTools = [shellTool, rgTool, installDependenciesTool, applyPatchTool, ...mcpTools];
+  const allTools = [
+    shellTool,
+    rgTool,
+    installDependenciesTool,
+    applyPatchTool,
+    ...mcpTools,
+  ];
   const toolsMap = Object.fromEntries(
-    allTools.map(tool => [tool.name, tool])
+    allTools.map((tool) => [tool.name, tool]),
   );
 
   const toolCalls = lastMessage.tool_calls;
@@ -87,7 +93,6 @@ export async function takeAction(
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke(toolCall.args);
-      console.log("TOOL RESULT", toolResult);
       if (typeof toolResult === "string") {
         result = toolResult;
         toolCallStatus = "success";
