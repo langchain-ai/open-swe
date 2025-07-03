@@ -26,6 +26,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
+import { CancelStreamButton } from "./cancel-stream-button";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -168,25 +169,25 @@ export function ThreadView({
                         {selectedTab === "planner" &&
                           plannerLoading &&
                           plannerCancelRef.current && (
-                            <Button
-                              onClick={() => plannerCancelRef.current?.()}
-                              variant="destructive"
-                              size="sm"
-                            >
-                              Cancel Planner
-                            </Button>
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Planner"
+                              isVisible={plannerLoading}
+                            />
                           )}
 
                         {selectedTab === "programmer" &&
                           programmerLoading &&
                           programmerCancelRef.current && (
-                            <Button
-                              onClick={() => programmerCancelRef.current?.()}
-                              variant="destructive"
-                              size="sm"
-                            >
-                              Cancel Programmer
-                            </Button>
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Programmer"
+                              isVisible={programmerLoading}
+                            />
                           )}
                       </div>
                     </div>
