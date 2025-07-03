@@ -18,7 +18,8 @@ import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
 
 interface AcceptedPlanEventData {
   planTitle: string;

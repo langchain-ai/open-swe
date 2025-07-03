@@ -11,6 +11,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
 
 type PlanItem = {
   index: number;
@@ -21,7 +22,7 @@ type PlanItem = {
 type AcceptedPlanStepProps = {
   planTitle?: string;
   planItems?: PlanItem[];
-  interruptType?: "accept" | "edit";
+  interruptType?: HumanResponse["type"];
   collapse?: boolean;
 };
 
@@ -67,13 +68,22 @@ export function AcceptedPlanStep({
     );
   };
 
-  const completedCount = planItems.filter((item) => item.completed).length;
   const totalCount = planItems.length;
 
   return (
-    <div className="group via-background to-background dark:via-background dark:to-background overflow-hidden rounded-xl border bg-gradient-to-br from-emerald-50/50 shadow-sm transition-shadow hover:shadow-md dark:from-emerald-950/20">
+    <div
+      className={cn(
+        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-emerald-50/50 transition-shadow dark:from-emerald-950/20",
+        !collapsed ? "shadow-sm hover:shadow-md" : "",
+      )}
+    >
       {/* Header */}
-      <div className="relative flex items-center border-b bg-gradient-to-r from-emerald-50 to-emerald-50/50 p-4 backdrop-blur-sm dark:from-emerald-950/30 dark:to-emerald-950/10">
+      <div
+        className={cn(
+          "relative flex items-center border-b bg-gradient-to-r from-emerald-50 to-emerald-50/50 p-4 backdrop-blur-sm dark:from-emerald-950/30 dark:to-emerald-950/10",
+          !collapsed ? "rounded-t-xl rounded-b-none" : "rounded-xl",
+        )}
+      >
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 shadow-md dark:bg-emerald-600">
           <Sparkles className="h-4 w-4 text-white" />
         </div>
@@ -87,7 +97,7 @@ export function AcceptedPlanStep({
           </div>
           {totalCount > 0 && (
             <p className="text-muted-foreground mt-1 text-xs">
-              {completedCount} of {totalCount} steps completed
+              {totalCount} steps
             </p>
           )}
         </div>
@@ -113,11 +123,11 @@ export function AcceptedPlanStep({
       {/* Content */}
       <div
         className={cn(
-          "overflow-hidden transition-all duration-300 ease-in-out",
-          collapsed ? "max-h-0" : "max-h-[500px]",
+          "transition-all duration-300 ease-in-out",
+          collapsed ? "hidden" : "flex",
         )}
       >
-        <div className="max-h-[468px] space-y-4 overflow-y-auto p-4">
+        <div className="space-y-4 p-4">
           {planTitle && (
             <div className="bg-card/50 rounded-lg border p-3">
               <h4 className="text-foreground mb-1 text-sm font-medium">
