@@ -10,6 +10,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
@@ -48,16 +49,20 @@ export async function startPlanner(
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
     };
-    const run = await langGraphClient.runs.create(plannerThreadId, "planner", {
-      input: runInput,
-      config: {
-        recursion_limit: 400,
+    const run = await langGraphClient.runs.create(
+      plannerThreadId,
+      PLANNER_GRAPH_ID,
+      {
+        input: runInput,
+        config: {
+          recursion_limit: 400,
+        },
+        ifNotExists: "create",
+        multitaskStrategy: "enqueue",
+        streamResumable: true,
+        streamMode: ["values", "messages", "custom"],
       },
-      ifNotExists: "create",
-      multitaskStrategy: "enqueue",
-      streamResumable: true,
-      streamMode: ["values", "messages", "custom"],
-    });
+    );
 
     return {
       plannerSession: {

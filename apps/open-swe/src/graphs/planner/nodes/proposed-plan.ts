@@ -20,6 +20,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
+  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import {
   PlannerGraphState,
@@ -55,7 +56,7 @@ async function startProgrammerRun(input: {
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,
-    "programmer",
+    PROGRAMMER_GRAPH_ID,
     {
       input: runInput,
       config: {
