@@ -19,9 +19,12 @@ Your sole objective in this phase is to gather comprehensive context about the c
     - You do not want to have to generate tasks such as 'Locate the XYZ file', 'Examine the structure of the codebase', or 'Do X if Y is true, otherwise to Z'. 
     - To ensure the above does not happen, you should be thorough in your context gathering. Always gather enough context to cover all edge cases, and prevent unclear instructions.
 
-4. **Leverage efficient search tools**: Use \`rg\` (ripgrep) for all file searches because it respects .gitignore patterns and provides significantly faster results than alternatives like grep or ls -R.
-   - When searching for specific file types, use glob patterns: \`rg -i pattern -g **/*.tsx project-directory/\`
-   - This explicit pattern matching ensures accurate results across all file extensions
+4. **Leverage efficient search tools**:
+    - Use \`rg\` (ripgrep) for all file searches because it respects .gitignore patterns and provides significantly faster results than alternatives like grep or ls -R.
+        - When searching for specific file types, use glob patterns: \`rg -i pattern -g **/*.tsx project-directory/\`
+        - This explicit pattern matching ensures accurate results across all file extensions
+    - If the user passes a URL, you should use the \`get_url_content\` tool to fetch the contents of the URL.
+        - You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
 
 5. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
 

@@ -13,12 +13,14 @@ import {
   FileText,
   CloudDownload,
   Search,
+  Globe,
 } from "lucide-react";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
+  createGetURLContentToolFields,
   formatRgCommand,
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
@@ -36,6 +38,8 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const getURLContentTool = createGetURLContentToolFields();
+type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -81,13 +85,20 @@ type PlannerNotesActionProps = BaseActionProps &
     actionType: "planner_notes";
   };
 
+type GetURLContentActionProps = BaseActionProps &
+  Partial<GetURLContentToolArgs> & {
+    actionType: "get_url_content";
+    output?: string;
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps
   | RgActionProps
   | InstallDependenciesActionProps
-  | PlannerNotesActionProps;
+  | PlannerNotesActionProps
+  | GetURLContentActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -101,6 +112,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   ["rg"]: "Searching...",
   [installDependenciesTool.name]: "Installing dependencies...",
   [plannerNotesTool.name]: "Saving notes...",
+  [getURLContentTool.name]: "Fetching URL content...",
 };
 
 function ActionItem(props: ActionItemProps) {
@@ -143,6 +155,10 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Dependencies installed" : "Installation failed";
       } else if (props.actionType === "planner_notes") {
         return props.success ? "Notes saved" : "Failed to save notes";
+      } else if (props.actionType === "get_url_content") {
+        return props.success
+          ? "URL content fetched"
+          : "Failed to fetch URL content";
       }
     }
 
@@ -156,7 +172,8 @@ function ActionItem(props: ActionItemProps) {
     if (
       props.actionType === "shell" ||
       props.actionType === "rg" ||
-      props.actionType === "install_dependencies"
+      props.actionType === "install_dependencies" ||
+      props.actionType === "get_url_content"
     ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
@@ -183,6 +200,8 @@ function ActionItem(props: ActionItemProps) {
       return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
     } else if (props.actionType === "rg") {
       return <Search className="text-muted-foreground mr-2 size-3.5" />;
+    } else if (props.actionType === "get_url_content") {
+      return <Globe className="text-muted-foreground mr-2 size-3.5" />;
     } else {
       return <Terminal className="text-muted-foreground mr-2 size-3.5" />;
     }
@@ -204,6 +223,16 @@ function ActionItem(props: ActionItemProps) {
           <span className="text-foreground/80 text-xs font-normal">
             Planner Notes
           </span>
+        </div>
+      );
+    }
+
+    if (props.actionType === "get_url_content") {
+      return (
+        <div className="flex-1">
+          <code className="text-foreground/80 text-xs font-normal">
+            {props.url}
+          </code>
         </div>
       );
     }
@@ -289,6 +318,14 @@ function ActionItem(props: ActionItemProps) {
               Exit code: {props.errorCode}
             </div>
           )}
+        </div>
+      );
+    } else if (props.actionType === "get_url_content" && props.output) {
+      return (
+        <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
+          <pre className="text-xs font-normal whitespace-pre-wrap">
+            {props.output}
+          </pre>
         </div>
       );
     } else if (props.actionType === "apply-patch" && props.diff) {

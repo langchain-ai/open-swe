@@ -32,6 +32,7 @@ import {
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
   createDiagnoseErrorToolFields,
+  createGetURLContentToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -58,6 +59,9 @@ type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 
 const diagnoseErrorTool = createDiagnoseErrorToolFields();
 type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
+
+const getURLContentTool = createGetURLContentToolFields();
+type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 
 function CustomComponent({
   message,
@@ -185,6 +189,16 @@ export function mapToolMessageToActionStepProps(
       notes: args.notes || [],
       reasoningText,
     };
+  } else if (toolCall?.name === getURLContentTool.name) {
+    const args = toolCall.args as GetURLContentToolArgs;
+    return {
+      actionType: "get_url_content",
+      status,
+      success,
+      url: args.url || "",
+      output: getContentString(message.content),
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -249,7 +263,8 @@ export function AssistantMessage({
           tc.name === applyPatchTool.name ||
           tc.name === rgTool.name ||
           tc.name === installDependenciesTool.name ||
-          tc.name === plannerNotesTool.name,
+          tc.name === plannerNotesTool.name ||
+          tc.name === getURLContentTool.name,
       )
     : [];
 
@@ -396,6 +411,14 @@ export function AssistantMessage({
           actionType: "planner_notes",
           status: "generating",
           notes: args?.notes || [],
+        } as ActionItemProps;
+      } else if (toolCall.name === getURLContentTool.name) {
+        const args = toolCall.args as GetURLContentToolArgs;
+        return {
+          actionType: "get_url_content",
+          status: "generating",
+          url: args?.url || "",
+          output: "",
         } as ActionItemProps;
       } else {
         if (isShellTool) {

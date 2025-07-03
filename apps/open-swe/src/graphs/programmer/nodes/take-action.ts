@@ -1,6 +1,10 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { createApplyPatchTool, createShellTool } from "../../../tools/index.js";
+import {
+  createApplyPatchTool,
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import {
   GraphState,
   GraphConfig,
@@ -45,11 +49,13 @@ export async function takeAction(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
+  const getURLContentTool = createGetURLContentTool();
   const toolsMap = {
     [applyPatchTool.name]: applyPatchTool,
     [shellTool.name]: shellTool,
     [rgTool.name]: rgTool,
     [installDependenciesTool.name]: installDependenciesTool,
+    [getURLContentTool.name]: getURLContentTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
