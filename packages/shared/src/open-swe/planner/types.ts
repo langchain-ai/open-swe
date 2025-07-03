@@ -85,6 +85,12 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  autoAcceptPlan: withLangGraph(z.custom<boolean>().optional(), {
+    reducer: {
+      schema: z.custom<boolean>().optional(),
+      fn: (_state, update) => update,
+    },
+  }),
 });
 
 export type PlannerGraphState = z.infer<typeof PlannerGraphStateObj>;
