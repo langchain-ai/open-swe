@@ -30,7 +30,8 @@ export type TooltipIconButtonProps = ButtonProps & {
     | "outline"
     | "secondary"
     | "ghost"
-    | "link";
+    | "link"
+    | "brand";
 };
 
 export const TooltipIconButton = forwardRef<
