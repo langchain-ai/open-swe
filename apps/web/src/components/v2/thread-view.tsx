@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -26,6 +26,7 @@ import {
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
+import { CancelStreamButton } from "./cancel-stream-button";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -48,6 +49,16 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  const [plannerLoading, setPlannerLoading] = useState(false);
+  const [programmerLoading, setProgrammerLoading] = useState(false);
+  const plannerCancelRef = useRef<(() => void) | null>(null);
+  const programmerCancelRef = useRef<(() => void) | null>(null);
+
+  const cancelRun = () => {
+    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
+    stream.stop();
+  };
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -126,6 +137,8 @@ export function ThreadView({
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
+          isLoading={stream.isLoading}
+          cancelRun={cancelRun}
         />
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
@@ -146,10 +159,39 @@ export function ThreadView({
                       setSelectedTab(value as "planner" | "programmer")
                     }
                   >
-                    <TabsList className="bg-muted/70 dark:bg-gray-800">
-                      <TabsTrigger value="planner">Planner</TabsTrigger>
-                      <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between">
+                      <TabsList className="bg-muted/70 dark:bg-gray-800">
+                        <TabsTrigger value="planner">Planner</TabsTrigger>
+                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                      </TabsList>
+
+                      <div className="flex gap-2">
+                        {selectedTab === "planner" &&
+                          plannerLoading &&
+                          plannerCancelRef.current && (
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Planner"
+                              isVisible={plannerLoading}
+                            />
+                          )}
+
+                        {selectedTab === "programmer" &&
+                          programmerLoading &&
+                          programmerCancelRef.current && (
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Programmer"
+                              isVisible={programmerLoading}
+                            />
+                          )}
+                      </div>
+                    </div>
+
                     <TabsContent value="planner">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
@@ -161,6 +203,10 @@ export function ThreadView({
                               setProgrammerSession={setProgrammerSession}
                               programmerSession={programmerSession}
                               setSelectedTab={setSelectedTab}
+                              onLoadingChange={setPlannerLoading}
+                              onStreamReady={(cancelFn) => {
+                                plannerCancelRef.current = cancelFn;
+                              }}
                             />
                           )}
                           {!(plannerThreadId && plannerRunId) && (
@@ -182,6 +228,10 @@ export function ThreadView({
                               graphId={PROGRAMMER_GRAPH_ID}
                               threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
+                              onLoadingChange={setProgrammerLoading}
+                              onStreamReady={(cancelFn) => {
+                                programmerCancelRef.current = cancelFn;
+                              }}
                             />
                           )}
                           {!programmerSession && (
