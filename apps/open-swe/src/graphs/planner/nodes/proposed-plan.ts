@@ -1,6 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
 import { Command, END, interrupt } from "@langchain/langgraph";
-import { GraphUpdate, GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  GraphUpdate,
+  GraphConfig,
+  TaskPlan,
+} from "@open-swe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,
@@ -23,6 +27,63 @@ import {
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "ProposedPlan");
+
+async function startProgrammerRun(input: {
+  runInput: Exclude<GraphUpdate, "taskPlan"> & { taskPlan: TaskPlan };
+  state: PlannerGraphState;
+  config: GraphConfig;
+}) {
+  const { runInput, state, config } = input;
+  const langGraphClient = createLangGraphClient({
+    defaultHeaders: {
+      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
+      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
+        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
+      [GITHUB_USER_ID_HEADER]:
+        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
+      [GITHUB_USER_LOGIN_HEADER]:
+        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
+    },
+  });
+
+  const programmerThreadId = uuidv4();
+  // Restart the sandbox.
+  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
+
+  const run = await langGraphClient.runs.create(
+    programmerThreadId,
+    "programmer",
+    {
+      input: runInput,
+      config: {
+        recursion_limit: 400,
+      },
+      ifNotExists: "create",
+      streamResumable: true,
+      streamMode: ["values", "messages", "custom"],
+    },
+  );
+
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    runInput.taskPlan,
+  );
+  return {
+    programmerSession: {
+      threadId: programmerThreadId,
+      runId: run.run_id,
+    },
+    sandboxSessionId: runInput.sandboxSessionId,
+    taskPlan: runInput.taskPlan,
+  };
+}
 
 export async function interruptProposedPlan(
   state: PlannerGraphState,
@@ -31,6 +92,37 @@ export async function interruptProposedPlan(
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
+  }
+
+  const userRequest = getUserRequest(state.messages);
+  const runInput: GraphUpdate = {
+    contextGatheringNotes: state.contextGatheringNotes,
+    branchName: state.branchName,
+    targetRepository: state.targetRepository,
+    githubIssueId: state.githubIssueId,
+  };
+
+  if (state.autoAcceptPlan) {
+    logger.info("Auto accepting plan.");
+    const planItems = proposedPlan.map((p, index) => ({
+      index,
+      plan: p,
+      completed: false,
+    }));
+    runInput.taskPlan = createNewTask(
+      userRequest,
+      state.proposedPlanTitle,
+      planItems,
+      { existingTaskPlan: state.taskPlan },
+    );
+
+    return await startProgrammerRun({
+      runInput: runInput as Exclude<GraphUpdate, "taskPlan"> & {
+        taskPlan: TaskPlan;
+      },
+      state,
+      config,
+    });
   }
 
   const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
@@ -67,30 +159,6 @@ export async function interruptProposedPlan(
     });
   }
 
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-      [GITHUB_USER_ID_HEADER]:
-        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
-      [GITHUB_USER_LOGIN_HEADER]:
-        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
-    },
-  });
-
-  const userRequest = getUserRequest(state.messages);
-
-  const runInput: GraphUpdate = {
-    contextGatheringNotes: state.contextGatheringNotes,
-    branchName: state.branchName,
-    targetRepository: state.targetRepository,
-    githubIssueId: state.githubIssueId,
-  };
-  // TODO: UPDATE ISSUE WITH PROGRAMMER THREAD ID.
-  // TODO: UPDATE ISSUE WITH TASK PLAN
-  const programmerThreadId = uuidv4();
-
   if (interruptRes.type === "accept") {
     const planItems = proposedPlan.map((p, index) => ({
       index,
@@ -125,38 +193,11 @@ export async function interruptProposedPlan(
     throw new Error("Unknown interrupt type." + interruptRes.type);
   }
 
-  // Restart the sandbox.
-  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
-
-  const run = await langGraphClient.runs.create(
-    programmerThreadId,
-    "programmer",
-    {
-      input: runInput,
-      config: {
-        recursion_limit: 400,
-      },
-      ifNotExists: "create",
-      streamResumable: true,
-      streamMode: ["values", "messages", "custom"],
+  return await startProgrammerRun({
+    runInput: runInput as Exclude<GraphUpdate, "taskPlan"> & {
+      taskPlan: TaskPlan;
     },
-  );
-
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
+    state,
     config,
-    runInput.taskPlan,
-  );
-
-  return {
-    programmerSession: {
-      threadId: programmerThreadId,
-      runId: run.run_id,
-    },
-    sandboxSessionId: runInput.sandboxSessionId,
-    taskPlan: runInput.taskPlan,
-  };
+  });
 }

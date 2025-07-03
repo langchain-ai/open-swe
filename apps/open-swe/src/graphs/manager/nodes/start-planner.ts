@@ -13,6 +13,7 @@ import {
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
+import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -38,15 +39,17 @@ export async function startPlanner(
 
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
   try {
+    const runInput: PlannerGraphUpdate = {
+      // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+      // Include the existing task plan, so the agent can use it as context when generating followup tasks.
+      taskPlan: state.taskPlan,
+      branchName: state.branchName ?? getBranchName(config),
+      autoAcceptPlan: state.autoAcceptPlan,
+    };
     const run = await langGraphClient.runs.create(plannerThreadId, "planner", {
-      input: {
-        // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-        // Include the existing task plan, so the agent can use it as context when generating followup tasks.
-        taskPlan: state.taskPlan,
-        branchName: state.branchName ?? getBranchName(config),
-      },
+      input: runInput,
       config: {
         recursion_limit: 400,
       },
