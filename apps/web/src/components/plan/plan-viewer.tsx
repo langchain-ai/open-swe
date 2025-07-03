@@ -65,8 +65,9 @@ export function PlanViewer({
                       status === "completed",
                     "border-blue-300 bg-blue-100/30 dark:border-blue-800 dark:bg-blue-900/30":
                       status === "current",
-                    "border-border bg-muted/30 dark:border-gray-800 dark:bg-gray-900/30":
-                      ["remaining", "proposed"].includes(status),
+                    "border-border bg-card": ["remaining", "proposed"].includes(
+                      status,
+                    ),
                   },
                 )}
               >
@@ -101,7 +102,7 @@ export function PlanViewer({
                         </span>
                       )}
                       {status === "proposed" && (
-                        <span className="bg-muted text-foreground/80 rounded-full px-2 py-0.5 text-xs dark:bg-gray-800 dark:text-gray-300">
+                        <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
                           Proposed
                         </span>
                       )}
@@ -162,7 +163,7 @@ export function PlanViewer({
                           });
                         });
                       }}
-                      className="text-foreground/90 dark:text-gray-200"
+                      className="text-foreground"
                     />
                   ) : (
                     <p
@@ -195,13 +196,13 @@ export function PlanViewer({
         {isProposedPlan && (
           <div
             key="add-new-plan-item"
-            className="border-border bg-muted/30 flex items-start gap-3 rounded-lg border p-3 transition-colors dark:border-gray-800 dark:bg-gray-900/30"
+            className="border-border bg-card/50 hover:bg-card flex items-start gap-4 rounded-lg border border-dashed p-4 transition-colors"
           >
             <Textarea
               placeholder="Add new plan item"
               value={newPlanItem}
               onChange={(e) => setNewPlanItem(e.target.value)}
-              className="text-gray-200"
+              className="text-foreground placeholder:text-muted-foreground"
             />
             <Button
               onClick={() => {
@@ -216,9 +217,9 @@ export function PlanViewer({
                 ]);
                 setNewPlanItem("");
               }}
-              className="text-foreground/90 hover:bg-muted hover:text-foreground mt-auto bg-inherit transition-colors dark:text-gray-200 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-              size="sm"
-              variant="outline"
+              disabled={!newPlanItem.trim()}
+              className="mt-auto"
+              variant="default"
             >
               Add
             </Button>

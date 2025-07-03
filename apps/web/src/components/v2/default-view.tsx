@@ -1,13 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { FilePlus2, Archive } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { FilePlus2, Archive, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo } from "./types";
 import { TerminalInput } from "./terminal-input";
@@ -28,6 +22,7 @@ import { QuickActions } from "./quick-actions";
 import { useState } from "react";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { TooltipIconButton } from "../ui/tooltip-icon-button";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -48,6 +43,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     dragOver,
     handlePaste,
   } = useFileUpload();
+  const [autoAccept, setAutoAccept] = useState(false);
 
   if (!apiUrl) {
     return <div>Missing API URL environment variable</div>;
@@ -112,8 +108,10 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   onPaste={handlePaste}
                   quickActionPrompt={quickActionPrompt}
                   setQuickActionPrompt={setQuickActionPrompt}
+                  autoAcceptPlan={autoAccept}
+                  setAutoAcceptPlan={setAutoAccept}
                 />
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger>
@@ -124,9 +122,24 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                           <FilePlus2 className="size-4" />
                         </Label>
                       </TooltipTrigger>
-                      <TooltipContent>Attach files</TooltipContent>
+                      <TooltipContent side="bottom">
+                        Attach files
+                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
+                  <TooltipIconButton
+                    variant={autoAccept ? "brand" : "ghost"}
+                    tooltip="Automatically accept the plan"
+                    className={cn(
+                      autoAccept
+                        ? "text-secondary"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setAutoAccept((prev) => !prev)}
+                    side="bottom"
+                  >
+                    <Zap className="size-4" />
+                  </TooltipIconButton>
                 </div>
               </div>
             </CardContent>
