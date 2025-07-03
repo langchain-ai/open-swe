@@ -42,7 +42,7 @@ const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 function createAcceptedPlanMessage(input: {
   planTitle: string;
   planItems: PlanItem[];
-  interruptType: HumanResponse["type"]
+  interruptType: HumanResponse["type"];
 }) {
   const { planTitle, planItems, interruptType } = input;
   const acceptedPlanEvent: CustomNodeEvent = {
@@ -73,7 +73,7 @@ async function startProgrammerRun(input: {
   runInput: Exclude<GraphUpdate, "taskPlan"> & { taskPlan: TaskPlan };
   state: PlannerGraphState;
   config: GraphConfig;
-  newMessages?: BaseMessage[]
+  newMessages?: BaseMessage[];
 }) {
   const { runInput, state, config, newMessages } = input;
   const langGraphClient = createLangGraphClient({
@@ -163,11 +163,13 @@ export async function interruptProposedPlan(
       },
       state,
       config,
-      newMessages: [createAcceptedPlanMessage({
-        planTitle: state.proposedPlanTitle,
-        planItems,
-        interruptType: "accept",
-      })],
+      newMessages: [
+        createAcceptedPlanMessage({
+          planTitle: state.proposedPlanTitle,
+          planItems,
+          interruptType: "accept",
+        }),
+      ],
     });
   }
 
@@ -245,10 +247,12 @@ export async function interruptProposedPlan(
     },
     state,
     config,
-    newMessages: [createAcceptedPlanMessage({
-      planTitle: state.proposedPlanTitle,
-      planItems,
-      interruptType: interruptRes.type,
-    })],
+    newMessages: [
+      createAcceptedPlanMessage({
+        planTitle: state.proposedPlanTitle,
+        planItems,
+        interruptType: interruptRes.type,
+      }),
+    ],
   });
 }
