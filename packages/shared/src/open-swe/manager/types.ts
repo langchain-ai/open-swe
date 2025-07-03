@@ -1,6 +1,7 @@
 import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
 import { z } from "zod";
+import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
@@ -34,6 +35,15 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    * Can be user specified, or defaults to `open-swe/<manager-thread-id>
    */
   branchName: z.string(),
+  /**
+   * Whether or not to auto accept the generated plan.
+   */
+  autoAcceptPlan: withLangGraph(z.custom<boolean>().optional(), {
+    reducer: {
+      schema: z.custom<boolean>().optional(),
+      fn: (_state, update) => update,
+    },
+  }),
 });
 
 export type ManagerGraphState = z.infer<typeof ManagerGraphStateObj>;
