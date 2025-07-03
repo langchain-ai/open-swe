@@ -22,6 +22,9 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createRgTool } from "../../../tools/rg.js";
+import { ZodTypeAny } from "zod";
+import { mcpClient } from "../../../utils/mcp-client.js";
+import { StructuredToolInterface } from "@langchain/core/tools";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -45,12 +48,19 @@ export async function takeAction(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const toolsMap = {
-    [applyPatchTool.name]: applyPatchTool,
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-    [installDependenciesTool.name]: installDependenciesTool,
-  };
+
+  let mcpTools: StructuredToolInterface[] = [];
+  try {
+    const client = mcpClient();
+    mcpTools = await client.getTools();
+  } catch (error) {
+    logger.error(`Error getting MCP tools: ${error}`);
+  }
+
+  const allTools = [shellTool, rgTool, installDependenciesTool, applyPatchTool, ...mcpTools];
+  const toolsMap = Object.fromEntries(
+    allTools.map(tool => [tool.name, tool])
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
@@ -77,8 +87,14 @@ export async function takeAction(
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke(toolCall.args);
-      result = toolResult.result;
-      toolCallStatus = toolResult.status;
+      console.log("TOOL RESULT", toolResult);
+      if (typeof toolResult === "string") {
+        result = toolResult;
+        toolCallStatus = "success";
+      } else {
+        result = toolResult.result;
+        toolCallStatus = toolResult.status;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -87,9 +103,21 @@ export async function takeAction(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: zodSchemaToString(tool.schema),
+          expectedSchema: (() => {
+            try {
+              return zodSchemaToString(tool.schema as ZodTypeAny);
+            } catch {
+              return JSON.stringify(tool.schema);
+            }
+          })(),
         });
-        result = formatBadArgsError(tool.schema, toolCall.args);
+        result = (() => {
+          try {
+            return formatBadArgsError(tool.schema as ZodTypeAny, toolCall.args);
+          } catch {
+            return `Invalid arguments for tool "${toolCall.name}". Expected schema: ${JSON.stringify(tool.schema)}`;
+          }
+        })();
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error

@@ -19,6 +19,9 @@ import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { mcpClient } from "../../../../utils/mcp-client.js";
+import type { StructuredToolInterface } from "@langchain/core/tools";
+
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -47,11 +50,23 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
+  let mcpTools: StructuredToolInterface[] = [];
+
+  try {
+    const client = mcpClient();
+    mcpTools = await client.getTools();
+  } catch (error) {
+    logger.error(`Error getting MCP tools: ${error}`);
+  }
+
   const tools = [
     createRgTool(state),
     createShellTool(state),
     createPlannerNotesTool(),
+    ...mcpTools,
   ];
+  logger.info(`MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`);
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,

@@ -17,6 +17,9 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
+import { mcpClient } from "../../../utils/mcp-client.js";
+import { StructuredToolInterface } from "@langchain/core/tools";
+import { ZodTypeAny } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -34,11 +37,19 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
-  const toolsMap = {
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-    [plannerNotesTool.name]: plannerNotesTool,
-  };
+
+  let mcpTools: StructuredToolInterface[] = [];
+  try {
+    const client = mcpClient();
+    mcpTools = await client.getTools();
+  } catch (error) {
+    logger.error(`Error getting MCP tools: ${error}`);
+  }
+
+  const allTools = [shellTool, rgTool, plannerNotesTool, ...mcpTools];
+  const toolsMap = Object.fromEntries(
+    allTools.map(tool => [tool.name, tool])
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
@@ -72,8 +83,14 @@ export async function takeActions(
           result: string;
           status: "success" | "error";
         };
-      result = toolResult.result;
-      toolCallStatus = toolResult.status;
+      console.log("TOOL RESULT", toolResult);
+      if (typeof toolResult === "string") {
+        result = toolResult;
+        toolCallStatus = "success";
+      } else {
+        result = toolResult.result;
+        toolCallStatus = toolResult.status;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -82,9 +99,21 @@ export async function takeActions(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: zodSchemaToString(tool.schema),
+          expectedSchema: (() => {
+            try {
+              return zodSchemaToString(tool.schema as ZodTypeAny);
+            } catch {
+              return JSON.stringify(tool.schema);
+            }
+          })(),
         });
-        result = formatBadArgsError(tool.schema, toolCall.args);
+        result = (() => {
+          try {
+            return formatBadArgsError(tool.schema as ZodTypeAny, toolCall.args);
+          } catch {
+            return `Invalid arguments for tool "${toolCall.name}". Expected schema: ${JSON.stringify(tool.schema)}`;
+          }
+        })();
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error
