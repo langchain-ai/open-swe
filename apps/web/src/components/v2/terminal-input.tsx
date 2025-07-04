@@ -45,6 +45,7 @@ export function TerminalInput({
   setQuickActionPrompt,
   autoAcceptPlan,
   setAutoAcceptPlan,
+  draftToLoad,
 }: TerminalInputProps) {
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
@@ -184,6 +185,7 @@ export function TerminalInput({
     </div>
   );
 }
+
 
 
 
