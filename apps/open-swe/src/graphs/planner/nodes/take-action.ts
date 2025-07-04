@@ -11,6 +11,7 @@ import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createRgTool } from "../../../tools/rg.js";
 import {
+import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
@@ -145,3 +146,4 @@ ${tc.content}`,
     messages: toolCallResults,
   };
 }
+
