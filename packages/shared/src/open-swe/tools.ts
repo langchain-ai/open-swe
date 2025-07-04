@@ -180,6 +180,43 @@ export function formatRgCommand(cmd: RipgrepCommand): string[] {
   return args;
 }
 
+export function createFindInstancesOfToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const findInstancesOfSchema = z.object({
+    query: z
+      .string()
+      .describe("The query/keyword to search for"),
+    
+    case_sensitive: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe("Whether or not to make the query search case sensitive. Defaults to true"),
+    
+    match_word: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe("Whether or not to only show results which match the exact keyword. Defaults to true"),
+    
+    exclude_files: z
+      .string()
+      .optional()
+      .describe("Glob pattern of files to exclude"),
+    
+    include_files: z
+      .string()
+      .optional()
+      .describe("Glob pattern of files to include"),
+  });
+
+  return {
+    name: "find_instances_of",
+    schema: findInstancesOfSchema,
+    description: `Find all instances of a string in the repository. Returns results with 3 lines of context above and below each match, absolute file paths, and total result count. The working directory this command will be executed in is \`${repoRoot}\`.`,
+  };
+}
+
 export function createSetTaskStatusToolFields() {
   const setTaskStatusToolSchema = z.object({
     reasoning: z
@@ -281,3 +318,4 @@ export function createDiagnoseErrorToolFields() {
     schema: diagnoseErrorToolSchema,
   };
 }
+
