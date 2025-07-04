@@ -35,10 +35,12 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
+  const findInstancesOfTool = createFindInstancesOfTool(state);
   const toolsMap = {
     [shellTool.name]: shellTool,
     [rgTool.name]: rgTool,
     [plannerNotesTool.name]: plannerNotesTool,
+    [findInstancesOfTool.name]: findInstancesOfTool,
   };
 
   const toolCalls = lastMessage.tool_calls;
@@ -146,4 +148,5 @@ ${tc.content}`,
     messages: toolCallResults,
   };
 }
+
 
