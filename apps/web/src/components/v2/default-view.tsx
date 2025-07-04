@@ -47,6 +47,10 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
 
+  const handleLoadDraft = (content: string) => {
+    setDraftToLoad(content);
+  };
+
   if (!apiUrl) {
     return <div>Missing API URL environment variable</div>;
   }
@@ -195,5 +199,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
 
