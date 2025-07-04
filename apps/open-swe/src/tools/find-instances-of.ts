@@ -120,6 +120,7 @@ export function createFindInstancesOfTool(
           });
           throw new Error(
             `Command failed. Exit code: ${response.exitCode}
+            
           );
         }
 
@@ -158,5 +159,6 @@ export function createFindInstancesOfTool(
 
   return findInstancesOfTool;
 }
+
 
 
