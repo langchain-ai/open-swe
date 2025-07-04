@@ -1,6 +1,5 @@
 import { initChatModel } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { createLLMFallbackWrapper } from "./llm-fallback.js";
 
 export enum Task {
   PLANNER = "planner",
@@ -80,13 +79,5 @@ export async function loadModel(config: GraphConfig, task: Task) {
       : { maxTokens }),
   });
 
-  // Wrap the model with fallback functionality
-  const wrappedModel = createLLMFallbackWrapper(model, {
-    maxTokens,
-    temperature: thinkingModel ? undefined : temperature,
-    originalProvider: modelProvider,
-    originalModelName: modelName,
-  });
-
-  return wrappedModel;
+  return model;
 }
