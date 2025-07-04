@@ -11,10 +11,10 @@ import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createRgTool } from "../../../tools/rg.js";
 import {
-import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
+import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
@@ -148,5 +148,6 @@ ${tc.content}`,
     messages: toolCallResults,
   };
 }
+
 
 
