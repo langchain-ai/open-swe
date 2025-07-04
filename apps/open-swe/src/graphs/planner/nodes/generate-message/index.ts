@@ -19,6 +19,7 @@ import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createFindInstancesOfTool } from "../../../../tools/find-instances-of.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -50,6 +51,7 @@ export async function generateAction(
   const tools = [
     createRgTool(state),
     createShellTool(state),
+    createFindInstancesOfTool(state),
     createPlannerNotesTool(),
   ];
   const modelWithTools = model.bindTools(tools, {
@@ -90,3 +92,4 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
