@@ -148,6 +148,3 @@ ${tc.content}`,
     messages: toolCallResults,
   };
 }
-
-
-

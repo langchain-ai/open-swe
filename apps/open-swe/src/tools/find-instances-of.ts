@@ -36,32 +36,32 @@ function formatFindInstancesOfCommand(input: FindInstancesOfInput): string[] {
 
   // Always include these flags for consistent output
   args.push("--color", "never", "--line-number", "--heading");
-  
+
   // Add context lines (3 above and 3 below)
   args.push("-A", "3", "-B", "3");
-  
+
   // Handle case sensitivity
   if (!input.case_sensitive) {
     args.push("-i");
   }
-  
+
   // Handle word matching
   if (input.match_word) {
     args.push("--word-regexp");
   }
-  
+
   // Handle file inclusion/exclusion patterns
   if (input.exclude_files) {
     args.push("-g", `!${input.exclude_files}`);
   }
-  
+
   if (input.include_files) {
     args.push("-g", input.include_files);
   }
-  
+
   // Add the search query as the last argument
   args.push(input.query);
-  
+
   return args;
 }
 
@@ -69,7 +69,9 @@ export function createFindInstancesOfTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
   const findInstancesOfTool = tool(
-    async (input: FindInstancesOfInput): Promise<{ result: string; status: "success" | "error" }> => {
+    async (
+      input: FindInstancesOfInput,
+    ): Promise<{ result: string; status: "success" | "error" }> => {
       let sandbox: Sandbox | undefined;
       try {
         const state = getCurrentTaskInput<GraphState>();
@@ -94,7 +96,7 @@ export function createFindInstancesOfTool(
           command: command.join(" "),
           repoRoot,
         });
-        
+
         const response = await sandbox.process.executeCommand(
           wrapScript(command.join(" ")),
           repoRoot,
@@ -118,9 +120,7 @@ export function createFindInstancesOfTool(
             error_result: response,
             input,
           });
-          throw new Error(
-            "Command failed. Exit code: " + response.exitCode,
-          );
+          throw new Error("Command failed. Exit code: " + response.exitCode);
         }
 
         return {
@@ -134,9 +134,7 @@ export function createFindInstancesOfTool(
             input,
             error: errorFields,
           });
-          throw new Error(
-            "Command failed. Exit code: " + errorFields.exitCode,
-          );
+          throw new Error("Command failed. Exit code: " + errorFields.exitCode);
         }
 
         logger.error(
@@ -158,11 +156,3 @@ export function createFindInstancesOfTool(
 
   return findInstancesOfTool;
 }
-
-
-
-
-
-
-
-

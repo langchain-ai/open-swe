@@ -180,30 +180,34 @@ export function formatRgCommand(cmd: RipgrepCommand): string[] {
   return args;
 }
 
-export function createFindInstancesOfToolFields(targetRepository: TargetRepository) {
+export function createFindInstancesOfToolFields(
+  targetRepository: TargetRepository,
+) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
   const findInstancesOfSchema = z.object({
-    query: z
-      .string()
-      .describe("The query/keyword to search for"),
-    
+    query: z.string().describe("The query/keyword to search for"),
+
     case_sensitive: z
       .boolean()
       .optional()
       .default(true)
-      .describe("Whether or not to make the query search case sensitive. Defaults to true"),
-    
+      .describe(
+        "Whether or not to make the query search case sensitive. Defaults to true",
+      ),
+
     match_word: z
       .boolean()
       .optional()
       .default(true)
-      .describe("Whether or not to only show results which match the exact keyword. Defaults to true"),
-    
+      .describe(
+        "Whether or not to only show results which match the exact keyword. Defaults to true",
+      ),
+
     exclude_files: z
       .string()
       .optional()
       .describe("Glob pattern of files to exclude"),
-    
+
     include_files: z
       .string()
       .optional()
@@ -318,4 +322,3 @@ export function createDiagnoseErrorToolFields() {
     schema: diagnoseErrorToolSchema,
   };
 }
-
