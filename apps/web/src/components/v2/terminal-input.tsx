@@ -105,6 +105,7 @@ export function TerminalInput({
         // set session storage so the stream can be resumed after redirect.
         sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
         push(`/chat/${newThreadId}`);
+        clearCurrentDraft();
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
@@ -182,5 +183,6 @@ export function TerminalInput({
     </div>
   );
 }
+
 
 
