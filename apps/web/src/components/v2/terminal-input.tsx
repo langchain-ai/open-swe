@@ -134,6 +134,13 @@ export function TerminalInput({
     }
   }, [quickActionPrompt]);
 
+  // Handle draft loading from external components
+  useEffect(() => {
+    if (draftToLoad) {
+      setMessage(draftToLoad);
+    }
+  }, [draftToLoad, setMessage]);
+
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
       <div className="text-foreground flex items-center gap-1">
