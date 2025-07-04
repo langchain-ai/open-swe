@@ -111,7 +111,7 @@ export function createFindInstancesOfTool(
           logger.info("Exit code 1. no results found", {
             ...response,
           });
-          successResult = `Exit code 1. No results found.
+          successResult = `Exit code 1. No results found.\n\n${response.result}`;
         } else if (response.exitCode > 1) {
           logger.error("Failed to run find_instances_of command", {
             error: response.result,
@@ -158,6 +158,7 @@ export function createFindInstancesOfTool(
 
   return findInstancesOfTool;
 }
+
 
 
 
