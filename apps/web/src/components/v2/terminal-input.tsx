@@ -46,7 +46,7 @@ export function TerminalInput({
   setAutoAcceptPlan,
 }: TerminalInputProps) {
   const { push } = useRouter();
-  const [message, setMessage] = useState("");
+  const { message, setMessage, clearCurrentDraft } = useDraftStorage();
   const { getConfig } = useConfigStore();
   const { selectedRepository } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
@@ -182,4 +182,5 @@ export function TerminalInput({
     </div>
   );
 }
+
 
