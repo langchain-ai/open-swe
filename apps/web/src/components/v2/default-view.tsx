@@ -152,6 +152,9 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             </CardContent>
           </Card>
 
+          {/* Saved Drafts */}
+          <DraftsSection onLoadDraft={handleLoadDraft} />
+
           {/* Recent & Running Threads */}
           <div>
             <div className="mb-3 flex items-center justify-between">
@@ -200,6 +203,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
 
 
