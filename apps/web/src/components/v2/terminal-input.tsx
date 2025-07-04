@@ -192,8 +192,3 @@ export function TerminalInput({
     </div>
   );
 }
-
-
-
-
-

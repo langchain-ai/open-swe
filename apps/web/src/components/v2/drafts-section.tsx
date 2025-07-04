@@ -28,10 +28,10 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
     };
 
     loadDrafts();
-    
+
     // Set up interval to refresh drafts periodically
     const interval = setInterval(loadDrafts, 1000);
-    
+
     return () => clearInterval(interval);
   }, [getAllDrafts]);
 
@@ -50,8 +50,10 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp);
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
+    const diffInMinutes = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60),
+    );
+
     if (diffInMinutes < 1) {
       return "Just now";
     } else if (diffInMinutes < 60) {
@@ -81,7 +83,7 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
           Saved Drafts
         </h2>
         <span className="text-muted-foreground text-xs">
-          {drafts.length} draft{drafts.length !== 1 ? 's' : ''}
+          {drafts.length} draft{drafts.length !== 1 ? "s" : ""}
         </span>
       </div>
 
@@ -99,7 +101,7 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
                     {truncateContent(draft.content, 60)}
                   </CardTitle>
                   <div className="mt-1 flex items-center gap-1">
-                    <FileText className="h-3 w-3 text-muted-foreground" />
+                    <FileText className="text-muted-foreground h-3 w-3" />
                     <span className="text-muted-foreground text-xs">Draft</span>
                   </div>
                 </div>
@@ -113,7 +115,7 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-muted-foreground hover:text-red-500 h-5 w-5 p-0"
+                  className="text-muted-foreground h-5 w-5 p-0 hover:text-red-500"
                   onClick={(e) => handleDeleteDraft(draft.id, e)}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -126,4 +128,3 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
     </div>
   );
 }
-

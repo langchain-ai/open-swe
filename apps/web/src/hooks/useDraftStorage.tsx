@@ -73,7 +73,7 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
     debounce((content: string) => {
       saveDraftToLocalStorage(content);
     }, 500),
-    []
+    [],
   );
 
   // Load initial draft on mount
@@ -87,10 +87,13 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
     }
   }, []);
 
-  const setMessage = useCallback((newMessage: string) => {
-    setMessageState(newMessage);
-    debouncedSave(newMessage);
-  }, [debouncedSave]);
+  const setMessage = useCallback(
+    (newMessage: string) => {
+      setMessageState(newMessage);
+      debouncedSave(newMessage);
+    },
+    [debouncedSave],
+  );
 
   const clearCurrentDraft = useCallback(() => {
     localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -98,29 +101,32 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
 
   const saveDraft = useCallback((content: string) => {
     if (!content.trim()) return;
-    
+
     const drafts = getDraftsFromLocalStorage();
     const newDraft: Draft = {
       id: Date.now().toString(),
       content: content.trim(),
       timestamp: Date.now(),
     };
-    
+
     const updatedDrafts = [newDraft, ...drafts.slice(0, 9)]; // Keep only 10 most recent drafts
     saveDraftsToLocalStorage(updatedDrafts);
   }, []);
 
-  const loadDraft = useCallback((draftId: string) => {
-    const drafts = getDraftsFromLocalStorage();
-    const draft = drafts.find(d => d.id === draftId);
-    if (draft) {
-      setMessage(draft.content);
-    }
-  }, [setMessage]);
+  const loadDraft = useCallback(
+    (draftId: string) => {
+      const drafts = getDraftsFromLocalStorage();
+      const draft = drafts.find((d) => d.id === draftId);
+      if (draft) {
+        setMessage(draft.content);
+      }
+    },
+    [setMessage],
+  );
 
   const deleteDraft = useCallback((draftId: string) => {
     const drafts = getDraftsFromLocalStorage();
-    const updatedDrafts = drafts.filter(d => d.id !== draftId);
+    const updatedDrafts = drafts.filter((d) => d.id !== draftId);
     saveDraftsToLocalStorage(updatedDrafts);
   }, []);
 
@@ -138,4 +144,3 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
     getAllDrafts,
   };
 };
-
