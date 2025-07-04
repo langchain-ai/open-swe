@@ -114,6 +114,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   onPaste={handlePaste}
                   quickActionPrompt={quickActionPrompt}
                   setQuickActionPrompt={setQuickActionPrompt}
+                  draftToLoad={draftToLoad}
                   autoAcceptPlan={autoAccept}
                   setAutoAcceptPlan={setAutoAccept}
                 />
@@ -199,6 +200,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
 
 
