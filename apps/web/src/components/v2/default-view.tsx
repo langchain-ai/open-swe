@@ -34,6 +34,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const router = useRouter();
   const [quickActionPrompt, setQuickActionPrompt] = useState("");
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const [draftToLoad, setDraftToLoad] = useState("");
   const assistantId: string | undefined = MANAGER_GRAPH_ID;
   const {
     contentBlocks,
@@ -194,4 +195,5 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
