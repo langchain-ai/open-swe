@@ -30,6 +30,7 @@ interface TerminalInputProps {
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
   autoAcceptPlan: boolean;
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
+  draftToLoad?: string;
 }
 
 export function TerminalInput({
@@ -183,6 +184,7 @@ export function TerminalInput({
     </div>
   );
 }
+
 
 
 
