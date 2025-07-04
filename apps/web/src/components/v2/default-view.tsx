@@ -20,6 +20,7 @@ import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
 import { useState } from "react";
+import { DraftsSection } from "./drafts-section";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
@@ -193,3 +194,4 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
