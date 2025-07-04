@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { useDraftStorage } from "@/hooks/useDraftStorage";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -181,3 +182,4 @@ export function TerminalInput({
     </div>
   );
 }
+
