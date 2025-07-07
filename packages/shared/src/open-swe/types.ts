@@ -18,9 +18,11 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  DEFAULT_MCP_SERVERS,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
+
 
 export type PlanItem = {
   /**
@@ -133,6 +135,24 @@ export type CustomRules = {
   repositoryStructure?: string;
   dependenciesAndInstallation?: string;
   testingInstructions?: string;
+};
+
+export type McpServerConfig = {
+  /**
+   * The command to run for this MCP server
+   */
+  command: string;
+  /**
+   * Arguments to pass to the command
+   */
+  args: string[];
+};
+
+export type McpServers = {
+  /**
+   * Map of server names to their configurations
+   */
+  [serverName: string]: McpServerConfig;
 };
 
 export const GraphAnnotation = MessagesZodState.extend({
@@ -407,6 +427,13 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  mcpServers: {
+    x_open_swe_ui_config: {
+      type: "textarea",
+      default: JSON.stringify(DEFAULT_MCP_SERVERS),
+      description: "JSON configuration for custom MCP servers. LangGraph docs server is set by default.",
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -576,6 +603,15 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER]),
+  /**
+   * Custom MCP servers configuration as JSON string. Merges with default servers.
+   * @default Default LangGraph docs MCP server
+   */
+  mcpServers: z
+    .string()
+    .optional()
+    .default(JSON.stringify(DEFAULT_MCP_SERVERS))
+    .langgraph.metadata(GraphConfigurationMetadata.mcpServers),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

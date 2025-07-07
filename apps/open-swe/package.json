@@ -28,6 +28,7 @@
     "@langchain/google-genai": "^0.2.9",
     "@langchain/langgraph": "^0.3.3",
     "@langchain/langgraph-sdk": "^0.0.85",
+    "@langchain/mcp-adapters": "^0.5.2",
     "@langchain/openai": "^0.5.10",
     "@octokit/app": "^16.0.1",
     "@octokit/core": "^7.0.2",

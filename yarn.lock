@@ -2303,6 +2303,7 @@ __metadata:
     "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-cli": latest
     "@langchain/langgraph-sdk": ^0.0.85
+    "@langchain/mcp-adapters": ^0.5.2
     "@langchain/openai": ^0.5.10
     "@octokit/app": ^16.0.1
     "@octokit/core": ^7.0.2
@@ -10775,7 +10776,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "open-swe@workspace:."
   dependencies:
-    "@langchain/mcp-adapters": ^0.5.2
     turbo: ^2.5.0
     typescript: ^5
   languageName: unknown

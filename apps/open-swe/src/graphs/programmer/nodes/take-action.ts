@@ -11,8 +11,8 @@ import {
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import {
-  formatBadArgsError,
-  zodSchemaToString,
+  safeSchemaToString,
+  safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
@@ -22,9 +22,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createRgTool } from "../../../tools/rg.js";
-import { ZodTypeAny } from "zod";
-import { mcpClient } from "../../../utils/mcp-client.js";
-import { StructuredToolInterface } from "@langchain/core/tools";
+import { getMcpTools } from "../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -49,13 +47,7 @@ export async function takeAction(
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
 
-  let mcpTools: StructuredToolInterface[] = [];
-  try {
-    const client = mcpClient();
-    mcpTools = await client.getTools();
-  } catch (error) {
-    logger.error(`Error getting MCP tools: ${error}`);
-  }
+  const mcpTools = await getMcpTools(config);
 
   const allTools = [
     shellTool,
@@ -108,21 +100,9 @@ export async function takeAction(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: (() => {
-            try {
-              return zodSchemaToString(tool.schema as ZodTypeAny);
-            } catch {
-              return JSON.stringify(tool.schema);
-            }
-          })(),
+          expectedSchema: safeSchemaToString(tool.schema),
         });
-        result = (() => {
-          try {
-            return formatBadArgsError(tool.schema as ZodTypeAny, toolCall.args);
-          } catch {
-            return `Invalid arguments for tool "${toolCall.name}". Expected schema: ${JSON.stringify(tool.schema)}`;
-          }
-        })();
+        result = safeBadArgsError(tool.schema, toolCall.args, toolCall.name);
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error

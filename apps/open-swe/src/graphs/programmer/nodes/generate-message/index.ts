@@ -27,8 +27,7 @@ import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { mcpClient } from "../../../../utils/mcp-client.js";
-import type { StructuredToolInterface } from "@langchain/core/tools";
+import { getMcpTools } from "../../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -73,14 +72,7 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  let mcpTools: StructuredToolInterface[] = [];
-
-  try {
-    const client = mcpClient();
-    mcpTools = await client.getTools();
-  } catch (error) {
-    logger.error(`Error getting MCP tools: ${error}`);
-  }
+  const mcpTools = await getMcpTools(config);
 
   const tools = [
     createRgTool(state),
