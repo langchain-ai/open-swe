@@ -103,8 +103,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
   );
-
-  const joinedKey = useRef<string | null>(null);
+  const joinedRunId = useRef<string | undefined>(undefined);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -162,19 +161,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
-  // Join stream when we have a new threadId+runId combination
   useEffect(() => {
-    if (!runId || !threadId) {
-      joinedKey.current = null;
-      return;
-    }
-
-    const currentKey = `${threadId}:${runId}`;
-    if (joinedKey.current !== currentKey) {
-      joinedKey.current = currentKey;
+    if (runId && runId !== joinedRunId.current) {
+      joinedRunId.current = runId;
       stream.joinStream(runId).catch(console.error);
+    } else if (!runId) {
+      joinedRunId.current = undefined;
     }
-  }, [runId, threadId, stream]);
+  }, [runId, stream]);
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
