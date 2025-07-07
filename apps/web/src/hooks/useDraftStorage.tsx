@@ -21,11 +21,12 @@ interface UseDraftStorageReturn {
 }
 
 const saveDraftToLocalStorage = (content: string) => {
+  if (typeof window === "undefined") return;
   try {
     if (content.trim()) {
-      localStorage.setItem(DRAFT_STORAGE_KEY, content);
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, content);
     } else {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
   } catch (error) {
     console.warn("Failed to save draft to localStorage:", error);
@@ -33,8 +34,9 @@ const saveDraftToLocalStorage = (content: string) => {
 };
 
 const getDraftFromLocalStorage = (): string => {
+  if (typeof window === "undefined") return "";
   try {
-    const stored = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY);
     return stored || "";
   } catch (error) {
     console.warn("Failed to retrieve draft from localStorage:", error);
@@ -43,16 +45,18 @@ const getDraftFromLocalStorage = (): string => {
 };
 
 const saveDraftsToLocalStorage = (drafts: Draft[]) => {
+  if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+    window.localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
   } catch (error) {
     console.warn("Failed to save drafts to localStorage:", error);
   }
 };
 
 const getDraftsFromLocalStorage = (): Draft[] => {
+  if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(DRAFTS_STORAGE_KEY);
+    const stored = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       return Array.isArray(parsed) ? parsed : [];
@@ -96,7 +100,8 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
   );
 
   const clearCurrentDraft = useCallback(() => {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(DRAFT_STORAGE_KEY);
   }, []);
 
   const saveDraft = useCallback((content: string) => {
