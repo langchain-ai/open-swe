@@ -5,6 +5,7 @@ import {
   verifyGithubUserId,
 } from "@open-swe/shared/github/verify-user";
 import {
+  GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
@@ -14,14 +15,31 @@ import { decryptGitHubToken } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 
+// TODO: Export from LangGraph SDK
+export interface BaseAuthReturn {
+  is_authenticated?: boolean;
+  display_name?: string;
+  identity: string;
+  permissions: string[];
+}
+
+interface AuthenticateReturn extends BaseAuthReturn {
+  metadata: {
+    installation_id: string;
+  };
+}
+
 export const auth = new Auth()
-  .authenticate(async (request: Request) => {
+  .authenticate<AuthenticateReturn>(async (request: Request) => {
     if (request.method === "OPTIONS") {
       return {
         identity: "anonymous",
         permissions: [],
         is_authenticated: false,
         display_name: "CORS Preflight",
+        metadata: {
+          installation_id: "",
+        },
       };
     }
 
@@ -36,6 +54,15 @@ export const auth = new Auth()
       throw new Error(
         "Missing GITHUB_TOKEN_ENCRYPTION_KEY environment variable.",
       );
+    }
+
+    const installationIdHeader = request.headers.get(
+      GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
+    );
+    if (!installationIdHeader) {
+      throw new HTTPException(401, {
+        message: "GitHub installation ID header missing",
+      });
     }
 
     // We don't do anything with this token right now, but still confirm it
@@ -84,6 +111,9 @@ export const auth = new Auth()
       identity: user.id.toString(),
       is_authenticated: true,
       display_name: user.login,
+      metadata: {
+        installation_id: installationIdHeader,
+      },
       permissions: [
         "threads:create",
         "threads:create_run",

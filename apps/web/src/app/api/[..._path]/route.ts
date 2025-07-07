@@ -3,6 +3,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
 } from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { NextRequest } from "next/server";
@@ -24,19 +25,9 @@ function getGitHubAccessTokenOrThrow(
 }
 
 async function getGitHubInstallationTokenOrThrow(
-  req: NextRequest,
+  installationIdCookie: string,
   encryptionKey: string,
 ): Promise<string> {
-  const installationIdCookie = req.cookies.get(
-    GITHUB_INSTALLATION_ID_COOKIE,
-  )?.value;
-
-  if (!installationIdCookie) {
-    throw new Error(
-      "No GitHub installation ID found. GitHub App must be installed first.",
-    );
-  }
-
   const appId = process.env.GITHUB_APP_ID;
   const privateAppKey = process.env.GITHUB_APP_PRIVATE_KEY;
 
@@ -67,11 +58,24 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
           "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
         );
       }
+      const installationIdCookie = req.cookies.get(
+        GITHUB_INSTALLATION_ID_COOKIE,
+      )?.value;
+
+      if (!installationIdCookie) {
+        throw new Error(
+          "No GitHub installation ID found. GitHub App must be installed first.",
+        );
+      }
 
       return {
         [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
         [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-          await getGitHubInstallationTokenOrThrow(req, encryptionKey),
+          await getGitHubInstallationTokenOrThrow(
+            installationIdCookie,
+            encryptionKey,
+          ),
+        [GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX]: installationIdCookie,
       };
     },
   });

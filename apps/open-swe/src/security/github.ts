@@ -18,7 +18,16 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
   const githubDeliveryHeader = requestClone.headers.get("x-github-delivery");
   const githubEventHeader = requestClone.headers.get("x-github-event");
   const githubSignatureHeader = requestClone.headers.get("x-hub-signature-256");
-  if (!githubDeliveryHeader || !githubEventHeader || !githubSignatureHeader) {
+  const githubInstallationIdHeader = requestClone.headers.get(
+    "x-github-hook-installation-target-id",
+  );
+  if (
+    !githubDeliveryHeader ||
+    !githubEventHeader ||
+    !githubSignatureHeader ||
+    !githubInstallationIdHeader
+  ) {
+    console.log("Missing GitHub webhook headers.");
     throw new HTTPException(401, {
       message: "Missing GitHub webhook headers.",
     });
@@ -34,10 +43,14 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     });
   }
 
+  console.log("Got installation id", githubInstallationIdHeader)
   return {
     identity: "x-internal-github-bot",
     is_authenticated: true,
     display_name: "GitHub Bot",
+    metadata: {
+      installation_id: githubInstallationIdHeader,
+    },
     permissions: [
       "threads:create",
       "threads:create_run",

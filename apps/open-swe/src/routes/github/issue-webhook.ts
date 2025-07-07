@@ -6,6 +6,7 @@ import { GitHubApp } from "../../utils/github-app.js";
 import { Webhooks } from "@octokit/webhooks";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 import {
+  GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
@@ -65,8 +66,10 @@ const getHeaders = (
   const installationId = headers["x-github-hook-installation-target-id"] || "";
   const targetType = headers["x-github-hook-installation-target-type"] || "";
   if (!webhookId || !webhookEvent || !installationId || !targetType) {
+    console.log("Missing webhook headers");
     return null;
   }
+  console.log("Got installation id", installationId)
   return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
@@ -81,6 +84,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     !payload.label?.name ||
     !validOpenSWELabels.some((l) => l === payload.label?.name)
   ) {
+    console.log("Invalid label");
     return;
   }
   const isAutoAcceptLabel = payload.label.name === getOpenSWEAutoAcceptLabel();
@@ -121,6 +125,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
           token,
           process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
         ),
+        [GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX]: installationId.toString(),
         [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
         [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
       },
