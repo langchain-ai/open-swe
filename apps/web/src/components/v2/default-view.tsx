@@ -20,6 +20,7 @@ import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
 import { useState } from "react";
+import { DraftsSection } from "./drafts-section";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
@@ -33,6 +34,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const router = useRouter();
   const [quickActionPrompt, setQuickActionPrompt] = useState("");
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const [draftToLoad, setDraftToLoad] = useState("");
   const assistantId: string | undefined = MANAGER_GRAPH_ID;
   const {
     contentBlocks,
@@ -44,6 +46,10 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
+
+  const handleLoadDraft = (content: string) => {
+    setDraftToLoad(content);
+  };
 
   if (!apiUrl) {
     return <div>Missing API URL environment variable</div>;
@@ -108,6 +114,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   onPaste={handlePaste}
                   quickActionPrompt={quickActionPrompt}
                   setQuickActionPrompt={setQuickActionPrompt}
+                  draftToLoad={draftToLoad}
                   autoAcceptPlan={autoAccept}
                   setAutoAcceptPlan={setAutoAccept}
                 />
@@ -188,6 +195,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             )}
           </div>
           <QuickActions setQuickActionPrompt={setQuickActionPrompt} />
+          {/* TODO: Better multiple draft handling. Not actually used right now */}
+          <DraftsSection onLoadDraft={handleLoadDraft} />
         </div>
       </div>
     </div>
