@@ -270,6 +270,26 @@ export function createTakePlannerNotesFields() {
   };
 }
 
+export function createLangGraphDocsReadFields() {
+  const langGraphDocsReadSchema = z.object({
+    query: z
+      .string()
+      .describe(
+        "Specific question about LangGraph API, syntax, patterns, or implementation details that you need answers for user's request to be executed.",
+      ),
+  });
+
+  return {
+    name: "langgraph_docs_read",
+    schema: langGraphDocsReadSchema,
+    description:
+      "Query the LangGraph documentation for specific API information, syntax, or examples. " +
+      "Use this tool when you need to understand LangGraph APIs, patterns, state management, " +
+      "graph structures, tool integration, or implementation details." +
+      "This should be used when you come across codebase that uses LangGraph, or you think the requested implementation requires LangGraph.",
+  };
+}
+
 export function createDiagnoseErrorToolFields() {
   const diagnoseErrorToolSchema = z.object({
     diagnosis: z.string().describe("The diagnosis of the error."),

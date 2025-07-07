@@ -19,6 +19,7 @@ import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createLangGraphDocsReadTool } from "../../../../tools/read-langgraph-docs.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -51,6 +52,7 @@ export async function generateAction(
     createRgTool(state),
     createShellTool(state),
     createPlannerNotesTool(),
+    createLangGraphDocsReadTool(config),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
