@@ -5,16 +5,11 @@ import {
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-  PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -27,15 +22,7 @@ export async function startPlanner(
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-      [GITHUB_USER_ID_HEADER]:
-        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
-      [GITHUB_USER_LOGIN_HEADER]:
-        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
-    },
+    defaultHeaders: getDefaultHeaders(config),
   });
 
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();

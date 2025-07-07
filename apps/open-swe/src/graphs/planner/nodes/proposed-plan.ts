@@ -16,10 +16,6 @@ import { startSandbox } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../../../utils/user-request.js";
 import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
   DO_NOT_RENDER_ID_PREFIX,
@@ -36,6 +32,7 @@ import {
   ACCEPTED_PLAN_NODE_ID,
   CustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -77,15 +74,7 @@ async function startProgrammerRun(input: {
 }) {
   const { runInput, state, config, newMessages } = input;
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-      [GITHUB_USER_ID_HEADER]:
-        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
-      [GITHUB_USER_LOGIN_HEADER]:
-        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
-    },
+    defaultHeaders: getDefaultHeaders(config),
   });
 
   const programmerThreadId = uuidv4();
