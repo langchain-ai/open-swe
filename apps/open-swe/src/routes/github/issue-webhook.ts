@@ -6,7 +6,7 @@ import { GitHubApp } from "../../utils/github-app.js";
 import { Webhooks } from "@octokit/webhooks";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 import {
-  GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
@@ -122,7 +122,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
           token,
           process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
         ),
-        [GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX]: installationId.toString(),
+        [GITHUB_INSTALLATION_NAME]: issueData.owner,
         [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
         [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
       },

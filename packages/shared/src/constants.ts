@@ -7,8 +7,7 @@ export const PLAN_INTERRUPT_ACTION_TITLE = "Approve/Edit Plan";
 // Prefix the access token with `x-` so that it's included in requests to the LangGraph server.
 export const GITHUB_TOKEN_COOKIE = "x-github-access-token";
 export const GITHUB_INSTALLATION_TOKEN_COOKIE = "x-github-installation-token";
-export const GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX =
-  "x-github-installation-id";
+export const GITHUB_INSTALLATION_NAME = "x-github-installation-name";
 
 export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";

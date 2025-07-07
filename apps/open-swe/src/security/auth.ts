@@ -5,7 +5,7 @@ import {
   verifyGithubUserId,
 } from "@open-swe/shared/github/verify-user";
 import {
-  GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
@@ -25,7 +25,7 @@ export interface BaseAuthReturn {
 
 interface AuthenticateReturn extends BaseAuthReturn {
   metadata: {
-    installation_id: string;
+    installation_name: string;
   };
 }
 
@@ -38,7 +38,7 @@ export const auth = new Auth()
         is_authenticated: false,
         display_name: "CORS Preflight",
         metadata: {
-          installation_id: "",
+          installation_name: "n/a",
         },
       };
     }
@@ -56,12 +56,12 @@ export const auth = new Auth()
       );
     }
 
-    const installationIdHeader = request.headers.get(
-      GITHUB_INSTALLATION_ID_COOKIE_X_PREFIX,
+    const installationNameHeader = request.headers.get(
+      GITHUB_INSTALLATION_NAME,
     );
-    if (!installationIdHeader) {
+    if (!installationNameHeader) {
       throw new HTTPException(401, {
-        message: "GitHub installation ID header missing",
+        message: "GitHub installation name header missing",
       });
     }
 
@@ -112,7 +112,7 @@ export const auth = new Auth()
       is_authenticated: true,
       display_name: user.login,
       metadata: {
-        installation_id: installationIdHeader,
+        installation_name: installationNameHeader,
       },
       permissions: [
         "threads:create",
