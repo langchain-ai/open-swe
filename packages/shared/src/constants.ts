@@ -21,16 +21,16 @@ export const GITHUB_USER_ID_HEADER = "x-github-user-id";
 export const GITHUB_USER_LOGIN_HEADER = "x-github-user-login";
 
 export const DEFAULT_MCP_SERVERS = {
-    "langgraph-docs-mcp": {
-      command: "uvx",
-      args: [
-        "--from",
-        "mcpdoc",
-        "mcpdoc",
-        "--urls",
-        "LangGraphPY:https://langchain-ai.github.io/langgraph/llms.txt LangGraphJS:https://langchain-ai.github.io/langgraphjs/llms.txt",
-        "--transport",
-        "stdio",
-      ],
-    },
+  "langgraph-docs-mcp": {
+    command: "uvx",
+    args: [
+      "--from",
+      "mcpdoc",
+      "mcpdoc",
+      "--urls",
+      "LangGraphPY:https://langchain-ai.github.io/langgraph/llms.txt LangGraphJS:https://langchain-ai.github.io/langgraphjs/llms.txt",
+      "--transport",
+      "stdio",
+    ],
+  },
 };

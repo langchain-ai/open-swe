@@ -85,8 +85,11 @@ export function safeSchemaToString(schema: unknown): string {
   }
 }
 
-
-export function safeBadArgsError(schema: unknown, args: any, toolName: string): string {
+export function safeBadArgsError(
+  schema: unknown,
+  args: any,
+  toolName: string,
+): string {
   if (schema instanceof z.ZodType) {
     try {
       const result = formatBadArgsError(schema, args);

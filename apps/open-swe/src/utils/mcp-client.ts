@@ -16,7 +16,7 @@ let lastConfigHash: string | null = null;
 export function mcpClient(mcpServers?: McpServers): MultiServerMCPClient {
   const serversToUse = mcpServers || {};
   const configHash = JSON.stringify(serversToUse);
-  
+
   // Recreate client if configuration changed
   if (!mcpClientInstance || lastConfigHash !== configHash) {
     mcpClientInstance = new MultiServerMCPClient({
@@ -36,17 +36,21 @@ export function mcpClient(mcpServers?: McpServers): MultiServerMCPClient {
  * @param config GraphConfig containing optional MCP servers configuration
  * @returns Array of MCP tools, empty array if error occurs
  */
-export async function getMcpTools(config?: GraphConfig): Promise<StructuredToolInterface[]> {
+export async function getMcpTools(
+  config?: GraphConfig,
+): Promise<StructuredToolInterface[]> {
   try {
     let mergedServers = { ...DEFAULT_MCP_SERVERS };
-    
+
     const mcpServersConfig = config?.configurable?.["mcpServers"];
     if (mcpServersConfig) {
       try {
         const userServers: McpServers = JSON.parse(mcpServersConfig);
         mergedServers = { ...mergedServers, ...userServers };
       } catch (error) {
-        logger.warn(`Failed to parse user MCP servers configuration: ${error}. Using defaults only.`);
+        logger.warn(
+          `Failed to parse user MCP servers configuration: ${error}. Using defaults only.`,
+        );
       }
     }
     const client = mcpClient(mergedServers);

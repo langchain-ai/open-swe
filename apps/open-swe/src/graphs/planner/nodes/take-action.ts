@@ -6,7 +6,10 @@ import {
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { safeSchemaToString, safeBadArgsError } from "../../../utils/zod-to-string.js";
+import {
+  safeSchemaToString,
+  safeBadArgsError,
+} from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createRgTool } from "../../../tools/rg.js";
 import {

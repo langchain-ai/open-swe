@@ -23,7 +23,6 @@ import {
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
-
 export type PlanItem = {
   /**
    * The index of the plan item. This is the order in which
@@ -431,7 +430,8 @@ export const GraphConfigurationMetadata: {
     x_open_swe_ui_config: {
       type: "textarea",
       default: JSON.stringify(DEFAULT_MCP_SERVERS),
-      description: "JSON configuration for custom MCP servers. LangGraph docs server is set by default.",
+      description:
+        "JSON configuration for custom MCP servers. LangGraph docs server is set by default.",
     },
   },
 };
