@@ -103,8 +103,9 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
   );
-  const [isJoiningStream, setIsJoiningStream] = useState(false);
-  const joinedRunId = useRef<string | null>(null);
+
+  // Track which threadId+runId combinations we've joined to avoid re-joining
+  const joinedKey = useRef<string | null>(null);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -160,26 +161,19 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
+  // Join stream when we have a new threadId+runId combination
   useEffect(() => {
-    // Reset state when runId becomes undefined/null
-    if (!runId) {
-      joinedRunId.current = null;
-      setIsJoiningStream(false);
+    if (!runId || !threadId) {
+      joinedKey.current = null;
       return;
     }
 
-    // Only join if we haven't joined this specific runId yet
-    if (joinedRunId.current !== runId) {
-      joinedRunId.current = runId;
-      setIsJoiningStream(true);
-      // TODO: If the SDK changes go in, use this instead:
-      // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
-      stream
-        .joinStream(runId)
-        .catch(console.error)
-        .finally(() => setIsJoiningStream(false));
+    const currentKey = `${threadId}:${runId}`;
+    if (joinedKey.current !== currentKey) {
+      joinedKey.current = currentKey;
+      stream.joinStream(runId).catch(console.error);
     }
-  }, [runId, stream]);
+  }, [runId, threadId, stream]);
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
@@ -210,8 +204,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
-  // Show loading state if we're joining a stream for a new runId
-  if (isJoiningStream && runId) {
+  // Show loading when we have a runId (session from another graph)
+  // but don't have content yet (no messages and no custom events)
+  const hasContent =
+    (filteredMessages && filteredMessages.length > 0) ||
+    customNodeEvents.length > 0;
+
+  if (runId && !hasContent) {
     return <LoadingActionsCardContent />;
   }
 
