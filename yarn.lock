@@ -2538,6 +2538,7 @@ __metadata:
     remark-math: ^6.0.0
     shadcn: ^2.6.1
     sonner: ^2.0.1
+    swr: ^2.3.4
     tailwind-merge: ^3.0.2
     tailwind-scrollbar: ^4.0.1
     tailwindcss: ^4.0.13
@@ -11330,7 +11331,6 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "open-swe@workspace:."
   dependencies:
-    swr: ^2.3.3
     turbo: ^2.5.0
     typescript: ^5
   languageName: unknown
@@ -13437,15 +13437,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"swr@npm:^2.3.3":
-  version: 2.3.3
-  resolution: "swr@npm:2.3.3"
+"swr@npm:^2.3.4":
+  version: 2.3.4
+  resolution: "swr@npm:2.3.4"
   dependencies:
     dequal: ^2.0.3
     use-sync-external-store: ^1.4.0
   peerDependencies:
     react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: 25b2ab03d0149951e4612fae8458d333d6fbe912298684495969250553176b5b5b731be119f406ebadf6e9c5dc39726dd2492cca9684f448aa1734274e2a4919
+  checksum: 18172b2215d8fa883b4845a094637e5aafb847b3ab96fb950866f0e50a9ada59450c8bcf9dc930e30e6fa40b986dbee45684c96337685b6d6f4d68006bd26b2a
   languageName: node
   linkType: hard
 
