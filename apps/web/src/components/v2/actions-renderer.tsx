@@ -104,7 +104,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     [],
   );
 
-  // Track which threadId+runId combinations we've joined to avoid re-joining
   const joinedKey = useRef<string | null>(null);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -161,6 +160,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
+  // TODO: If the SDK changes go in, use this instead:
+  // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
   // Join stream when we have a new threadId+runId combination
   useEffect(() => {
     if (!runId || !threadId) {
@@ -204,8 +205,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
-  // Show loading when we have a runId (session from another graph)
-  // but don't have content yet (no messages and no custom events)
   const hasContent =
     (filteredMessages && filteredMessages.length > 0) ||
     customNodeEvents.length > 0;
