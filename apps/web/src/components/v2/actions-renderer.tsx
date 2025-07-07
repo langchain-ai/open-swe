@@ -20,6 +20,7 @@ import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { LoadingActionsCardContent } from "./thread-view-loading";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -102,6 +103,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
   );
+  const [isJoiningStream, setIsJoiningStream] = useState(false);
+  const joinedRunId = useRef<string | null>(null);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -157,15 +160,26 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
-  const streamJoined = useRef(false);
   useEffect(() => {
-    if (!streamJoined.current && runId) {
-      streamJoined.current = true;
+    // Reset state when runId becomes undefined/null
+    if (!runId) {
+      joinedRunId.current = null;
+      setIsJoiningStream(false);
+      return;
+    }
+
+    // Only join if we haven't joined this specific runId yet
+    if (joinedRunId.current !== runId) {
+      joinedRunId.current = runId;
+      setIsJoiningStream(true);
       // TODO: If the SDK changes go in, use this instead:
       // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
-      stream.joinStream(runId).catch(console.error);
+      stream
+        .joinStream(runId)
+        .catch(console.error)
+        .finally(() => setIsJoiningStream(false));
     }
-  }, [runId]);
+  }, [runId, stream]);
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
@@ -195,6 +209,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       }
     }
   }, [stream.values, graphId]);
+
+  // Show loading state if we're joining a stream for a new runId
+  if (isJoiningStream && runId) {
+    return <LoadingActionsCardContent />;
+  }
 
   return (
     <div className="flex w-full flex-col gap-2">
