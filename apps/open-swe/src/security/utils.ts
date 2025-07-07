@@ -16,7 +16,7 @@ export function createOwnerFilter(user: { identity: string }) {
 // Helper function for create operations that set metadata
 export function createWithOwnerMetadata(
   value: any,
-  user: { identity: string },
+  user: { identity: string; metadata: { installation_name: string } },
 ) {
   if (isStudioUser(user.identity)) {
     return;
@@ -24,5 +24,6 @@ export function createWithOwnerMetadata(
 
   value.metadata ??= {};
   value.metadata.owner = user.identity;
+  value.metadata.installation_name = user.metadata.installation_name;
   return { owner: user.identity };
 }
