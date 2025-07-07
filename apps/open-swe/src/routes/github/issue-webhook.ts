@@ -66,10 +66,8 @@ const getHeaders = (
   const installationId = headers["x-github-hook-installation-target-id"] || "";
   const targetType = headers["x-github-hook-installation-target-type"] || "";
   if (!webhookId || !webhookEvent || !installationId || !targetType) {
-    console.log("Missing webhook headers");
     return null;
   }
-  console.log("Got installation id", installationId)
   return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
@@ -84,7 +82,6 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     !payload.label?.name ||
     !validOpenSWELabels.some((l) => l === payload.label?.name)
   ) {
-    console.log("Invalid label");
     return;
   }
   const isAutoAcceptLabel = payload.label.name === getOpenSWEAutoAcceptLabel();

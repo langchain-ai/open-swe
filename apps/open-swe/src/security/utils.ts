@@ -22,8 +22,6 @@ export function createWithOwnerMetadata(
     return;
   }
 
-  console.log("USER METADATA", user.metadata);
-
   value.metadata ??= {};
   value.metadata.owner = user.identity;
   value.metadata.installation_id = user.metadata.installation_id;

@@ -27,7 +27,6 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     !githubSignatureHeader ||
     !githubInstallationIdHeader
   ) {
-    console.log("Missing GitHub webhook headers.");
     throw new HTTPException(401, {
       message: "Missing GitHub webhook headers.",
     });
@@ -43,7 +42,6 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     });
   }
 
-  console.log("Got installation id", githubInstallationIdHeader)
   return {
     identity: "x-internal-github-bot",
     is_authenticated: true,
