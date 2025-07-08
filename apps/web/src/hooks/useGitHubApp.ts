@@ -286,6 +286,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [branchesHasMore, branchesLoadingMore, branchesPage, fetchBranches]);
 
+  // Track installation ID changes
+  useEffect(() => {
+    const installationId = getCookie(GITHUB_INSTALLATION_ID_COOKIE);
+    setCurrentInstallationId(installationId);
+  }, []);
+
   useEffect(() => {
     checkInstallation();
   }, []);
@@ -448,6 +454,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
 
