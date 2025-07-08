@@ -24,6 +24,7 @@ import { DraftsSection } from "./drafts-section";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
+import { InstallationSelector } from "../github/installation-selector";
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -71,6 +72,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="bg-muted h-1 w-1 rounded-full"></div>
             </div>
+            <InstallationSelector />
             <ThemeToggle />
             <GitHubLogoutButton />
           </div>
@@ -202,3 +204,4 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
