@@ -3,6 +3,7 @@ import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 
 const SELECTED_REPO_STORAGE_KEY = "selected-repository";
 
@@ -430,3 +431,4 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
