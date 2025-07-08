@@ -119,7 +119,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     if (stream.isLoading) {
       onStreamReady(cancelRun);
     } else {
-      onStreamReady(undefined)
+      onStreamReady(undefined);
     }
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 

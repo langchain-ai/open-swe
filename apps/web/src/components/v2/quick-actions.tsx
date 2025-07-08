@@ -28,26 +28,28 @@ const DEV_README_PROMPT = `Please add a new callout to the root readme in the re
 "Welcome to Open SWE!"
 Make it a 'tip' callout`;
 
-function DevReadmePromptQuickAction({ setQuickActionPrompt }: QuickActionsProps) {
+function DevReadmePromptQuickAction({
+  setQuickActionPrompt,
+}: QuickActionsProps) {
   const nodeEnv = process.env.NODE_ENV;
   if (nodeEnv === "production") {
     return null;
   }
   return (
     <Card
-          onClick={() => setQuickActionPrompt(DEV_README_PROMPT)}
-          className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
-        >
-          <CardHeader className="px-3">
-            <CardTitle className="text-foreground text-sm">
-              [DEV] Add Welcome Callout
-            </CardTitle>
-            <CardDescription className="text-muted-foreground text-xs">
-              Add a welcome callout to the root readme.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-  )
+      onClick={() => setQuickActionPrompt(DEV_README_PROMPT)}
+      className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
+    >
+      <CardHeader className="px-3">
+        <CardTitle className="text-foreground text-sm">
+          [DEV] Add Welcome Callout
+        </CardTitle>
+        <CardDescription className="text-muted-foreground text-xs">
+          Add a welcome callout to the root readme.
+        </CardDescription>
+      </CardHeader>
+    </Card>
+  );
 }
 
 interface QuickActionsProps {
@@ -61,7 +63,9 @@ export function QuickActions({ setQuickActionPrompt }: QuickActionsProps) {
         Quick Actions
       </h2>
       <div className="grid gap-3 md:grid-cols-3">
-        <DevReadmePromptQuickAction setQuickActionPrompt={setQuickActionPrompt} />
+        <DevReadmePromptQuickAction
+          setQuickActionPrompt={setQuickActionPrompt}
+        />
         <Card
           onClick={() => setQuickActionPrompt(GENERATE_RULES_PROMPT)}
           className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
