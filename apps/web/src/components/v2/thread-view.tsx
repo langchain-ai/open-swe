@@ -248,7 +248,7 @@ export function ThreadView({
                   </Tabs>
                 }
                 footer={
-                  <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
                     <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
                   </div>
                 }

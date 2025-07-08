@@ -38,6 +38,9 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     identity: "x-internal-github-bot",
     is_authenticated: true,
     display_name: "GitHub Bot",
+    metadata: {
+      installation_name: "n/a",
+    },
     permissions: [
       "threads:create",
       "threads:create_run",

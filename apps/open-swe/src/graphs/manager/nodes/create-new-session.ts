@@ -5,12 +5,7 @@ import {
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
-import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-} from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
@@ -23,6 +18,7 @@ import {
   formatContentForIssueBody,
 } from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
 
 /**
  * Create new manager session.
@@ -73,15 +69,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
   ];
 
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-      [GITHUB_USER_ID_HEADER]:
-        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
-      [GITHUB_USER_LOGIN_HEADER]:
-        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
-    },
+    defaultHeaders: getDefaultHeaders(config),
   });
 
   const newManagerThreadId = uuidv4();
@@ -91,7 +79,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     messages: inputMessages,
     branchName: state.branchName ?? getBranchName(config),
   };
-  await langGraphClient.runs.create(newManagerThreadId, "manager", {
+  await langGraphClient.runs.create(newManagerThreadId, MANAGER_GRAPH_ID, {
     input: {},
     command: {
       update: commandUpdate,
