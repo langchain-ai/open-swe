@@ -216,7 +216,8 @@ export async function initializeSandbox(
   try {
     sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
     emitStepEvent(baseCreateSandboxAction, "success");
-  } catch {
+  } catch (e) {
+    logger.error("Failed to create sandbox environment", { e });
     emitStepEvent(
       baseCreateSandboxAction,
       "error",

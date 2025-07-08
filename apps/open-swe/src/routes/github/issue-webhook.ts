@@ -6,6 +6,7 @@ import { GitHubApp } from "../../utils/github-app.js";
 import { Webhooks } from "@octokit/webhooks";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 import {
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
@@ -13,7 +14,11 @@ import {
 } from "@open-swe/shared/constants";
 import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
-import { getOpenSWELabel } from "../../utils/github/label.js";
+import {
+  getOpenSWEAutoAcceptLabel,
+  getOpenSWELabel,
+} from "../../utils/github/label.js";
+import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -72,11 +77,21 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
     );
   }
-  if (payload.label?.name !== getOpenSWELabel()) {
+  const validOpenSWELabels = [getOpenSWELabel(), getOpenSWEAutoAcceptLabel()];
+  if (
+    !payload.label?.name ||
+    !validOpenSWELabels.some((l) => l === payload.label?.name)
+  ) {
     return;
   }
+  const isAutoAcceptLabel = payload.label.name === getOpenSWEAutoAcceptLabel();
 
-  logger.info(`'open-swe' label added to issue #${payload.issue.number}`);
+  logger.info(
+    `'${payload.label.name}' label added to issue #${payload.issue.number}`,
+    {
+      isAutoAcceptLabel,
+    },
+  );
 
   try {
     // Get installation ID from the webhook payload
@@ -107,30 +122,33 @@ webhooks.on("issues.labeled", async ({ payload }) => {
           token,
           process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
         ),
+        [GITHUB_INSTALLATION_NAME]: issueData.owner,
         [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
         [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
       },
     });
 
     const threadId = uuidv4();
-    const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
-      input: {
-        messages: [
-          new HumanMessage({
-            id: uuidv4(),
-            content: `**${issueData.issueTitle}**\n\n${issueData.issueBody}`,
-            additional_kwargs: {
-              isOriginalIssue: true,
-              githubIssueId: issueData.issueNumber,
-            },
-          }),
-        ],
-        githubIssueId: issueData.issueNumber,
-        targetRepository: {
-          owner: issueData.owner,
-          repo: issueData.repo,
-        },
+    const runInput: ManagerGraphUpdate = {
+      messages: [
+        new HumanMessage({
+          id: uuidv4(),
+          content: `**${issueData.issueTitle}**\n\n${issueData.issueBody}`,
+          additional_kwargs: {
+            isOriginalIssue: true,
+            githubIssueId: issueData.issueNumber,
+          },
+        }),
+      ],
+      githubIssueId: issueData.issueNumber,
+      targetRepository: {
+        owner: issueData.owner,
+        repo: issueData.repo,
       },
+      autoAcceptPlan: isAutoAcceptLabel,
+    };
+    const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
+      input: runInput,
       config: {
         recursion_limit: 400,
       },
@@ -140,13 +158,14 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     });
 
     logger.info("Created new run from GitHub issue.", {
-      thread_id: threadId,
-      run_id: run.run_id,
-      issue_number: issueData.issueNumber,
+      threadId,
+      runId: run.run_id,
+      issueNumber: issueData.issueNumber,
       owner: issueData.owner,
       repo: issueData.repo,
-      user_id: issueData.userId,
-      user_login: issueData.userLogin,
+      userId: issueData.userId,
+      userLogin: issueData.userLogin,
+      autoAcceptPlan: isAutoAcceptLabel,
     });
 
     logger.info("Creating comment...");

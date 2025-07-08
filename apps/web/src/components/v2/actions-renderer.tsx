@@ -3,17 +3,61 @@ import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
+  ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import {
+  DO_NOT_RENDER_ID_PREFIX,
+  PLANNER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
+import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
+
+interface AcceptedPlanEventData {
+  planTitle: string;
+  planItems: PlanItem[];
+  interruptType: HumanResponse["type"];
+}
+
+type AcceptedPlanEvent = CustomNodeEvent & {
+  data: AcceptedPlanEventData;
+};
+
+function isAcceptedPlanEvent(
+  event: CustomNodeEvent,
+): event is AcceptedPlanEvent {
+  const { data } = event;
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    typeof data.planTitle === "string" &&
+    Array.isArray(data.planItems) &&
+    data.planItems.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof item.index === "number" &&
+        typeof item.plan === "string" &&
+        typeof item.completed === "boolean",
+    ) &&
+    (data.interruptType === "accept" || data.interruptType === "edit")
+  );
+}
+
+function isAcceptedPlanEvents(
+  events: CustomNodeEvent[],
+): events is AcceptedPlanEvent[] {
+  return events.every(isAcceptedPlanEvent);
+}
 
 interface ActionsRendererProps {
   graphId: string;
@@ -24,6 +68,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -55,6 +100,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   setProgrammerSession,
   programmerSession,
   setSelectedTab,
+  onStreamReady,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
@@ -71,9 +117,21 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     },
   });
 
+  const { cancelRun } = useCancelStream<State>({
+    stream,
+    threadId,
+    runId,
+    streamName: graphId === "planner" ? "Planner" : "Programmer",
+  });
+
   const initializeEvents = customNodeEvents.filter(
     (e) => e.nodeId === INITIALIZE_NODE_ID,
   );
+
+  const acceptedPlanEvents = customNodeEvents.filter(
+    (e) => e.nodeId === ACCEPTED_PLAN_NODE_ID,
+  );
+
   const steps = mapCustomEventsToSteps(initializeEvents);
   const allSuccess =
     steps.length > 0 && steps.every((s) => s.status === "success");
@@ -84,15 +142,29 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }
 
   useEffect(() => {
-    const customInitEvents = getCustomNodeEventsFromMessages(
-      stream.messages,
-      INITIALIZE_NODE_ID,
-    );
-    // If there are no custom init events found in messages, or we already have steps from custom events, return
-    if (!customInitEvents?.length || initializeEvents.length) {
+    const allCustomEvents = getCustomNodeEventsFromMessages(stream.messages);
+    if (!allCustomEvents?.length) {
       return;
     }
-    setCustomNodeEvents(customInitEvents);
+
+    setCustomNodeEvents((prev) => {
+      // If no existing events, set all new events
+      if (prev.length === 0) {
+        return allCustomEvents;
+      }
+
+      // Merge new events with existing ones, avoiding duplicates
+      const existingActionIds = new Set(prev.map((e) => e.actionId));
+      const newEvents = allCustomEvents.filter(
+        (e) => !existingActionIds.has(e.actionId),
+      );
+
+      if (newEvents.length > 0) {
+        return [...prev, ...newEvents];
+      }
+
+      return prev;
+    });
   }, [stream.messages]);
 
   const streamJoined = useRef(false);
@@ -104,6 +176,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       stream.joinStream(runId).catch(console.error);
     }
   }, [runId]);
+
+  useEffect(() => {
+    if (stream.isLoading) {
+      onStreamReady(cancelRun);
+    } else {
+      onStreamReady(undefined);
+    }
+  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
@@ -122,9 +202,17 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           programmerSession?.threadId)
     ) {
       setProgrammerSession?.(stream.values.programmerSession);
-      setSelectedTab?.("programmer");
+
+      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
+      // This allows the accepted plan step to be visible before switching
+      if (graphId === PLANNER_GRAPH_ID) {
+        // Add a small delay to allow the accepted plan step to render first
+        setTimeout(() => {
+          setSelectedTab?.("programmer");
+        }, 2000);
+      }
     }
-  }, [stream.values]);
+  }, [stream.values, graphId]);
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -145,6 +233,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           handleRegenerate={() => {}}
         />
       ))}
+      {acceptedPlanEvents.length > 0 &&
+        isAcceptedPlanEvents(acceptedPlanEvents) && (
+          <AcceptedPlanStep
+            planTitle={acceptedPlanEvents[0].data.planTitle}
+            planItems={acceptedPlanEvents[0].data.planItems}
+            interruptType={acceptedPlanEvents[0].data.interruptType}
+          />
+        )}
     </div>
   );
 }
