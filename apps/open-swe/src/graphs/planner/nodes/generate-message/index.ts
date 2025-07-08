@@ -1,5 +1,8 @@
 import { loadModel, Task } from "../../../../utils/load-model.js";
-import { createShellTool } from "../../../../tools/index.js";
+import {
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../../tools/index.js";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -54,6 +57,7 @@ export async function generateAction(
     createRgTool(state),
     createShellTool(state),
     createPlannerNotesTool(),
+    createGetURLContentTool(),
     ...mcpTools,
   ];
   logger.info(

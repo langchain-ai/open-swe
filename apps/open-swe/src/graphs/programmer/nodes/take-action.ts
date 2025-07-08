@@ -1,6 +1,10 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { createApplyPatchTool, createShellTool } from "../../../tools/index.js";
+import {
+  createApplyPatchTool,
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import {
   GraphState,
   GraphConfig,
@@ -46,6 +50,7 @@ export async function takeAction(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
+  const getURLContentTool = createGetURLContentTool();
 
   const mcpTools = await getMcpTools(config);
 
@@ -54,6 +59,7 @@ export async function takeAction(
     rgTool,
     installDependenciesTool,
     applyPatchTool,
+    getURLContentTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

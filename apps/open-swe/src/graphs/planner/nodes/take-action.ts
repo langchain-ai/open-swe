@@ -1,5 +1,8 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { createShellTool } from "../../../tools/index.js";
+import {
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   PlannerGraphState,
@@ -37,10 +40,11 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
+  const getURLContentTool = createGetURLContentTool();
 
   const mcpTools = await getMcpTools(config);
 
-  const allTools = [shellTool, rgTool, plannerNotesTool, ...mcpTools];
+  const allTools = [shellTool, rgTool, plannerNotesTool, getURLContentTool, ...mcpTools];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -106,9 +110,18 @@ export async function takeActions(
       }
     }
 
+    const truncatedOutput =
+      toolCall.name === getURLContentTool.name
+        ? // Allow for more context to be included from URL contents.
+          truncateOutput(result, {
+            numStartCharacters: 10000,
+            numEndCharacters: 10000,
+          })
+        : truncateOutput(result);
+
     const toolMessage = new ToolMessage({
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content: truncatedOutput,
       name: toolCall.name,
       status: toolCallStatus,
     });

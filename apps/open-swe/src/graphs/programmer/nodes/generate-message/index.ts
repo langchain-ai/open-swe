@@ -9,6 +9,7 @@ import {
   createApplyPatchTool,
   createRequestHumanHelpToolFields,
   createUpdatePlanToolFields,
+  createGetURLContentTool,
 } from "../../../../tools/index.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
@@ -80,6 +81,7 @@ export async function generateAction(
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
+    createGetURLContentTool(),
     ...mcpTools,
     // Only provide the dependencies installed tool if they're not already installed.
     ...(state.dependenciesInstalled
