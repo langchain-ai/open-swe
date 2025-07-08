@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { truncateOutput } from "./truncate-outputs.js";
 
 export function getMissingKeysFromObjectSchema(
   schema: z.ZodTypeAny,
@@ -67,4 +68,38 @@ export function formatBadArgsError(schema: z.ZodTypeAny, args: any) {
   )}.\nGot:\n${JSON.stringify(args)}\nMissing keys:\n - ${missingKeys.join(
     "\n - ",
   )}\n`;
+}
+
+export function safeSchemaToString(schema: unknown): string {
+  if (schema instanceof z.ZodType) {
+    try {
+      const result = zodSchemaToString(schema);
+      return truncateOutput(result);
+    } catch {
+      const result = JSON.stringify(schema); // fallback to JSON.stringify
+      return truncateOutput(result);
+    }
+  } else {
+    const result = JSON.stringify(schema);
+    return truncateOutput(result);
+  }
+}
+
+export function safeBadArgsError(
+  schema: unknown,
+  args: any,
+  toolName: string,
+): string {
+  if (schema instanceof z.ZodType) {
+    try {
+      const result = formatBadArgsError(schema, args);
+      return truncateOutput(result);
+    } catch {
+      const schemaString = truncateOutput(JSON.stringify(schema));
+      return `Invalid arguments for tool "${toolName}". Expected schema: ${schemaString}`;
+    }
+  } else {
+    const schemaString = truncateOutput(JSON.stringify(schema));
+    return `Invalid arguments for tool "${toolName}". Expected schema: ${schemaString}`;
+  }
 }

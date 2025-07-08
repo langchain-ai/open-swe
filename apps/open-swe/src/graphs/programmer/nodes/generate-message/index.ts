@@ -28,6 +28,7 @@ import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
+import { getMcpTools } from "../../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -72,6 +73,8 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const mcpTools = await getMcpTools(config);
+
   const tools = [
     createRgTool(state),
     createShellTool(state),
@@ -79,11 +82,16 @@ export async function generateAction(
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
     createGetURLContentTool(),
+    ...mcpTools,
     // Only provide the dependencies installed tool if they're not already installed.
     ...(state.dependenciesInstalled
       ? []
       : [createInstallDependenciesTool(state)]),
   ];
+  logger.info(
+    `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
+  );
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
