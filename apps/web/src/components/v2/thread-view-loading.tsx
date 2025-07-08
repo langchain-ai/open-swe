@@ -14,52 +14,41 @@ function isEven(n: number) {
 
 export function LoadingActionsCardContent() {
   return (
-    <>
-      <div className="flex items-center gap-2 pb-3">
-        <div className="bg-muted h-4 w-32 animate-pulse rounded dark:bg-gray-700"></div>
-        <div className="ml-auto flex items-center gap-1">
-          <Loader2 className="text-muted-foreground h-3 w-3 animate-spin" />
-          <span className="text-muted-foreground text-xs">
-            Loading actions...
-          </span>
+    <div className="space-y-3">
+      {Array.from({ length: 8 }, (_, i) => (
+        <div
+          key={i}
+          className="border-border bg-muted/30 space-y-2 rounded-lg border p-3 dark:bg-gray-900"
+        >
+          {isEven(i) ? (
+            <div className="bg-background space-y-1 rounded p-2 dark:bg-black">
+              <div className="bg-muted h-2 w-32 animate-pulse rounded dark:bg-gray-700"></div>
+              <div className="bg-muted h-2 w-48 animate-pulse rounded dark:bg-gray-700"></div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="bg-muted h-4 w-4 animate-pulse rounded dark:bg-gray-700"></div>
+                <div className="bg-muted h-3 w-40 animate-pulse rounded dark:bg-gray-700"></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="bg-muted h-3 w-16 animate-pulse rounded dark:bg-gray-700"></div>
+                <div className="bg-muted h-4 w-4 animate-pulse rounded dark:bg-gray-700"></div>
+              </div>
+            </div>
+          )}
         </div>
+      ))}
+      <div className="border-border space-y-2 rounded-lg border-2 border-dashed p-3">
+        <div className="bg-muted h-12 animate-pulse rounded dark:bg-gray-800"></div>
+        <div className="bg-muted h-7 w-16 animate-pulse rounded dark:bg-gray-800"></div>
       </div>
-      <div className="space-y-3">
-        {Array.from({ length: 8 }, (_, i) => (
-          <div
-            key={i}
-            className="border-border bg-muted/30 space-y-2 rounded-lg border p-3 dark:bg-gray-900"
-          >
-            {isEven(i) ? (
-              <div className="bg-background space-y-1 rounded p-2 dark:bg-black">
-                <div className="bg-muted h-2 w-32 animate-pulse rounded dark:bg-gray-700"></div>
-                <div className="bg-muted h-2 w-48 animate-pulse rounded dark:bg-gray-700"></div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="bg-muted h-4 w-4 animate-pulse rounded dark:bg-gray-700"></div>
-                  <div className="bg-muted h-3 w-40 animate-pulse rounded dark:bg-gray-700"></div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="bg-muted h-3 w-16 animate-pulse rounded dark:bg-gray-700"></div>
-                  <div className="bg-muted h-4 w-4 animate-pulse rounded dark:bg-gray-700"></div>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-        <div className="border-border space-y-2 rounded-lg border-2 border-dashed p-3">
-          <div className="bg-muted h-12 animate-pulse rounded dark:bg-gray-800"></div>
-          <div className="bg-muted h-7 w-16 animate-pulse rounded dark:bg-gray-800"></div>
-        </div>
 
-        <div className="flex gap-2 pt-3">
-          <div className="bg-muted h-8 flex-1 animate-pulse rounded dark:bg-gray-700"></div>
-          <div className="bg-muted h-8 flex-1 animate-pulse rounded dark:bg-gray-700"></div>
-        </div>
+      <div className="flex gap-2 pt-3">
+        <div className="bg-muted h-8 flex-1 animate-pulse rounded dark:bg-gray-700"></div>
+        <div className="bg-muted h-8 flex-1 animate-pulse rounded dark:bg-gray-700"></div>
       </div>
-    </>
+    </div>
   );
 }
 
