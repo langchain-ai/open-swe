@@ -33,6 +33,7 @@ import {
   createTakePlannerNotesFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
+  createFindInstancesOfToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -62,6 +63,9 @@ type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
+
+const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
+type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 
 function CustomComponent({
   message,
@@ -199,6 +203,20 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
+  } else if (toolCall?.name === findInstancesOfTool.name) {
+    const args = toolCall.args as FindInstancesOfToolArgs;
+    return {
+      actionType: "find_instances_of",
+      status,
+      success,
+      query: args.query || "",
+      case_sensitive: args.case_sensitive,
+      match_word: args.match_word,
+      include_files: args.include_files,
+      exclude_files: args.exclude_files,
+      output: getContentString(message.content),
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -264,7 +282,8 @@ export function AssistantMessage({
           tc.name === rgTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
-          tc.name === getURLContentTool.name,
+          tc.name === getURLContentTool.name ||
+          tc.name === findInstancesOfTool.name,
       )
     : [];
 
@@ -418,6 +437,18 @@ export function AssistantMessage({
           actionType: "get_url_content",
           status: "generating",
           url: args?.url || "",
+          output: "",
+        } as ActionItemProps;
+      } else if (toolCall.name === findInstancesOfTool.name) {
+        const args = toolCall.args as FindInstancesOfToolArgs;
+        return {
+          actionType: "find_instances_of",
+          status: "generating",
+          query: args?.query || "",
+          case_sensitive: args?.case_sensitive,
+          match_word: args?.match_word,
+          include_files: args?.include_files,
+          exclude_files: args?.exclude_files,
           output: "",
         } as ActionItemProps;
       } else {

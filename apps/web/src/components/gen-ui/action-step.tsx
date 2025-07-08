@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { JSX, useState } from "react";
 import {
   Terminal,
   FileCode,
@@ -14,6 +14,7 @@ import {
   CloudDownload,
   Search,
   Globe,
+  Hash,
 } from "lucide-react";
 import {
   createApplyPatchToolFields,
@@ -21,10 +22,13 @@ import {
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
   createGetURLContentToolFields,
+  createFindInstancesOfToolFields,
   formatRgCommand,
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { cn } from "@/lib/utils";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -40,6 +44,8 @@ const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
+const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
+type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -91,6 +97,13 @@ type GetURLContentActionProps = BaseActionProps &
     output?: string;
   };
 
+type FindInstancesOfActionProps = BaseActionProps &
+  Partial<FindInstancesOfToolArgs> & {
+    actionType: "find_instances_of";
+    output?: string;
+    errorCode?: number;
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
@@ -98,7 +111,8 @@ export type ActionItemProps =
   | RgActionProps
   | InstallDependenciesActionProps
   | PlannerNotesActionProps
-  | GetURLContentActionProps;
+  | GetURLContentActionProps
+  | FindInstancesOfActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -113,7 +127,59 @@ const ACTION_GENERATING_TEXT_MAP = {
   [installDependenciesTool.name]: "Installing dependencies...",
   [plannerNotesTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
+  [findInstancesOfTool.name]: "Finding instances...",
 };
+
+function ToolIconWithTooltip({
+  toolNamePretty,
+  icon,
+}: {
+  toolNamePretty: string;
+  icon: JSX.Element;
+}) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {icon}
+        </TooltipTrigger>
+        <TooltipContent>
+          {toolNamePretty}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger className={cn("rounded-xs p-[0.5px] text-xs", !matchCase ? "bg-blue-500" : "bg-gray-100")}>
+          <p>Aa</p>
+        </TooltipTrigger>
+        <TooltipContent>
+          Match case {matchCase ? "on" : "off"}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+function MatchWholeWordIcon({ matchWholeWord }: { matchWholeWord: boolean }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger className={cn("rounded-md border-b-[1px] border-gray-200", matchWholeWord ? "bg-blue-500" : "bg-gray-100")}>
+          <p>ab</p>
+        </TooltipTrigger>
+        <TooltipContent>
+          Match whole word {matchWholeWord ? "on" : "off"}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
 
 function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
@@ -159,6 +225,8 @@ function ActionItem(props: ActionItemProps) {
         return props.success
           ? "URL content fetched"
           : "Failed to fetch URL content";
+      } else if (props.actionType === "find_instances_of") {
+        return props.success ? "Search completed" : "Search failed";
       }
     }
 
@@ -187,23 +255,26 @@ function ActionItem(props: ActionItemProps) {
 
   // Render the header icon based on action type
   const renderHeaderIcon = () => {
+    const defaultIconStyling = "text-muted-foreground mr-2 size-3.5";
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <Loader2 className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Loading" icon={<Loader2 className={cn(defaultIconStyling)} />} />
     }
 
     if (props.actionType === "planner_notes") {
-      return <FileText className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Planner Notes" icon={<FileText className={cn(defaultIconStyling)} />} />
     } else if (props.actionType === "install_dependencies") {
-      return <CloudDownload className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Install Dependencies" icon={<CloudDownload className={cn(defaultIconStyling)} />} />
     } else if (props.actionType === "apply-patch") {
-      return <FileCode className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Apply Patch" icon={<FileCode className={cn(defaultIconStyling)} />} />
     } else if (props.actionType === "rg") {
-      return <Search className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Ripgrep (rg)" icon={<Search className={cn(defaultIconStyling)} />} />
     } else if (props.actionType === "get_url_content") {
-      return <Globe className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Get URL Contents" icon={<Globe className={cn(defaultIconStyling)} />} />
+    } else if (props.actionType === "find_instances_of") {
+      return <ToolIconWithTooltip toolNamePretty="Find Instances of" icon={<Hash className={cn(defaultIconStyling)} />} />
     } else {
-      return <Terminal className="text-muted-foreground mr-2 size-3.5" />;
+      return <ToolIconWithTooltip toolNamePretty="Tool Call" icon={<Terminal className={cn(defaultIconStyling)} />} />
     }
   };
 
@@ -233,6 +304,31 @@ function ActionItem(props: ActionItemProps) {
           <code className="text-foreground/80 text-xs font-normal">
             {props.url}
           </code>
+        </div>
+      );
+    }
+    
+    if (props.actionType === "find_instances_of") {
+      return (
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <code className="text-foreground/80 text-xs font-normal">
+              {props.query}
+            </code>
+            {props.case_sensitive !== undefined && (
+              <MatchCaseIcon matchCase={props.case_sensitive} />
+            )}
+            {props.match_word !== undefined && (
+              <MatchWholeWordIcon matchWholeWord={props.match_word} />
+            )}
+          </div>
+          {(props.include_files || props.exclude_files) && (
+            <div className="text-muted-foreground mt-0.5 text-xs font-normal">
+              {props.include_files && <span>Include: {props.include_files}</span>}
+              {props.include_files && props.exclude_files && <span> | </span>}
+              {props.exclude_files && <span>Exclude: {props.exclude_files}</span>}
+            </div>
+          )}
         </div>
       );
     }
@@ -305,6 +401,7 @@ function ActionItem(props: ActionItemProps) {
     if (
       (props.actionType === "shell" ||
         props.actionType === "rg" ||
+        props.actionType === "find_instances_of" ||
         props.actionType === "install_dependencies") &&
       props.output
     ) {
