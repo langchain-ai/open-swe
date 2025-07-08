@@ -3,7 +3,7 @@ import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
+import { useGitHubInstallations } from "@/hooks/useGitHubInstallations";
 
 const SELECTED_REPO_STORAGE_KEY = "selected-repository";
 
@@ -97,15 +97,13 @@ interface UseGitHubAppReturn {
 }
 
 export function useGitHubApp(): UseGitHubAppReturn {
+  // Use the centralized installation state
+  const { currentInstallationId } = useGitHubInstallations();
+
   // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Track current installation ID
-  const [currentInstallationId, setCurrentInstallationId] = useState<
-    string | null
-  >(null);
 
   // Repository state and pagination
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -288,14 +286,22 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [branchesHasMore, branchesLoadingMore, branchesPage, fetchBranches]);
 
-  // Track installation ID changes
+  // Refresh repositories when installation changes
   useEffect(() => {
-    const installationId = getCookie(GITHUB_INSTALLATION_ID_COOKIE);
-    setCurrentInstallationId(installationId);
-  }, []);
+    if (currentInstallationId) {
+      // Clear selected repository and branches when installation changes
+      setSelectedRepository(null);
+      setBranches([]);
+      setRepositoriesPage(1);
+      setRepositoriesHasMore(false);
 
-  useEffect(() => {
-    checkInstallation();
+      // Reset auto-selection flags so they can run again for the new installation
+      hasAutoSelectedRef.current = false;
+      hasCheckedLocalStorageRef.current = false;
+
+      // Fetch repositories for the new installation
+      checkInstallation();
+    }
   }, [currentInstallationId]);
 
   useEffect(() => {

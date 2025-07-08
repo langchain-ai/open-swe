@@ -32,8 +32,8 @@ export function InstallationSelector({
     switchInstallation,
   } = useGitHubInstallations();
 
-  const handleValueChange = (value: string) => {
-    switchInstallation(value);
+  const handleValueChange = async (value: string) => {
+    await switchInstallation(value);
   };
 
   const getAccountIcon = (accountType: "User" | "Organization") => {
@@ -76,11 +76,27 @@ export function InstallationSelector({
     );
   }
 
+  if (installations.length === 0) {
+    return (
+      <Button
+        variant="outline"
+        disabled
+        size={size}
+        className={cn("text-muted-foreground min-w-[200px]", className)}
+      >
+        <div className="flex items-center gap-2">
+          <GitHubSVG />
+          <span>No installations found</span>
+        </div>
+      </Button>
+    );
+  }
+
   return (
     <Select
       value={currentInstallation?.id.toString() || ""}
       onValueChange={handleValueChange}
-      disabled={disabled || installations.length === 0}
+      disabled={disabled}
     >
       <SelectTrigger
         size={size}
@@ -88,7 +104,21 @@ export function InstallationSelector({
       >
         <div className="flex items-center gap-2">
           <GitHubSVG />
-          <SelectValue placeholder={placeholder} />
+          {currentInstallation ? (
+            <div className="flex items-center gap-2">
+              {getAccountIcon(currentInstallation.accountType)}
+              <img
+                src={currentInstallation.avatarUrl}
+                alt={`${currentInstallation.accountName} avatar`}
+                className="h-4 w-4 rounded-full"
+              />
+              <span className="truncate">
+                {currentInstallation.accountName}
+              </span>
+            </div>
+          ) : (
+            <SelectValue placeholder={placeholder} />
+          )}
         </div>
       </SelectTrigger>
       <SelectContent>
