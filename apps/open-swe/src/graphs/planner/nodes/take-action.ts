@@ -25,7 +25,7 @@ const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeActions(
   state: PlannerGraphState,
-  _config: GraphConfig,
+  config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
@@ -38,7 +38,7 @@ export async function takeActions(
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
 
-  const mcpTools = await getMcpTools(_config);
+  const mcpTools = await getMcpTools(config);
 
   const allTools = [shellTool, rgTool, plannerNotesTool, ...mcpTools];
   const toolsMap = Object.fromEntries(

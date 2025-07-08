@@ -1,6 +1,10 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import type { GraphConfig, McpServers } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  McpServerConfigSchema,
+  McpServers,
+} from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
 import { DEFAULT_MCP_SERVERS } from "@open-swe/shared/constants";
 
@@ -13,8 +17,8 @@ let lastConfigHash: string | null = null;
 /**
  * Returns a shared MCP client instance
  */
-export function mcpClient(mcpServers?: McpServers): MultiServerMCPClient {
-  const serversToUse = mcpServers || {};
+export function mcpClient(mcpServers: McpServers): MultiServerMCPClient {
+  const serversToUse = mcpServers;
   const configHash = JSON.stringify(serversToUse);
 
   // Recreate client if configuration changed
@@ -37,22 +41,36 @@ export function mcpClient(mcpServers?: McpServers): MultiServerMCPClient {
  * @returns Array of MCP tools, empty array if error occurs
  */
 export async function getMcpTools(
-  config?: GraphConfig,
+  config: GraphConfig,
 ): Promise<StructuredToolInterface[]> {
   try {
-    let mergedServers = { ...DEFAULT_MCP_SERVERS };
+    let mergedServers: McpServers = { ...DEFAULT_MCP_SERVERS };
 
     const mcpServersConfig = config?.configurable?.["mcpServers"];
     if (mcpServersConfig) {
       try {
         const userServers: McpServers = JSON.parse(mcpServersConfig);
-        mergedServers = { ...mergedServers, ...userServers };
+        for (const serverName in userServers) {
+          const serverConfig = userServers[serverName];
+          if (!serverConfig) continue;
+          try {
+            McpServerConfigSchema.parse(serverConfig);
+            mergedServers[serverName] = serverConfig;
+          } catch (error) {
+            logger.warn(
+              `Failed to parse MCP server configuration for ${serverName}: ${error}. Skipping.`,
+            );
+          }
+        }
       } catch (error) {
         logger.warn(
           `Failed to parse user MCP servers configuration: ${error}. Using defaults only.`,
         );
       }
     }
+
+    if (!mergedServers) return [];
+
     const client = mcpClient(mergedServers);
     const tools = await client.getTools();
     return tools;
