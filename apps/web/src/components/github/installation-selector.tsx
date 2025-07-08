@@ -66,7 +66,7 @@ export function InstallationSelector({
         variant="outline"
         disabled
         size={size}
-        className={cn("min-w-[200px] text-destructive", className)}
+        className={cn("text-destructive min-w-[200px]", className)}
       >
         <div className="flex items-center gap-2">
           <GitHubSVG />
@@ -82,7 +82,10 @@ export function InstallationSelector({
       onValueChange={handleValueChange}
       disabled={disabled || installations.length === 0}
     >
-      <SelectTrigger size={size} className={cn("min-w-[200px]", className)}>
+      <SelectTrigger
+        size={size}
+        className={cn("min-w-[200px]", className)}
+      >
         <div className="flex items-center gap-2">
           <GitHubSVG />
           <SelectValue placeholder={placeholder} />
@@ -109,4 +112,3 @@ export function InstallationSelector({
     </Select>
   );
 }
-

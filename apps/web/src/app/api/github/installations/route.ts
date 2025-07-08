@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
     if (!response.ok) {
       const errorData = await response.json();
       return NextResponse.json(
-        { error: `Failed to fetch installations: ${JSON.stringify(errorData)}` },
+        {
+          error: `Failed to fetch installations: ${JSON.stringify(errorData)}`,
+        },
         { status: response.status },
       );
     }
@@ -79,4 +81,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

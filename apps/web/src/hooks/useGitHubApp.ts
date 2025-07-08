@@ -48,11 +48,11 @@ const getRepositoryFromLocalStorage = (): TargetRepository | null => {
  */
 const getCookie = (name: string): string | null => {
   if (typeof document === "undefined") return null;
-  
+
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) {
-    return parts.pop()?.split(';').shift() || null;
+    return parts.pop()?.split(";").shift() || null;
   }
   return null;
 };
@@ -103,7 +103,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const [error, setError] = useState<string | null>(null);
 
   // Track current installation ID
-  const [currentInstallationId, setCurrentInstallationId] = useState<string | null>(null);
+  const [currentInstallationId, setCurrentInstallationId] = useState<
+    string | null
+  >(null);
 
   // Repository state and pagination
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -454,8 +456,3 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
-
-
-
-
-
