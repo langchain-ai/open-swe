@@ -31,7 +31,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 
 * **Repository location**: {REPO_DIRECTORY}
 * **Current directory**: {CURRENT_WORKING_DIRECTORY}
-* All changes are auto-committed - no manual commits needed
+* All changes are auto-committed - no manual commits needed, and you should never create backup files.
 * Work only within the existing Git repository
 * Use \`apply_patch\` for file edits (accepts diffs and file paths)
 * Use \`shell\` with \`touch\` to create new files (not \`apply_patch\`)
