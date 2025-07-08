@@ -1,6 +1,10 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { createApplyPatchTool, createShellTool } from "../../../tools/index.js";
+import {
+  createApplyPatchTool,
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import {
   GraphState,
   GraphConfig,
@@ -11,8 +15,8 @@ import {
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import {
-  formatBadArgsError,
-  zodSchemaToString,
+  safeSchemaToString,
+  safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
@@ -22,6 +26,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createRgTool } from "../../../tools/rg.js";
+import { getMcpTools } from "../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -45,12 +50,21 @@ export async function takeAction(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const toolsMap = {
-    [applyPatchTool.name]: applyPatchTool,
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-    [installDependenciesTool.name]: installDependenciesTool,
-  };
+  const getURLContentTool = createGetURLContentTool();
+
+  const mcpTools = await getMcpTools(config);
+
+  const allTools = [
+    shellTool,
+    rgTool,
+    installDependenciesTool,
+    applyPatchTool,
+    getURLContentTool,
+    ...mcpTools,
+  ];
+  const toolsMap = Object.fromEntries(
+    allTools.map((tool) => [tool.name, tool]),
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
@@ -77,8 +91,13 @@ export async function takeAction(
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke(toolCall.args);
-      result = toolResult.result;
-      toolCallStatus = toolResult.status;
+      if (typeof toolResult === "string") {
+        result = toolResult;
+        toolCallStatus = "success";
+      } else {
+        result = toolResult.result;
+        toolCallStatus = toolResult.status;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -87,9 +106,9 @@ export async function takeAction(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: zodSchemaToString(tool.schema),
+          expectedSchema: safeSchemaToString(tool.schema),
         });
-        result = formatBadArgsError(tool.schema, toolCall.args);
+        result = safeBadArgsError(tool.schema, toolCall.args, toolCall.name);
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error

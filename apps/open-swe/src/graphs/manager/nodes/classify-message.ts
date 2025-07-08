@@ -5,10 +5,6 @@ import {
 } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-} from "@open-swe/shared/constants";
-import {
   BaseMessage,
   HumanMessage,
   isHumanMessage,
@@ -30,6 +26,7 @@ import {
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
 } from "../../../utils/github/issue-messages.js";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
 
 // This should not be shown to the user if the programmer is running
 const PLAN_ROUTING_OPTION = `- plan: Call this route if the user's message is a complete request which you can use to kickoff a new planning session (only if one is not already running), or it's an entirely new request which you should also start a new planning session for (only if both the planner and programmer are not running). You may also call this route if the planner is running, and the user's message contains updated instructions, or additional context which may be relevant/helpful to the planner.`;
@@ -217,11 +214,7 @@ export async function classifyMessage(
   }
 
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-    },
+    defaultHeaders: getDefaultHeaders(config),
   });
 
   const [programmerThread, plannerThread] = await Promise.all([

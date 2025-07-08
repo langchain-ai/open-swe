@@ -8,18 +8,20 @@ import { Input } from "@/components/ui/input";
 import { ArrowLeft, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
-import { useThreads } from "@/hooks/useThreads";
+import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
 
 export default function AllThreadsPage() {
   const router = useRouter();
-  const { threads, threadsLoading } = useThreads<GraphState>(
-    process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
-  );
+  const { threads, isLoading: threadsLoading } = useThreadsSWR<GraphState>({
+    assistantId: MANAGER_GRAPH_ID,
+    refreshInterval: 15000, // Poll every 15 seconds
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 

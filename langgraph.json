@@ -9,6 +9,9 @@
   "dependencies": ["./apps/open-swe"],
   "auth": {
     "path": "./apps/open-swe/src/security/auth.ts:auth"
+  },
+  "http": {
+    "app": "./apps/open-swe/src/routes/app.ts:app"
   }
 }
  

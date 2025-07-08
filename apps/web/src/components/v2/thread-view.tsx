@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -15,16 +15,18 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import { HumanMessage } from "@langchain/core/messages";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import {
+  DO_NOT_RENDER_ID_PREFIX,
+  PROGRAMMER_GRAPH_ID,
+  PLANNER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { StickToBottom } from "use-stick-to-bottom";
 import {
   StickyToBottomContent,
   ScrollToBottom,
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
-
-const PROGRAMMER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PROGRAMMER_ASSISTANT_ID;
-const PLANNER_ASSISTANT_ID = process.env.NEXT_PUBLIC_PLANNER_ASSISTANT_ID;
+import { CancelStreamButton } from "./cancel-stream-button";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -47,6 +49,14 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  const plannerCancelRef = useRef<(() => void) | null>(null);
+  const programmerCancelRef = useRef<(() => void) | null>(null);
+
+  const cancelRun = () => {
+    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
+    stream.stop();
+  };
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -125,6 +135,8 @@ export function ThreadView({
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
+          isLoading={stream.isLoading}
+          cancelRun={cancelRun}
         />
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
@@ -145,30 +157,56 @@ export function ThreadView({
                       setSelectedTab(value as "planner" | "programmer")
                     }
                   >
-                    <TabsList className="bg-muted/70 dark:bg-gray-800">
-                      <TabsTrigger value="planner">Planner</TabsTrigger>
-                      <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                    </TabsList>
+                    <div className="flex items-center justify-between">
+                      <TabsList className="bg-muted/70 dark:bg-gray-800">
+                        <TabsTrigger value="planner">Planner</TabsTrigger>
+                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                      </TabsList>
+
+                      <div className="flex gap-2">
+                        {selectedTab === "planner" &&
+                          plannerCancelRef.current && (
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Planner"
+                            />
+                          )}
+
+                        {selectedTab === "programmer" &&
+                          programmerCancelRef.current && (
+                            <CancelStreamButton
+                              stream={stream}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              streamName="Programmer"
+                            />
+                          )}
+                      </div>
+                    </div>
+
                     <TabsContent value="planner">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
-                          {plannerThreadId &&
-                            plannerRunId &&
-                            PLANNER_ASSISTANT_ID && (
-                              <ActionsRenderer<PlannerGraphState>
-                                graphId={PLANNER_ASSISTANT_ID}
-                                threadId={plannerThreadId}
-                                runId={plannerRunId}
-                                setProgrammerSession={setProgrammerSession}
-                                programmerSession={programmerSession}
-                                setSelectedTab={setSelectedTab}
-                              />
-                            )}
-                          {!(
-                            plannerThreadId &&
-                            plannerRunId &&
-                            PLANNER_ASSISTANT_ID
-                          ) && (
+                          {plannerThreadId && plannerRunId && (
+                            <ActionsRenderer<PlannerGraphState>
+                              graphId={PLANNER_GRAPH_ID}
+                              threadId={plannerThreadId}
+                              runId={plannerRunId}
+                              setProgrammerSession={setProgrammerSession}
+                              programmerSession={programmerSession}
+                              setSelectedTab={setSelectedTab}
+                              onStreamReady={(cancelFn) => {
+                                if (cancelFn) {
+                                  plannerCancelRef.current = cancelFn;
+                                } else {
+                                  plannerCancelRef.current = null;
+                                }
+                              }}
+                            />
+                          )}
+                          {!(plannerThreadId && plannerRunId) && (
                             <div className="flex items-center justify-center gap-2 py-8">
                               <Clock className="text-muted-foreground size-4" />
                               <span className="text-muted-foreground text-sm">
@@ -182,11 +220,18 @@ export function ThreadView({
                     <TabsContent value="programmer">
                       <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
                         <CardContent className="space-y-2 p-3 pt-0">
-                          {programmerSession && PROGRAMMER_ASSISTANT_ID && (
+                          {programmerSession && (
                             <ActionsRenderer<GraphState>
-                              graphId={PROGRAMMER_ASSISTANT_ID}
+                              graphId={PROGRAMMER_GRAPH_ID}
                               threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
+                              onStreamReady={(cancelFn) => {
+                                if (cancelFn) {
+                                  programmerCancelRef.current = cancelFn;
+                                } else {
+                                  programmerCancelRef.current = null;
+                                }
+                              }}
                             />
                           )}
                           {!programmerSession && (
@@ -203,7 +248,7 @@ export function ThreadView({
                   </Tabs>
                 }
                 footer={
-                  <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
                     <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
                   </div>
                 }

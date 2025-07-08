@@ -25,6 +25,7 @@ import {
   MarkTaskCompleted,
   MarkTaskIncomplete,
 } from "@/components/gen-ui/task-review";
+import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -36,6 +37,8 @@ import {
   createTakePlannerNotesFields,
   createMarkTaskCompletedFields,
   createMarkTaskIncompleteFields,
+  createDiagnoseErrorToolFields,
+  createGetURLContentToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -63,6 +66,12 @@ const markTaskCompletedTool = createMarkTaskCompletedFields();
 type MarkTaskCompletedToolArgs = z.infer<typeof markTaskCompletedTool.schema>;
 const markTaskIncompleteTool = createMarkTaskIncompleteFields();
 type MarkTaskIncompleteToolArgs = z.infer<typeof markTaskIncompleteTool.schema>;
+
+const diagnoseErrorTool = createDiagnoseErrorToolFields();
+type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
+
+const getURLContentTool = createGetURLContentToolFields();
+type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 
 function CustomComponent({
   message,
@@ -190,6 +199,16 @@ export function mapToolMessageToActionStepProps(
       notes: args.notes || [],
       reasoningText,
     };
+  } else if (toolCall?.name === getURLContentTool.name) {
+    const args = toolCall.args as GetURLContentToolArgs;
+    return {
+      actionType: "get_url_content",
+      status,
+      success,
+      url: args.url || "",
+      output: getContentString(message.content),
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -254,7 +273,8 @@ export function AssistantMessage({
           tc.name === applyPatchTool.name ||
           tc.name === rgTool.name ||
           tc.name === installDependenciesTool.name ||
-          tc.name === plannerNotesTool.name,
+          tc.name === plannerNotesTool.name ||
+          tc.name === getURLContentTool.name,
       )
     : [];
 
@@ -272,6 +292,10 @@ export function AssistantMessage({
 
   const markTaskIncompleteToolCall = message
     ? aiToolCalls.find((tc) => tc.name === markTaskIncompleteTool.name)
+    : undefined;
+
+  const diagnoseErrorToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === diagnoseErrorTool.name)
     : undefined;
 
   // We can be sure that if the task status tool call is present, it will be the
@@ -296,7 +320,25 @@ export function AssistantMessage({
     );
   }
 
-  // Same for PR tool. If this is present, it's the only tool call we need to render.
+  if (diagnoseErrorToolCall) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === diagnoseErrorToolCall.id,
+    );
+
+    const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <DiagnoseErrorAction
+          status={correspondingToolResult ? "done" : "generating"}
+          diagnosis={args.diagnosis}
+          reasoningText={reasoningText}
+        />
+      </div>
+    );
+  }
+
   if (openPrToolCall) {
     let branch: string | undefined;
     let targetBranch: string | undefined = "main";
@@ -428,6 +470,14 @@ export function AssistantMessage({
           actionType: "planner_notes",
           status: "generating",
           notes: args?.notes || [],
+        } as ActionItemProps;
+      } else if (toolCall.name === getURLContentTool.name) {
+        const args = toolCall.args as GetURLContentToolArgs;
+        return {
+          actionType: "get_url_content",
+          status: "generating",
+          url: args?.url || "",
+          output: "",
         } as ActionItemProps;
       } else {
         if (isShellTool) {

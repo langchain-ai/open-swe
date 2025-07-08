@@ -33,20 +33,19 @@ async function handleCreateFile(
   }
 }
 
-async function readFileFunc(
-  sandbox: Sandbox,
-  filePath: string,
-  args?: {
-    workDir?: string;
-  },
-): Promise<{
+async function readFileFunc(inputs: {
+  sandbox: Sandbox;
+  filePath: string;
+  workDir?: string;
+}): Promise<{
   success: boolean;
   output: string;
 }> {
+  const { sandbox, filePath, workDir } = inputs;
   try {
     const readOutput = await sandbox.process.executeCommand(
       `cat "${filePath}"`,
-      args?.workDir,
+      workDir,
     );
 
     if (readOutput.exitCode !== 0) {
@@ -65,7 +64,9 @@ async function readFileFunc(
     };
   } catch (e: any) {
     if (e instanceof Error && e.message.includes("No such file or directory")) {
-      const createOutput = await handleCreateFile(sandbox, filePath, args);
+      const createOutput = await handleCreateFile(sandbox, filePath, {
+        workDir,
+      });
       if (createOutput.exitCode !== 0) {
         return {
           success: false,
@@ -73,7 +74,7 @@ async function readFileFunc(
         };
       } else {
         // If the file was created successfully, try reading it again.
-        return readFile(sandbox, filePath, args);
+        return readFile(inputs);
       }
     }
 
@@ -106,19 +107,22 @@ async function readFileFunc(
 
 export const readFile = traceable(readFileFunc, {
   name: "read_file",
+  processInputs: (inputs) => {
+    const { sandbox: _sandbox, ...rest } = inputs;
+    return rest;
+  },
 });
 
-async function writeFileFunc(
-  sandbox: Sandbox,
-  filePath: string,
-  content: string,
-  args?: {
-    workDir?: string;
-  },
-): Promise<{
+async function writeFileFunc(inputs: {
+  sandbox: Sandbox;
+  filePath: string;
+  content: string;
+  workDir?: string;
+}): Promise<{
   success: boolean;
   output: string;
 }> {
+  const { sandbox, filePath, content, workDir } = inputs;
   try {
     const delimiter = "EOF_" + Date.now() + "_" + Math.random().toString(36);
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
@@ -126,7 +130,7 @@ ${content}
 ${delimiter}`;
     const writeOutput = await sandbox.process.executeCommand(
       writeCommand,
-      args?.workDir,
+      workDir,
     );
 
     if (writeOutput.exitCode !== 0) {
@@ -169,4 +173,8 @@ ${delimiter}`;
 
 export const writeFile = traceable(writeFileFunc, {
   name: "write_file",
+  processInputs: (inputs) => {
+    const { sandbox: _sandbox, ...rest } = inputs;
+    return rest;
+  },
 });

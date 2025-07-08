@@ -14,6 +14,7 @@ import {
   CustomNodeEvent,
   isCustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 const useTypedStream = useStream<
   GraphState,
@@ -37,18 +38,15 @@ const StreamSession = ({ children }: { children: ReactNode }) => {
   const [customEvents, setCustomEvents] = useState<CustomNodeEvent[]>([]);
   const { refreshThreads } = useThreadsContext();
 
-  if (
-    !process.env.NEXT_PUBLIC_API_URL ||
-    !process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID
-  ) {
+  if (!process.env.NEXT_PUBLIC_API_URL) {
     throw new Error(
-      "Both NEXT_PUBLIC_API_URL and NEXT_PUBLIC_MANAGER_ASSISTANT_ID environment variables must be defined.",
+      "NEXT_PUBLIC_API_URL environment variable must be defined.",
     );
   }
 
   const streamValue = useTypedStream({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: process.env.NEXT_PUBLIC_MANAGER_ASSISTANT_ID,
+    assistantId: MANAGER_GRAPH_ID,
     reconnectOnMount: true,
     threadId: threadId ?? null,
     onCustomEvent: (event, options) => {

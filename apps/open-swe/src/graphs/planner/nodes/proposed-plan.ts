@@ -1,6 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
+import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { Command, END, interrupt } from "@langchain/langgraph";
-import { GraphUpdate, GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  GraphUpdate,
+  GraphConfig,
+  TaskPlan,
+  PlanItem,
+} from "@open-swe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,
@@ -10,10 +16,10 @@ import { startSandbox } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../../../utils/user-request.js";
 import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
+  DO_NOT_RENDER_ID_PREFIX,
+  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import {
   PlannerGraphState,
@@ -21,6 +27,92 @@ import {
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+import {
+  ACCEPTED_PLAN_NODE_ID,
+  CustomNodeEvent,
+} from "@open-swe/shared/open-swe/custom-node-events";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
+
+const logger = createLogger(LogLevel.INFO, "ProposedPlan");
+
+function createAcceptedPlanMessage(input: {
+  planTitle: string;
+  planItems: PlanItem[];
+  interruptType: HumanResponse["type"];
+}) {
+  const { planTitle, planItems, interruptType } = input;
+  const acceptedPlanEvent: CustomNodeEvent = {
+    nodeId: ACCEPTED_PLAN_NODE_ID,
+    actionId: uuidv4(),
+    action: "Plan accepted",
+    createdAt: new Date().toISOString(),
+    data: {
+      status: "success",
+      planTitle,
+      planItems,
+      interruptType,
+    },
+  };
+
+  const acceptedPlanMessage = new AIMessage({
+    id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+    content: "",
+    additional_kwargs: {
+      hidden: true,
+      customNodeEvents: [acceptedPlanEvent],
+    },
+  });
+  return acceptedPlanMessage;
+}
+
+async function startProgrammerRun(input: {
+  runInput: Exclude<GraphUpdate, "taskPlan"> & { taskPlan: TaskPlan };
+  state: PlannerGraphState;
+  config: GraphConfig;
+  newMessages?: BaseMessage[];
+}) {
+  const { runInput, state, config, newMessages } = input;
+  const langGraphClient = createLangGraphClient({
+    defaultHeaders: getDefaultHeaders(config),
+  });
+
+  const programmerThreadId = uuidv4();
+  // Restart the sandbox.
+  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
+
+  const run = await langGraphClient.runs.create(
+    programmerThreadId,
+    PROGRAMMER_GRAPH_ID,
+    {
+      input: runInput,
+      config: {
+        recursion_limit: 400,
+      },
+      ifNotExists: "create",
+      streamResumable: true,
+      streamMode: ["values", "messages", "custom"],
+    },
+  );
+
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    runInput.taskPlan,
+  );
+  return {
+    programmerSession: {
+      threadId: programmerThreadId,
+      runId: run.run_id,
+    },
+    sandboxSessionId: runInput.sandboxSessionId,
+    taskPlan: runInput.taskPlan,
+    messages: newMessages,
+  };
+}
 
 export async function interruptProposedPlan(
   state: PlannerGraphState,
@@ -29,6 +121,45 @@ export async function interruptProposedPlan(
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
+  }
+
+  let planItems: PlanItem[];
+  const userRequest = getUserRequest(state.messages);
+  const runInput: GraphUpdate = {
+    contextGatheringNotes: state.contextGatheringNotes,
+    branchName: state.branchName,
+    targetRepository: state.targetRepository,
+    githubIssueId: state.githubIssueId,
+  };
+
+  if (state.autoAcceptPlan) {
+    logger.info("Auto accepting plan.");
+    planItems = proposedPlan.map((p, index) => ({
+      index,
+      plan: p,
+      completed: false,
+    }));
+    runInput.taskPlan = createNewTask(
+      userRequest,
+      state.proposedPlanTitle,
+      planItems,
+      { existingTaskPlan: state.taskPlan },
+    );
+
+    return await startProgrammerRun({
+      runInput: runInput as Exclude<GraphUpdate, "taskPlan"> & {
+        taskPlan: TaskPlan;
+      },
+      state,
+      config,
+      newMessages: [
+        createAcceptedPlanMessage({
+          planTitle: state.proposedPlanTitle,
+          planItems,
+          interruptType: "accept",
+        }),
+      ],
+    });
   }
 
   const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
@@ -65,28 +196,8 @@ export async function interruptProposedPlan(
     });
   }
 
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-    },
-  });
-
-  const userRequest = getUserRequest(state.messages);
-
-  const runInput: GraphUpdate = {
-    contextGatheringNotes: state.contextGatheringNotes,
-    branchName: state.branchName,
-    targetRepository: state.targetRepository,
-    githubIssueId: state.githubIssueId,
-  };
-  // TODO: UPDATE ISSUE WITH PROGRAMMER THREAD ID.
-  // TODO: UPDATE ISSUE WITH TASK PLAN
-  const programmerThreadId = uuidv4();
-
   if (interruptRes.type === "accept") {
-    const planItems = proposedPlan.map((p, index) => ({
+    planItems = proposedPlan.map((p, index) => ({
       index,
       plan: p,
       completed: false,
@@ -103,7 +214,7 @@ export async function interruptProposedPlan(
       .split(PLAN_INTERRUPT_DELIMITER)
       .map((step: string) => step.trim());
 
-    const planItems = editedPlan.map((p: string, index: number) => ({
+    planItems = editedPlan.map((p: string, index: number) => ({
       index,
       plan: p,
       completed: false,
@@ -119,38 +230,18 @@ export async function interruptProposedPlan(
     throw new Error("Unknown interrupt type." + interruptRes.type);
   }
 
-  // Restart the sandbox.
-  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
-
-  const run = await langGraphClient.runs.create(
-    programmerThreadId,
-    "programmer",
-    {
-      input: runInput,
-      config: {
-        recursion_limit: 400,
-      },
-      ifNotExists: "create",
-      streamResumable: true,
-      streamMode: ["values", "messages", "custom"],
+  return await startProgrammerRun({
+    runInput: runInput as Exclude<GraphUpdate, "taskPlan"> & {
+      taskPlan: TaskPlan;
     },
-  );
-
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
+    state,
     config,
-    runInput.taskPlan,
-  );
-
-  return {
-    programmerSession: {
-      threadId: programmerThreadId,
-      runId: run.run_id,
-    },
-    sandboxSessionId: runInput.sandboxSessionId,
-    taskPlan: runInput.taskPlan,
-  };
+    newMessages: [
+      createAcceptedPlanMessage({
+        planTitle: state.proposedPlanTitle,
+        planItems,
+        interruptType: interruptRes.type,
+      }),
+    ],
+  });
 }

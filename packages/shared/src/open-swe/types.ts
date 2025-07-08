@@ -14,8 +14,12 @@ import {
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
 import {
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
+  GITHUB_USER_ID_HEADER,
+  GITHUB_USER_LOGIN_HEADER,
+  DEFAULT_MCP_SERVERS,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
@@ -404,6 +408,29 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_USER_ID_HEADER]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
+  [GITHUB_USER_LOGIN_HEADER]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
+  [GITHUB_INSTALLATION_NAME]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
+  mcpServers: {
+    x_open_swe_ui_config: {
+      type: "json",
+      default: JSON.stringify(DEFAULT_MCP_SERVERS),
+      description:
+        "JSON configuration for custom MCP servers. LangGraph docs server is set by default.",
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -569,6 +596,36 @@ export const GraphConfiguration = z.object({
     .langgraph.metadata(
       GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
     ),
+  /**
+   * The user's GitHub ID. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_USER_ID_HEADER]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_ID_HEADER]),
+  /**
+   * The user's GitHub login. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_USER_LOGIN_HEADER]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER]),
+  /**
+   * The installation name of the GitHub app. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_INSTALLATION_NAME]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME]),
+  /**
+   * Custom MCP servers configuration as JSON string. Merges with default servers.
+   * @default Default LangGraph docs MCP server
+   */
+  mcpServers: z
+    .string()
+    .optional()
+    .default(JSON.stringify(DEFAULT_MCP_SERVERS))
+    .langgraph.metadata(GraphConfigurationMetadata.mcpServers),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

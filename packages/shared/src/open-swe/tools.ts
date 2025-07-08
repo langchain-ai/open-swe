@@ -270,6 +270,34 @@ export function createTakePlannerNotesFields() {
   };
 }
 
+export function createDiagnoseErrorToolFields() {
+  const diagnoseErrorToolSchema = z.object({
+    diagnosis: z.string().describe("The diagnosis of the error."),
+  });
+
+  return {
+    name: "diagnose_error",
+    description: "Diagnoses an error given a diagnosis.",
+    schema: diagnoseErrorToolSchema,
+  };
+}
+
+export function createGetURLContentToolFields() {
+  const getURLContentSchema = z.object({
+    url: z
+      .string()
+      .describe(
+        "The URL to get the content of. Returns the page content in markdown format.",
+      ),
+  });
+
+  return {
+    name: "get_url_content",
+    description: "Get the full page content of a given URL in markdown format.",
+    schema: getURLContentSchema,
+  };
+}
+
 export function createMarkTaskCompletedFields() {
   const markTaskCompletedSchema = z.object({
     review: z
