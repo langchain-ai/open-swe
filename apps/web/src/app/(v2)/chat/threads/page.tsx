@@ -54,6 +54,7 @@ export default function AllThreadsPage() {
   };
 
   return (
+    <GitHubAppProvider>
     <div className="bg-background flex h-screen flex-col">
       {/* Header */}
       <div className="border-border bg-card border-b px-4 py-3">
@@ -209,7 +210,9 @@ export default function AllThreadsPage() {
         </div>
       </div>
     </div>
+    </GitHubAppProvider>
   );
 }
+
 
 
