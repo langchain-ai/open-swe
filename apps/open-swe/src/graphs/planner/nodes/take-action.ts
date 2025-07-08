@@ -1,13 +1,18 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { createShellTool } from "../../../tools/index.js";
+import {
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { zodSchemaToString } from "../../../utils/zod-to-string.js";
-import { formatBadArgsError } from "../../../utils/zod-to-string.js";
+import {
+  safeSchemaToString,
+  safeBadArgsError,
+} from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createRgTool } from "../../../tools/rg.js";
 import {
@@ -17,12 +22,13 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
+import { getMcpTools } from "../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeActions(
   state: PlannerGraphState,
-  _config: GraphConfig,
+  config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
@@ -34,11 +40,20 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
-  const toolsMap = {
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-    [plannerNotesTool.name]: plannerNotesTool,
-  };
+  const getURLContentTool = createGetURLContentTool();
+
+  const mcpTools = await getMcpTools(config);
+
+  const allTools = [
+    shellTool,
+    rgTool,
+    plannerNotesTool,
+    getURLContentTool,
+    ...mcpTools,
+  ];
+  const toolsMap = Object.fromEntries(
+    allTools.map((tool) => [tool.name, tool]),
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
@@ -72,8 +87,13 @@ export async function takeActions(
           result: string;
           status: "success" | "error";
         };
-      result = toolResult.result;
-      toolCallStatus = toolResult.status;
+      if (typeof toolResult === "string") {
+        result = toolResult;
+        toolCallStatus = "success";
+      } else {
+        result = toolResult.result;
+        toolCallStatus = toolResult.status;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -82,9 +102,9 @@ export async function takeActions(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: zodSchemaToString(tool.schema),
+          expectedSchema: safeSchemaToString(tool.schema),
         });
-        result = formatBadArgsError(tool.schema, toolCall.args);
+        result = safeBadArgsError(tool.schema, toolCall.args, toolCall.name);
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error
@@ -96,9 +116,18 @@ export async function takeActions(
       }
     }
 
+    const truncatedOutput =
+      toolCall.name === getURLContentTool.name
+        ? // Allow for more context to be included from URL contents.
+          truncateOutput(result, {
+            numStartCharacters: 10000,
+            numEndCharacters: 10000,
+          })
+        : truncateOutput(result);
+
     const toolMessage = new ToolMessage({
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content: truncatedOutput,
       name: toolCall.name,
       status: toolCallStatus,
     });
