@@ -60,6 +60,9 @@ Below you're provided with routes to take given the user's request. You should n
 Ensure your response is clear, and concise. You should not explicitly state which route you're taking, but it should be obvious to anyone who also knows what routes are available.
 Although you're only supposed to classify & respond to the latest message, this does not mean you should look at it in isolation. You should consider the conversation history as a whole, and the current status of your two AI assistants (programmer and planner) to determine how to respond to the user's new message.
 
+# Context
+Although it's not shown here, you do have access to the full repository contents the user is referencing. Because of this, you should always assume you'll have access to any/all files or folders the user is referencing.
+
 # Assistant Statuses
 The planner's current status is: {PLANNER_STATUS}
 The programmer's current status is: {PROGRAMMER_STATUS}
@@ -190,6 +193,7 @@ const createClassificationPromptAndToolSchema = (inputs: {
         ...(showCreateIssueRoutingOption ? ["create_new_issue"] : []),
       ])
       .describe("The route to take to handle the user's new message."),
+    ...(showCreateIssueRoutingOption || !programmerIsRunning ? { issue_title: z.string().optional().describe("The title of the issue to create.") } : {})
   });
 
   return {
@@ -296,6 +300,7 @@ export async function classifyMessage(
     // Route to node which kicks off new manager run, passing in the full conversation history.
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
+      issueTitle: "issue_title" in toolCallArgs ? toolCallArgs.issue_title as string : undefined,
     };
     return new Command({
       update: commandUpdate,
@@ -404,6 +409,7 @@ export async function classifyMessage(
   const commandUpdate: ManagerGraphUpdate = {
     messages: newMessages,
     ...(githubIssueId ? { githubIssueId } : {}),
+    issueTitle: "issue_title" in toolCallArgs ? toolCallArgs.issue_title as string : undefined,
   };
 
   if ((toolCallArgs.route as any) === "code") {
