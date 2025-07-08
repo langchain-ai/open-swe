@@ -170,6 +170,17 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
+  // Clear streamLoading as soon as we get any content (agent has started running)
+  useEffect(() => {
+    const hasContent =
+      (stream.messages && stream.messages.length > 0) ||
+      customNodeEvents.length > 0;
+
+    if (hasContent && streamLoading) {
+      setStreamLoading(false);
+    }
+  }, [stream.messages, customNodeEvents, streamLoading]);
+
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
   useEffect(() => {
