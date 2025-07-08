@@ -8,7 +8,6 @@ interface CancelStreamButtonProps {
   threadId?: string;
   runId?: string;
   streamName: "Planner" | "Programmer";
-  isVisible?: boolean;
 }
 
 export function CancelStreamButton({
@@ -16,7 +15,6 @@ export function CancelStreamButton({
   threadId,
   runId,
   streamName,
-  isVisible,
 }: CancelStreamButtonProps) {
   const { cancelRun } = useCancelStream({
     stream,
@@ -25,7 +23,7 @@ export function CancelStreamButton({
     streamName,
   });
 
-  const shouldShow = isVisible ?? (stream.isLoading && threadId && runId);
+  const shouldShow = stream.isLoading && threadId && runId;
 
   if (!shouldShow) {
     return null;

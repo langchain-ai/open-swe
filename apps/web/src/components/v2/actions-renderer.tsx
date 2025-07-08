@@ -25,8 +25,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
-  onLoadingChange?: (isLoading: boolean) => void;
-  onStreamReady?: (cancelFn: () => void) => void;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -58,7 +57,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   setProgrammerSession,
   programmerSession,
   setSelectedTab,
-  onLoadingChange,
   onStreamReady,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
@@ -118,11 +116,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }, [runId]);
 
   useEffect(() => {
-    onLoadingChange?.(stream.isLoading);
-  }, [stream.isLoading, onLoadingChange]);
-
-  useEffect(() => {
-    onStreamReady?.(cancelRun);
+    if (stream.isLoading) {
+      onStreamReady(cancelRun);
+    } else {
+      onStreamReady(undefined)
+    }
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages

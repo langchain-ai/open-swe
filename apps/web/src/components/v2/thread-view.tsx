@@ -50,8 +50,6 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
 
-  const [plannerLoading, setPlannerLoading] = useState(false);
-  const [programmerLoading, setProgrammerLoading] = useState(false);
   const plannerCancelRef = useRef<(() => void) | null>(null);
   const programmerCancelRef = useRef<(() => void) | null>(null);
 
@@ -167,26 +165,22 @@ export function ThreadView({
 
                       <div className="flex gap-2">
                         {selectedTab === "planner" &&
-                          plannerLoading &&
                           plannerCancelRef.current && (
                             <CancelStreamButton
                               stream={stream}
                               threadId={plannerThreadId}
                               runId={plannerRunId}
                               streamName="Planner"
-                              isVisible={plannerLoading}
                             />
                           )}
 
                         {selectedTab === "programmer" &&
-                          programmerLoading &&
                           programmerCancelRef.current && (
                             <CancelStreamButton
                               stream={stream}
                               threadId={plannerThreadId}
                               runId={plannerRunId}
                               streamName="Programmer"
-                              isVisible={programmerLoading}
                             />
                           )}
                       </div>
@@ -203,9 +197,12 @@ export function ThreadView({
                               setProgrammerSession={setProgrammerSession}
                               programmerSession={programmerSession}
                               setSelectedTab={setSelectedTab}
-                              onLoadingChange={setPlannerLoading}
                               onStreamReady={(cancelFn) => {
-                                plannerCancelRef.current = cancelFn;
+                                if (cancelFn) {
+                                  plannerCancelRef.current = cancelFn;
+                                } else {
+                                  plannerCancelRef.current = null;
+                                }
                               }}
                             />
                           )}
@@ -228,9 +225,12 @@ export function ThreadView({
                               graphId={PROGRAMMER_GRAPH_ID}
                               threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
-                              onLoadingChange={setProgrammerLoading}
                               onStreamReady={(cancelFn) => {
-                                programmerCancelRef.current = cancelFn;
+                                if (cancelFn) {
+                                  programmerCancelRef.current = cancelFn;
+                                } else {
+                                  programmerCancelRef.current = null;
+                                }
                               }}
                             />
                           )}
