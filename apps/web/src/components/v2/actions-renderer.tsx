@@ -107,6 +107,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     [],
   );
   const joinedRunId = useRef<string | undefined>(undefined);
+  const [streamLoading, setStreamLoading] = useState(false);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -174,7 +175,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   useEffect(() => {
     if (runId && runId !== joinedRunId.current) {
       joinedRunId.current = runId;
-      stream.joinStream(runId).catch(console.error);
+      setStreamLoading(true);
+      stream
+        .joinStream(runId)
+        .catch(console.error)
+        .finally(() => setStreamLoading(false));
     } else if (!runId) {
       joinedRunId.current = undefined;
     }
@@ -217,11 +222,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
-  const hasContent =
-    (filteredMessages && filteredMessages.length > 0) ||
-    customNodeEvents.length > 0;
-
-  if (runId && !hasContent) {
+  if (streamLoading) {
     return <LoadingActionsCardContent />;
   }
 
