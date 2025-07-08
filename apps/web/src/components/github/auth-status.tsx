@@ -5,49 +5,40 @@ import { GitHubSVG } from "@/components/icons/github";
 import { ArrowRight } from "lucide-react";
 import { LangGraphLogoSVG } from "../icons/langgraph";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { GitHubAppProvider } from "@/providers/GitHubApp";
 
-export default function AuthStatus() {
+function AuthStatusContent() {
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const [hasGitHubAppInstalled, setHasGitHubAppInstalled] = useState<
-    boolean | null
-  >(() => {
-    if (typeof window === "undefined") return null;
-    const cached = localStorage.getItem("github_app_installed");
-    return cached === "true" ? true : cached === "false" ? false : null;
-  });
-
-  const [isCheckingAppInstallation, setIsCheckingAppInstallation] =
-    useState(false);
   const {
     token: githubToken,
     fetchToken: fetchGitHubToken,
     isLoading: isTokenLoading,
   } = useGitHubToken();
 
+  const {
+    isInstalled: hasGitHubAppInstalled,
+    isLoading: isCheckingAppInstallation,
+  } = useGitHubAppProvider();
+
   useEffect(() => {
     checkAuthStatus();
   }, []);
 
   useEffect(() => {
-    if (isAuth) {
-      const cachedInstallationStatus = localStorage.getItem(
-        "github_app_installed",
-      );
-      if (cachedInstallationStatus === "true") {
-        setHasGitHubAppInstalled(true);
-        // Fetch token if we don't have one yet
-        if (!githubToken && !isTokenLoading) {
-          fetchGitHubToken();
-        }
-      } else if (cachedInstallationStatus === "false") {
-        setHasGitHubAppInstalled(false);
-      } else {
-        checkGitHubAppInstallation();
-      }
+    if (isAuth && hasGitHubAppInstalled && !githubToken && !isTokenLoading) {
+      // Fetch token when app is installed but we don't have a token yet
+      fetchGitHubToken();
     }
-  }, [isAuth, githubToken]);
+  }, [
+    isAuth,
+    hasGitHubAppInstalled,
+    githubToken,
+    isTokenLoading,
+    fetchGitHubToken,
+  ]);
 
   const checkAuthStatus = async () => {
     try {
@@ -60,34 +51,6 @@ export default function AuthStatus() {
     }
   };
 
-  const checkGitHubAppInstallation = async () => {
-    setIsCheckingAppInstallation(true);
-    try {
-      const response = await fetch("/api/github/repositories");
-      if (response.ok) {
-        setHasGitHubAppInstalled(true);
-        localStorage.setItem("github_app_installed", "true");
-
-        await fetchGitHubToken();
-      } else {
-        const errorData = await response.json();
-        if (errorData.error.includes("installation")) {
-          setHasGitHubAppInstalled(false);
-          localStorage.setItem("github_app_installed", "false");
-        } else {
-          setHasGitHubAppInstalled(false);
-          localStorage.setItem("github_app_installed", "false");
-        }
-      }
-    } catch (error) {
-      console.error("Error checking GitHub App installation:", error);
-      setHasGitHubAppInstalled(false);
-      localStorage.setItem("github_app_installed", "false");
-    } finally {
-      setIsCheckingAppInstallation(false);
-    }
-  };
-
   const handleLogin = () => {
     setIsLoading(true);
     window.location.href = "/api/auth/github/login";
@@ -95,8 +58,6 @@ export default function AuthStatus() {
 
   const handleInstallGitHubApp = () => {
     setIsLoading(true);
-
-    localStorage.removeItem("github_app_installed");
     window.location.href = "/api/github/installation";
   };
 
@@ -198,4 +159,12 @@ export default function AuthStatus() {
       </div>
     );
   }
+}
+
+export default function AuthStatus() {
+  return (
+    <GitHubAppProvider>
+      <AuthStatusContent />
+    </GitHubAppProvider>
+  );
 }

@@ -4,6 +4,8 @@ import { useState } from "react";
 import { LogOut } from "lucide-react";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 
+const GITHUB_APP_INSTALLED_KEY = "github_app_installed";
+
 export function GitHubLogoutButton() {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -14,7 +16,7 @@ export function GitHubLogoutButton() {
         method: "POST",
       });
       if (response.ok) {
-        localStorage.removeItem("github_app_installed");
+        localStorage.removeItem(GITHUB_APP_INSTALLED_KEY);
         window.location.href = "/";
       } else {
         console.error("Logout failed");

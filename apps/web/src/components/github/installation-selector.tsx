@@ -7,9 +7,10 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
-import { useGitHubInstallations } from "@/hooks/useGitHubInstallations";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { cn } from "@/lib/utils";
 import { Building2, User } from "lucide-react";
+import type { Installation } from "@/hooks/useGitHubInstallations";
 
 interface InstallationSelectorProps {
   disabled?: boolean;
@@ -27,10 +28,10 @@ export function InstallationSelector({
   const {
     installations,
     currentInstallation,
-    isLoading,
-    error,
+    installationsLoading: isLoading,
+    installationsError: error,
     switchInstallation,
-  } = useGitHubInstallations();
+  } = useGitHubAppProvider();
 
   const handleValueChange = async (value: string) => {
     await switchInstallation(value);
