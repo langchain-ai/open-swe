@@ -1,10 +1,10 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { StructuredToolInterface } from "@langchain/core/tools";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
-  GraphConfig,
   McpServerConfigSchema,
   McpServers,
-} from "@open-swe/shared/open-swe/types";
+} from "@open-swe/shared/open-swe/mcp";
 import { createLogger, LogLevel } from "./logger.js";
 import { DEFAULT_MCP_SERVERS } from "@open-swe/shared/constants";
 
