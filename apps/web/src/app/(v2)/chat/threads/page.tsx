@@ -78,7 +78,10 @@ export default function AllThreadsPage() {
                 {filteredThreads.length} threads
               </span>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <InstallationSelector />
+              <ThemeToggle />
+            </div>
           </div>
         </div>
       </div>
@@ -208,4 +211,5 @@ export default function AllThreadsPage() {
     </div>
   );
 }
+
 
