@@ -44,7 +44,13 @@ export async function takeActions(
 
   const mcpTools = await getMcpTools(config);
 
-  const allTools = [shellTool, rgTool, plannerNotesTool, getURLContentTool, ...mcpTools];
+  const allTools = [
+    shellTool,
+    rgTool,
+    plannerNotesTool,
+    getURLContentTool,
+    ...mcpTools,
+  ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );

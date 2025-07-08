@@ -44,7 +44,7 @@ export async function getMcpTools(
   config: GraphConfig,
 ): Promise<StructuredToolInterface[]> {
   try {
-    let mergedServers: McpServers = { ...DEFAULT_MCP_SERVERS };
+    const mergedServers: McpServers = { ...DEFAULT_MCP_SERVERS };
 
     const mcpServersConfig = config?.configurable?.["mcpServers"];
     if (mcpServersConfig) {
