@@ -294,7 +294,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   useEffect(() => {
     checkInstallation();
-  }, []);
+  }, [currentInstallationId]);
 
   useEffect(() => {
     if (
@@ -454,6 +454,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
 
