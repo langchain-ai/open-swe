@@ -59,8 +59,12 @@ function formatFindInstancesOfCommand(input: FindInstancesOfInput): string[] {
     args.push("-g", input.include_files);
   }
 
-  // Add the search query as the last argument
-  args.push(input.query);
+  // For literal string matching (not regex)
+  args.push("--fixed-strings");
+
+  // Add the search query as the last argument (ensure it's properly quoted)
+  const formattedQuery = `'${input.query.replace(/^'|'$/g, "")}'`;
+  args.push(formattedQuery);
 
   return args;
 }

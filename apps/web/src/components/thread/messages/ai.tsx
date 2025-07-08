@@ -205,13 +205,17 @@ export function mapToolMessageToActionStepProps(
     };
   } else if (toolCall?.name === findInstancesOfTool.name) {
     const args = toolCall.args as FindInstancesOfToolArgs;
+    // case_sensitive and match_word both default to true.
+    const caseSensitive =
+      args.case_sensitive === undefined ? true : args.case_sensitive;
+    const matchWord = args.match_word === undefined ? true : args.match_word;
     return {
       actionType: "find_instances_of",
       status,
       success,
       query: args.query || "",
-      case_sensitive: args.case_sensitive,
-      match_word: args.match_word,
+      case_sensitive: caseSensitive,
+      match_word: matchWord,
       include_files: args.include_files,
       exclude_files: args.exclude_files,
       output: getContentString(message.content),
@@ -441,12 +445,17 @@ export function AssistantMessage({
         } as ActionItemProps;
       } else if (toolCall.name === findInstancesOfTool.name) {
         const args = toolCall.args as FindInstancesOfToolArgs;
+        // case_sensitive and match_word both default to true.
+        const caseSensitive =
+          args.case_sensitive === undefined ? true : args.case_sensitive;
+        const matchWord =
+          args.match_word === undefined ? true : args.match_word;
         return {
           actionType: "find_instances_of",
           status: "generating",
           query: args?.query || "",
-          case_sensitive: args?.case_sensitive,
-          match_word: args?.match_word,
+          case_sensitive: caseSensitive,
+          match_word: matchWord,
           include_files: args?.include_files,
           exclude_files: args?.exclude_files,
           output: "",

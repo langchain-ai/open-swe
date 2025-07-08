@@ -27,7 +27,12 @@ import {
   RipgrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // Used only for Zod type inference.
@@ -140,12 +145,8 @@ function ToolIconWithTooltip({
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
-          {icon}
-        </TooltipTrigger>
-        <TooltipContent>
-          {toolNamePretty}
-        </TooltipContent>
+        <TooltipTrigger asChild>{icon}</TooltipTrigger>
+        <TooltipContent>{toolNamePretty}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -155,27 +156,54 @@ function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className={cn("rounded-sm px-1 py-[2px] text-xs border-1 border-gray-200", matchCase ? "bg-blue-500/60 border-blue-500 text-white" : "bg-none")}>
+        <TooltipTrigger
+          className={cn(
+            "rounded-sm border border-gray-300 px-1 py-[2px] text-xs dark:border-gray-600",
+            matchCase
+              ? "border-blue-500 bg-blue-500/80 text-white"
+              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+          )}
+        >
           <p className="font-mono">Aa</p>
         </TooltipTrigger>
-        <TooltipContent>
-          Match case {matchCase ? "on" : "off"}
-        </TooltipContent>
+        <TooltipContent>Match case {matchCase ? "on" : "off"}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
-  )
+  );
 }
 
 function MatchWholeWordIcon({ matchWholeWord }: { matchWholeWord: boolean }) {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className={cn("rounded-sm px-1 py-[2px] text-xs border-1 border-gray-200", matchWholeWord ? "bg-blue-500/60 border-blue-500 text-white" : "bg-none")}>
+        <TooltipTrigger
+          className={cn(
+            "rounded-sm border border-gray-300 px-1 py-[2px] text-xs dark:border-gray-600",
+            matchWholeWord
+              ? "border-blue-500 bg-blue-500/80 text-white"
+              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+          )}
+        >
           <span className="relative inline-block px-0.5">
-            <p className="font-mono relative z-10 m-0 text-center">ab</p>
-            <div className={cn("absolute bottom-0 left-0 h-1/5 w-[1px]", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
-            <div className={cn("absolute bottom-0 left-0 right-0 h-[1px] w-full", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
-            <div className={cn("absolute bottom-0 right-0 h-1/5 w-[1px]", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
+            <p className="relative z-10 m-0 text-center font-mono">ab</p>
+            <div
+              className={cn(
+                "absolute bottom-0 left-0 h-1/5 w-[1px]",
+                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
+              )}
+            ></div>
+            <div
+              className={cn(
+                "absolute right-0 bottom-0 left-0 h-[1px] w-full",
+                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
+              )}
+            ></div>
+            <div
+              className={cn(
+                "absolute right-0 bottom-0 h-1/5 w-[1px]",
+                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
+              )}
+            ></div>
           </span>
         </TooltipTrigger>
         <TooltipContent>
@@ -183,7 +211,7 @@ function MatchWholeWordIcon({ matchWholeWord }: { matchWholeWord: boolean }) {
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
-  )
+  );
 }
 
 function ActionItem(props: ActionItemProps) {
@@ -246,7 +274,8 @@ function ActionItem(props: ActionItemProps) {
       props.actionType === "shell" ||
       props.actionType === "rg" ||
       props.actionType === "install_dependencies" ||
-      props.actionType === "get_url_content"
+      props.actionType === "get_url_content" ||
+      props.actionType === "find_instances_of"
     ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
@@ -263,23 +292,63 @@ function ActionItem(props: ActionItemProps) {
     const defaultIconStyling = "text-muted-foreground mr-2 size-3.5";
     if (props.status === "loading" || !("actionType" in props)) {
       // In loading state, we don't know the type yet, use a generic icon
-      return <ToolIconWithTooltip toolNamePretty="Loading" icon={<Loader2 className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Loading"
+          icon={<Loader2 className={cn(defaultIconStyling)} />}
+        />
+      );
     }
 
     if (props.actionType === "planner_notes") {
-      return <ToolIconWithTooltip toolNamePretty="Planner Notes" icon={<FileText className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Planner Notes"
+          icon={<FileText className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "install_dependencies") {
-      return <ToolIconWithTooltip toolNamePretty="Install Dependencies" icon={<CloudDownload className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Install Dependencies"
+          icon={<CloudDownload className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "apply-patch") {
-      return <ToolIconWithTooltip toolNamePretty="Apply Patch" icon={<FileCode className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Apply Patch"
+          icon={<FileCode className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "rg") {
-      return <ToolIconWithTooltip toolNamePretty="Ripgrep (rg)" icon={<Search className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Ripgrep (rg)"
+          icon={<Search className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "get_url_content") {
-      return <ToolIconWithTooltip toolNamePretty="Get URL Contents" icon={<Globe className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Get URL Contents"
+          icon={<Globe className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "find_instances_of") {
-      return <ToolIconWithTooltip toolNamePretty="Find Instances of" icon={<Hash className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Find Instances of"
+          icon={<Hash className={cn(defaultIconStyling)} />}
+        />
+      );
     } else {
-      return <ToolIconWithTooltip toolNamePretty="Tool Call" icon={<Terminal className={cn(defaultIconStyling)} />} />
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Tool Call"
+          icon={<Terminal className={cn(defaultIconStyling)} />}
+        />
+      );
     }
   };
 
@@ -312,7 +381,7 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     }
-    
+
     if (props.actionType === "find_instances_of") {
       return (
         <div className="flex-1">
@@ -320,15 +389,19 @@ function ActionItem(props: ActionItemProps) {
             <code className="text-foreground/80 text-xs font-normal">
               {props.query}
             </code>
-            <div className="w-[1px] h-4 bg-border dark:bg-white"></div>
+            <div className="bg-border h-4 w-[1px] dark:bg-white"></div>
             <MatchCaseIcon matchCase={!!props.case_sensitive} />
             <MatchWholeWordIcon matchWholeWord={!!props.match_word} />
           </div>
           {(props.include_files || props.exclude_files) && (
             <div className="text-muted-foreground mt-0.5 text-xs font-normal">
-              {props.include_files && <span>Include: {props.include_files}</span>}
+              {props.include_files && (
+                <span>Include: {props.include_files}</span>
+              )}
               {props.include_files && props.exclude_files && <span> | </span>}
-              {props.exclude_files && <span>Exclude: {props.exclude_files}</span>}
+              {props.exclude_files && (
+                <span>Exclude: {props.exclude_files}</span>
+              )}
             </div>
           )}
         </div>

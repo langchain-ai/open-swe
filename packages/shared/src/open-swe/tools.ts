@@ -185,7 +185,11 @@ export function createFindInstancesOfToolFields(
 ) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
   const findInstancesOfSchema = z.object({
-    query: z.string().describe("The query/keyword to search for"),
+    query: z
+      .string()
+      .describe(
+        "The query/keyword to search for. This should be a literal string, not a regex.",
+      ),
 
     case_sensitive: z
       .boolean()
