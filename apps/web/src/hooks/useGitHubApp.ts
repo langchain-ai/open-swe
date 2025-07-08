@@ -102,6 +102,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Track current installation ID
+  const [currentInstallationId, setCurrentInstallationId] = useState<string | null>(null);
+
   // Repository state and pagination
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [repositoriesPage, setRepositoriesPage] = useState(1);
@@ -445,5 +448,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
 
 
