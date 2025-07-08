@@ -12,6 +12,8 @@ import { useThreads } from "@/hooks/useThreads";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { InstallationSelector } from "@/components/github/installation-selector";
+import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
 type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
@@ -206,3 +208,4 @@ export default function AllThreadsPage() {
     </div>
   );
 }
+
