@@ -322,3 +322,19 @@ export function createDiagnoseErrorToolFields() {
     schema: diagnoseErrorToolSchema,
   };
 }
+
+export function createGetURLContentToolFields() {
+  const getURLContentSchema = z.object({
+    url: z
+      .string()
+      .describe(
+        "The URL to get the content of. Returns the page content in markdown format.",
+      ),
+  });
+
+  return {
+    name: "get_url_content",
+    description: "Get the full page content of a given URL in markdown format.",
+    schema: getURLContentSchema,
+  };
+}

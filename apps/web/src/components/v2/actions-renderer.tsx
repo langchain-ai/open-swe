@@ -3,6 +3,7 @@ import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
   CustomNodeEvent,
@@ -67,6 +68,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -98,6 +100,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   setProgrammerSession,
   programmerSession,
   setSelectedTab,
+  onStreamReady,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
@@ -112,6 +115,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
+  });
+
+  const { cancelRun } = useCancelStream<State>({
+    stream,
+    threadId,
+    runId,
+    streamName: graphId === "planner" ? "Planner" : "Programmer",
   });
 
   const initializeEvents = customNodeEvents.filter(
@@ -166,6 +176,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       stream.joinStream(runId).catch(console.error);
     }
   }, [runId]);
+
+  useEffect(() => {
+    if (stream.isLoading) {
+      onStreamReady(cancelRun);
+    } else {
+      onStreamReady(undefined);
+    }
+  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(

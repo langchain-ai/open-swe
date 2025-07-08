@@ -14,6 +14,7 @@ import {
   type RemoveUIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
 import {
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
@@ -407,6 +408,11 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_INSTALLATION_NAME]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -576,6 +582,13 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER]),
+  /**
+   * The installation name of the GitHub app. Required when creating runs triggered by a bot (e.g. GitHub issue)
+   */
+  [GITHUB_INSTALLATION_NAME]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME]),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<
