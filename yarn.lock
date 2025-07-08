@@ -3014,6 +3014,7 @@ __metadata:
     remark-math: ^6.0.0
     shadcn: ^2.6.1
     sonner: ^2.0.1
+    swr: ^2.3.4
     tailwind-merge: ^3.0.2
     tailwind-scrollbar: ^4.0.1
     tailwindcss: ^4.0.13
@@ -6688,7 +6689,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"dequal@npm:^2.0.0":
+"dequal@npm:^2.0.0, dequal@npm:^2.0.3":
   version: 2.0.3
   resolution: "dequal@npm:2.0.3"
   checksum: 8679b850e1a3d0ebbc46ee780d5df7b478c23f335887464023a631d1b9af051ad4a6595a44220f9ff8ff95a8ddccf019b5ad778a976fd7bbf77383d36f412f90
@@ -14232,6 +14233,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"swr@npm:^2.3.4":
+  version: 2.3.4
+  resolution: "swr@npm:2.3.4"
+  dependencies:
+    dequal: ^2.0.3
+    use-sync-external-store: ^1.4.0
+  peerDependencies:
+    react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 18172b2215d8fa883b4845a094637e5aafb847b3ab96fb950866f0e50a9ada59450c8bcf9dc930e30e6fa40b986dbee45684c96337685b6d6f4d68006bd26b2a
+  languageName: node
+  linkType: hard
+
 "tailwind-merge@npm:^3.0.2":
   version: 3.3.0
   resolution: "tailwind-merge@npm:3.3.0"
@@ -15062,7 +15075,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"use-sync-external-store@npm:^1.5.0":
+"use-sync-external-store@npm:^1.4.0, use-sync-external-store@npm:^1.5.0":
   version: 1.5.0
   resolution: "use-sync-external-store@npm:1.5.0"
   peerDependencies:
