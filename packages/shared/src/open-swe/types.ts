@@ -627,7 +627,7 @@ export const GraphConfigurationMetadata: {
   },
   mcpServers: {
     x_open_swe_ui_config: {
-      type: "textarea",
+      type: "json",
       default: JSON.stringify(DEFAULT_MCP_SERVERS),
       description:
         "JSON configuration for custom MCP servers. LangGraph docs server is set by default.",
