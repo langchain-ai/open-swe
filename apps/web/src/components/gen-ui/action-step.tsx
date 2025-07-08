@@ -155,8 +155,8 @@ function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className={cn("rounded-xs p-[0.5px] text-xs", !matchCase ? "bg-blue-500" : "bg-gray-100")}>
-          <p>Aa</p>
+        <TooltipTrigger className={cn("rounded-sm px-1 py-[2px] text-xs border-1 border-gray-200", matchCase ? "bg-blue-500/60 border-blue-500 text-white" : "bg-none")}>
+          <p className="font-mono">Aa</p>
         </TooltipTrigger>
         <TooltipContent>
           Match case {matchCase ? "on" : "off"}
@@ -170,8 +170,13 @@ function MatchWholeWordIcon({ matchWholeWord }: { matchWholeWord: boolean }) {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger className={cn("rounded-md border-b-[1px] border-gray-200", matchWholeWord ? "bg-blue-500" : "bg-gray-100")}>
-          <p>ab</p>
+        <TooltipTrigger className={cn("rounded-sm px-1 py-[2px] text-xs border-1 border-gray-200", matchWholeWord ? "bg-blue-500/60 border-blue-500 text-white" : "bg-none")}>
+          <span className="relative inline-block px-0.5">
+            <p className="font-mono relative z-10 m-0 text-center">ab</p>
+            <div className={cn("absolute bottom-0 left-0 h-1/5 w-[1px]", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
+            <div className={cn("absolute bottom-0 left-0 right-0 h-[1px] w-full", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
+            <div className={cn("absolute bottom-0 right-0 h-1/5 w-[1px]", matchWholeWord ? "bg-white" : "bg-black dark:bg-white")}></div>
+          </span>
         </TooltipTrigger>
         <TooltipContent>
           Match whole word {matchWholeWord ? "on" : "off"}
@@ -315,12 +320,9 @@ function ActionItem(props: ActionItemProps) {
             <code className="text-foreground/80 text-xs font-normal">
               {props.query}
             </code>
-            {props.case_sensitive !== undefined && (
-              <MatchCaseIcon matchCase={props.case_sensitive} />
-            )}
-            {props.match_word !== undefined && (
-              <MatchWholeWordIcon matchWholeWord={props.match_word} />
-            )}
+            <div className="w-[1px] h-4 bg-border dark:bg-white"></div>
+            <MatchCaseIcon matchCase={!!props.case_sensitive} />
+            <MatchWholeWordIcon matchWholeWord={!!props.match_word} />
           </div>
           {(props.include_files || props.exclude_files) && (
             <div className="text-muted-foreground mt-0.5 text-xs font-normal">
