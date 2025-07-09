@@ -21,6 +21,7 @@ import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { LoadingActionsCardContent } from "./thread-view-loading";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -105,6 +106,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
   );
+  const joinedRunId = useRef<string | undefined>(undefined);
+  const [streamLoading, setStreamLoading] = useState(false);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -167,15 +170,31 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
-  const streamJoined = useRef(false);
+  // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
-    if (!streamJoined.current && runId) {
-      streamJoined.current = true;
-      // TODO: If the SDK changes go in, use this instead:
-      // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
-      stream.joinStream(runId).catch(console.error);
+    const hasContent =
+      (stream.messages && stream.messages.length > 0) ||
+      customNodeEvents.length > 0;
+
+    if (hasContent && streamLoading) {
+      setStreamLoading(false);
     }
-  }, [runId]);
+  }, [stream.messages, customNodeEvents, streamLoading]);
+
+  // TODO: If the SDK changes go in, use this instead:
+  // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
+  useEffect(() => {
+    if (runId && runId !== joinedRunId.current) {
+      joinedRunId.current = runId;
+      setStreamLoading(true);
+      stream
+        .joinStream(runId)
+        .catch(console.error)
+        .finally(() => setStreamLoading(false));
+    } else if (!runId) {
+      joinedRunId.current = undefined;
+    }
+  }, [runId, stream]);
 
   useEffect(() => {
     if (stream.isLoading) {
@@ -213,6 +232,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       }
     }
   }, [stream.values, graphId]);
+
+  if (streamLoading) {
+    return <LoadingActionsCardContent />;
+  }
 
   return (
     <div className="flex w-full flex-col gap-2">

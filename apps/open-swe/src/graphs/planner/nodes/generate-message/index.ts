@@ -23,6 +23,7 @@ import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 import { createFindInstancesOfTool } from "../../../../tools/find-instances-of.js";
+import { getMcpTools } from "../../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -51,13 +52,20 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const mcpTools = await getMcpTools(config);
+
   const tools = [
     createRgTool(state),
     createShellTool(state),
     createFindInstancesOfTool(state),
     createPlannerNotesTool(),
     createGetURLContentTool(),
+    ...mcpTools,
   ];
+  logger.info(
+    `MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`,
+  );
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
