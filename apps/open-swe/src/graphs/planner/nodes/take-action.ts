@@ -1,5 +1,4 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { Sandbox } from "@daytonaio/sdk";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -22,90 +21,11 @@ import {
 } from "../../../utils/github/git.js";
 import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { daytonaClient } from "../../../utils/sandbox.js";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../../constants.js";
-import {
-  cloneRepo,
-  configureGitUserInRepo,
-} from "../../../utils/github/git.js";
-import { getCodebaseTree } from "../../../utils/tree.js";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
-import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
-
-async function getSandboxWithErrorHandling(
-  sandboxSessionId: string,
-  targetRepository: TargetRepository,
-  branchName: string,
-  config: GraphConfig,
-): Promise<{
-  sandbox: Sandbox;
-  codebaseTree: any | null;
-  dependenciesInstalled: boolean | null;
-}> {
-  try {
-    // Try to get existing sandbox
-    const sandbox = await daytonaClient().get(sandboxSessionId);
-
-    // Check sandbox state
-    const sandboxInfo = await sandbox.info();
-    const state = sandboxInfo.state;
-
-    if (state === "started") {
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
-    }
-
-    if (state === "stopped" || state === "archived") {
-      await sandbox.start();
-      return {
-        sandbox,
-        codebaseTree: null,
-        dependenciesInstalled: null,
-      };
-    }
-
-    // For any other state, recreate sandbox
-    throw new Error(`Sandbox in unrecoverable state: ${state}`);
-  } catch (error) {
-    // Recreate sandbox if any step fails
-    logger.info("Recreating sandbox due to error or unrecoverable state", {
-      error,
-    });
-
-    const sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-
-    // Clone repository
-    await cloneRepo(sandbox, targetRepository, {
-      githubInstallationToken,
-      stateBranchName: branchName,
-    });
-
-    // Configure git user
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-    await configureGitUserInRepo(absoluteRepoDir, sandbox, {
-      githubInstallationToken,
-      owner: targetRepository.owner,
-      repo: targetRepository.repo,
-    });
-
-    // Get codebase tree
-    const codebaseTree = await getCodebaseTree(sandbox.id);
-
-    return {
-      sandbox,
-      codebaseTree,
-      dependenciesInstalled: false,
-    };
-  }
-}
 
 export async function takeActions(
   state: PlannerGraphState,
@@ -142,6 +62,14 @@ export async function takeActions(
     throw new Error("No tool calls found.");
   }
 
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
+
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
     if (!tool) {
@@ -165,7 +93,12 @@ export async function takeActions(
     try {
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
-        (await tool.invoke(toolCall.args)) as {
+        (await tool.invoke({
+          ...toolCall.args,
+          // Pass in the existing/new sandbox session ID to the tool call.
+          // use `x` prefix to avoid name conflicts with tool args.
+          xSandboxSessionId: sandbox.id,
+        })) as {
           result: string;
           status: "success" | "error";
         };
@@ -217,13 +150,6 @@ export async function takeActions(
   });
 
   let toolCallResults = await Promise.all(toolCallResultsPromise);
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
-      state.sandboxSessionId,
-      state.targetRepository,
-      state.branchName,
-      config,
-    );
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {

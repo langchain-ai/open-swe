@@ -1,12 +1,10 @@
 import { tool } from "@langchain/core/tools";
-import { Sandbox } from "@daytonaio/sdk";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { getCurrentTaskInput } from "@langchain/langgraph";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
+import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
 const logger = createLogger(LogLevel.INFO, "ShellTool");
 
@@ -20,23 +18,9 @@ export function createShellTool(
 ) {
   const shellTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      let sandbox: Sandbox | undefined;
       try {
-        const state = getCurrentTaskInput<GraphState>();
-        const { sandboxSessionId } = state;
-        if (!sandboxSessionId) {
-          logger.error(
-            "FAILED TO RUN COMMAND: No sandbox session ID provided",
-            {
-              input,
-            },
-          );
-          throw new Error(
-            "FAILED TO RUN COMMAND: No sandbox session ID provided",
-          );
-        }
+        const sandbox = await getSandboxSessionOrThrow(input);
 
-        sandbox = await daytonaClient().get(sandboxSessionId);
         const { command, workdir, timeout } = input;
         const response = await sandbox.process.executeCommand(
           command.join(" "),
