@@ -1,4 +1,5 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { Sandbox, SandboxState } from "@daytonaio/sdk";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -22,10 +23,84 @@ import {
 import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { daytonaClient } from "../../../utils/sandbox.js";
+import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../../constants.js";
+import { cloneRepo, configureGitUserInRepo } from "../../../utils/github/git.js";
+import { getCodebaseTree } from "../../../utils/tree.js";
+import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
+import { TargetRepository } from "@open-swe/shared/open-swe/types";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
+
+async function getSandboxWithErrorHandling(
+  sandboxSessionId: string,
+  targetRepository: TargetRepository,
+  branchName: string,
+  config: GraphConfig,
+): Promise<{
+  sandbox: Sandbox;
+  codebaseTree: any | null;
+  dependenciesInstalled: boolean | null;
+}> {
+  try {
+    // Try to get existing sandbox
+    const sandbox = await daytonaClient().get(sandboxSessionId);
+    
+    // Check sandbox state
+    const sandboxInfo = await sandbox.info();
+    const state = sandboxInfo.state;
+    
+    if (state === 'started') {
+      return {
+        sandbox,
+        codebaseTree: null,
+        dependenciesInstalled: null,
+      };
+    }
+    
+    if (state === 'stopped' || state === 'archived') {
+      await sandbox.start();
+      return {
+        sandbox,
+        codebaseTree: null,
+        dependenciesInstalled: null,
+      };
+    }
+    
+    // For any other state, recreate sandbox
+    throw new Error(`Sandbox in unrecoverable state: ${state}`);
+  } catch (error) {
+    // Recreate sandbox if any step fails
+    logger.info("Recreating sandbox due to error or unrecoverable state", { error });
+    
+    const sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
+    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+    
+    // Clone repository
+    await cloneRepo(sandbox, targetRepository, {
+      githubInstallationToken,
+      stateBranchName: branchName,
+    });
+    
+    // Configure git user
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+    await configureGitUserInRepo(absoluteRepoDir, sandbox, {
+      githubInstallationToken,
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+    });
+    
+    // Get codebase tree
+    const codebaseTree = await getCodebaseTree(sandbox.id);
+    
+    return {
+      sandbox,
+      codebaseTree,
+      dependenciesInstalled: false,
+    };
+  }
+}
 
 export async function takeActions(
   state: PlannerGraphState,
@@ -176,3 +251,4 @@ ${tc.content}`,
     messages: toolCallResults,
   };
 }
+
