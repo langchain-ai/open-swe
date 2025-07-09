@@ -28,10 +28,9 @@ export async function requestHelp(
     throw new Error("Last message is not an AI message with tool calls.");
   }
   const sandboxSessionId = state.sandboxSessionId;
-  if (!sandboxSessionId) {
-    throw new Error("Sandbox session ID not found.");
+  if (sandboxSessionId) {
+    await stopSandbox(sandboxSessionId);
   }
-  await stopSandbox(sandboxSessionId);
 
   const toolCall = lastMessage.tool_calls[0];
 
