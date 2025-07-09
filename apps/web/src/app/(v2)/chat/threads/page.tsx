@@ -223,32 +223,7 @@ function AllThreadsPageContent() {
 
 export default function AllThreadsPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="bg-background flex h-screen flex-col">
-          <div className="border-border bg-card border-b px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-muted h-6 w-6 animate-pulse rounded"></div>
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                <span className="text-muted-foreground font-mono text-sm">
-                  All Threads
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <div className="mx-auto max-w-6xl p-4">
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <ThreadCardLoading key={`loading-${index}`} />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      }
-    >
+    <Suspense fallback={<div>Loading...</div>}>
       <AllThreadsPageContent />
     </Suspense>
   );
