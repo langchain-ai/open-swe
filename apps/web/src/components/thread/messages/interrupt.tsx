@@ -6,7 +6,7 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 interface InterruptProps {
   interruptValue?: unknown;
   isLastMessage: boolean;
-  hasNoAIOrToolMessages: boolean;
+  hasNoAIOrToolMessages?: boolean;
   forceRenderInterrupt?: boolean;
   thread: ReturnType<typeof useStream>;
 }

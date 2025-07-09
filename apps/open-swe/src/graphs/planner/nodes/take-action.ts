@@ -19,10 +19,11 @@ import {
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
+import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { daytonaClient } from "../../../utils/sandbox.js";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -40,8 +41,8 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const plannerNotesTool = createPlannerNotesTool();
+  const findInstancesOfTool = createFindInstancesOfTool(state);
   const getURLContentTool = createGetURLContentTool();
-
   const mcpTools = await getMcpTools(config);
 
   const allTools = [
@@ -49,6 +50,7 @@ export async function takeActions(
     rgTool,
     plannerNotesTool,
     getURLContentTool,
+    findInstancesOfTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(
@@ -59,6 +61,14 @@ export async function takeActions(
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
   }
+
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
 
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
@@ -83,7 +93,12 @@ export async function takeActions(
     try {
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
-        (await tool.invoke(toolCall.args)) as {
+        (await tool.invoke({
+          ...toolCall.args,
+          // Pass in the existing/new sandbox session ID to the tool call.
+          // use `x` prefix to avoid name conflicts with tool args.
+          xSandboxSessionId: sandbox.id,
+        })) as {
           result: string;
           status: "success" | "error";
         };
@@ -135,7 +150,6 @@ export async function takeActions(
   });
 
   let toolCallResults = await Promise.all(toolCallResultsPromise);
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
@@ -172,5 +186,8 @@ ${tc.content}`,
 
   return {
     messages: toolCallResults,
+    sandboxSessionId: sandbox.id,
+    ...(codebaseTree && { codebaseTree }),
+    ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
 }

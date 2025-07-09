@@ -4,7 +4,7 @@ import {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
-import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
+import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
@@ -30,9 +30,9 @@ export async function createNewSession(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
-  const titleAndContent = await createIssueTitleAndBodyFromMessages(
+  const titleAndContent = await createIssueFieldsFromMessages(
     state.messages,
-    config,
+    config.configurable,
   );
   const { githubAccessToken } = getGitHubTokensFromConfig(config);
   const newIssue = await createIssue({

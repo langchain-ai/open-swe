@@ -18,10 +18,11 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
-import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createFindInstancesOfTool } from "../../../../tools/find-instances-of.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
@@ -56,6 +57,7 @@ export async function generateAction(
   const tools = [
     createRgTool(state),
     createShellTool(state),
+    createFindInstancesOfTool(state),
     createPlannerNotesTool(),
     createGetURLContentTool(),
     ...mcpTools,
@@ -69,9 +71,9 @@ export async function generateAction(
     parallel_tool_calls: true,
   });
 
-  const [missingMessages, latestTaskPlan] = await Promise.all([
+  const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
     getMissingMessages(state, config),
-    getTaskPlanFromIssue(state, config),
+    getPlansFromIssue(state, config),
   ]);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
