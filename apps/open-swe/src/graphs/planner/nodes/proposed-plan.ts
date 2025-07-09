@@ -26,7 +26,10 @@ import {
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import {
+  addProposedPlanToIssue,
+  addTaskPlanToIssue,
+} from "../../../utils/github/issue-task.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   ACCEPTED_PLAN_NODE_ID,
@@ -161,6 +164,15 @@ export async function interruptProposedPlan(
       ],
     });
   }
+
+  await addProposedPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    proposedPlan,
+  );
 
   const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
     action_request: {

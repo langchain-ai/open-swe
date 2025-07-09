@@ -112,6 +112,91 @@ export async function getPlansFromIssue(
   };
 }
 
+function insertPlanToIssueBody(
+  issueBody: string,
+  planString: string,
+  planType: "taskPlan" | "proposedPlan",
+) {
+  const openingPlanTag =
+    planType === "taskPlan" ? TASK_OPEN_TAG : PROPOSED_PLAN_OPEN_TAG;
+  const closingPlanTag =
+    planType === "taskPlan" ? TASK_CLOSE_TAG : PROPOSED_PLAN_CLOSE_TAG;
+
+  const wrappedPlan = `${openingPlanTag}
+${planString}
+${closingPlanTag}`;
+
+  let newBody = "";
+
+  if (
+    !issueBody.includes(openingPlanTag) &&
+    !issueBody.includes(closingPlanTag)
+  ) {
+    if (
+      !issueBody.includes(DETAILS_OPEN_TAG) &&
+      !issueBody.includes(DETAILS_CLOSE_TAG)
+    ) {
+      newBody = `${issueBody}
+${DETAILS_OPEN_TAG}
+${AGENT_CONTEXT_DETAILS_SUMMARY}
+${wrappedPlan}
+${DETAILS_CLOSE_TAG}`;
+    } else {
+      // No plan present yet, but details already exists.
+      const contentBeforeDetailsTag = issueBody.split(DETAILS_OPEN_TAG)?.[0];
+      const contentAfterDetailsTag = issueBody.split(DETAILS_CLOSE_TAG)?.[0];
+
+      newBody = `${contentBeforeDetailsTag}
+${wrappedPlan}
+${contentAfterDetailsTag}`;
+    }
+  } else {
+    const contentBeforeOpenTag = issueBody.split(openingPlanTag)?.[0];
+    const contentAfterCloseTag = issueBody.split(closingPlanTag)?.[1];
+
+    newBody = `${contentBeforeOpenTag}
+${wrappedPlan}
+${contentAfterCloseTag}`;
+  }
+
+  return newBody;
+}
+
+export async function addProposedPlanToIssue(
+  input: GetIssueTaskPlanInput,
+  config: GraphConfig,
+  proposedPlan: string[],
+) {
+  const issue = await getIssue({
+    owner: input.targetRepository.owner,
+    repo: input.targetRepository.repo,
+    issueNumber: input.githubIssueId,
+    githubInstallationToken:
+      getGitHubTokensFromConfig(config).githubInstallationToken,
+  });
+  if (!issue || !issue.body) {
+    throw new Error(
+      "No issue found when attempting to get task plan from issue",
+    );
+  }
+
+  const proposedPlanString = JSON.stringify(proposedPlan, null, 2);
+  const newBody = insertPlanToIssueBody(
+    issue.body,
+    proposedPlanString,
+    "proposedPlan",
+  );
+
+  await updateIssue({
+    owner: input.targetRepository.owner,
+    repo: input.targetRepository.repo,
+    issueNumber: input.githubIssueId,
+    githubInstallationToken:
+      getGitHubTokensFromConfig(config).githubInstallationToken,
+    body: newBody,
+  });
+}
+
 const DETAILS_OPEN_TAG = "<details>";
 const DETAILS_CLOSE_TAG = "</details>";
 const AGENT_CONTEXT_DETAILS_SUMMARY = "<summary>Agent Context</summary>";
@@ -134,35 +219,7 @@ export async function addTaskPlanToIssue(
   }
 
   const taskPlanString = JSON.stringify(taskPlan, null, 2);
-  let newBody = "";
-
-  if (
-    !issue.body.includes(TASK_OPEN_TAG) &&
-    !issue.body.includes(TASK_CLOSE_TAG)
-  ) {
-    newBody = `${issue.body}
-
-${DETAILS_OPEN_TAG}
-${AGENT_CONTEXT_DETAILS_SUMMARY}
-
-${TASK_OPEN_TAG}
-${taskPlanString}
-${TASK_CLOSE_TAG}
-
-${DETAILS_CLOSE_TAG}`;
-  } else {
-    const contentBeforeOpenTag = issue.body.split(TASK_OPEN_TAG)?.[0];
-    const contentAfterCloseTag = issue.body.split(TASK_CLOSE_TAG)?.[1];
-    const newTaskPlanString = JSON.stringify(taskPlan, null, 2);
-
-    newBody = `${contentBeforeOpenTag}
-
-${TASK_OPEN_TAG}
-${newTaskPlanString}
-${TASK_CLOSE_TAG}
-
-${contentAfterCloseTag}`;
-  }
+  const newBody = insertPlanToIssueBody(issue.body, taskPlanString, "taskPlan");
 
   await updateIssue({
     owner: input.targetRepository.owner,
