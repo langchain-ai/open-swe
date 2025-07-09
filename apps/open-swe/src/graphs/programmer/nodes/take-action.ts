@@ -20,7 +20,7 @@ import {
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { daytonaClient } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { shouldDiagnoseError } from "../utils/tool-message-error.js";
@@ -38,12 +38,6 @@ export async function takeAction(
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
-  }
-
-  if (!state.sandboxSessionId) {
-    throw new Error(
-      "Failed to take action: No sandbox session ID found in state.",
-    );
   }
 
   const applyPatchTool = createApplyPatchTool(state);
@@ -71,6 +65,13 @@ export async function takeAction(
     throw new Error("No tool calls found.");
   }
 
+  const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
+    state.sandboxSessionId,
+    state.targetRepository,
+    state.branchName,
+    config,
+  );
+
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
 
@@ -90,7 +91,12 @@ export async function takeAction(
     try {
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
-        await tool.invoke(toolCall.args);
+        await tool.invoke({
+          ...toolCall.args,
+          // Pass in the existing/new sandbox session ID to the tool call.
+          // use `x` prefix to avoid name conflicts with tool args.
+          xSandboxSessionId: sandbox.id,
+        });
       if (typeof toolResult === "string") {
         result = toolResult;
         toolCallStatus = "success";
@@ -141,7 +147,6 @@ export async function takeAction(
 
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
   const changedFiles = await getChangedFilesStatus(
     getRepoAbsolutePath(state.targetRepository),
     sandbox,
@@ -169,13 +174,22 @@ export async function takeAction(
 
   const codebaseTree = await getCodebaseTree();
 
+  // Prioritize wereDependenciesInstalled over dependenciesInstalled
+  const dependenciesInstalledUpdate =
+    wereDependenciesInstalled !== null
+      ? wereDependenciesInstalled
+      : dependenciesInstalled !== null
+        ? dependenciesInstalled
+        : null;
+
   const commandUpdate: GraphUpdate = {
     messages: toolCallResults,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
     codebaseTree,
-    ...(wereDependenciesInstalled !== null && {
-      dependenciesInstalled: wereDependenciesInstalled,
+    sandboxSessionId: sandbox.id,
+    ...(dependenciesInstalledUpdate !== null && {
+      dependenciesInstalled: dependenciesInstalledUpdate,
     }),
   };
   return new Command({

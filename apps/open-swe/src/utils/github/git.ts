@@ -386,7 +386,7 @@ export async function stashAndClearChanges(
 ): Promise<ExecuteResponse | false> {
   try {
     const gitStashOutput = await sandbox.process.executeCommand(
-      "git stash && git reset --hard",
+      "git add -A && git stash && git reset --hard",
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
