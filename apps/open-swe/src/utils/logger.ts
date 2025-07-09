@@ -74,7 +74,11 @@ function logWithOptionalIds(styledPrefix: string, message: string, data?: any) {
 export function createLogger(level: LogLevel, prefix: string) {
   const hash = simpleHash(prefix);
   const color = COLORS[hash % COLORS.length];
-  const styledPrefix = `${BOLD}${color}[${prefix}]${RESET}`; // Apply bold and color
+  
+  // Use plain prefix in production, styled prefix otherwise
+  const styledPrefix = process.env.NODE_ENV === 'production'
+    ? `[${prefix}]`
+    : `${BOLD}${color}[${prefix}]${RESET}`;
 
   return {
     debug: (message: string, data?: any) => {
@@ -108,3 +112,4 @@ export function createLogger(level: LogLevel, prefix: string) {
     },
   };
 }
+
