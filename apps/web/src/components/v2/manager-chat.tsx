@@ -11,6 +11,7 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { cn } from "@/lib/utils";
+import { isAIMessageSDK } from "@/lib/langchain-messages";
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -67,6 +68,19 @@ interface ManagerChatProps {
   cancelRun: () => void;
 }
 
+function extractResponseFromMessage(message: Message): string {
+  if (!isAIMessageSDK(message)) {
+    return getMessageContentString(message.content);
+  }
+  const toolCall = message.tool_calls?.[0];
+  const response = toolCall?.args?.response;
+
+  if (!toolCall || !response) {
+    return getMessageContentString(message.content);
+  }
+  return response;
+}
+
 export function ManagerChat({
   messages,
   chatInput,
@@ -87,39 +101,41 @@ export function ManagerChat({
             contentClassName="space-y-4 p-4"
             content={
               <>
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className="group flex gap-3"
-                  >
-                    <div className="flex-shrink-0">
-                      {message.type === "human" ? (
-                        <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
-                          <User className="text-muted-foreground h-3 w-3" />
+                {messages.map((message) => {
+                  const messageContentString =
+                    extractResponseFromMessage(message);
+                  return (
+                    <div
+                      key={message.id}
+                      className="group flex gap-3"
+                    >
+                      <div className="flex-shrink-0">
+                        {message.type === "human" ? (
+                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
+                            <User className="text-muted-foreground h-3 w-3" />
+                          </div>
+                        ) : (
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
+                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="relative flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground text-xs font-medium">
+                            {message.type === "human" ? "You" : "Agent"}
+                          </span>
                         </div>
-                      ) : (
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
-                          <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                        <div className="text-foreground text-sm leading-relaxed">
+                          {messageContentString}
                         </div>
-                      )}
-                    </div>
-                    <div className="relative flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground text-xs font-medium">
-                          {message.type === "human" ? "You" : "Agent"}
-                        </span>
-                      </div>
-                      <div className="text-foreground text-sm leading-relaxed">
-                        {getMessageContentString(message.content)}
-                      </div>
-                      <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MessageCopyButton
-                          content={getMessageContentString(message.content)}
-                        />
+                        <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <MessageCopyButton content={messageContentString} />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             }
             footer={

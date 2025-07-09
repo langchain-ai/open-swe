@@ -36,8 +36,8 @@ import {
   CONVERSATION_HISTORY_PROMPT,
   CREATE_ISSUE_ROUTING_OPTION,
   PLAN_ROUTING_OPTION,
+  PLANNER_RUNNING_PROMPT,
   PROPOSED_PLAN_PROMPT,
-  ROUTING_SYSTEM_PROMPT,
   TASK_PLAN_PROMPT,
 } from "./prompts.js";
 import {
@@ -51,7 +51,6 @@ const createClassificationPromptAndToolSchema = (inputs: {
   plannerStatus: ThreadStatus | "not_started";
   messages: BaseMessage[];
   taskPlan: TaskPlan;
-  routingResponse?: string;
   proposedPlan?: string[];
 }): {
   prompt: string;
@@ -84,16 +83,15 @@ const createClassificationPromptAndToolSchema = (inputs: {
       : null;
 
   const programmerRunning = inputs.programmerStatus === "busy";
+  const plannerRunning = inputs.plannerStatus === "busy";
   const showCreateIssueOption =
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
 
-  const systemPrompt = inputs.routingResponse
-    ? ROUTING_SYSTEM_PROMPT
-    : CLASSIFICATION_SYSTEM_PROMPT;
-
-  const prompt = systemPrompt
-    .replaceAll("{PROGRAMMER_STATUS}", inputs.programmerStatus)
+  const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
+    "{PROGRAMMER_STATUS}",
+    inputs.programmerStatus,
+  )
     .replaceAll("{PLANNER_STATUS}", inputs.plannerStatus)
     .replaceAll(
       "{CODE_ROUTING_OPTION}",
@@ -103,6 +101,10 @@ const createClassificationPromptAndToolSchema = (inputs: {
     .replaceAll(
       "{PLAN_ROUTING_OPTION}",
       !programmerRunning ? PLAN_ROUTING_OPTION : "",
+    )
+    .replaceAll(
+      "{PLANNER_RUNNING_PROMPT}",
+      plannerRunning ? PLANNER_RUNNING_PROMPT : "",
     )
     .replaceAll(
       "{CREATE_ISSUE_ROUTING_OPTION}",
@@ -117,8 +119,7 @@ const createClassificationPromptAndToolSchema = (inputs: {
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
       formattedConversationHistoryPrompt ?? "",
-    )
-    .replaceAll("{ROUTING_RESPONSE}", inputs.routingResponse ?? "");
+    );
 
   const schema = createClassificationSchema({
     programmerRunning,
@@ -167,53 +168,33 @@ export async function classifyMessage(
     : null;
   const taskPlan = issuePlans?.taskPlan ?? state.taskPlan;
 
-  const { prompt: responsePrompt } = createClassificationPromptAndToolSchema({
+  const { prompt, schema } = createClassificationPromptAndToolSchema({
     programmerStatus,
     plannerStatus,
     messages: state.messages,
     taskPlan,
     proposedPlan: issuePlans?.proposedPlan ?? undefined,
   });
-
-  const model = await loadModel(config, Task.CLASSIFICATION);
-  const response = await model.invoke([
-    {
-      role: "system",
-      content: responsePrompt,
-    },
-    userMessage,
-  ]);
-
-  // Get the new prompt, this time passing the `routingResponse` to the prompt.
-  const { prompt: routingPrompt, schema } =
-    createClassificationPromptAndToolSchema({
-      programmerStatus,
-      plannerStatus,
-      messages: state.messages,
-      taskPlan: state.taskPlan,
-      routingResponse: getMessageContentString(response.content),
-    });
   const respondAndRouteTool = {
     name: "respond_and_route",
     description: "Respond to the user's message and determine how to route it.",
     schema,
   };
+  const model = await loadModel(config, Task.CLASSIFICATION);
   const modelWithTools = model.bindTools([respondAndRouteTool], {
     tool_choice: respondAndRouteTool.name,
     parallel_tool_calls: false,
   });
 
-  const toolCallingResponse = await modelWithTools
-    .withConfig({ tags: ["nostream"] })
-    .invoke([
-      {
-        role: "system",
-        content: routingPrompt,
-      },
-      userMessage,
-    ]);
+  const response = await modelWithTools.invoke([
+    {
+      role: "system",
+      content: prompt,
+    },
+    userMessage,
+  ]);
 
-  const toolCall = toolCallingResponse.tool_calls?.[0];
+  const toolCall = response.tool_calls?.[0];
   if (!toolCall) {
     throw new Error("No tool call found.");
   }
@@ -326,6 +307,15 @@ export async function classifyMessage(
     });
 
     await Promise.all(createCommentsPromise);
+
+    // After creating the new comment, we can add the message to state and end.
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: [response],
+    };
+    return new Command({
+      update: commandUpdate,
+      goto: END,
+    });
   }
 
   // Issue has been created, and any missing human messages have been added to it.
@@ -336,7 +326,8 @@ export async function classifyMessage(
   };
 
   if ((toolCallArgs.route as any) === "code") {
-    // If the route was code, we don't need to do anything since the issue now contains the new messages, and the coding agent will handle pulling them in.
+    // If the route was code, we don't need to do anything since the issue now contains the new messages, and the coding agent will handle pulling them in.\
+    // This should never be reached since we should return early after adding the Github comment, but include anyways...
     return new Command({
       update: commandUpdate,
       goto: END,
