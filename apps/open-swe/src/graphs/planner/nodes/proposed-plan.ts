@@ -12,7 +12,7 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { startSandbox } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../../../utils/user-request.js";
 import {
@@ -79,7 +79,19 @@ async function startProgrammerRun(input: {
 
   const programmerThreadId = uuidv4();
   // Restart the sandbox.
-  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
+  runInput.sandboxSessionId = sandbox.id;
+  runInput.codebaseTree = codebaseTree ?? runInput.codebaseTree;
+  runInput.dependenciesInstalled =
+    dependenciesInstalled !== null
+      ? dependenciesInstalled
+      : runInput.dependenciesInstalled;
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,
@@ -178,11 +190,6 @@ export async function interruptProposedPlan(
     description: `A new plan has been generated for your request. Please review it and either approve it, edit it, respond to it, or ignore it. Responses will be passed to an LLM where it will rewrite then plan.
     If editing the plan, ensure each step in the plan is separated by "${PLAN_INTERRUPT_DELIMITER}".`,
   })[0];
-
-  if (!state.sandboxSessionId) {
-    // TODO: This should prob just create a sandbox?
-    throw new Error("No sandbox session ID found.");
-  }
 
   if (interruptRes.type === "response") {
     // Plan was responded to, route to the rewrite plan node.
