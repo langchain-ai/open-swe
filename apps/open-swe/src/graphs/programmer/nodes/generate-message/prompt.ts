@@ -45,6 +45,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
 * **History**: Use \`git log\` and \`git blame\` for additional context when needed
 * **Parallel Tool Calling**: You're allowed, and encouraged to call multiple tools at once, as long as they do not conflict, or depend on each other.
+* **URL Content**: Use the \`get_url_content\` tool to fetch the contents of a URL. You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
 
 ### Coding Standards
 

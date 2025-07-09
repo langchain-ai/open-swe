@@ -6,25 +6,68 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import {
-  createRgToolFields,
-  formatRgCommand,
-} from "@open-swe/shared/open-swe/tools";
+import { createFindInstancesOfToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { z } from "zod";
 import { wrapScript } from "../utils/wrap-script.js";
 
-const logger = createLogger(LogLevel.INFO, "RgTool");
+const logger = createLogger(LogLevel.INFO, "FindInstancesOfTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-export function createRgTool(
+export function createFindInstancesOfTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
-  const rgTool = tool(
-    async (input): Promise<{ result: string; status: "success" | "error" }> => {
+  const findInstancesOfFields = createFindInstancesOfToolFields(
+    state.targetRepository,
+  );
+  const formatFindInstancesOfCommand = (
+    input: z.infer<typeof findInstancesOfFields.schema>,
+  ): string[] => {
+    const args = ["rg"];
+
+    // Always include these flags for consistent output
+    args.push("--color", "never", "--line-number", "--heading");
+
+    // Add context lines (3 above and 3 below)
+    args.push("-A", "3", "-B", "3");
+
+    // Handle case sensitivity
+    if (!input.case_sensitive) {
+      args.push("-i");
+    }
+
+    // Handle word matching
+    if (input.match_word) {
+      args.push("--word-regexp");
+    }
+
+    // Handle file inclusion/exclusion patterns
+    if (input.exclude_files) {
+      args.push("-g", `!${input.exclude_files}`);
+    }
+
+    if (input.include_files) {
+      args.push("-g", input.include_files);
+    }
+
+    // For literal string matching (not regex)
+    args.push("--fixed-strings");
+
+    // Add the search query as the last argument (ensure it's properly quoted)
+    const formattedQuery = `'${input.query.replace(/^'|'$/g, "")}'`;
+    args.push(formattedQuery);
+
+    return args;
+  };
+
+  const findInstancesOfTool = tool(
+    async (
+      input: z.infer<typeof findInstancesOfFields.schema>,
+    ): Promise<{ result: string; status: "success" | "error" }> => {
       let sandbox: Sandbox | undefined;
       try {
         const state = getCurrentTaskInput<GraphState>();
@@ -44,15 +87,12 @@ export function createRgTool(
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
 
         sandbox = await daytonaClient().get(sandboxSessionId);
-        const command = formatRgCommand({
-          pattern: input.pattern,
-          paths: input.paths,
-          flags: input.flags,
-        });
-        logger.info("Running rg command", {
+        const command = formatFindInstancesOfCommand(input);
+        logger.info("Running find_instances_of command", {
           command: command.join(" "),
           repoRoot,
         });
+
         const response = await sandbox.process.executeCommand(
           wrapScript(command.join(" ")),
           repoRoot,
@@ -71,14 +111,12 @@ export function createRgTool(
           });
           successResult = `Exit code 1. No results found.\n\n${response.result}`;
         } else if (response.exitCode > 1) {
-          logger.error("Failed to run rg command", {
+          logger.error("Failed to run find_instances_of command", {
             error: response.result,
             error_result: response,
             input,
           });
-          throw new Error(
-            `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
-          );
+          throw new Error("Command failed. Exit code: " + response.exitCode);
         }
 
         return {
@@ -88,17 +126,15 @@ export function createRgTool(
       } catch (e) {
         const errorFields = getSandboxErrorFields(e);
         if (errorFields) {
-          logger.error("Failed to run rg command", {
+          logger.error("Failed to run find_instances_of command", {
             input,
             error: errorFields,
           });
-          throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
-          );
+          throw new Error("Command failed. Exit code: " + errorFields.exitCode);
         }
 
         logger.error(
-          "Failed to run rg command: " +
+          "Failed to run find_instances_of command: " +
             (e instanceof Error ? e.message : "Unknown error"),
           {
             error: e,
@@ -106,13 +142,13 @@ export function createRgTool(
           },
         );
         throw new Error(
-          "FAILED TO RUN RG COMMAND: " +
+          "FAILED TO RUN FIND_INSTANCES_OF COMMAND: " +
             (e instanceof Error ? e.message : "Unknown error"),
         );
       }
     },
-    createRgToolFields(state.targetRepository),
+    findInstancesOfFields,
   );
 
-  return rgTool;
+  return findInstancesOfTool;
 }
