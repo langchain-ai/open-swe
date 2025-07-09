@@ -12,6 +12,9 @@ const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";
 export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
 
+export const PROPOSED_PLAN_OPEN_TAG = "<open-swe-do-not-edit-proposed-plan>";
+export const PROPOSED_PLAN_CLOSE_TAG = "</open-swe-do-not-edit-proposed-plan>";
+
 function typeNarrowTaskPlan(taskPlan: unknown): taskPlan is TaskPlan {
   return !!(
     typeof taskPlan === "object" &&
@@ -50,15 +53,44 @@ export function extractTasksFromIssueContent(content: string): TaskPlan | null {
   }
 }
 
+function extractProposedPlanFromIssueContent(content: string): string[] | null {
+  if (
+    !content.includes(PROPOSED_PLAN_OPEN_TAG) ||
+    !content.includes(PROPOSED_PLAN_CLOSE_TAG)
+  ) {
+    return null;
+  }
+  const proposedPlanString = content
+    .split(PROPOSED_PLAN_OPEN_TAG)?.[1]
+    ?.split(PROPOSED_PLAN_CLOSE_TAG)?.[0];
+  try {
+    const parsedProposedPlan = JSON.parse(proposedPlanString.trim());
+    return parsedProposedPlan;
+  } catch (e) {
+    logger.error("Failed to parse proposed plan", {
+      proposedPlanString,
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+    return null;
+  }
+}
+
 type GetIssueTaskPlanInput = {
   githubIssueId: number;
   targetRepository: TargetRepository;
 };
 
-export async function getTaskPlanFromIssue(
+export async function getPlansFromIssue(
   input: GetIssueTaskPlanInput,
   config: GraphConfig,
-): Promise<TaskPlan | null> {
+): Promise<{
+  taskPlan: TaskPlan | null;
+  proposedPlan: string[] | null;
+}> {
   const issue = await getIssue({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
@@ -72,7 +104,12 @@ export async function getTaskPlanFromIssue(
     );
   }
 
-  return extractTasksFromIssueContent(issue.body);
+  const taskPlan = extractTasksFromIssueContent(issue.body);
+  const proposedPlan = extractProposedPlanFromIssueContent(issue.body);
+  return {
+    taskPlan,
+    proposedPlan,
+  };
 }
 
 const DETAILS_OPEN_TAG = "<details>";
