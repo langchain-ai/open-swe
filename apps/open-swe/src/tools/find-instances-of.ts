@@ -8,13 +8,8 @@ import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createFindInstancesOfToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-
-const wrapScript = (command: string): string => {
-  return `script --return --quiet -c "$(cat <<'OPEN_SWE_X'
-${command}
-OPEN_SWE_X
-)" /dev/null`;
-};
+import { z } from "zod";
+import { wrapScript } from "../utils/wrap-script.js";
 
 const logger = createLogger(LogLevel.INFO, "FindInstancesOfTool");
 
@@ -23,58 +18,55 @@ const DEFAULT_ENV = {
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-interface FindInstancesOfInput {
-  query: string;
-  case_sensitive?: boolean;
-  match_word?: boolean;
-  exclude_files?: string;
-  include_files?: string;
-}
-
-function formatFindInstancesOfCommand(input: FindInstancesOfInput): string[] {
-  const args = ["rg"];
-
-  // Always include these flags for consistent output
-  args.push("--color", "never", "--line-number", "--heading");
-
-  // Add context lines (3 above and 3 below)
-  args.push("-A", "3", "-B", "3");
-
-  // Handle case sensitivity
-  if (!input.case_sensitive) {
-    args.push("-i");
-  }
-
-  // Handle word matching
-  if (input.match_word) {
-    args.push("--word-regexp");
-  }
-
-  // Handle file inclusion/exclusion patterns
-  if (input.exclude_files) {
-    args.push("-g", `!${input.exclude_files}`);
-  }
-
-  if (input.include_files) {
-    args.push("-g", input.include_files);
-  }
-
-  // For literal string matching (not regex)
-  args.push("--fixed-strings");
-
-  // Add the search query as the last argument (ensure it's properly quoted)
-  const formattedQuery = `'${input.query.replace(/^'|'$/g, "")}'`;
-  args.push(formattedQuery);
-
-  return args;
-}
-
 export function createFindInstancesOfTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
+  const findInstancesOfFields = createFindInstancesOfToolFields(
+    state.targetRepository,
+  );
+  const formatFindInstancesOfCommand = (
+    input: z.infer<typeof findInstancesOfFields.schema>,
+  ): string[] => {
+    const args = ["rg"];
+
+    // Always include these flags for consistent output
+    args.push("--color", "never", "--line-number", "--heading");
+
+    // Add context lines (3 above and 3 below)
+    args.push("-A", "3", "-B", "3");
+
+    // Handle case sensitivity
+    if (!input.case_sensitive) {
+      args.push("-i");
+    }
+
+    // Handle word matching
+    if (input.match_word) {
+      args.push("--word-regexp");
+    }
+
+    // Handle file inclusion/exclusion patterns
+    if (input.exclude_files) {
+      args.push("-g", `!${input.exclude_files}`);
+    }
+
+    if (input.include_files) {
+      args.push("-g", input.include_files);
+    }
+
+    // For literal string matching (not regex)
+    args.push("--fixed-strings");
+
+    // Add the search query as the last argument (ensure it's properly quoted)
+    const formattedQuery = `'${input.query.replace(/^'|'$/g, "")}'`;
+    args.push(formattedQuery);
+
+    return args;
+  };
+
   const findInstancesOfTool = tool(
     async (
-      input: FindInstancesOfInput,
+      input: z.infer<typeof findInstancesOfFields.schema>,
     ): Promise<{ result: string; status: "success" | "error" }> => {
       let sandbox: Sandbox | undefined;
       try {
@@ -155,7 +147,7 @@ export function createFindInstancesOfTool(
         );
       }
     },
-    createFindInstancesOfToolFields(state.targetRepository),
+    findInstancesOfFields,
   );
 
   return findInstancesOfTool;

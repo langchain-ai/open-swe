@@ -11,13 +11,7 @@ import {
   formatRgCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-
-const wrapScript = (command: string): string => {
-  return `script --return --quiet -c "$(cat <<'OPEN_SWE_X'
-${command}
-OPEN_SWE_X
-)" /dev/null`;
-};
+import { wrapScript } from "../utils/wrap-script.js";
 
 const logger = createLogger(LogLevel.INFO, "RgTool");
 
