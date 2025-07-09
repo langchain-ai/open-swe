@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const BASE_CLASSIFICATION_SCHEMA = z.object({
+  internal_reasoning: z.string().describe("The reasoning being the decision of the route you're going to take. This is internal, and not shown to the user, so you may be technical in your reasoning. Please include all the reasoning, and context which led you to choose this route."),
   response: z
     .string()
     .describe(
@@ -11,19 +12,10 @@ export const BASE_CLASSIFICATION_SCHEMA = z.object({
     .describe("The route to take to handle the user's new message."),
 });
 
-export function createClassificationSchema(inputs: {
-  programmerRunning: boolean;
-  showCreateIssueOption: boolean;
-}) {
-  const { programmerRunning, showCreateIssueOption } = inputs;
-
-  const enumOptions = [
-    ...(programmerRunning ? ["code"] : ["plan"]),
-    ...(showCreateIssueOption ? ["create_new_issue"] : []),
-  ];
+export function createClassificationSchema(enumOptions: [string, ...string[]]) {
   const schema = BASE_CLASSIFICATION_SCHEMA.extend({
     route: z
-      .enum(["no_op", ...enumOptions])
+      .enum(enumOptions)
       .describe("The route to take to handle the user's new message."),
   });
 

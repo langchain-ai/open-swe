@@ -1,11 +1,12 @@
-// This should not be shown to the user if the programmer is running
-export const PLAN_ROUTING_OPTION = `- plan: You may call this route when the planner is inactive, or even when it's active. Call this route if the user's message is a complete request you can send to the planner (if the planner is not yet running), or if the user's message includes additional context/related requests the which should be sent to the planner, so it can use it in its current planning session.`;
+export const UPDATE_PROGRAMMER_ROUTING_OPTION = `- update_programmer: You should call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer's current session.\n`;
 
-// This should only be included in the state when the programmer is running.
-export const CODE_ROUTING_OPTION = `- code: Call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer.`;
+export const START_PLANNER_ROUTING_OPTION = `- start_planner: You should call this route if the user's message is a complete request you can send to the planner, which it can use to generate a plan. This route may be called when the planner has not started yet.\n`;
 
-// This should only be included when the programmer/planner is running.
-export const CREATE_ISSUE_ROUTING_OPTION = `- create_new_issue: Call this route if the user's request should create a new GitHub issue, and should be executed independently from the current request. This should only be called if the new request does not depend on the current request.`;
+export const UPDATE_PLANNER_ROUTING_OPTION = `- update_planner: You should call this route if the user sends a new message containing anything from a related request that the planner should plan for, additional context about their previous request/the codebase, or something which the planner should be aware of.\n`;
+
+export const RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION = `- resume_and_update_planner: You should call this route if the planner is currently interrupted, and the user's message includes additional context/related requests the which require updates to the plan. This will resume the planner so that it can handle the user's new request.\n`;
+
+export const CREATE_NEW_ISSUE_ROUTING_OPTION = `- create_new_issue: Call this route if the user's request should create a new GitHub issue, and should be executed independently from the current request. This should only be called if the new request does not depend on the current request.\n`;
 
 // This should only be included if the task plan exists.
 export const TASK_PLAN_PROMPT = `# Task Plan
@@ -23,10 +24,6 @@ export const CONVERSATION_HISTORY_PROMPT = `# Conversation History
 The following is the conversation history between the user and you. This does not include their most recent message, which is the one you are currently classifying. You should use this as context when determining where to route the user's message, and how to reply to them.
 {CONVERSATION_HISTORY}
 \n\n`;
-
-// Only shown if the planner is currently running.
-export const PLANNER_RUNNING_PROMPT = `\n  If you decide the user's request should be added to this current planning session, you may still call the 'plan' route even though the planner agent is currently running.
-  Routing to the 'plan' route will send their latest message to the planner, and it will be read & acted on it during its current planning session.`;
 
 // This prompt does not generate the route, it only generates the response.
 export const CLASSIFICATION_SYSTEM_PROMPT = `# Identity
@@ -55,13 +52,16 @@ The programmer's current status is: {PROGRAMMER_STATUS}
 # Routing Options
 Based on all of the context provided above, generate a response to send to the user, including messaging about the route you'll select from the below options in your next step.
 Your routing options are:
-- no_op: This should be called when the user's message does not warrant starting a new planning session, or updating the running session, or the same with the programmer if it's already running.
-{PLAN_ROUTING_OPTION}{PLANNER_RUNNING_PROMPT}
-{CREATE_ISSUE_ROUTING_OPTION}
-{CODE_ROUTING_OPTION}
+- no_op: This should be called when the user's message is not a new request, additional context, or a new issue to create. This should only be called when none of the routing options are appropriate.
+{UPDATE_PROGRAMMER_ROUTING_OPTION}{START_PLANNER_ROUTING_OPTION}{UPDATE_PLANNER_ROUTING_OPTION}{RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION}{CREATE_NEW_ISSUE_ROUTING_OPTION}
 
 # Response
 Your response should be clear, concise and straight to the point. Do NOT include any additional context, such as an idea for how to implement their request.
+
+**IMPORTANT**:
+Remember, you are ONLY allowed to route to one of: {ROUTING_OPTIONS}
+You should NEVER try to route to an option which is not listed above, even if the conversation history shows you calling a route that's not shown above.
+Routes are not always available to be called, so ensure you only call one of the options shown above.
 
 You're only acting as a manager, and thus your response to the user's message should be a short message about which route you'll take, WITHOUT actually referencing the route you'll take.
 Your manager will be very happy with you if you're able to articulate the route you plan to take, without actually mentioning the route! Ensure each response to the user is slightly different too. You should never repeat responses.

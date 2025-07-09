@@ -1,20 +1,32 @@
-import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  GraphState,
+  TaskPlan,
+} from "@open-swe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../../utils/langgraph-client.js";
 import {
+  AIMessage,
   BaseMessage,
   HumanMessage,
+  isAIMessage,
   isHumanMessage,
+  isToolMessage,
   RemoveMessage,
+  ToolMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
 import { removeLastHumanMessage } from "../../../../utils/message/modify-array.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { getMessageString } from "../../../../utils/message/content.js";
+import {
+  getHumanMessageString,
+  getToolMessageString,
+  getUnknownMessageString,
+} from "../../../../utils/message/content.js";
 import { loadModel, Task } from "../../../../utils/load-model.js";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
@@ -32,12 +44,13 @@ import {
 import { getDefaultHeaders } from "../../../../utils/default-headers.js";
 import {
   CLASSIFICATION_SYSTEM_PROMPT,
-  CODE_ROUTING_OPTION,
   CONVERSATION_HISTORY_PROMPT,
-  CREATE_ISSUE_ROUTING_OPTION,
-  PLAN_ROUTING_OPTION,
-  PLANNER_RUNNING_PROMPT,
+  CREATE_NEW_ISSUE_ROUTING_OPTION,
+  UPDATE_PLANNER_ROUTING_OPTION,
+  UPDATE_PROGRAMMER_ROUTING_OPTION,
   PROPOSED_PLAN_PROMPT,
+  RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION,
+  START_PLANNER_ROUTING_OPTION,
   TASK_PLAN_PROMPT,
 } from "./prompts.js";
 import {
@@ -48,8 +61,43 @@ import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
+
+const threadStatusToMoreReadableString = {
+  not_started: "not started",
+  busy: "currently running",
+  idle: "not running",
+  interrupted: "interrupted",
+  error: "error",
+};
+
+const formatMessageForClassification = (message: BaseMessage): string => {
+  if (isHumanMessage(message)) {
+    return getHumanMessageString(message);
+  }
+
+  // Special formatting for the AI messages as we don't want to show what status was called since the available statuses are dynamic.
+  if (isAIMessage(message)) {
+    const aiMessage = message as AIMessage;
+    const toolCallName = aiMessage.tool_calls?.[0]?.name;
+    const toolCallResponseStr = aiMessage.tool_calls?.[0]?.args?.response;
+    const toolCallStr =
+      toolCallName && toolCallResponseStr
+        ? `Tool call: ${toolCallName}\nArgs: ${JSON.stringify({ response: toolCallResponseStr }, null)}\n`
+        : "";
+    const content = getMessageContentString(aiMessage.content);
+    return `<assistant message-id=${aiMessage.id ?? "No ID"}>\nContent: ${content}\n${toolCallStr}</assistant>`;
+  }
+
+  if (isToolMessage(message)) {
+    const toolMessage = message as ToolMessage;
+    return getToolMessageString(toolMessage);
+  }
+
+  return getUnknownMessageString(message);
+};
 
 const createClassificationPromptAndToolSchema = (inputs: {
   programmerStatus: ThreadStatus | "not_started";
@@ -83,39 +131,58 @@ const createClassificationPromptAndToolSchema = (inputs: {
     conversationHistoryWithoutLatest?.length
       ? CONVERSATION_HISTORY_PROMPT.replaceAll(
           "{CONVERSATION_HISTORY}",
-          conversationHistoryWithoutLatest.map(getMessageString).join("\n"),
+          conversationHistoryWithoutLatest
+            .map(formatMessageForClassification)
+            .join("\n"),
         )
       : null;
 
   const programmerRunning = inputs.programmerStatus === "busy";
   const plannerRunning = inputs.plannerStatus === "busy";
+  const plannerInterrupted = inputs.plannerStatus === "interrupted";
+  const plannerNotStarted = inputs.plannerStatus === "not_started";
+
   const showCreateIssueOption =
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
 
+  const routingOptions: [string, ...string[]] = [
+    "no_op",
+    ...(programmerRunning ? ["update_programmer"] : []),
+    ...(plannerNotStarted ? ["start_planner"] : []),
+    ...(plannerRunning ? ["update_planner"] : []),
+    ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
+    ...(showCreateIssueOption ? ["create_new_issue"] : []),
+  ];
+
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
     "{PROGRAMMER_STATUS}",
-    inputs.programmerStatus,
+    threadStatusToMoreReadableString[inputs.programmerStatus],
   )
-    .replaceAll("{PLANNER_STATUS}", inputs.plannerStatus)
     .replaceAll(
-      "{CODE_ROUTING_OPTION}",
-      programmerRunning ? CODE_ROUTING_OPTION : "",
+      "{PLANNER_STATUS}",
+      threadStatusToMoreReadableString[inputs.plannerStatus],
     )
-    // Only show the planner option if the programmer is not running
+    .replaceAll("{ROUTING_OPTIONS}", routingOptions.join(", "))
     .replaceAll(
-      "{PLAN_ROUTING_OPTION}",
-      !programmerRunning ? PLAN_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{PLANNER_RUNNING_PROMPT}",
-      plannerRunning ? PLANNER_RUNNING_PROMPT : "",
+      "{UPDATE_PROGRAMMER_ROUTING_OPTION}",
+      programmerRunning ? UPDATE_PROGRAMMER_ROUTING_OPTION : "",
     )
     .replaceAll(
-      "{CREATE_ISSUE_ROUTING_OPTION}",
-      // Do not show the create new issue option if both the planner & programmer have not started
-      // if either have started/currently running/completed, show the option
-      showCreateIssueOption ? CREATE_ISSUE_ROUTING_OPTION : "",
+      "{START_PLANNER_ROUTING_OPTION}",
+      plannerNotStarted ? START_PLANNER_ROUTING_OPTION : "",
+    )
+    .replaceAll(
+      "{UPDATE_PLANNER_ROUTING_OPTION}",
+      plannerRunning ? UPDATE_PLANNER_ROUTING_OPTION : "",
+    )
+    .replaceAll(
+      "{RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION}",
+      plannerNotStarted ? RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION : "",
+    )
+    .replaceAll(
+      "{CREATE_NEW_ISSUE_ROUTING_OPTION}",
+      showCreateIssueOption ? CREATE_NEW_ISSUE_ROUTING_OPTION : "",
     )
     .replaceAll(
       "{TASK_PLAN_PROMPT}",
@@ -126,10 +193,7 @@ const createClassificationPromptAndToolSchema = (inputs: {
       formattedConversationHistoryPrompt ?? "",
     );
 
-  const schema = createClassificationSchema({
-    programmerRunning,
-    showCreateIssueOption,
-  });
+  const schema = createClassificationSchema(routingOptions);
 
   return {
     prompt,
@@ -156,14 +220,18 @@ export async function classifyMessage(
     defaultHeaders: getDefaultHeaders(config),
   });
 
-  const [programmerThread, plannerThread] = await Promise.all([
-    state.programmerSession?.threadId
-      ? langGraphClient.threads.get(state.programmerSession.threadId)
-      : undefined,
-    state.plannerSession?.threadId
-      ? langGraphClient.threads.get(state.plannerSession.threadId)
-      : undefined,
-  ]);
+  const plannerThread = state.plannerSession?.threadId
+    ? await langGraphClient.threads.get<PlannerGraphState>(
+        state.plannerSession.threadId,
+      )
+    : undefined;
+  const plannerThreadValues = plannerThread?.values;
+  const programmerThread = plannerThreadValues?.programmerSession?.threadId
+    ? await langGraphClient.threads.get<GraphState>(
+        plannerThreadValues.programmerSession.threadId,
+      )
+    : undefined;
+
   const programmerStatus = programmerThread?.status ?? "not_started";
   const plannerStatus = plannerThread?.status ?? "not_started";
 
@@ -365,16 +433,21 @@ export async function classifyMessage(
     ...(githubIssueId ? { githubIssueId } : {}),
   };
 
-  if ((toolCallArgs.route as any) === "code") {
-    // If the route was code, we don't need to do anything since the issue now contains the new messages, and the coding agent will handle pulling them in.\
-    // This should never be reached since we should return early after adding the Github comment, but include anyways...
+  if (
+    (toolCallArgs.route as any) === "update_programmer" ||
+    (toolCallArgs.route as any) === "update_planner" ||
+    (toolCallArgs.route as any) === "resume_and_update_planner"
+  ) {
+    // If the route is one of the above, we don't need to do anything since the issue now contains
+    // the new messages, and the coding agent will handle pulling them in. This should never be
+    // reachable since we should return early after adding the Github comment, but include anyways...
     return new Command({
       update: commandUpdate,
       goto: END,
     });
   }
 
-  if (toolCallArgs.route === "plan") {
+  if (toolCallArgs.route === "start_planner") {
     // Always kickoff a new start planner node. This will enqueue new runs on the planner graph.
     return new Command({
       update: commandUpdate,
