@@ -191,11 +191,6 @@ export async function interruptProposedPlan(
     If editing the plan, ensure each step in the plan is separated by "${PLAN_INTERRUPT_DELIMITER}".`,
   })[0];
 
-  if (!state.sandboxSessionId) {
-    // TODO: This should prob just create a sandbox?
-    throw new Error("No sandbox session ID found.");
-  }
-
   if (interruptRes.type === "response") {
     // Plan was responded to, route to the rewrite plan node.
     throw new Error("RESPONDING TO PLAN NOT IMPLEMENTED.");

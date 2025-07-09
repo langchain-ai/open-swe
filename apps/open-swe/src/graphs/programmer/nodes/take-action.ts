@@ -40,12 +40,6 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  if (!state.sandboxSessionId) {
-    throw new Error(
-      "Failed to take action: No sandbox session ID found in state.",
-    );
-  }
-
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
@@ -180,17 +174,22 @@ export async function takeAction(
 
   const codebaseTree = await getCodebaseTree();
 
+  // Prioritize wereDependenciesInstalled over dependenciesInstalled
+  const dependenciesInstalledUpdate =
+    wereDependenciesInstalled !== null
+      ? wereDependenciesInstalled
+      : dependenciesInstalled !== null
+        ? dependenciesInstalled
+        : null;
+
   const commandUpdate: GraphUpdate = {
     messages: toolCallResults,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
     codebaseTree,
     sandboxSessionId: sandbox.id,
-    ...(dependenciesInstalled !== null && {
-      dependenciesInstalled,
-    }),
-    ...(wereDependenciesInstalled !== null && {
-      dependenciesInstalled: wereDependenciesInstalled,
+    ...(dependenciesInstalledUpdate !== null && {
+      dependenciesInstalled: dependenciesInstalledUpdate,
     }),
   };
   return new Command({
