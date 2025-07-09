@@ -212,7 +212,7 @@ export async function takeActions(
   });
 
   let toolCallResults = await Promise.all(toolCallResultsPromise);
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
+  const {sandbox, codebaseTree, dependenciesInstalled} = await getSandboxWithErrorHandling(state.sandboxSessionId, state.targetRepository, state.branchName, config);
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
@@ -249,6 +249,10 @@ ${tc.content}`,
 
   return {
     messages: toolCallResults,
+    sandboxSessionId: sandbox.id,
+    ...(codebaseTree && { codebaseTree }),
+    ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
 }
+
 
