@@ -14,6 +14,7 @@ import {
   prepareGraphState,
   notetaker,
   takeActions,
+  needsContext,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -50,7 +51,12 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addNode("take-plan-actions", takeActions)
   .addNode("generate-plan", generatePlan)
   .addNode("notetaker", notetaker)
-  .addNode("interrupt-proposed-plan", interruptProposedPlan)
+  .addNode("interrupt-proposed-plan", interruptProposedPlan, {
+    ends: [END, "needs-context"],
+  })
+  .addNode("needs-context", needsContext, {
+    ends: ["generate-plan-context-action", "generate-plan"],
+  })
   .addEdge(START, "prepare-graph-state")
   .addEdge("initialize-sandbox", "generate-plan-context-action")
   .addConditionalEdges(
@@ -60,8 +66,7 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   )
   .addEdge("take-plan-actions", "generate-plan-context-action")
   .addEdge("generate-plan", "notetaker")
-  .addEdge("notetaker", "interrupt-proposed-plan")
-  .addEdge("interrupt-proposed-plan", END);
+  .addEdge("notetaker", "interrupt-proposed-plan");
 
 export const graph = workflow.compile();
 graph.name = "Open SWE - Planner";

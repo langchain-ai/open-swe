@@ -23,7 +23,7 @@ import {
   createIssueComment,
 } from "../../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
-import { createIssueTitleAndBodyFromMessages } from "../../utils/generate-issue-fields.js";
+import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
 import {
   extractIssueTitleAndContentFromMessage,
@@ -45,6 +45,11 @@ import {
   createClassificationSchema,
 } from "./schemas.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
+import { createLogger, LogLevel } from "../../../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 const createClassificationPromptAndToolSchema = (inputs: {
   programmerStatus: ThreadStatus | "not_started";
@@ -231,9 +236,9 @@ export async function classifyMessage(
 
   // If it's not a no_op, ensure there is a GitHub issue with the user's request.
   if (!githubIssueId) {
-    const { title } = await createIssueTitleAndBodyFromMessages(
+    const { title } = await createIssueFieldsFromMessages(
       state.messages,
-      config,
+      config.configurable,
     );
     const { content: body } = extractIssueTitleAndContentFromMessage(
       getMessageContentString(userMessage.content),
@@ -308,9 +313,44 @@ export async function classifyMessage(
 
     await Promise.all(createCommentsPromise);
 
+    let newPlannerId: string | undefined;
+    if (plannerStatus === "interrupted") {
+      if (!state.plannerSession?.threadId) {
+        throw new Error("No planner session found. Unable to resume planner.");
+      }
+      // We need to resume the planner session via a 'response' so that it can re-plan
+      const plannerResume: HumanResponse = {
+        type: "response",
+        args: "resume planner",
+      };
+      logger.info("Resuming planner session");
+      const newPlannerRun = await langGraphClient.runs.create(
+        state.plannerSession?.threadId,
+        PLANNER_GRAPH_ID,
+        {
+          command: {
+            resume: plannerResume,
+          },
+        },
+      );
+      newPlannerId = newPlannerRun.run_id;
+      logger.info("Planner session resumed", {
+        runId: newPlannerRun.run_id,
+        threadId: state.plannerSession.threadId,
+      });
+    }
+
     // After creating the new comment, we can add the message to state and end.
     const commandUpdate: ManagerGraphUpdate = {
-      messages: [response],
+      messages: newMessages,
+      ...(newPlannerId && state.plannerSession?.threadId
+        ? {
+            plannerSession: {
+              threadId: state.plannerSession.threadId,
+              runId: newPlannerId,
+            },
+          }
+        : {}),
     };
     return new Command({
       update: commandUpdate,

@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createSessionPlanToolFields } from "../../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
@@ -17,6 +18,7 @@ import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../../utils/get-notes.js";
 import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
@@ -76,7 +78,8 @@ export async function generatePlan(
       ...(optionalToolMessage ? [optionalToolMessage] : []),
     ]);
 
-  if (!response.tool_calls?.length) {
+  const toolCall = response.tool_calls?.[0];
+  if (!toolCall) {
     throw new Error("Failed to generate plan");
   }
 
@@ -86,12 +89,19 @@ export async function generatePlan(
     newSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
-  const proposedPlanArgs = response.tool_calls[0].args as z.infer<
+  const proposedPlanArgs = toolCall.args as z.infer<
     typeof sessionPlanTool.schema
   >;
 
+  const toolResponse = new ToolMessage({
+    id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+    tool_call_id: toolCall.id ?? "",
+    content: "Successfully saved plan.",
+    name: sessionPlanTool.name,
+  });
+
   return {
-    messages: [response],
+    messages: [response, toolResponse],
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),

@@ -11,7 +11,8 @@ const followupMessagePrompt = `
 The user is sending a followup request for you to generate a plan for. You are provided with the following context to aid in your new plan context gathering steps:
   - The previous user requests, along with the tasks, and task summaries you generated for these previous requests.
   - The summaries of the actions you took, and their results from previous planning sessions.
-  - You are only provided this information as context to reference when gathering context for the new plan, or for making changes to the previously generated plan.
+  - You are only provided this information as context to reference when gathering context for the new plan, or for making changes to the proposed plan.
+  - If the user requests changes/additions to the proposed plan, your goal is to make as few changes/additions as possible, only addressing the specific changes the user requested.
 
 {PREVIOUS_PLAN}
 `;
