@@ -121,10 +121,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     },
   });
 
-  if (graphId === PLANNER_GRAPH_ID) {
-    console.log(stream.interrupt);
-  }
-
   const { cancelRun } = useCancelStream<State>({
     stream,
     threadId,

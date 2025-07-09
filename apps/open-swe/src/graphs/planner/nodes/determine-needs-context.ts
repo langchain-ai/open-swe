@@ -107,7 +107,7 @@ const determineContextTool = {
   schema: determineContextSchema,
 };
 
-export async function needsContext(
+export async function determineNeedsContext(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {

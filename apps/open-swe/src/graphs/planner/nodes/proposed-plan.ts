@@ -215,7 +215,7 @@ export async function interruptProposedPlan(
     // Plan was responded to, route to the needs-context node which will determine
     // if we need more context, or can go right to the planning step.
     return new Command({
-      goto: "needs-context",
+      goto: "determine-needs-context",
     });
   }
 

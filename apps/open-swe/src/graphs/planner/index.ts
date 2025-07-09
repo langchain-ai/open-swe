@@ -14,7 +14,7 @@ import {
   prepareGraphState,
   notetaker,
   takeActions,
-  needsContext,
+  determineNeedsContext,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -52,9 +52,9 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   .addNode("generate-plan", generatePlan)
   .addNode("notetaker", notetaker)
   .addNode("interrupt-proposed-plan", interruptProposedPlan, {
-    ends: [END, "needs-context"],
+    ends: [END, "determine-needs-context"],
   })
-  .addNode("needs-context", needsContext, {
+  .addNode("determine-needs-context", determineNeedsContext, {
     ends: ["generate-plan-context-action", "generate-plan"],
   })
   .addEdge(START, "prepare-graph-state")
