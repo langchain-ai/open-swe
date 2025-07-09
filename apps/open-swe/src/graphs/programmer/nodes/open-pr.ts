@@ -15,7 +15,10 @@ import { loadModel, Task } from "../../../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
-import { daytonaClient, deleteSandbox } from "../../../utils/sandbox.js";
+import {
+  deleteSandbox,
+  getSandboxWithErrorHandling,
+} from "../../../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
@@ -46,15 +49,16 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const sandboxSessionId = state.sandboxSessionId;
-  if (!sandboxSessionId) {
-    throw new Error(
-      "Failed to open pull request: No sandbox session ID found in state.",
-    );
-  }
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
 
-  const sandbox = await daytonaClient().get(sandboxSessionId);
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
+  const sandboxSessionId = sandbox.id;
 
   const { owner, repo } = state.targetRepository;
 
@@ -154,5 +158,7 @@ export async function openPullRequest(
       sandboxSessionId: undefined,
       dependenciesInstalled: false,
     }),
+    ...(codebaseTree && { codebaseTree }),
+    ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
 }
