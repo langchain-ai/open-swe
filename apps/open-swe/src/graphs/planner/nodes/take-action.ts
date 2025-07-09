@@ -1,5 +1,5 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { Sandbox, SandboxState } from "@daytonaio/sdk";
+import { Sandbox } from "@daytonaio/sdk";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -254,5 +254,6 @@ ${tc.content}`,
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
 }
+
 
 
