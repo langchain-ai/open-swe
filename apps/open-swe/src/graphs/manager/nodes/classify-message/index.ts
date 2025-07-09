@@ -1,32 +1,16 @@
-import {
-  GraphConfig,
-  GraphState,
-  TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../../utils/langgraph-client.js";
 import {
-  AIMessage,
   BaseMessage,
   HumanMessage,
-  isAIMessage,
   isHumanMessage,
-  isToolMessage,
   RemoveMessage,
-  ToolMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
-import { removeLastHumanMessage } from "../../../../utils/message/modify-array.js";
-import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import {
-  getHumanMessageString,
-  getToolMessageString,
-  getUnknownMessageString,
-} from "../../../../utils/message/content.js";
 import { loadModel, Task } from "../../../../utils/load-model.js";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
@@ -36,170 +20,20 @@ import {
 } from "../../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
 import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
-import { ThreadStatus } from "@langchain/langgraph-sdk";
 import {
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
 } from "../../../../utils/github/issue-messages.js";
 import { getDefaultHeaders } from "../../../../utils/default-headers.js";
-import {
-  CLASSIFICATION_SYSTEM_PROMPT,
-  CONVERSATION_HISTORY_PROMPT,
-  CREATE_NEW_ISSUE_ROUTING_OPTION,
-  UPDATE_PLANNER_ROUTING_OPTION,
-  UPDATE_PROGRAMMER_ROUTING_OPTION,
-  PROPOSED_PLAN_PROMPT,
-  RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION,
-  START_PLANNER_ROUTING_OPTION,
-  TASK_PLAN_PROMPT,
-} from "./prompts.js";
-import {
-  BASE_CLASSIFICATION_SCHEMA,
-  createClassificationSchema,
-} from "./schemas.js";
+import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { createClassificationPromptAndToolSchema } from "./utils.js";
 
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
-
-const threadStatusToMoreReadableString = {
-  not_started: "not started",
-  busy: "currently running",
-  idle: "not running",
-  interrupted: "interrupted",
-  error: "error",
-};
-
-const formatMessageForClassification = (message: BaseMessage): string => {
-  if (isHumanMessage(message)) {
-    return getHumanMessageString(message);
-  }
-
-  // Special formatting for the AI messages as we don't want to show what status was called since the available statuses are dynamic.
-  if (isAIMessage(message)) {
-    const aiMessage = message as AIMessage;
-    const toolCallName = aiMessage.tool_calls?.[0]?.name;
-    const toolCallResponseStr = aiMessage.tool_calls?.[0]?.args?.response;
-    const toolCallStr =
-      toolCallName && toolCallResponseStr
-        ? `Tool call: ${toolCallName}\nArgs: ${JSON.stringify({ response: toolCallResponseStr }, null)}\n`
-        : "";
-    const content = getMessageContentString(aiMessage.content);
-    return `<assistant message-id=${aiMessage.id ?? "No ID"}>\nContent: ${content}\n${toolCallStr}</assistant>`;
-  }
-
-  if (isToolMessage(message)) {
-    const toolMessage = message as ToolMessage;
-    return getToolMessageString(toolMessage);
-  }
-
-  return getUnknownMessageString(message);
-};
-
-const createClassificationPromptAndToolSchema = (inputs: {
-  programmerStatus: ThreadStatus | "not_started";
-  plannerStatus: ThreadStatus | "not_started";
-  messages: BaseMessage[];
-  taskPlan: TaskPlan;
-  proposedPlan?: string[];
-}): {
-  prompt: string;
-  schema: z.ZodTypeAny;
-} => {
-  const conversationHistoryWithoutLatest = removeLastHumanMessage(
-    inputs.messages,
-  );
-  const formattedTaskPlanPrompt = inputs.taskPlan
-    ? TASK_PLAN_PROMPT.replaceAll(
-        "{TASK_PLAN}",
-        formatPlanPrompt(getActivePlanItems(inputs.taskPlan)),
-      )
-    : null;
-  const formattedProposedPlanPrompt = inputs.proposedPlan?.length
-    ? PROPOSED_PLAN_PROMPT.replace(
-        "{PROPOSED_PLAN}",
-        inputs.proposedPlan
-          .map((p, index) => `  ${index + 1}: ${p}`)
-          .join("\n"),
-      )
-    : null;
-
-  const formattedConversationHistoryPrompt =
-    conversationHistoryWithoutLatest?.length
-      ? CONVERSATION_HISTORY_PROMPT.replaceAll(
-          "{CONVERSATION_HISTORY}",
-          conversationHistoryWithoutLatest
-            .map(formatMessageForClassification)
-            .join("\n"),
-        )
-      : null;
-
-  const programmerRunning = inputs.programmerStatus === "busy";
-  const plannerRunning = inputs.plannerStatus === "busy";
-  const plannerInterrupted = inputs.plannerStatus === "interrupted";
-  const plannerNotStarted = inputs.plannerStatus === "not_started";
-
-  const showCreateIssueOption =
-    inputs.programmerStatus !== "not_started" ||
-    inputs.plannerStatus !== "not_started";
-
-  const routingOptions: [string, ...string[]] = [
-    "no_op",
-    ...(programmerRunning ? ["update_programmer"] : []),
-    ...(plannerNotStarted ? ["start_planner"] : []),
-    ...(plannerRunning ? ["update_planner"] : []),
-    ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
-    ...(showCreateIssueOption ? ["create_new_issue"] : []),
-  ];
-
-  const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
-    "{PROGRAMMER_STATUS}",
-    threadStatusToMoreReadableString[inputs.programmerStatus],
-  )
-    .replaceAll(
-      "{PLANNER_STATUS}",
-      threadStatusToMoreReadableString[inputs.plannerStatus],
-    )
-    .replaceAll("{ROUTING_OPTIONS}", routingOptions.join(", "))
-    .replaceAll(
-      "{UPDATE_PROGRAMMER_ROUTING_OPTION}",
-      programmerRunning ? UPDATE_PROGRAMMER_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{START_PLANNER_ROUTING_OPTION}",
-      plannerNotStarted ? START_PLANNER_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{UPDATE_PLANNER_ROUTING_OPTION}",
-      plannerRunning ? UPDATE_PLANNER_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION}",
-      plannerNotStarted ? RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{CREATE_NEW_ISSUE_ROUTING_OPTION}",
-      showCreateIssueOption ? CREATE_NEW_ISSUE_ROUTING_OPTION : "",
-    )
-    .replaceAll(
-      "{TASK_PLAN_PROMPT}",
-      formattedTaskPlanPrompt ?? formattedProposedPlanPrompt ?? "",
-    )
-    .replaceAll(
-      "{CONVERSATION_HISTORY_PROMPT}",
-      formattedConversationHistoryPrompt ?? "",
-    );
-
-  const schema = createClassificationSchema(routingOptions);
-
-  return {
-    prompt,
-    schema,
-  };
-};
 
 /**
  * Classify the latest human message to determine how to route the request.

@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 export const BASE_CLASSIFICATION_SCHEMA = z.object({
-  internal_reasoning: z.string().describe("The reasoning being the decision of the route you're going to take. This is internal, and not shown to the user, so you may be technical in your reasoning. Please include all the reasoning, and context which led you to choose this route."),
+  internal_reasoning: z
+    .string()
+    .describe(
+      "The reasoning being the decision of the route you're going to take. This is internal, and not shown to the user, so you may be technical in your reasoning. Please include all the reasoning, and context which led you to choose this route.",
+    ),
   response: z
     .string()
     .describe(
