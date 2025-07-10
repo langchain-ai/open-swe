@@ -116,7 +116,7 @@ const isSearchThreadsRequest = (reqUrlStr: string, reqMethod: string) => {
       reqPathnameParts?.[1] === "api" &&
       reqPathnameParts?.[2] === "threads" &&
       reqPathnameParts?.[3] === "search" &&
-      reqMethod.toLowerCase() === "get";
+      reqMethod.toLowerCase() === "post";
     return isGetStateReq;
   } catch {
     return false;
