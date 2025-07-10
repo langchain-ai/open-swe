@@ -25,7 +25,7 @@ All requests to the LangGraph server are authenticated through a sophisticated p
 
 ### Proxy Route Architecture
 
-The Next.js application includes a proxy route (`apps/web/src/app/api/[..._path]/route.ts`) that acts as an intermediary for all LangGraph server requests. This proxy uses the `langgraph-nextjs-api-passthrough` package to handle request forwarding with enhanced security.
+The Next.js application includes a proxy route (`apps/web/src/app/api/[..._path]/route.ts`) that acts as an intermediary for all LangGraph server requests. This proxy uses the [`langgraph-nextjs-api-passthrough`](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) package to handle request forwarding with enhanced security.
 
 <Tip>
 The proxy route ensures that sensitive authentication tokens never reach the client directly, maintaining security while enabling seamless communication with the LangGraph server.
@@ -48,7 +48,7 @@ All headers are prefixed with `x-` to ensure they're included in LangGraph run c
 ### Token Encryption
 
 Open SWE implements AES-256-GCM encryption for all GitHub tokens to prevent exposure in:
-- LangSmith traces
+- LangSmith trace metadata
 - Run configurations
 - Potential unauthorized access scenarios
 
@@ -122,11 +122,6 @@ Open SWE implements fine-grained access control for all LangGraph resources:
 - **Read/Update/Delete operations** verify user ID matches resource owner
 - **Search operations** filter results by user ownership
 
-### Supported Resources
-- **Threads** - Chat conversations and their associated runs
-- **Assistants** - AI agent configurations
-- **Store** - Persistent data storage with user-specific access
-
 ## Token Access During Execution
 
 During LangGraph run execution, encrypted tokens are accessible through the run's configurable field:
@@ -138,16 +133,6 @@ During LangGraph run execution, encrypted tokens are accessible through the run'
 <Note>
 This design ensures tokens remain encrypted in storage and traces while being available for necessary GitHub operations during run execution.
 </Note>
-
-## Security Best Practices
-
-Open SWE's authentication system implements several security best practices:
-
-- **Token encryption** prevents exposure in logs and traces
-- **Header prefixing** ensures secure token transport
-- **Signature verification** validates webhook authenticity
-- **User isolation** prevents cross-user resource access
-- **Comprehensive logging** for security monitoring
 
 <Tip>
 Always ensure the `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable is identical between your web application and LangGraph agent deployments.

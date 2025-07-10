@@ -14,11 +14,10 @@ The monorepo is organized into two main directories:
 **`apps/open-swe`** - LangGraph Agent Application
 - Contains the core LangGraph agent implementation with TypeScript
 - Includes three specialized graphs: manager, planner, and programmer
-- Serves as the backend API using Hono server framework
 - Handles GitHub webhook integration and LLM interactions
 
 **`apps/web`** - Next.js Web Interface  
-- React 19 frontend with Next.js 15 framework
+- React frontend with Next.js framework
 - Uses Shadcn UI components (Radix UI) with Tailwind CSS
 - Provides the user interface for interacting with the LangGraph agent
 - Includes authentication and proxy routes for secure communication
@@ -65,7 +64,6 @@ The `^build` dependency ensures that shared packages are built before dependent 
 Run these commands from the repository root:
 
 - `yarn build` - Build all packages in dependency order
-- `yarn dev` - Start development servers for all applications
 - `yarn lint` - Run linting across all packages
 - `yarn format` - Format code using Prettier
 

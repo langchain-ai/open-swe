@@ -10,7 +10,7 @@ Open SWE provides a powerful web interface that allows you to interact with the 
 The UI offers two distinct modes for handling your coding requests:
 
 <Note>
-You can toggle between auto and manual mode using the lightning bolt (⚡) icon in the terminal input area.
+You can toggle between auto and manual mode using the lightning bolt (⚡) icon in the main input area.
 </Note>
 
 ### Auto Mode
@@ -19,7 +19,6 @@ When **Auto Mode** is enabled (lightning bolt icon is highlighted):
 - Plans are automatically accepted and executed without user intervention
 - The agent proceeds directly from planning to implementation
 - Ideal for straightforward requests where you trust the agent's planning
-- Faster workflow with minimal user interaction required
 
 ### Manual Mode
 
@@ -27,47 +26,49 @@ When **Manual Mode** is active (lightning bolt icon is not highlighted):
 - You must manually review and accept proposed plans before execution
 - Provides opportunity to edit, modify, or reject plans
 - Allows for more control over the implementation approach
-- Recommended for complex or critical changes
 
 <Tip>
 Start with manual mode for important changes to review the agent's approach before execution.
 </Tip>
 
-## Manager Graph Capabilities
+## Manager Agent Capabilities
 
-The Manager graph acts as the central orchestrator, intelligently routing your messages and managing the overall workflow. Here's what the Manager can and cannot do:
+The Manager agent acts as the central orchestrator, intelligently routing your messages and managing the overall workflow. Here's what the Manager can and cannot do:
 
-### What the Manager CAN Do
+### What the manager _can_ do
 
 <Steps>
   <Step title="Respond to User Messages">
-    Provides contextual responses and status updates about ongoing operations
+    Provides contextual responses and status updates about ongoing operations. You can ask the manager what it can do, what the status of different agents is, etc.
   </Step>
   <Step title="Create New Planning Runs">
-    Initiates new planning sessions when you submit coding requests
+    Initiates new planning sessions when you submit coding requests. If your message contains a coding request, the manager will create a new planning session & corresponding GitHub issue.
   </Step>
   <Step title="Send Messages to Active Planning Runs">
-    Forwards additional context or requirements to running planner sessions
+    Forwards additional context or requirements to running planner sessions. If you send a message while the planner is running, the manager can forward that message to the planner, without interrupting its flow.
   </Step>
   <Step title="Resume Interrupted Planners">
-    Continues planning sessions that were paused for user input or approval
+    Resumes planner sessions that were paused for the user to accept or reject plans. If the planner has paused for plan acceptance, you can message the manager with feedback about the plan. This will be forwarded to the planner, and it will continue its flow based on your feedback.
   </Step>
   <Step title="Send Messages to Active Programmer Runs">
-    Provides additional context or instructions to running implementation sessions
+    Provides additional context or instructions to running implementation sessions. If you send a message while the programmer is running, the manager can forward that message to the programmer, without interrupting its flow.
+  </Step>
+  <Step title="Create new tasks">
+    Creates new tasks, independent of the current request. If you send a message to the manager with a request for a task that is unrelated to the current request, or can be implemented in parallel via a different session, the manager will create a new GitHub issue, and initiate a new planning session for that issue.
   </Step>
 </Steps>
 
-### What the Manager CANNOT Do
+### What the Manager _cannot_ Do
 
 <Note>
 The Manager has several important limitations to ensure proper workflow control:
 </Note>
 
-- **Cannot create new Programmer runs** - Only happens after plan acceptance or in auto mode
-- **Cannot stop running Planner/Programmer sessions** - Sessions run to completion or interruption
-- **Cannot re-plan while Programmer is running** - Planning and programming are sequential
-- **Cannot open Pull Requests directly** - PRs are created automatically after Programmer completion
-- **Cannot accept plans in manual mode** - You must manually click accept for plan approval
+- **Cannot create new Programmer runs** - This only happens after plan acceptance or in auto mode.
+- **Cannot stop running Planner/Programmer sessions** - To stop a session, you must click the cancel button in the UI.
+- **Cannot re-plan while Programmer is running** - Once the programmer session has started, you can not go back to the planner. However, you can send a message to the manager which can be forwarded to the programmer.
+- **Cannot open Pull Requests directly** - PRs are created automatically after Programmer completion (and changes are automatically committed anytime a file is modified).
+- **Cannot accept plans in manual mode** - You must manually click accept for plan approval.
 
 ## Message Handling and Routing
 
@@ -116,6 +117,11 @@ Plans are presented as interruptions that require user response:
 - **Manual Mode**: You must explicitly accept or reject the plan
 - **Auto Mode**: Plans are automatically accepted and execution begins
 - **Plan Editing**: You can modify proposed plans before acceptance
+- **Feedback**: You can provide feedback to the manager if you want the plan to be changed in some way
+
+### Automatic Approval
+
+When auto mode is enabled, plans are automatically accepted and implementation begins immediately after plan generation.
 
 ## Programmer Runs
 
@@ -141,25 +147,6 @@ Once a plan is accepted, the Programmer graph executes the implementation.
 <Note>
 The Programmer automatically commits changes after each step, ensuring your work is preserved even if the session is interrupted.
 </Note>
-
-## Plan Approval Process
-
-The plan approval process differs based on your selected mode:
-
-### Manual Approval
-
-1. **Plan Review**: Examine the proposed steps and approach
-2. **Plan Editing**: Modify steps if needed using the plan editor
-3. **Explicit Acceptance**: Click the "Accept" button to proceed with implementation
-4. **Rejection Option**: Provide feedback to request a different approach
-
-### Automatic Approval
-
-When auto mode is enabled, plans are automatically accepted and implementation begins immediately after plan generation.
-
-<Tip>
-TODO: add an image showing the plan approval interface here
-</Tip>
 
 ## Getting Started
 
