@@ -143,10 +143,7 @@ async function getInstallationNameFromReq(
       isGetStateRequest(req.url, req.method) ||
       isSearchThreadsRequest(req.url, req.method)
     ) {
-      console.log("Trying to get installation name from request");
       return await getInstallationName(installationId);
-    } else {
-      console.log("is not a new run req", req.url);
     }
     return "";
   } catch {
