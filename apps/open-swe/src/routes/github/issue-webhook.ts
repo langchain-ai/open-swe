@@ -52,6 +52,20 @@ const getPayload = (body: string): Record<string, any> | null => {
   }
 };
 
+const createDevMetadataComment = (runId: string, threadId: string) => {
+  return `<details>
+  <summary>Dev Metadata</summary>
+  ${JSON.stringify(
+    {
+      runId,
+      threadId,
+    },
+    null,
+    2,
+  )}
+</details>`;
+};
+
 const getHeaders = (
   c: Context,
 ): {
@@ -179,7 +193,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
         owner: issueData.owner,
         repo: issueData.repo,
         issue_number: issueData.issueNumber,
-        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}`,
+        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(run.run_id, threadId)}`,
       },
     );
   } catch (error) {

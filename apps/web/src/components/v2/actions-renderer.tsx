@@ -22,6 +22,7 @@ import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
+import { Interrupt } from "../thread/messages/interrupt";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -210,6 +211,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       !isHumanMessageSDK(m) &&
       !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
   );
+  const isLastMessageHidden = !!(
+    stream.messages?.length > 0 &&
+    stream.messages[stream.messages.length - 1].id &&
+    stream.messages[stream.messages.length - 1].id?.startsWith(
+      DO_NOT_RENDER_ID_PREFIX,
+    )
+  );
 
   // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
@@ -264,6 +272,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
             interruptType={acceptedPlanEvents[0].data.interruptType}
           />
         )}
+      {/* If the last message is hidden, but there's an interrupt, we must manually render the interrupt */}
+      {isLastMessageHidden && stream.interrupt ? (
+        <Interrupt
+          interruptValue={stream.interrupt?.value}
+          isLastMessage={true}
+          thread={stream as UseStream<Record<string, unknown>>}
+        />
+      ) : null}
     </div>
   );
 }

@@ -24,7 +24,7 @@ import {
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
-import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
@@ -97,9 +97,9 @@ export async function generateAction(
     parallel_tool_calls: true,
   });
 
-  const [missingMessages, latestTaskPlan] = await Promise.all([
+  const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
     getMissingMessages(state, config),
-    getTaskPlanFromIssue(state, config),
+    getPlansFromIssue(state, config),
   ]);
 
   const response = await modelWithTools.invoke([

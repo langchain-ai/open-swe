@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
@@ -9,6 +10,8 @@ import { getMessageString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../utils/get-notes.js";
+import { ToolMessage } from "@langchain/core/messages";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
@@ -131,9 +134,15 @@ ${state.messages.map(getMessageString).join("\n")}`;
   if (!toolCall) {
     throw new Error("Failed to generate plan");
   }
+  const toolResponse = new ToolMessage({
+    id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+    tool_call_id: toolCall.id ?? "",
+    content: "Successfully saved notes.",
+    name: condenseContextTool.name,
+  });
 
   return {
-    messages: [response],
+    messages: [response, toolResponse],
     contextGatheringNotes: (
       toolCall.args as z.infer<typeof condenseContextToolSchema>
     ).notes,

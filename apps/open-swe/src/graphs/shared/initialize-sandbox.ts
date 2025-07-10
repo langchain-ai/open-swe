@@ -243,7 +243,7 @@ export async function initializeSandbox(
   emitStepEvent(baseCloneRepoAction, "pending");
   const cloneRepoRes = await cloneRepo(sandbox, targetRepository, {
     githubInstallationToken,
-    stateBranchName: state.branchName,
+    stateBranchName: branchName,
   });
   if (cloneRepoRes.exitCode !== 0) {
     emitStepEvent(
