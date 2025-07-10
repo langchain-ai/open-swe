@@ -31,7 +31,7 @@ function getCookieOptions(expires?: Date) {
 /**
  * Cookie options for GitHub installation ID cookie (non-HTTP-only for client access)
  */
-function getInstallationCookieOptions(expires?: Date) {
+export function getInstallationCookieOptions(expires?: Date) {
   return {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,

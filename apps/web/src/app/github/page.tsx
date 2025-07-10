@@ -123,18 +123,12 @@ function GitHubPageContent() {
   );
 }
 
-function GitHubPageWithProvider() {
-  return (
-    <GitHubAppProvider>
-      <GitHubPageContent />
-    </GitHubAppProvider>
-  );
-}
-
 export default function GitHubPage() {
   return (
     <Suspense fallback={<GithubPageLoading />}>
-      <GitHubPageWithProvider />
+      <GitHubAppProvider>
+        <GitHubPageContent />
+      </GitHubAppProvider>
     </Suspense>
   );
 }
