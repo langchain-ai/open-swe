@@ -3494,7 +3494,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/docs@workspace:apps/docs"
   dependencies:
-    mint: ^4.1.19
+    mint: ^4.2.12
   languageName: unknown
   linkType: soft
 
@@ -13653,7 +13653,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"mint@npm:^4.1.19":
+"mint@npm:^4.2.12":
   version: 4.2.12
   resolution: "mint@npm:4.2.12"
   dependencies:

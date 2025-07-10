@@ -23,7 +23,7 @@
           {
             "group": "Usage",
             "pages": [
-              "usage/index",
+              "usage/intro",
               "usage/ui",
               "usage/webhook"
             ]
@@ -31,9 +31,10 @@
           {
             "group": "Development Setup",
             "pages": [
-              "setup/index",
+              "setup/intro",
               "setup/development",
-              "setup/authentication"
+              "setup/authentication",
+              "setup/monorepo"
             ]
           }
         ]
@@ -43,7 +44,7 @@
       "anchors": [
         {
           "anchor": "Demo",
-          "href": "https://openswe.langchain.com",
+          "href": "https://swe.langchain.com",
           "icon": "link"
         },
         {

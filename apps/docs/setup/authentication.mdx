@@ -3,37 +3,137 @@ title: 'Authentication'
 description: 'How authentication works in Open SWE'
 ---
 
-(in this page, cover how the auth flow works in open swe)
+Open SWE implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow involves GitHub OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
 
-- Discuss how we use GitHub Oauth for client side auth
-  - if user is not logged in, it will require them to login
-  - if they are logged in, it'll redirect them to the chat page
-  - users can update their gh auth via the `/settings` page
-- Discuss LangGraph auth
-  - all requests made to the LangGraph server are authenticated
-  - when making requests from the client, they first go through a proxy route in the Next.js app.
-    - proxy route uses the `langgraph-nextjs-api-passthrough` package (https://www.npmjs.com/package/langgraph-nextjs-api-passthrough)
-    - this proxy route injects the following headers to the request:
-      - `GITHUB_TOKEN_COOKIE` (`"x-github-access-token"`) - this is the user's access token for github. it will allow us to take actions on behalf of the user, such as create gh issues and comments
-      - `GITHUB_INSTALLATION_TOKEN_COOKIE` (`"x-github-installation-token"`) - this is the installation token for the github app. it will allow us to take actions on behalf of the github app, such as make commits and open pull requests
-      - `GITHUB_INSTALLATION_NAME` (`"x-github-installation-name"`) - this is the name of the installation. will be either your github username if you're making requests against a repo your user owns, or an org name if making requests on a repo in an org
-      - all headers are prefixed with `x-` so that they are included in the configurable field of the langgraph runs, so we can access them during a run and not only in the auth middleware
-      - all secrets (gh tokens) are encrypted in this proxy route to prevent them being exposed in LangSmith traces, or if other users are somehow able to access your threads/runs.
-    - finally, the request is forwarded to your actual langgraph server, where it first runs through an auth middleware to verify the user is authenticated.
-  - the first check in the langgraph server auth middleware looks to see if a header is present which would indicate the request is coming from a github webhook
-    - if true, it will verify the webhook signature, and authorize it if so. we do not include the user information in this auth step, as that is done in the next request that the webhook handler makes to actually create a new langgraph run based on the webhook event. here is where your gh user is included so that the thread/run created by this webhook is only exposed to you, the user.
-  - all requests made to the langgraph server go through this auth middleware. this includes requests to custom routes (like the webhook handler) and requests made to the langgraph server (like creating a new thread/run)
-  - if it's not a webhook request, we check for two required headers
-    - the installation name
-    - the installation token
-    - if either are not defined, we throw a 401 unauthorized error
-  - after getting these headers, we check to see if there's a github access token (tied to a user)
-    - if there is, we use that to verify the user. this would indicate the request was made from the web app
-    - if there isn't, we check for two additional headers
-      - the user id
-      - the user login
-      - after getting these values, we verify the user ID & login passed in headers are valid, and that the installation token is valid
-      - this occurs when a run is created from a github webhook
+## GitHub OAuth Authentication
 
-    - finally, after validating either the github user id & login, or getting the user ID and login from the user's github access token, we return a new identity object. this contains the user's ID, and the installation name. we use the user ID to ensure the only resources you're allowed to access are your own. the auth middleware then forwards to a handler which runs for each resource type (e.g. create new thread). in this handler we add your user id to metadata if it's a create request, and if it's a get request we verify the user id from the identity matches the one in the metadata.
-  - since the access tokens/installation tokens are prefixed with `x-` they're going to be included in the configurable field of the langgraph runs (still encrypted). so whenever we need to take some action (e.g. create new issue) we first extract that field from the configurable field, decrypt, then preform the action.
+Open SWE uses GitHub OAuth for client-side authentication, providing secure access to user accounts and repository permissions.
+
+### Authentication Flow
+
+- **Unauthenticated users** are automatically redirected to GitHub OAuth login
+- **Authenticated users** are redirected directly to the chat interface
+- **Settings management** is available at `/settings` for updating GitHub authentication
+
+<Note>
+GitHub OAuth provides the foundation for all user interactions, enabling Open SWE to access repositories and perform actions on behalf of authenticated users.
+</Note>
+
+## LangGraph Server Authentication
+
+All requests to the LangGraph server are authenticated through a sophisticated proxy system that ensures secure communication between the web interface and the agent backend.
+
+### Proxy Route Architecture
+
+The Next.js application includes a proxy route (`apps/web/src/app/api/[..._path]/route.ts`) that acts as an intermediary for all LangGraph server requests. This proxy uses the [`langgraph-nextjs-api-passthrough`](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) package to handle request forwarding with enhanced security.
+
+<Tip>
+The proxy route ensures that sensitive authentication tokens never reach the client directly, maintaining security while enabling seamless communication with the LangGraph server.
+</Tip>
+
+### Header Injection System
+
+The proxy route automatically injects the following encrypted headers into each request:
+
+#### Authentication Headers
+
+- **`x-github-access-token`** - User's GitHub access token for user-specific actions (creating issues, comments)
+- **`x-github-installation-token`** - GitHub App installation token for app-level actions (commits, pull requests)
+- **`x-github-installation-name`** - Installation name (username or organization name)
+
+<Note>
+All headers are prefixed with `x-` to ensure they're included in LangGraph run configurations, making them accessible during execution while maintaining security through encryption.
+</Note>
+
+### Token Encryption
+
+Open SWE implements AES-256-GCM encryption for all GitHub tokens to prevent exposure in:
+- LangSmith trace metadata
+- Run configurations
+- Potential unauthorized access scenarios
+
+The encryption process uses the `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable and includes:
+- **Initialization Vector (IV)** for unique encryption per token
+- **Authentication Tag** for data integrity verification
+- **Base64 encoding** for safe transport
+
+<Tip>
+The same encryption key must be configured in both the web application and LangGraph agent for proper token decryption.
+</Tip>
+
+## Authentication Middleware
+
+The LangGraph server implements comprehensive authentication middleware (`apps/open-swe/src/security/auth.ts`) that validates all incoming requests.
+
+### Webhook Authentication
+
+The middleware first checks for GitHub webhook requests by detecting the `X-Hub-Signature-256` header:
+
+1. **Signature verification** using the configured webhook secret
+2. **Automatic authorization** for valid webhook signatures
+3. **Separate user verification** in subsequent run creation requests
+
+<Note>
+Webhook authentication is handled separately from user authentication to enable automated GitHub issue processing while maintaining security.
+</Note>
+
+### Standard Request Authentication
+
+For non-webhook requests, the middleware validates:
+
+#### Required Headers
+- **Installation name** (`x-github-installation-name`)
+- **Installation token** (`x-github-installation-token`)
+
+Missing either header results in a 401 Unauthorized error.
+
+#### User Verification Process
+
+The middleware supports two authentication paths:
+
+**Web Application Requests:**
+- Uses encrypted GitHub access token (`x-github-access-token`)
+- Verifies user identity through GitHub API
+- Extracts user ID and login from token
+
+**Webhook-Generated Requests:**
+- Uses explicit user headers (`x-github-user-id`, `x-github-user-login`)
+- Validates user ID and login against installation token
+- Ensures webhook-created runs are properly attributed
+
+### Identity and Permissions
+
+Upon successful authentication, the middleware returns an identity object containing:
+- **User ID** for resource ownership verification
+- **Display name** (GitHub login)
+- **Installation name** for repository context
+- **Comprehensive permissions** for LangGraph operations
+
+<Tip>
+The user ID serves as the primary identifier for resource access control, ensuring users can only access their own threads, runs, and assistants.
+</Tip>
+
+## Resource Access Control
+
+Open SWE implements fine-grained access control for all LangGraph resources:
+
+### Metadata-Based Ownership
+- **Create operations** automatically add user ID to resource metadata
+- **Read/Update/Delete operations** verify user ID matches resource owner
+- **Search operations** filter results by user ownership
+
+## Token Access During Execution
+
+During LangGraph run execution, encrypted tokens are accessible through the run's configurable field:
+
+1. **Token extraction** from run configuration
+2. **Decryption** using the shared encryption key
+3. **Action execution** (creating issues, making commits, etc.)
+
+<Note>
+This design ensures tokens remain encrypted in storage and traces while being available for necessary GitHub operations during run execution.
+</Note>
+
+<Tip>
+Always ensure the `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable is identical between your web application and LangGraph agent deployments.
+</Tip>

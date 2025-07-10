@@ -7,6 +7,6 @@
     "dev": "mint dev"
   },
   "devDependencies": {
-    "mint": "^4.1.19"
+    "mint": "^4.2.12"
   }
 }
