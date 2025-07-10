@@ -22,7 +22,6 @@ export async function GET(request: NextRequest) {
     );
 
     response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, installationId, {
-      httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24 * 30, // 30 days

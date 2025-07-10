@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
+import { getCookie } from "@/lib/utils";
 import type {
   GitHubInstallation,
   GitHubInstallationsResponse,
@@ -24,6 +25,7 @@ interface UseGitHubInstallationsReturn {
 
   // Actions
   refreshInstallations: () => Promise<void>;
+  refreshCurrentInstallation: () => void;
   switchInstallation: (installationId: string) => Promise<void>;
 }
 
@@ -41,7 +43,8 @@ const transformInstallation = (
 
 /**
  * Hook for managing GitHub App installations
- * Fetches installation data from the API endpoint and provides functions to switch between installations
+ * Fetches installation data from the API endpoint and reads current installation ID from cookies
+ * Provides functions to switch between installations
  */
 export function useGitHubInstallations(): UseGitHubInstallationsReturn {
   const [installations, setInstallations] = useState<Installation[]>([]);
@@ -51,21 +54,9 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
     string | null
   >(null);
 
-  // Fetch current installation ID from the server (since it's in an HttpOnly cookie)
-  const fetchCurrentInstallationId = useCallback(async (): Promise<
-    string | null
-  > => {
-    try {
-      const response = await fetch("/api/github/current-installation");
-      if (response.ok) {
-        const data = await response.json();
-        return data.installationId || null;
-      }
-      return null;
-    } catch (error) {
-      console.warn("Failed to fetch current installation ID:", error);
-      return null;
-    }
+  // Get current installation ID from the cookie
+  const getCurrentInstallationId = useCallback((): string | null => {
+    return getCookie(GITHUB_INSTALLATION_ID_COOKIE);
   }, []);
 
   // Fetch installations from API
@@ -88,8 +79,8 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
 
       setInstallations(transformedInstallations);
 
-      // Also fetch the current installation ID from the server
-      const currentId = await fetchCurrentInstallationId();
+      // Get the current installation ID from the cookie
+      const currentId = getCurrentInstallationId();
       setCurrentInstallationId(currentId);
     } catch (err) {
       const errorMessage =
@@ -99,38 +90,7 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [fetchCurrentInstallationId]);
-
-  // Auto-select default installation when installations are loaded
-  useEffect(() => {
-    if (installations.length > 0 && !isLoading) {
-      // Check if current installation ID is valid
-      const isCurrentInstallationValid =
-        currentInstallationId &&
-        installations.some(
-          (installation) =>
-            installation.id.toString() === currentInstallationId,
-        );
-
-      if (!isCurrentInstallationValid) {
-        // No valid installation selected, auto-select the first one
-        const firstInstallation = installations[0];
-        if (firstInstallation) {
-          switchInstallation(firstInstallation.id.toString());
-        }
-      }
-    }
-  }, [installations, isLoading, currentInstallationId]);
-
-  // Initial fetch on mount
-  useEffect(() => {
-    fetchInstallations();
-  }, [fetchInstallations]);
-
-  // Refresh installations function
-  const refreshInstallations = useCallback(async () => {
-    await fetchInstallations();
-  }, [fetchInstallations]);
+  }, [getCurrentInstallationId]);
 
   // Switch installation function - now uses API endpoint
   const switchInstallation = useCallback(async (installationId: string) => {
@@ -154,6 +114,49 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
     }
   }, []);
 
+  // Auto-select default installation when installations are loaded
+  useEffect(() => {
+    if (installations.length > 0 && !isLoading) {
+      // Check if current installation ID is valid
+      const isCurrentInstallationValid =
+        currentInstallationId &&
+        installations.some(
+          (installation) =>
+            installation.id.toString() === currentInstallationId,
+        );
+
+      if (!isCurrentInstallationValid) {
+        // No valid installation selected, auto-select the first one
+        const firstInstallation = installations[0];
+        if (firstInstallation) {
+          switchInstallation(firstInstallation.id.toString());
+        }
+      }
+    }
+  }, [installations, isLoading, currentInstallationId, switchInstallation]);
+
+  // Initialize installation ID from cookie on mount
+  useEffect(() => {
+    const cookieInstallationId = getCurrentInstallationId();
+    setCurrentInstallationId(cookieInstallationId);
+  }, [getCurrentInstallationId]);
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchInstallations();
+  }, [fetchInstallations]);
+
+  // Refresh installations function
+  const refreshInstallations = useCallback(async () => {
+    await fetchInstallations();
+  }, [fetchInstallations]);
+
+  // Refresh current installation ID from cookie
+  const refreshCurrentInstallation = useCallback(() => {
+    const cookieInstallationId = getCurrentInstallationId();
+    setCurrentInstallationId(cookieInstallationId);
+  }, [getCurrentInstallationId]);
+
   // Find current installation object
   const currentInstallation = currentInstallationId
     ? installations.find(
@@ -173,6 +176,7 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
 
     // Actions
     refreshInstallations,
+    refreshCurrentInstallation,
     switchInstallation,
   };
 }
