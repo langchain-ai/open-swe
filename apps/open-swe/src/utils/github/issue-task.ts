@@ -15,6 +15,10 @@ export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
 export const PROPOSED_PLAN_OPEN_TAG = "<open-swe-do-not-edit-proposed-plan>";
 export const PROPOSED_PLAN_CLOSE_TAG = "</open-swe-do-not-edit-proposed-plan>";
 
+const DETAILS_OPEN_TAG = "<details>";
+const DETAILS_CLOSE_TAG = "</details>";
+const AGENT_CONTEXT_DETAILS_SUMMARY = "<summary>Agent Context</summary>";
+
 function typeNarrowTaskPlan(taskPlan: unknown): taskPlan is TaskPlan {
   return !!(
     typeof taskPlan === "object" &&
@@ -126,8 +130,6 @@ function insertPlanToIssueBody(
 ${planString}
 ${closingPlanTag}`;
 
-  let newBody = "";
-
   if (
     !issueBody.includes(openingPlanTag) &&
     !issueBody.includes(closingPlanTag)
@@ -136,7 +138,7 @@ ${closingPlanTag}`;
       !issueBody.includes(DETAILS_OPEN_TAG) &&
       !issueBody.includes(DETAILS_CLOSE_TAG)
     ) {
-      newBody = `${issueBody}
+      return `${issueBody}
 ${DETAILS_OPEN_TAG}
 ${AGENT_CONTEXT_DETAILS_SUMMARY}
 ${wrappedPlan}
@@ -144,22 +146,34 @@ ${DETAILS_CLOSE_TAG}`;
     } else {
       // No plan present yet, but details already exists.
       const contentBeforeDetailsTag = issueBody.split(DETAILS_OPEN_TAG)?.[0];
-      const contentAfterDetailsTag = issueBody.split(DETAILS_CLOSE_TAG)?.[0];
+      const contentAfterDetailsOpenTag =
+        issueBody.split(DETAILS_OPEN_TAG)?.[1] || "";
+      const contentAfterSummary = contentAfterDetailsOpenTag.includes(
+        AGENT_CONTEXT_DETAILS_SUMMARY,
+      )
+        ? contentAfterDetailsOpenTag.split(AGENT_CONTEXT_DETAILS_SUMMARY)[1]
+        : contentAfterDetailsOpenTag;
+      const contentAfterDetailsCloseTag =
+        issueBody.split(DETAILS_CLOSE_TAG)?.[1] || "";
 
-      newBody = `${contentBeforeDetailsTag}
-${wrappedPlan}
-${contentAfterDetailsTag}`;
+      return `${contentBeforeDetailsTag}${DETAILS_OPEN_TAG}
+${AGENT_CONTEXT_DETAILS_SUMMARY}
+${wrappedPlan}${
+        contentAfterSummary.trim()
+          ? `
+${contentAfterSummary.trim()}`
+          : ""
+      }
+${DETAILS_CLOSE_TAG}${contentAfterDetailsCloseTag}`;
     }
   } else {
     const contentBeforeOpenTag = issueBody.split(openingPlanTag)?.[0];
     const contentAfterCloseTag = issueBody.split(closingPlanTag)?.[1];
 
-    newBody = `${contentBeforeOpenTag}
+    return `${contentBeforeOpenTag}
 ${wrappedPlan}
 ${contentAfterCloseTag}`;
   }
-
-  return newBody;
 }
 
 export async function addProposedPlanToIssue(
@@ -196,10 +210,6 @@ export async function addProposedPlanToIssue(
     body: newBody,
   });
 }
-
-const DETAILS_OPEN_TAG = "<details>";
-const DETAILS_CLOSE_TAG = "</details>";
-const AGENT_CONTEXT_DETAILS_SUMMARY = "<summary>Agent Context</summary>";
 
 export async function addTaskPlanToIssue(
   input: GetIssueTaskPlanInput,
