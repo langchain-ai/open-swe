@@ -101,8 +101,8 @@ const isGetStateRequest = (reqUrlStr: string, reqMethod: string) => {
       reqPathnameParts?.[1] === "api" &&
       reqPathnameParts?.[2] === "threads" &&
       validate(reqPathnameParts?.[3]) &&
-      reqPathnameParts?.[4] === "state";
-    reqMethod.toLowerCase() === "get";
+      reqPathnameParts?.[4] === "state" &&
+      reqMethod.toLowerCase() === "get";
     return isGetStateReq;
   } catch {
     return false;
@@ -115,8 +115,8 @@ const isSearchThreadsRequest = (reqUrlStr: string, reqMethod: string) => {
     const isGetStateReq =
       reqPathnameParts?.[1] === "api" &&
       reqPathnameParts?.[2] === "threads" &&
-      reqPathnameParts?.[3] === "search";
-    reqMethod.toLowerCase() === "get";
+      reqPathnameParts?.[3] === "search" &&
+      reqMethod.toLowerCase() === "get";
     return isGetStateReq;
   } catch {
     return false;
