@@ -89,7 +89,7 @@ export async function finalReview(
     // Marked as completed. No further actions necessary.
     const toolMessage = new ToolMessage({
       tool_call_id: toolCall.id ?? "",
-      content: "Successfully marked task as completed.",
+      content: "Marked task as completed.",
     });
     return {
       messages: [response, toolMessage],
