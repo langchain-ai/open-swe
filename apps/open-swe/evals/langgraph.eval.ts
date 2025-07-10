@@ -14,7 +14,7 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 
 const logger = createLogger(LogLevel.INFO, "Evaluator");
 
-const DATASET_NAME = "aliyan-open-swe-langgraph-eval-2";
+const DATASET_NAME = process.env.DATASET_NAME || "";
 // const RUN_NAME = `${DATASET_NAME}-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
 // async function loadDataset(): Promise<Example[]> {
@@ -39,10 +39,27 @@ const DATASET_NAME = "aliyan-open-swe-langgraph-eval-2";
 const DATASET = [
   {
     inputs: {
-      repo: "mai-sandbox/open-swe_edit_task_1a",
+      repo: "mai-sandbox/open-swe_content_team_eval",
       branch: "main",
-      user_input:
-        "I have a LangGraph React agent that I want to enhance with web search capabilities. Please add Tavily search functionality to this agent so it can search the web for current information and provide up-to-date responses.\n\nRequirements:\n\n- Add Tavily search tool integration\n- Configure it to return 3 results with advanced search depth\n- Use environment variables for API keys (assume they will be in .env)\n- Maintain the existing conversation memory functionality",
+      user_input: `I have implemented a multi-agent content creation system using LangGraph that orchestrates collaboration between specialized agents. The system is experiencing multiple runtime errors and workflow failures that prevent proper execution.
+
+System Architecture
+The application implements a three-agent architecture:
+
+Research Agent: Utilizes web search tools to gather information on specified topics
+Writer Agent: Creates content based on research findings with creative temperature settings
+Reviewer Agent: Provides feedback using fact-checking tools and determines revision needs
+
+Expected Workflow
+User Request → Research Agent → Writer Agent → Reviewer Agent → [Revision Loop if needed] → Final Content
+
+Current Issues
+
+Runtime Errors: Application fails to start with import and graph compilation errors
+Agent Handoff Failures: Agents are not properly transferring control and context
+Tool Integration Problems: Tool calling mechanisms are not functioning correctly
+State Management Issues: Shared state is not being updated correctly across agent transitions
+Routing Logic Failures: Conditional edges and workflow routing are broken`,
     },
   },
 ];
