@@ -1,37 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGitHubToken } from "@/lib/auth";
+import { Endpoints } from "@octokit/types";
 
-export interface GitHubInstallation {
-  id: number;
-  account: {
-    login: string;
-    id: number;
-    type: "User" | "Organization";
-    avatar_url: string;
-  };
-  app_id: number;
-  app_slug: string;
-  target_id: number;
-  target_type: "User" | "Organization";
-  permissions: Record<string, string>;
-  events: string[];
-  created_at: string;
-  updated_at: string;
-  single_file_name: string | null;
-  has_multiple_single_files: boolean;
-  single_file_paths: string[];
-  repository_selection: "all" | "selected";
-  access_tokens_url: string;
-  repositories_url: string;
-  html_url: string;
-  suspended_by: any;
-  suspended_at: string | null;
-}
-
-export interface GitHubInstallationsResponse {
-  total_count: number;
-  installations: GitHubInstallation[];
-}
+type GitHubInstallationsResponse =
+  Endpoints["GET /user/installations"]["response"]["data"];
 
 /**
  * Fetches all GitHub App installations accessible to the current user

@@ -72,6 +72,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@octokit/types": "^14.1.0",
     "@tailwindcss/postcss": "^4.0.13",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/lodash": "^4.17.16",

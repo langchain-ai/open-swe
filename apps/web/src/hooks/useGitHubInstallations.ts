@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 import { getCookie } from "@/lib/utils";
-import type {
-  GitHubInstallation,
-  GitHubInstallationsResponse,
-} from "@/app/api/github/installations/route";
+import { Endpoints } from "@octokit/types";
+
+type GitHubInstallationsResponse =
+  Endpoints["GET /user/installations"]["response"]["data"];
+type GitHubInstallation = GitHubInstallationsResponse["installations"][0];
 
 export interface Installation {
   id: number;
@@ -34,12 +35,32 @@ interface UseGitHubInstallationsReturn {
  */
 const transformInstallation = (
   installation: GitHubInstallation,
-): Installation => ({
-  id: installation.id,
-  accountName: installation.account.login,
-  accountType: installation.account.type,
-  avatarUrl: installation.account.avatar_url,
-});
+): Installation => {
+  if (!installation.account) {
+    throw new Error("Installation account is null");
+  }
+
+  // Handle both User and Organization account types
+  let accountName: string;
+  if ("login" in installation.account && installation.account.login) {
+    accountName = installation.account.login;
+  } else if ("slug" in installation.account && installation.account.slug) {
+    accountName = installation.account.slug;
+  } else if ("name" in installation.account && installation.account.name) {
+    accountName = installation.account.name;
+  } else {
+    accountName = "Unknown";
+  }
+
+  const accountType = installation.target_type as "User" | "Organization";
+
+  return {
+    id: installation.id,
+    accountName,
+    accountType,
+    avatarUrl: installation.account.avatar_url,
+  };
+};
 
 /**
  * Hook for managing GitHub App installations

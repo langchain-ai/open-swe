@@ -2837,6 +2837,7 @@ __metadata:
     "@langchain/langgraph": ^0.3.3
     "@langchain/langgraph-sdk": ^0.0.85
     "@octokit/app": ^16.0.1
+    "@octokit/types": ^14.1.0
     "@open-swe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14
     "@radix-ui/react-avatar": ^1.1.3
