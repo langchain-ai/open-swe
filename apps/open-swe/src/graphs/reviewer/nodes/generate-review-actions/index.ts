@@ -1,5 +1,4 @@
 import { loadModel, Task } from "../../../../utils/load-model.js";
-import { createShellTool } from "../../../../tools/index.js";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -9,7 +8,7 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { createRgTool } from "../../../../tools/rg.js";
+import { createRgTool, createShellTool, createFindInstancesOfTool } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getUserRequest } from "../../../../utils/user-request.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
@@ -42,14 +41,13 @@ export async function generateReviewActions(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [createRgTool(state), createShellTool(state)];
+  const tools = [createRgTool(state), createShellTool(state), createFindInstancesOfTool(state)];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
   });
 
   const response = await modelWithTools
-    .withConfig({ tags: ["nostream"] })
     .invoke([
       {
         role: "user",

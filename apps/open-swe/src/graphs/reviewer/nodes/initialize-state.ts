@@ -2,19 +2,27 @@ import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
 } from "@open-swe/shared/open-swe/reviewer/types";
-import { daytonaClient } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
 export async function initializeState(
   state: ReviewerGraphState,
+  config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const repoRoot = getRepoAbsolutePath(state.targetRepository);
   logger.info("Initializing state for reviewer");
   // get the base branch name, then get the changed files
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
@@ -41,21 +49,12 @@ export async function initializeState(
   }
   const changedFiles = changedFilesRes.result.trim();
 
-  const codebaseTreeRes = await sandbox.process.executeCommand(
-    "git ls-files | tree --fromfile -L 3",
-    repoRoot,
-  );
-  if (codebaseTreeRes.exitCode !== 0) {
-    throw new Error(
-      `Failed to get codebase tree: ${JSON.stringify(codebaseTreeRes, null, 2)}`,
-    );
-  }
-  const codebaseTree = codebaseTreeRes.result.trim();
-
   logger.info("Finished getting state for reviewer");
+
   return {
     baseBranchName,
     changedFiles,
-    codebaseTree,
+    ...(codebaseTree ? { codebaseTree } : {}),
+    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {})
   };
 }

@@ -15,13 +15,14 @@ import {
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { daytonaClient } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
 export async function takeReviewerActions(
   state: ReviewerGraphState,
-  _config: GraphConfig,
+  config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const { reviewerMessages } = state;
   const lastMessage = reviewerMessages[reviewerMessages.length - 1];
@@ -32,15 +33,28 @@ export async function takeReviewerActions(
 
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
-  const toolsMap = {
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-  };
+  const findInstancesOfTool = createFindInstancesOfTool(state);
+  const allTools = [
+    shellTool,
+    rgTool,
+    findInstancesOfTool,
+  ];
+  const toolsMap = Object.fromEntries(
+    allTools.map((tool) => [tool.name, tool]),
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
   }
+
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+      await getSandboxWithErrorHandling(
+        state.sandboxSessionId,
+        state.targetRepository,
+        state.branchName,
+        config,
+      );
 
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
@@ -65,7 +79,12 @@ export async function takeReviewerActions(
     try {
       const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
-        (await tool.invoke(toolCall.args)) as {
+        (await tool.invoke({
+          ...toolCall.args,
+          // Pass in the existing/new sandbox session ID to the tool call.
+          // use `x` prefix to avoid name conflicts with tool args.
+          xSandboxSessionId: sandbox.id,
+        })) as {
           result: string;
           status: "success" | "error";
         };
@@ -103,7 +122,6 @@ export async function takeReviewerActions(
   });
 
   let toolCallResults = await Promise.all(toolCallResultsPromise);
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
@@ -141,5 +159,7 @@ ${tc.content}`,
   return {
     messages: toolCallResults,
     reviewerMessages: toolCallResults,
+    ...(codebaseTree ? { codebaseTree } : {}),
+    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {})
   };
 }
