@@ -1,0 +1,54 @@
+---
+title: 'Development Setup'
+description: 'How to set up Open SWE for development'
+---
+
+(in this page, cover what is needed to set up Open SWE for development)
+
+- clone repo
+- install deps
+- copy env example files from both `apps/web/.env.example` & `apps/open-swe/.env.example`
+  - discuss filling in values for each (excluding GH app values. note that we'll cover that in the next step)
+- create gh app
+  - mention having a dev github app and a prod github app
+  - add callout that this is a GitHub App, which is not the same as a GitHub oauth app
+  - walk through setup & permissions:
+    - https://github.com/settings/apps/new to create new github app
+    - give it a name & description
+    - set homepage url to your URL, or repo readme if no url
+    - set callback url to `http://localhost:3000/api/auth/github/callback` for dev
+    - uncheck `Expire user authorization tokens` so that the users tokens never expire
+    - check `Request user authorization (OAuth) during installation` so that we can allow users to use our gh app for login to the web app
+    - check `Redirect on update` so users are always redirected back to your app after updating permissions
+    - enable webhook
+    - set webhook url to `/webhook/github`. suggest using ngrok to create a public url which points to your local `http://localhost:2024` server for dev (`/webhook/github` is a custom route added to your langgraph server)
+    - create secret: `openssl rand -hex 32` and set this as the webhook secret, and save it under the `GITHUB_WEBHOOK_SECRET` in the `apps/open-swe/.env` file
+    - set permissions:
+      - Repository permissions:
+        - `Contents`: `Read & Write`
+        - `Issues`: `Read & Write`
+        - `Pull requests`: `Read & Write`
+        - `Metadata`: `Read only` (mandatory, will be enabled for you)
+      - Organization permissions:
+        - None
+      - Account permissions:
+        - None
+
+    - Subscribe to events:
+      - `Issues` - required for webhook to work
+      
+    - `Where can this GitHub App be installed?`: `Any account` (or `Only on this account` if you want to limit it to your own account)
+    - Create GitHub App
+    - After creating app, we'll now be able to get/create secrets:
+    - `GITHUB_APP_NAME`: name of the app, e.g. `open-swe-dev`
+    - `GITHUB_APP_ID`: `App ID` of the app, e.g. `12345678`
+    - `GITHUB_APP_PRIVATE_KEY`: `Private key` of the app. To generate, scroll down to the `Private keys` section and generate a new one. e.g. `-----BEGIN RSA PRIVATE KEY-----\n...add your private key here...\n-----END RSA PRIVATE KEY-----\n`
+    - `GITHUB_APP_CLIENT_ID`: `Client ID` of the app
+    - `GITHUB_APP_CLIENT_SECRET`: Under the `Client secrets` section, click `Generate new client secret` and copy the value.
+    - done
+- after setting all your env vars, you can now start the agent & web app servers
+  - `cd apps/open-swe` - `yarn dev` - starts a development server at `http://localhost:2024`
+  (in a separate terminal window)
+  - `cd apps/web` - `yarn dev` - starts a development server at `http://localhost:3000`
+
+Done! Now you can visit `http://localhost:3000` to see the web app, and start using Open SWE!

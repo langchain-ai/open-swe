@@ -1,0 +1,19 @@
+---
+title: 'Monorepo'
+description: 'How the Open SWE monorepo is configured'
+---
+
+(in this page, cover the monorepo structure, and best practices for using it)
+
+- cover the repo structure:
+  - monorepo
+  - `apps/open-swe` contains the agent
+  - `apps/web` contains the web app
+  - `apps/docs` contains the docs
+  - `packages/shared` contains shared utils, types, etc. any code which is used in both the agent & web app should go here
+- turbo repo for monorepo management
+  - install deps in specific packages theyre used in, never in root
+    - only time to install deps in root is when adding a resolution. if multiple apps/packages share a dependency, add the resolution to root so that they all use the same version
+  - run build from root or `packages/shared` when making a change in `shared` and want access in other packages
+- mention that the `apps/open-swe` package has a `postinstall` hook which runs `yarn build` after installing deps.
+  - this is required so that we can deploy on langgraph platform. since open swe is a monorepo and the agent requires accessing built files from the shared repo, we must run build before we can start the langgraph server
