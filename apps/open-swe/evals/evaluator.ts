@@ -3,7 +3,7 @@ import { OpenSWEInput } from "./open-swe-types.js";
 import { Daytona, Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { SNAPSHOT_NAME, TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { cloneRepo } from "../src/utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
@@ -198,7 +198,10 @@ async function runCodeAnalysis(
  */
 export async function evaluator(inputs: {
   openSWEInputs: OpenSWEInput;
-  output: GraphState;
+  output: {
+    branchName: string;
+    targetRepository: TargetRepository;
+  };
 }): Promise<SimpleEvaluationResult[]> {
   const { openSWEInputs, output } = inputs;
 

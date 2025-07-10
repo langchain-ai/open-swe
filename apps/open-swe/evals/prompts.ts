@@ -1,8 +1,9 @@
 // Add this import at the top
 import { OpenSWEInput } from "./open-swe-types.js";
-import { GraphUpdate, TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { HumanMessage } from "@langchain/core/messages";
 import { Octokit } from "@octokit/rest";
+import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 
 
 async function getRepoReadmeContents(
@@ -24,7 +25,7 @@ async function getRepoReadmeContents(
 
 export async function formatInputs(
   inputs: OpenSWEInput,
-): Promise<GraphUpdate> {
+): Promise<ManagerGraphUpdate> {
   const targetRepository: TargetRepository = {
     owner: inputs.repo.split("/")[0],
     repo: inputs.repo.split("/")[1],
@@ -53,7 +54,7 @@ export async function formatInputs(
   const userMessage = new HumanMessage(userMessageContent);
   return {
     messages: [userMessage],
-    internalMessages: [userMessage],
     targetRepository,
+    autoAcceptPlan: true,
   };
 }

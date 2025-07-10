@@ -43,6 +43,12 @@ export const auth = new Auth()
       };
     }
 
+    // TODO: Update to support instances when no gh app installation token or user access token is provided.
+    // Instead, only require Github PAT.
+    // Then, you'll need to update the graph config to have a new field for gh PAT
+    // and update the `getGitHubTokensFromConfig` function to support extracting & returning the GH PAT
+    // You might be able to get away with setting the PAT under the installation token field (needs to be tested)
+
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
       // This will either return a valid user, or throw an error
