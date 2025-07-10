@@ -104,10 +104,8 @@ export function InstallationSelector({
         className={cn("min-w-[200px]", className)}
       >
         <div className="flex items-center gap-2">
-          <GitHubSVG />
           {currentInstallation ? (
             <div className="flex items-center gap-2">
-              {getAccountIcon(currentInstallation.accountType)}
               <img
                 src={currentInstallation.avatarUrl}
                 alt={`${currentInstallation.accountName} avatar`}
@@ -129,7 +127,6 @@ export function InstallationSelector({
             value={installation.id.toString()}
           >
             <div className="flex items-center gap-2">
-              {getAccountIcon(installation.accountType)}
               <img
                 src={installation.avatarUrl}
                 alt={`${installation.accountName} avatar`}
