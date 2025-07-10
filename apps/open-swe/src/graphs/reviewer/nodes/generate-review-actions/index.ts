@@ -8,7 +8,11 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { createRgTool, createShellTool, createFindInstancesOfTool } from "../../../../tools/index.js";
+import {
+  createRgTool,
+  createShellTool,
+  createFindInstancesOfTool,
+} from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getUserRequest } from "../../../../utils/user-request.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
@@ -41,20 +45,23 @@ export async function generateReviewActions(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
-  const tools = [createRgTool(state), createShellTool(state), createFindInstancesOfTool(state)];
+  const tools = [
+    createRgTool(state),
+    createShellTool(state),
+    createFindInstancesOfTool(state),
+  ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
   });
 
-  const response = await modelWithTools
-    .invoke([
-      {
-        role: "user",
-        content: formatSystemPrompt(state),
-      },
-      ...state.reviewerMessages,
-    ]);
+  const response = await modelWithTools.invoke([
+    {
+      role: "user",
+      content: formatSystemPrompt(state),
+    },
+    ...state.reviewerMessages,
+  ]);
 
   logger.info("Generated review actions", {
     ...(getMessageContentString(response.content) && {

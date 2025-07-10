@@ -34,11 +34,7 @@ export async function takeReviewerActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const findInstancesOfTool = createFindInstancesOfTool(state);
-  const allTools = [
-    shellTool,
-    rgTool,
-    findInstancesOfTool,
-  ];
+  const allTools = [shellTool, rgTool, findInstancesOfTool];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -49,12 +45,12 @@ export async function takeReviewerActions(
   }
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
-      await getSandboxWithErrorHandling(
-        state.sandboxSessionId,
-        state.targetRepository,
-        state.branchName,
-        config,
-      );
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
 
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
@@ -160,6 +156,6 @@ ${tc.content}`,
     messages: toolCallResults,
     reviewerMessages: toolCallResults,
     ...(codebaseTree ? { codebaseTree } : {}),
-    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {})
+    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {}),
   };
 }

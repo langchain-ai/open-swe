@@ -55,6 +55,6 @@ export async function initializeState(
     baseBranchName,
     changedFiles,
     ...(codebaseTree ? { codebaseTree } : {}),
-    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {})
+    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {}),
   };
 }
