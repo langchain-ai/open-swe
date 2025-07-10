@@ -3,6 +3,24 @@ title: 'Introduction'
 description: 'An introduction to Open SWE'
 ---
 
+# Welcome to Open SWE
+
+Open SWE is an open-source cloud-based coding agent built with [LangGraph](https://langchain-ai.github.io/langgraph/). It's designed to autonomously understand, plan, and execute code changes across entire repositories using advanced AI capabilities.
+
+<Note>
+Open SWE is currently under active development and is not yet ready for production use.
+</Note>
+
+## How It Works
+
+Open SWE operates through three specialized LangGraph components:
+- **Manager Graph**: Orchestrates user interactions and coordinates between other graphs
+- **Planner Graph**: Analyzes requirements and creates detailed execution plans
+- **Programmer Graph**: Executes code changes based on approved plans
+
+The agent can be used through a web interface or triggered automatically via GitHub webhooks, making it flexible for both interactive development and automated workflows.
+
+
 <CardGroup cols={2}>
   <Card
     title="Concepts"
@@ -27,4 +45,15 @@ description: 'An introduction to Open SWE'
   </Card>
 </CardGroup>
 
-(add a very high level overview of what open swe is, and what content the docs cover)
+## What's in These Docs
+
+This documentation covers everything you need to know about Open SWE:
+
+- **Concepts**: Core principles and architecture behind Open SWE
+- **Setup**: Complete development environment setup including monorepo structure, dependencies, and authentication
+- **Usage**: How to interact with Open SWE through the web interface and GitHub webhooks
+
+<Tip>
+Try out the [live demo](https://openswe.langchain.com) to see Open SWE in action, though note that availability may vary during development.
+</Tip>
+
