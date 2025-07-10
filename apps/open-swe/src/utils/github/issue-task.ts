@@ -146,16 +146,24 @@ ${DETAILS_CLOSE_TAG}`;
     } else {
       // No plan present yet, but details already exists.
       const contentBeforeDetailsTag = issueBody.split(DETAILS_OPEN_TAG)?.[0];
-      const contentAfterDetailsOpenTag = issueBody.split(DETAILS_OPEN_TAG)?.[1] || '';
-      const contentAfterSummary = contentAfterDetailsOpenTag.includes(AGENT_CONTEXT_DETAILS_SUMMARY) 
-        ? contentAfterDetailsOpenTag.split(AGENT_CONTEXT_DETAILS_SUMMARY)[1] 
+      const contentAfterDetailsOpenTag =
+        issueBody.split(DETAILS_OPEN_TAG)?.[1] || "";
+      const contentAfterSummary = contentAfterDetailsOpenTag.includes(
+        AGENT_CONTEXT_DETAILS_SUMMARY,
+      )
+        ? contentAfterDetailsOpenTag.split(AGENT_CONTEXT_DETAILS_SUMMARY)[1]
         : contentAfterDetailsOpenTag;
-      const contentAfterDetailsCloseTag = issueBody.split(DETAILS_CLOSE_TAG)?.[1] || '';
+      const contentAfterDetailsCloseTag =
+        issueBody.split(DETAILS_CLOSE_TAG)?.[1] || "";
 
       return `${contentBeforeDetailsTag}${DETAILS_OPEN_TAG}
 ${AGENT_CONTEXT_DETAILS_SUMMARY}
-${wrappedPlan}${contentAfterSummary.trim() ? `
-${contentAfterSummary.trim()}` : ''}
+${wrappedPlan}${
+        contentAfterSummary.trim()
+          ? `
+${contentAfterSummary.trim()}`
+          : ""
+      }
 ${DETAILS_CLOSE_TAG}${contentAfterDetailsCloseTag}`;
     }
   } else {
