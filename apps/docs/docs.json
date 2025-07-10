@@ -21,19 +21,19 @@
             ]
           },
           {
-            "group": "Development Setup",
-            "pages": [
-              "setup/index",
-              "setup/development",
-              "setup/authentication"
-            ]
-          },
-          {
             "group": "Usage",
             "pages": [
               "usage/index",
               "usage/ui",
               "usage/webhook"
+            ]
+          },
+          {
+            "group": "Development Setup",
+            "pages": [
+              "setup/index",
+              "setup/development",
+              "setup/authentication"
             ]
           }
         ]
