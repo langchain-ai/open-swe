@@ -8,6 +8,6 @@ export default defineConfig({
     typecheck: {
       tsconfig: "./eval.tsconfig.json",
     },
-    testTimeout: 1800_000, // 30 minutes
+    testTimeout: 7200_000, // 120 minutes
   },
 });

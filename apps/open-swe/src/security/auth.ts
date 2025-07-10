@@ -10,6 +10,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { decryptGitHubToken } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
@@ -43,12 +44,6 @@ export const auth = new Auth()
       };
     }
 
-    // TODO: Update to support instances when no gh app installation token or user access token is provided.
-    // Instead, only require Github PAT.
-    // Then, you'll need to update the graph config to have a new field for gh PAT
-    // and update the `getGitHubTokensFromConfig` function to support extracting & returning the GH PAT
-    // You might be able to get away with setting the PAT under the installation token field (needs to be tested)
-
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
       // This will either return a valid user, or throw an error
@@ -62,6 +57,46 @@ export const auth = new Auth()
       );
     }
 
+    // Check for GitHub PAT authentication (simpler mode for evals, etc.)
+    const encryptedGitHubPat = request.headers.get(GITHUB_PAT);
+    if (encryptedGitHubPat) {
+      // PAT-only authentication mode
+      const githubPat = decryptGitHubToken(encryptedGitHubPat, encryptionKey);
+      const user = await verifyGithubUser(githubPat);
+
+      if (!user) {
+        throw new HTTPException(401, {
+          message: "Invalid GitHub PAT",
+        });
+      }
+
+      return {
+        identity: user.id.toString(),
+        is_authenticated: true,
+        display_name: user.login,
+        metadata: {
+          installation_name: "pat-auth", // Dummy installation name for PAT mode
+        },
+        permissions: [
+          "threads:create",
+          "threads:create_run",
+          "threads:read",
+          "threads:delete",
+          "threads:update",
+          "threads:search",
+          "assistants:create",
+          "assistants:read",
+          "assistants:delete",
+          "assistants:update",
+          "assistants:search",
+          "deployments:read",
+          "deployments:search",
+          "store:access",
+        ],
+      };
+    }
+
+    // GitHub App authentication mode (existing logic)
     const installationNameHeader = request.headers.get(
       GITHUB_INSTALLATION_NAME,
     );

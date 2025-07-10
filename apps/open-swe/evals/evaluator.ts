@@ -16,7 +16,6 @@ const RUN_PIP_IN_VENV = `${VENV_PATH}/bin/pip`;
 
 /**
  * Setup Python environment with requirements.txt + ruff + mypy
- * Simplified approach that works for any Python repository
  */
 async function setupEnv(
   sandbox: Sandbox,
@@ -24,7 +23,6 @@ async function setupEnv(
 ): Promise<boolean> {
   logger.info("Setting up Python environment...");
 
-  // 1. Create the virtual environment
   const createVenvCommand = "python -m venv .venv";
   const createVenvRes = await sandbox.process.executeCommand(
     createVenvCommand,
@@ -40,7 +38,6 @@ async function setupEnv(
     return false;
   }
 
-  // 2. Upgrade pip first
   const upgradePipRes = await sandbox.process.executeCommand(
     `${RUN_PIP_IN_VENV} install --upgrade pip`,
     absoluteRepoDir,
@@ -51,30 +48,30 @@ async function setupEnv(
     logger.warn("Failed to upgrade pip, continuing anyway", { upgradePipRes });
   }
 
-  // 3. Install repository requirements if requirements.txt exists
   const requirementsExistRes = await sandbox.process.executeCommand(
     "test -f requirements.txt",
     absoluteRepoDir,
     undefined,
     TIMEOUT_SEC,
   );
-  
+
   if (requirementsExistRes.exitCode === 0) {
     logger.info("Found requirements.txt, installing...");
     const installReqRes = await sandbox.process.executeCommand(
       `${RUN_PIP_IN_VENV} install -r requirements.txt`,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_SEC * 3, // Longer timeout for requirements
+      TIMEOUT_SEC * 3,
     );
     if (installReqRes.exitCode !== 0) {
-      logger.warn("Failed to install requirements.txt, continuing anyway", { installReqRes });
+      logger.warn("Failed to install requirements.txt, continuing anyway", {
+        installReqRes,
+      });
     }
   } else {
     logger.info("No requirements.txt found, skipping repository dependencies");
   }
 
-  // 4. Install code analysis tools (ruff + mypy) - this must succeed
   const installAnalysisToolsRes = await sandbox.process.executeCommand(
     `${RUN_PIP_IN_VENV} install ruff mypy`,
     absoluteRepoDir,
@@ -82,7 +79,9 @@ async function setupEnv(
     TIMEOUT_SEC,
   );
   if (installAnalysisToolsRes.exitCode !== 0) {
-    logger.error("Failed to install ruff and mypy", { installAnalysisToolsRes });
+    logger.error("Failed to install ruff and mypy", {
+      installAnalysisToolsRes,
+    });
     return false;
   }
 
@@ -93,104 +92,115 @@ async function setupEnv(
 /**
  * Run ruff and mypy analysis on all Python files in the repository
  */
-async function runCodeAnalysis(
+async function runCodeTests(
   sandbox: Sandbox,
   absoluteRepoDir: string,
 ): Promise<{ ruffScore: number; mypyScore: number; details: any }> {
   logger.info("Running code analysis on all Python files in repository");
-  
-  const analysisResults = {
+
+  const testResults = {
     ruffScore: 0,
     mypyScore: 0,
     details: {
-      ruff: { issues: [] as any[], exitCode: -1, output: "", error: null as any },
-      mypy: { issues: [] as string[], exitCode: -1, output: "", error: null as any }
-    }
+      ruff: {
+        issues: [] as any[],
+        exitCode: -1,
+        output: "",
+        error: null as any,
+      },
+      mypy: {
+        issues: [] as string[],
+        exitCode: -1,
+        output: "",
+        error: null as any,
+      },
+    },
   };
 
-  // Run ruff on all Python files in the repository
   try {
-    logger.info("Running ruff analysis...");
+    logger.info("Running ruff check on all Python files...");
     const ruffRes = await sandbox.process.executeCommand(
       `${RUN_PYTHON_IN_VENV} -m ruff check . --output-format=json`,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_SEC,
+      TIMEOUT_SEC * 3,
     );
-    
-    analysisResults.details.ruff.exitCode = ruffRes.exitCode;
-    analysisResults.details.ruff.output = ruffRes.result;
-    
+
+    testResults.details.ruff.exitCode = ruffRes.exitCode;
+    testResults.details.ruff.output = ruffRes.result;
+
     if (ruffRes.exitCode === 0) {
-      analysisResults.ruffScore = 1; // Perfect score if no issues
-      logger.info("Ruff analysis passed - no issues found");
+      testResults.ruffScore = 1;
+      logger.info("Ruff analysis passed. No issues found.");
     } else {
-      // Try to parse JSON output to count issues
       try {
         const ruffIssues = JSON.parse(ruffRes.result);
-        analysisResults.details.ruff.issues = ruffIssues;
-        
+        testResults.details.ruff.issues = ruffIssues;
+
         const issueCount = Array.isArray(ruffIssues) ? ruffIssues.length : 0;
-        analysisResults.ruffScore = issueCount === 0 ? 1 : 0; // Binary scoring: pass/fail
-        
-        logger.info(`Ruff found ${issueCount} issues`, { 
-          score: analysisResults.ruffScore,
-          sampleIssues: ruffIssues.slice(0, 3) // Log first 3 issues
+        testResults.ruffScore = issueCount === 0 ? 1 : 0; // Binary scoring: pass/fail
+
+        logger.info(`Ruff found ${issueCount} issues`, {
+          score: testResults.ruffScore,
+          issues: ruffIssues.slice(0, 3), // Log first 3 issues
         });
       } catch (parseError) {
-        // If JSON parsing fails, use simple binary scoring
-        analysisResults.ruffScore = 0;
-        logger.warn("Could not parse ruff JSON output, using binary scoring", { 
-          parseError, 
-          output: ruffRes.result?.substring(0, 200) + "..." 
-        });
+        testResults.ruffScore = 0;
+        logger.warn(
+          "Could not parse ruff JSON output. Setting Ruff score to 0.",
+          {
+            parseError,
+            output: ruffRes.result?.substring(0, 200) + "...",
+          },
+        );
       }
     }
   } catch (error) {
-    logger.error("Failed to run ruff analysis", { error });
-    analysisResults.details.ruff.error = error;
-    analysisResults.ruffScore = 0;
+    logger.error("Failed to run ruff check", { error });
+    testResults.details.ruff.error = error;
+    testResults.ruffScore = 0;
   }
 
   // Run mypy on all Python files in the repository
   try {
-    logger.info("Running mypy analysis...");
+    logger.info("Running mypy type check on all Python files...");
     const mypyRes = await sandbox.process.executeCommand(
-      `${RUN_PYTHON_IN_VENV} -m mypy . --ignore-missing-imports --no-error-summary`,
+      `${RUN_PYTHON_IN_VENV} -m mypy . --no-error-summary --show-error-codes --no-color-output`,
       absoluteRepoDir,
       undefined,
-      TIMEOUT_SEC,
+      TIMEOUT_SEC * 3,
     );
-    
-    analysisResults.details.mypy.exitCode = mypyRes.exitCode;
-    analysisResults.details.mypy.output = mypyRes.result;
-    
+
+    testResults.details.mypy.exitCode = mypyRes.exitCode;
+    testResults.details.mypy.output = mypyRes.result;
+
     if (mypyRes.exitCode === 0) {
-      analysisResults.mypyScore = 1; // Perfect score if no issues
+      testResults.mypyScore = 1; // Perfect score if no issues
       logger.info("MyPy analysis passed - no type issues found");
     } else {
-      // Count mypy errors from output
-      const errorLines = mypyRes.result.split('\n').filter(line => 
-        line.includes(': error:') || line.includes(': warning:')
-      );
-      
-      analysisResults.details.mypy.issues = errorLines;
-      
+      const errorLines = mypyRes.result
+        .split("\n")
+        .filter(
+          (line) => line.includes(": error:") || line.includes(": warning:"),
+        );
+
+      testResults.details.mypy.issues = errorLines;
+
       const issueCount = errorLines.length;
-      analysisResults.mypyScore = issueCount === 0 ? 1 : 0; // Binary scoring: pass/fail
-      
-      logger.info(`MyPy found ${issueCount} issues`, { 
-        score: analysisResults.mypyScore,
-        sampleIssues: errorLines.slice(0, 3) // Log first 3 issues
+      testResults.mypyScore = issueCount === 0 ? 1 : 0; // Binary scoring: pass/fail
+
+      logger.info(`MyPy found ${issueCount} issues`, {
+        score: testResults.mypyScore,
+        issues: errorLines.slice(0, 3),
       });
     }
   } catch (error) {
-    logger.error("Failed to run mypy analysis", { error });
-    analysisResults.details.mypy.error = error;
-    analysisResults.mypyScore = 0;
+    logger.error("Failed to run mypy", { error });
+    testResults.details.mypy.error = error;
+    testResults.mypyScore = 0;
   }
 
-  return analysisResults;
+  return testResults;
 }
 
 /**
@@ -211,19 +221,18 @@ export async function evaluator(inputs: {
   }
 
   const daytonaInstance = new Daytona();
-     logger.info("Creating sandbox...", { 
-     repo: openSWEInputs.repo,
-     originalBranch: openSWEInputs.branch, // Branch the agent was asked to fix
-     solutionBranch: output.branchName,    // Branch the agent created with solution
-     user_input: openSWEInputs.user_input.substring(0, 100) + "..."
-   });
-  
+  logger.info("Creating sandbox...", {
+    repo: openSWEInputs.repo,
+    originalBranch: openSWEInputs.branch,
+    solutionBranch: output.branchName,
+    user_input: openSWEInputs.user_input.substring(0, 100) + "...",
+  });
+
   const sandbox = await daytonaInstance.create({
     image: SNAPSHOT_NAME,
   });
 
   try {
-    // Clone the repository
     const res = await cloneRepo(sandbox, output.targetRepository, {
       githubInstallationToken: githubToken,
     });
@@ -237,10 +246,9 @@ export async function evaluator(inputs: {
 
     const absoluteRepoDir = getRepoAbsolutePath(output.targetRepository);
 
-    // Checkout the agent's solution branch (this contains their changes)
     const solutionBranch = output.branchName;
     logger.info(`Checking out agent's solution branch: ${solutionBranch}`);
-    
+
     const checkoutBranchRes = await sandbox.process.executeCommand(
       `git checkout ${solutionBranch}`,
       absoluteRepoDir,
@@ -255,29 +263,28 @@ export async function evaluator(inputs: {
       throw new Error(`Failed to checkout solution branch: ${solutionBranch}`);
     }
 
-    // Setup Python environment
     const envSetupSuccess = await setupEnv(sandbox, absoluteRepoDir);
     if (!envSetupSuccess) {
       logger.error("Failed to setup environment");
-      return [{
-        key: "overall-score",
-        score: 0,
-      }];
+      return [
+        {
+          key: "overall-score",
+          score: 0,
+        },
+      ];
     }
 
-    // Run code analysis on all Python files
-    const analysisResult = await runCodeAnalysis(sandbox, absoluteRepoDir);
-    
-    // Simple addition scoring (no weighting)
+    const analysisResult = await runCodeTests(sandbox, absoluteRepoDir);
+
     const overallScore = analysisResult.ruffScore + analysisResult.mypyScore;
-    
+
     logger.info("Evaluation completed", {
       overallScore,
       ruffScore: analysisResult.ruffScore,
       mypyScore: analysisResult.mypyScore,
       repo: openSWEInputs.repo,
       originalBranch: openSWEInputs.branch,
-      solutionBranch: output.branchName
+      solutionBranch: output.branchName,
     });
 
     return [
@@ -290,19 +297,19 @@ export async function evaluator(inputs: {
         score: analysisResult.ruffScore,
       },
       {
-        key: "mypy-score", 
+        key: "mypy-score",
         score: analysisResult.mypyScore,
       },
     ];
-
   } catch (error) {
     logger.error("Evaluation failed with error", { error });
-    return [{
-      key: "overall-score",
-      score: 0,
-    }];
+    return [
+      {
+        key: "overall-score",
+        score: 0,
+      },
+    ];
   } finally {
-    // Cleanup sandbox
     try {
       await sandbox.delete();
       logger.info("Sandbox cleaned up successfully");

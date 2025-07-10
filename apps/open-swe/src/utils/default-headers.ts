@@ -5,9 +5,18 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   GITHUB_INSTALLATION_NAME,
+  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 
-export function getDefaultHeaders(config: GraphConfig) {
+export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
+  const githubPat = config.configurable?.[GITHUB_PAT];
+  if (githubPat) {
+    // PAT-only
+    return {
+      [GITHUB_PAT]: githubPat,
+    };
+  }
+
   const githubInstallationTokenCookie =
     config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE];
   const githubInstallationName =
