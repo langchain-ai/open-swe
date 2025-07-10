@@ -1,0 +1,17 @@
+---
+title: 'From the UI'
+description: 'How to use Open SWE from the UI'
+---
+
+(in this page, cover how you can use Open SWE from the UI. Do not include screenshots, I will manually add those later)
+
+discuss:
+- Auto mode vs manual mode
+- chatting with the agent (manager)
+  - what the manager can do: respond to user, create new planning run, send new message to active planning run, resume the planner after interrupted with a response, send new message to active programmer run
+  - what the manager can NOT do: create new programmer run (this can only happen by accepting the proposed plan/auto mode after plan is complete), stop the planner/programmer. re-plan while the programmer is running. open a PR (this will only happen after the programmer finishes. the programmer will always auto-commit after every change though), accept a plan (you need to manually click accept if not running in auto-mode)
+  - overview of how the manager can take actions:
+    - how messages you send to the manager trigger planning runs
+    - how messages you send to the manager can add new messages to planning run while its active
+    - how messages you send to the manager can resume the planner if it's interrupted w/ a proposed plan
+    - how messages you send to the manager can send new messages to active programmer run

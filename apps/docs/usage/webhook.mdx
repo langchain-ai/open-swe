@@ -1,0 +1,12 @@
+---
+title: 'From Webhooks'
+description: 'How to use Open SWE from webhooks'
+---
+
+(in this page, cover how you can trigger open swe from webhooks, specifically github issues)
+
+- discuss how adding a label to a GH issue that Open SWE is installed on can trigger a run
+  - cover manual vs auto mode (`open-swe` vs `open-swe-auto`)
+  - cover how open swe will reply to the issue with a message confirming it's started a new run, and it will include a link to the new run so you can view it in the open swe UI
+    - cover how only the user who created the issue will be able to view this URL
+- discuss how PRs will link back to the issue that triggered it, so when the PR is closed, it will close the issue
