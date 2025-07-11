@@ -63,15 +63,15 @@ export interface RuffFix {
  * Individual Ruff issue
  */
 export interface RuffIssue {
-  cell: string | null; // Always null for regular Python files, only used for Jupyter notebooks
-  code: string; // Rule code (always present)
-  end_location: RuffLocation; // End position (always present)
-  filename: string; // Full file path (always present)
-  fix: RuffFix | null; // Auto-fix suggestion (null if no fix available)
-  location: RuffLocation; // Start position (always present)
-  message: string; // Issue description (always present)
-  noqa_row: number; // Line number for noqa comments (always present)
-  url: string; // Link to rule documentation (always present)
+  cell: string | null;
+  code: string;
+  end_location: RuffLocation;
+  filename: string;
+  fix: RuffFix | null;
+  location: RuffLocation;
+  message: string;
+  noqa_row: number;
+  url: string;
 }
 
 /**
