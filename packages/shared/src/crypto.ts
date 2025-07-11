@@ -20,19 +20,16 @@ function deriveKey(encryptionKey: string): Buffer {
 }
 
 /**
- * Encrypts a GitHub token using AES-256-GCM
+ * Encrypts a secret using AES-256-GCM
  *
- * @param token - The GitHub access token to encrypt
+ * @param secret - The secret to encrypt
  * @param encryptionKey - The encryption key (will be hashed to 256 bits)
  * @returns Base64 encoded encrypted data containing IV, encrypted token, and auth tag
  * @throws Error if encryption fails or inputs are invalid
  */
-export function encryptGitHubToken(
-  token: string,
-  encryptionKey: string,
-): string {
-  if (!token || typeof token !== "string") {
-    throw new Error("Token must be a non-empty string");
+export function encryptSecret(secret: string, encryptionKey: string): string {
+  if (!secret || typeof secret !== "string") {
+    throw new Error("Secret must be a non-empty string");
   }
 
   if (!encryptionKey || typeof encryptionKey !== "string") {
@@ -49,9 +46,9 @@ export function encryptGitHubToken(
     // Create cipher
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
-    // Encrypt the token
+    // Encrypt the secret
     const encryptedBuffer = Buffer.concat([
-      cipher.update(token, "utf8"),
+      cipher.update(secret, "utf8"),
       cipher.final(),
     ]);
 
@@ -64,25 +61,25 @@ export function encryptGitHubToken(
     return combined.toString("base64");
   } catch (error) {
     throw new Error(
-      `Failed to encrypt token: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Failed to encrypt secret: ${error instanceof Error ? error.message : "Unknown error"}`,
     );
   }
 }
 
 /**
- * Decrypts a GitHub token using AES-256-GCM
+ * Decrypts a secret using AES-256-GCM
  *
- * @param encryptedToken - Base64 encoded encrypted data from encryptGitHubToken
+ * @param encryptedSecret - Base64 encoded encrypted data from encryptSecret
  * @param encryptionKey - The encryption key used for encryption
- * @returns The decrypted GitHub access token
+ * @returns The decrypted secret
  * @throws Error if decryption fails or inputs are invalid
  */
-export function decryptGitHubToken(
-  encryptedToken: string,
+export function decryptSecret(
+  encryptedSecret: string,
   encryptionKey: string,
 ): string {
-  if (!encryptedToken || typeof encryptedToken !== "string") {
-    throw new Error("Encrypted token must be a non-empty string");
+  if (!encryptedSecret || typeof encryptedSecret !== "string") {
+    throw new Error("Encrypted secret must be a non-empty string");
   }
 
   if (!encryptionKey || typeof encryptionKey !== "string") {
@@ -91,11 +88,13 @@ export function decryptGitHubToken(
 
   try {
     // Decode the combined data
-    const combined = Buffer.from(encryptedToken, "base64");
+    const combined = Buffer.from(encryptedSecret, "base64");
 
     // Minimum length: IV_LENGTH + TAG_LENGTH + 1 byte for data
     if (combined.length < IV_LENGTH + TAG_LENGTH + 1) {
-      throw new Error("Invalid encrypted token format: too short or malformed");
+      throw new Error(
+        "Invalid encrypted secret format: too short or malformed",
+      );
     }
 
     // Extract IV, encrypted data, and tag
@@ -126,7 +125,7 @@ export function decryptGitHubToken(
     return decryptedBuffer.toString("utf8");
   } catch (error) {
     throw new Error(
-      `Failed to decrypt token: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Failed to decrypt secret: ${error instanceof Error ? error.message : "Unknown error"}`,
     );
   }
 }

@@ -47,12 +47,12 @@ All headers are prefixed with `x-` to ensure they're included in LangGraph run c
 
 ### Token Encryption
 
-Open SWE implements AES-256-GCM encryption for all GitHub tokens to prevent exposure in:
+Open SWE implements AES-256-GCM encryption for all secrets passed to the LangGraph server to prevent exposure in:
 - LangSmith trace metadata
 - Run configurations
 - Potential unauthorized access scenarios
 
-The encryption process uses the `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable and includes:
+The encryption process uses the `SECRETS_ENCRYPTION_KEY` environment variable and includes:
 - **Initialization Vector (IV)** for unique encryption per token
 - **Authentication Tag** for data integrity verification
 - **Base64 encoding** for safe transport
@@ -135,5 +135,5 @@ This design ensures tokens remain encrypted in storage and traces while being av
 </Note>
 
 <Tip>
-Always ensure the `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable is identical between your web application and LangGraph agent deployments.
+Always ensure the `SECRETS_ENCRYPTION_KEY` environment variable is identical between your web application and LangGraph agent deployments.
 </Tip>
