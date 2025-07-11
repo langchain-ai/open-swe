@@ -1,4 +1,3 @@
-// Add this import at the top
 import { OpenSWEInput } from "./open-swe-types.js";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { HumanMessage } from "@langchain/core/messages";
@@ -32,8 +31,7 @@ export async function formatInputs(
   const targetRepository: TargetRepository = {
     owner: inputs.repo.split("/")[0],
     repo: inputs.repo.split("/")[1],
-    branch: inputs.branch, // using branch from the dataset
-    // removed baseCommit
+    branch: inputs.branch,
   };
 
   const readmeContents = await getRepoReadmeContents(targetRepository);

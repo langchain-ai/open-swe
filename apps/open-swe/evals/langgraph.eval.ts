@@ -11,8 +11,9 @@ import { encryptGitHubToken } from "@open-swe/shared/crypto";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
+import { withRetry } from "./utils/retry.js";
 
-const logger = createLogger(LogLevel.INFO, "Evaluator");
+const logger = createLogger(LogLevel.DEBUG, "Evaluator");
 
 const DATASET_NAME = process.env.DATASET_NAME || "";
 // const RUN_NAME = `${DATASET_NAME}-${new Date().toISOString().replace(/[:.]/g, '-')}`;
@@ -102,13 +103,27 @@ ls.describe(DATASET_NAME, () => {
       });
 
       // Run the agent with user input
-      const managerRun = await lgClient.runs.wait(threadId, MANAGER_GRAPH_ID, {
-        input,
-        config: {
-          recursion_limit: 250,
-        },
-        ifNotExists: "create",
-      });
+      let managerRun;
+      try {
+        managerRun = await withRetry(() => lgClient.runs.wait(threadId, MANAGER_GRAPH_ID, {
+          input,
+          config: {
+            recursion_limit: 250,
+          },
+          ifNotExists: "create",
+        }));
+      } catch (error) {
+        logger.error("Error in manager run", {
+          thread_id: threadId,
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            cause: error.cause,
+          } : error,
+        });
+        return; // instead of skipping, we should award 0 points
+      }
 
       const managerState = managerRun as unknown as ManagerGraphState;
       const plannerSession = managerState?.plannerSession;
@@ -120,10 +135,25 @@ ls.describe(DATASET_NAME, () => {
         return; // instead of skipping, we should award 0 points
       }
 
-      const plannerRun = await lgClient.runs.join(
-        plannerSession.threadId,
-        plannerSession.runId,
-      );
+      let plannerRun;
+      try {
+        plannerRun = await withRetry(() => lgClient.runs.join(
+          plannerSession.threadId,
+          plannerSession.runId,
+        ));
+      } catch (error) {
+        logger.error("Error joining planner run", {
+          thread_id: threadId,
+          plannerSession,
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            cause: error.cause,
+          } : error,
+        });
+        return; // instead of skipping, we should award 0 points
+      }
 
       // Type-safe access to planner run state
       const plannerState = plannerRun as unknown as PlannerGraphState;
@@ -136,12 +166,26 @@ ls.describe(DATASET_NAME, () => {
         return; // instead of skipping, we should award 0 points
       }
 
-      const programmerRun = await lgClient.runs.join(
-        programmerSession.threadId,
-        programmerSession.runId,
-      );
+      let programmerRun;
+      try {
+        programmerRun = await withRetry(() => lgClient.runs.join(
+          programmerSession.threadId,
+          programmerSession.runId,
+        ));
+      } catch (error) {
+        logger.error("Error joining programmer run", {
+          thread_id: threadId,
+          programmerSession,
+          error: error instanceof Error ? {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            cause: error.cause,
+          } : error,
+        });
+        return; // instead of skipping, we should award 0 points
+      }
 
-      // Type-safe access to programmer run state
       const programmerState = programmerRun as unknown as GraphState;
       const branchName = programmerState?.branchName;
 
@@ -174,6 +218,6 @@ ls.describe(DATASET_NAME, () => {
         evalResult,
       });
     },
-    900_000,
+    7200_000,
   );
 });
