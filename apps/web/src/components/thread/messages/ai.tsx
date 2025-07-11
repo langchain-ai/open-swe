@@ -123,14 +123,14 @@ function parseAnthropicStreamedToolCalls(
 
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
-  thread: { messages: Message[] },
+  threadMessages: Message[],
 ): ActionItemProps {
-  const toolCall: ToolCall | undefined = thread.messages
+  const toolCall: ToolCall | undefined = threadMessages
     .filter(isAIMessageSDK)
     .flatMap((m) => m.tool_calls ?? [])
     .find((tc) => tc.id === message.tool_call_id);
 
-  const aiMessage = thread.messages
+  const aiMessage = threadMessages
     .filter(isAIMessageSDK)
     .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
   const reasoningText = aiMessage
@@ -234,12 +234,14 @@ export function AssistantMessage({
   handleRegenerate,
   forceRenderInterrupt = false,
   thread,
+  threadMessages,
 }: {
   message: Message | undefined;
   isLoading: boolean;
   handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
   forceRenderInterrupt?: boolean;
   thread: ReturnType<typeof useStream<Record<string, unknown>>>;
+  threadMessages: Message[];
 }) {
   const content = message?.content ?? [];
   const contentString = getContentString(content);
@@ -248,7 +250,7 @@ export function AssistantMessage({
     parseAsBoolean.withDefault(false),
   );
 
-  const messages = thread.messages;
+  const messages = threadMessages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
 
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
@@ -409,7 +411,10 @@ export function AssistantMessage({
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
-        return mapToolMessageToActionStepProps(correspondingToolResult, thread);
+        return mapToolMessageToActionStepProps(
+          correspondingToolResult,
+          threadMessages,
+        );
       } else if (isRgTool) {
         const args = toolCall.args as RgToolArgs;
         return {
@@ -521,8 +526,8 @@ export function AssistantMessage({
   }
 
   const isLastMessage =
-    thread.messages[thread.messages.length - 1].id === message?.id;
-  const hasNoAIOrToolMessages = !thread.messages.find(
+    threadMessages[threadMessages.length - 1].id === message?.id;
+  const hasNoAIOrToolMessages = !threadMessages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
   const isToolResult = message?.type === "tool";
