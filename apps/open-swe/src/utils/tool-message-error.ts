@@ -1,8 +1,10 @@
 import {
+  BaseMessage,
   isAIMessage,
   isToolMessage,
   ToolMessage,
 } from "@langchain/core/messages";
+import { getMessageString } from "./message/content.js";
 
 /**
  * Group tool messages by their parent AI message
@@ -86,3 +88,36 @@ export function shouldDiagnoseError(messages: Array<any>) {
     (group) => calculateErrorRate(group) >= ERROR_THRESHOLD,
   );
 }
+
+export const getAllLastFailedActions = (messages: BaseMessage[]): string => {
+  const result: string[] = [];
+  let i = 0;
+
+  // Find pairs of AI messages followed by error tool messages
+  while (i < messages.length - 1) {
+    const currentMessage = messages[i];
+    const nextMessage = messages[i + 1];
+
+    if (
+      isAIMessage(currentMessage) &&
+      isToolMessage(nextMessage) &&
+      nextMessage?.status === "error"
+    ) {
+      // Add the AI message and its corresponding error tool message
+      result.push(getMessageString(currentMessage));
+      result.push(getMessageString(nextMessage));
+      i += 2; // Move to the next potential pair
+    } else if (
+      isToolMessage(currentMessage) &&
+      currentMessage?.status !== "error"
+    ) {
+      // Stop when we encounter a non-error tool message
+      break;
+    } else {
+      // Move to the next message if current one doesn't match our pattern
+      i++;
+    }
+  }
+
+  return result.join("\n");
+};

@@ -21,7 +21,7 @@
   "dependencies": {
     "@langchain/core": "^0.3.57",
     "@langchain/langgraph": "^0.3.3",
-    "@langchain/langgraph-sdk": "^0.0.85",
+    "@langchain/langgraph-sdk": "^0.0.92",
     "@octokit/app": "^16.0.1",
     "@open-swe/shared": "*",
     "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -72,6 +72,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@octokit/types": "^14.1.0",
     "@tailwindcss/postcss": "^4.0.13",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/lodash": "^4.17.16",

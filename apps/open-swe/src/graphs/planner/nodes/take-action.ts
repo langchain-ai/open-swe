@@ -24,13 +24,15 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
 export async function takeActions(
   state: PlannerGraphState,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<Command> {
   const { messages } = state;
   const lastMessage = messages[messages.length - 1];
 
@@ -184,10 +186,22 @@ ${tc.content}`,
     })),
   });
 
-  return {
+  const shouldRouteDiagnoseNode = shouldDiagnoseError([
+    ...state.messages,
+    ...toolCallResults,
+  ]);
+
+  const commandUpdate: PlannerGraphUpdate = {
     messages: toolCallResults,
     sandboxSessionId: sandbox.id,
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
+
+  return new Command({
+    goto: shouldRouteDiagnoseNode
+      ? "diagnose-error"
+      : "generate-plan-context-action",
+    update: commandUpdate,
+  });
 }

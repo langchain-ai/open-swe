@@ -57,6 +57,7 @@ export function TerminalInput({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
+    fetchStateHistory: false,
   });
 
   const handleSend = async () => {

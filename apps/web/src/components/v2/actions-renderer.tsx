@@ -119,6 +119,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
+    fetchStateHistory: false,
   });
 
   const { cancelRun } = useCancelStream<State>({
