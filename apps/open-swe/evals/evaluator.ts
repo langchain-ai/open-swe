@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { OpenSWEInput, RuffIssue } from "./open-swe-types.js";
+import { OpenSWEInput, RuffIssue, codeTestDetails } from "./open-swe-types.js";
 import { Daytona, Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
@@ -97,7 +97,7 @@ async function setupEnv(
 async function runCodeTests(
   sandbox: Sandbox,
   absoluteRepoDir: string,
-): Promise<{ ruffScore: number; mypyScore: number; details: any }> {
+): Promise<{ ruffScore: number; mypyScore: number; details: codeTestDetails }> {
   logger.info("Running code analysis on all Python files in repository");
 
   const testResults = {

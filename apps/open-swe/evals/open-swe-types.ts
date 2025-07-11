@@ -91,3 +91,14 @@ export interface MyPyResult {
   error: Error | null;
   issues: string[];
 }
+
+export type codeTestDetails = {
+  ruff: {
+    issues: RuffIssue[];
+    error: Error | null;
+  };
+  mypy: {
+    issues: string[];
+    error: Error | null;
+  };
+};
