@@ -94,6 +94,35 @@ const isNewRunRequest = (reqUrlStr: string, reqMethod: string) => {
   }
 };
 
+const isGetStateRequest = (reqUrlStr: string, reqMethod: string) => {
+  try {
+    const reqPathnameParts = new URL(reqUrlStr).pathname.split("/");
+    const isGetStateReq =
+      reqPathnameParts?.[1] === "api" &&
+      reqPathnameParts?.[2] === "threads" &&
+      validate(reqPathnameParts?.[3]) &&
+      reqPathnameParts?.[4] === "state" &&
+      reqMethod.toLowerCase() === "get";
+    return isGetStateReq;
+  } catch {
+    return false;
+  }
+};
+
+const isSearchThreadsRequest = (reqUrlStr: string, reqMethod: string) => {
+  try {
+    const reqPathnameParts = new URL(reqUrlStr).pathname.split("/");
+    const isGetStateReq =
+      reqPathnameParts?.[1] === "api" &&
+      reqPathnameParts?.[2] === "threads" &&
+      reqPathnameParts?.[3] === "search" &&
+      reqMethod.toLowerCase() === "post";
+    return isGetStateReq;
+  } catch {
+    return false;
+  }
+};
+
 async function getInstallationNameFromReq(
   req: Request,
   installationId: string,
@@ -101,13 +130,19 @@ async function getInstallationNameFromReq(
   try {
     const requestJson = await req.json();
     const installationName = requestJson?.input?.targetRepository?.owner;
-    return installationName;
+    if (installationName) {
+      return installationName;
+    }
   } catch {
     // no-op
   }
 
   try {
-    if (isNewRunRequest(req.url, req.method)) {
+    if (
+      isNewRunRequest(req.url, req.method) ||
+      isGetStateRequest(req.url, req.method) ||
+      isSearchThreadsRequest(req.url, req.method)
+    ) {
       return await getInstallationName(installationId);
     }
     return "";

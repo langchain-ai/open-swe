@@ -28,6 +28,7 @@ export default function ThreadPage({
     assistantId: MANAGER_GRAPH_ID,
     threadId: thread_id,
     reconnectOnMount: true,
+    fetchStateHistory: false,
   });
 
   const { threads, threadsLoading } = useThreads<GraphState>(MANAGER_GRAPH_ID);

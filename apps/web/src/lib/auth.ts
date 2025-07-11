@@ -29,6 +29,19 @@ function getCookieOptions(expires?: Date) {
 }
 
 /**
+ * Cookie options for GitHub installation ID cookie (non-HTTP-only for client access)
+ */
+export function getInstallationCookieOptions(expires?: Date) {
+  return {
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    maxAge: expires ? undefined : 60 * 60 * 24 * 30, // 30 days
+    expires,
+    path: "/",
+  };
+}
+
+/**
  * Stores GitHub OAuth token data in secure HTTP-only cookies
  *
  * @param tokenData The GitHub token data to store
@@ -57,7 +70,7 @@ export function storeGitHubToken(
     response.cookies.set(
       GITHUB_INSTALLATION_ID_COOKIE,
       tokenData.installation_id,
-      cookieOptions,
+      getInstallationCookieOptions(),
     );
   }
 }

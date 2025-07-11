@@ -1,15 +1,14 @@
 import { BaseMessage } from "@langchain/core/messages";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { traceable } from "langsmith/traceable";
 import { z } from "zod";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
 
-async function createIssueTitleAndBodyFromMessagesFunc(
+export async function createIssueFieldsFromMessages(
   messages: BaseMessage[],
-  config: GraphConfig,
+  configurable: GraphConfig["configurable"],
 ): Promise<{ title: string; body: string }> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel({ configurable }, Task.ACTION_GENERATOR);
   const githubIssueTool = {
     name: "create_github_issue",
     description: "Create a new GitHub issue with the given title and body.",
@@ -31,7 +30,7 @@ async function createIssueTitleAndBodyFromMessagesFunc(
       tool_choice: githubIssueTool.name,
       parallel_tool_calls: false,
     })
-    .withConfig({ tags: ["nostream"] });
+    .withConfig({ tags: ["nostream"], runName: "create-issue-fields" });
 
   const prompt = `You're an AI programmer, tasked with taking the conversation history provided below, and creating a new GitHub issue.
 Ensure the issue title and body are both clear and concise. Do not hallucinate any information not found in the conversation history.
@@ -54,8 +53,3 @@ With the above conversation history in mind, please call the ${githubIssueTool.n
   }
   return toolCall.args as z.infer<typeof githubIssueTool.schema>;
 }
-
-export const createIssueTitleAndBodyFromMessages = traceable(
-  createIssueTitleAndBodyFromMessagesFunc,
-  { name: "create-issue-title-and-body-from-messages" },
-);

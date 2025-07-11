@@ -12,7 +12,7 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { startSandbox } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import { getUserRequest } from "../../../utils/user-request.js";
 import {
@@ -21,12 +21,12 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
-import {
-  PlannerGraphState,
-  PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import {
+  addProposedPlanToIssue,
+  addTaskPlanToIssue,
+} from "../../../utils/github/issue-task.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   ACCEPTED_PLAN_NODE_ID,
@@ -79,7 +79,19 @@ async function startProgrammerRun(input: {
 
   const programmerThreadId = uuidv4();
   // Restart the sandbox.
-  runInput.sandboxSessionId = (await startSandbox(state.sandboxSessionId)).id;
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
+  runInput.sandboxSessionId = sandbox.id;
+  runInput.codebaseTree = codebaseTree ?? runInput.codebaseTree;
+  runInput.dependenciesInstalled =
+    dependenciesInstalled !== null
+      ? dependenciesInstalled
+      : runInput.dependenciesInstalled;
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,
@@ -103,21 +115,25 @@ async function startProgrammerRun(input: {
     config,
     runInput.taskPlan,
   );
-  return {
-    programmerSession: {
-      threadId: programmerThreadId,
-      runId: run.run_id,
+
+  return new Command({
+    goto: END,
+    update: {
+      programmerSession: {
+        threadId: programmerThreadId,
+        runId: run.run_id,
+      },
+      sandboxSessionId: runInput.sandboxSessionId,
+      taskPlan: runInput.taskPlan,
+      messages: newMessages,
     },
-    sandboxSessionId: runInput.sandboxSessionId,
-    taskPlan: runInput.taskPlan,
-    messages: newMessages,
-  };
+  });
 }
 
 export async function interruptProposedPlan(
   state: PlannerGraphState,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate | Command> {
+): Promise<Command> {
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
@@ -162,7 +178,19 @@ export async function interruptProposedPlan(
     });
   }
 
-  const interruptRes = interrupt<HumanInterrupt, HumanResponse[]>({
+  await addProposedPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    proposedPlan,
+  );
+
+  const interruptResponse = interrupt<
+    HumanInterrupt,
+    HumanResponse[] | HumanResponse
+  >({
     action_request: {
       action: PLAN_INTERRUPT_ACTION_TITLE,
       args: {
@@ -177,26 +205,28 @@ export async function interruptProposedPlan(
     },
     description: `A new plan has been generated for your request. Please review it and either approve it, edit it, respond to it, or ignore it. Responses will be passed to an LLM where it will rewrite then plan.
     If editing the plan, ensure each step in the plan is separated by "${PLAN_INTERRUPT_DELIMITER}".`,
-  })[0];
+  });
 
-  if (!state.sandboxSessionId) {
-    // TODO: This should prob just create a sandbox?
-    throw new Error("No sandbox session ID found.");
+  const humanResponse: HumanResponse = Array.isArray(interruptResponse)
+    ? interruptResponse[0]
+    : interruptResponse;
+
+  if (humanResponse.type === "response") {
+    // Plan was responded to, route to the needs-context node which will determine
+    // if we need more context, or can go right to the planning step.
+    return new Command({
+      goto: "determine-needs-context",
+    });
   }
 
-  if (interruptRes.type === "response") {
-    // Plan was responded to, route to the rewrite plan node.
-    throw new Error("RESPONDING TO PLAN NOT IMPLEMENTED.");
-  }
-
-  if (interruptRes.type === "ignore") {
+  if (humanResponse.type === "ignore") {
     // Plan was ignored, end the process.
     return new Command({
       goto: END,
     });
   }
 
-  if (interruptRes.type === "accept") {
+  if (humanResponse.type === "accept") {
     planItems = proposedPlan.map((p, index) => ({
       index,
       plan: p,
@@ -209,8 +239,8 @@ export async function interruptProposedPlan(
       planItems,
       { existingTaskPlan: state.taskPlan },
     );
-  } else if (interruptRes.type === "edit") {
-    const editedPlan = (interruptRes.args as ActionRequest).args.plan
+  } else if (humanResponse.type === "edit") {
+    const editedPlan = (humanResponse.args as ActionRequest).args.plan
       .split(PLAN_INTERRUPT_DELIMITER)
       .map((step: string) => step.trim());
 
@@ -227,7 +257,7 @@ export async function interruptProposedPlan(
       { existingTaskPlan: state.taskPlan },
     );
   } else {
-    throw new Error("Unknown interrupt type." + interruptRes.type);
+    throw new Error("Unknown interrupt type." + humanResponse.type);
   }
 
   return await startProgrammerRun({
@@ -240,7 +270,7 @@ export async function interruptProposedPlan(
       createAcceptedPlanMessage({
         planTitle: state.proposedPlanTitle,
         planItems,
-        interruptType: interruptRes.type,
+        interruptType: humanResponse.type,
       }),
     ],
   });

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Open SWE",
+  "colors": {
+    "primary": "#0ea5e9",
+    "light": "#38bdf8",
+    "dark": "#0369a1"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/intro",
+              "usage/ui",
+              "usage/webhook"
+            ]
+          },
+          {
+            "group": "Development Setup",
+            "pages": [
+              "setup/intro",
+              "setup/development",
+              "setup/authentication",
+              "setup/monorepo"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "Demo",
+          "href": "https://swe.langchain.com",
+          "icon": "link"
+        },
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/langchain-ai/open-swe",
+          "icon": "github"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/langchain-ai/open-swe"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/langchain-ai/open-swe",
+      "twitter": "https://twitter.com/langchainai"
+    }
+  }
+}

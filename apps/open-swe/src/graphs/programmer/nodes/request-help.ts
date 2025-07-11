@@ -1,8 +1,15 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { GraphState, GraphUpdate } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  GraphState,
+  GraphUpdate,
+} from "@open-swe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
-import { stopSandbox, startSandbox } from "../../../utils/sandbox.js";
+import {
+  getSandboxWithErrorHandling,
+  stopSandbox,
+} from "../../../utils/sandbox.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -12,16 +19,18 @@ ${helpRequest}
 \`\`\``;
 };
 
-export async function requestHelp(state: GraphState): Promise<Command> {
+export async function requestHelp(
+  state: GraphState,
+  config: GraphConfig,
+): Promise<Command> {
   const lastMessage = state.internalMessages[state.internalMessages.length - 1];
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
   }
   const sandboxSessionId = state.sandboxSessionId;
-  if (!sandboxSessionId) {
-    throw new Error("Sandbox session ID not found.");
+  if (sandboxSessionId) {
+    await stopSandbox(sandboxSessionId);
   }
-  await stopSandbox(sandboxSessionId);
 
   const toolCall = lastMessage.tool_calls[0];
 
@@ -52,15 +61,27 @@ export async function requestHelp(state: GraphState): Promise<Command> {
     if (typeof interruptRes.args !== "string") {
       throw new Error("Interrupt response expected to be a string.");
     }
-    await startSandbox(sandboxSessionId);
+
+    const { sandbox, codebaseTree, dependenciesInstalled } =
+      await getSandboxWithErrorHandling(
+        state.sandboxSessionId,
+        state.targetRepository,
+        state.branchName,
+        config,
+      );
+
     const toolMessage = new ToolMessage({
       tool_call_id: toolCall.id ?? "",
       content: `Human response: ${interruptRes.args}`,
       status: "success",
     });
+
     const commandUpdate: GraphUpdate = {
       messages: [toolMessage],
       internalMessages: [toolMessage],
+      sandboxSessionId: sandbox.id,
+      ...(codebaseTree && { codebaseTree }),
+      ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     };
     return new Command({
       goto: "generate-action",

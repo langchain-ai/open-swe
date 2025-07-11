@@ -4,6 +4,7 @@ import {
   GITHUB_TOKEN_TYPE_COOKIE,
   GITHUB_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
+import { getInstallationCookieOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -112,13 +113,11 @@ export async function GET(request: NextRequest) {
 
     // If there's an installation_id, store that as well for future API calls
     if (installationId) {
-      response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, installationId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-        path: "/",
-      });
+      response.cookies.set(
+        GITHUB_INSTALLATION_ID_COOKIE,
+        installationId,
+        getInstallationCookieOptions(),
+      );
     }
 
     return response;
