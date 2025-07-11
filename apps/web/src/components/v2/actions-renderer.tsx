@@ -109,7 +109,7 @@ function addMessagesToState(
 }
 
 function isNodeEndMessagesUpdate(
-  data: unknown
+  data: unknown,
 ): data is { output: { messages: Message[] } } {
   return !!(
     typeof data === "object" &&
@@ -120,7 +120,7 @@ function isNodeEndMessagesUpdate(
     "messages" in data.output &&
     data.output.messages &&
     Array.isArray(data.output.messages)
-  )
+  );
 }
 
 const REVIEWER_NODE_IDS = [
@@ -163,7 +163,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         data.data &&
         isNodeEndMessagesUpdate(data.data)
       ) {
-        console.log("setting output messages!!")
         const outputMessages = data.data.output.messages;
         setMergedMessages((prev) => [...prev, ...outputMessages]);
       }
@@ -238,14 +237,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     if (runId && runId !== joinedRunId.current) {
       joinedRunId.current = runId;
       setStreamLoading(true);
-      console.log("Joining stream", graphId, runId);
       stream
         .joinStream(runId)
         .catch(console.error)
-        .finally(() => {
-          console.log("joinStream completed", graphId, runId);
-          setStreamLoading(false);
-        });
+        .finally(() => setStreamLoading(false));
     } else if (!runId) {
       joinedRunId.current = undefined;
     }

@@ -411,7 +411,10 @@ export function AssistantMessage({
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
-        return mapToolMessageToActionStepProps(correspondingToolResult, threadMessages);
+        return mapToolMessageToActionStepProps(
+          correspondingToolResult,
+          threadMessages,
+        );
       } else if (isRgTool) {
         const args = toolCall.args as RgToolArgs;
         return {
