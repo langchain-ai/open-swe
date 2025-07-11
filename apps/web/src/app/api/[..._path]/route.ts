@@ -78,7 +78,6 @@ const isNewRunRequest = (reqUrlStr: string, reqMethod: string) => {
       reqPathnameParts?.[2] === "threads" &&
       validate(reqPathnameParts?.[3]) &&
       reqPathnameParts?.[4] === "runs" &&
-      reqPathnameParts.length === 5 &&
       reqMethod.toLowerCase() === "post";
     const isStreamRunReq =
       reqPathnameParts?.[1] === "api" &&
