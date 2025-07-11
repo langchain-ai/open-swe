@@ -21,12 +21,12 @@ import {
   Bug,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ThreadDisplayInfo } from "./types";
+import { ThreadMetadata } from "./types";
 import { ThreadCard } from "./thread-card";
 
 interface ThreadSwitcherProps {
-  currentThread: ThreadDisplayInfo;
-  allThreads: ThreadDisplayInfo[];
+  currentThread: ThreadMetadata;
+  allThreads: ThreadMetadata[];
 }
 
 export function ThreadSwitcher({
@@ -37,9 +37,6 @@ export function ThreadSwitcher({
   const router = useRouter();
 
   const otherThreads = allThreads.filter((t) => t.id !== currentThread.id);
-  const runningCount = otherThreads.filter(
-    (t) => t.status === "running",
-  ).length;
 
   return (
     <Sheet
@@ -54,14 +51,6 @@ export function ThreadSwitcher({
         >
           <Layers3 className="h-3 w-3" />
           <span className="hidden sm:inline">Switch Thread</span>
-          {runningCount > 0 && (
-            <Badge
-              variant="secondary"
-              className="h-4 bg-blue-100 px-1 text-xs text-blue-700 dark:bg-blue-950 dark:text-blue-400"
-            >
-              {runningCount}
-            </Badge>
-          )}
         </Button>
       </SheetTrigger>
       <SheetContent

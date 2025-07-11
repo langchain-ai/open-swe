@@ -2,11 +2,11 @@ import { getThreadTitle } from "@/lib/thread";
 import { Thread } from "@langchain/langgraph-sdk";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 
-export interface ThreadDisplayInfo {
+export interface ThreadMetadata {
   id: string;
   title: string;
-  status: "running" | "completed" | "failed" | "pending";
   lastActivity: string;
   taskCount: number;
   repository: string;
@@ -22,37 +22,18 @@ export interface ThreadDisplayInfo {
   };
 }
 
-// Utility functions to convert between Thread and ThreadDisplayInfo
-export function threadToDisplayInfo(
+export interface ThreadDisplayInfo extends ThreadMetadata {
+  status: ThreadUIStatus;
+}
+
+export function threadToMetadata(
   thread: Thread<ManagerGraphState>,
-): ThreadDisplayInfo {
+): ThreadMetadata {
   const values = thread.values;
   const activePlanItems = values?.taskPlan
     ? getActivePlanItems(values.taskPlan)
     : [];
-  const completedTasksLen = activePlanItems.filter((t) => t.completed).length;
 
-  // Determine UI status from thread status and task completion
-  let uiStatus: ThreadDisplayInfo["status"];
-  switch (thread.status) {
-    case "busy":
-      uiStatus = "running";
-      break;
-    case "idle":
-      uiStatus =
-        completedTasksLen === activePlanItems.length ? "completed" : "pending";
-      break;
-    case "error":
-      uiStatus = "failed";
-      break;
-    case "interrupted":
-      uiStatus = "pending";
-      break;
-    default:
-      uiStatus = "pending";
-  }
-
-  // Calculate time since last update
   const lastUpdate = new Date(thread.updated_at);
   const now = new Date();
   const diffMs = now.getTime() - lastUpdate.getTime();
@@ -74,17 +55,16 @@ export function threadToDisplayInfo(
   return {
     id: thread.thread_id,
     title: getThreadTitle(thread),
-    status: uiStatus,
     lastActivity,
     taskCount: values?.taskPlan?.tasks.length ?? 0,
     repository: values?.targetRepository
       ? `${values.targetRepository.owner}/${values.targetRepository.repo}`
       : "",
-    branch: values?.targetRepository.branch || "main",
+    branch: values?.targetRepository?.branch || "main",
     githubIssue: values?.githubIssueId
       ? {
           number: values?.githubIssueId,
-          url: `https://github.com/${values?.targetRepository.owner}/${values?.targetRepository.repo}/issues/${values?.githubIssueId}`,
+          url: `https://github.com/${values?.targetRepository?.owner}/${values?.targetRepository?.repo}/issues/${values?.githubIssueId}`,
         }
       : undefined,
   };

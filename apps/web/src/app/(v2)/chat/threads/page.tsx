@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, Search, Filter } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
+import { ThreadMetadata, threadToMetadata } from "@/components/v2/types";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
@@ -15,45 +15,73 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { InstallationSelector } from "@/components/github/installation-selector";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 
-type FilterStatus = "all" | "running" | "completed" | "failed" | "pending";
+type FilterStatus =
+  | "all"
+  | "running"
+  | "completed"
+  | "failed"
+  | "pending"
+  | "idle"
+  | "paused"
+  | "error";
 
 function AllThreadsPageContent() {
   const router = useRouter();
   const { threads, isLoading: threadsLoading } = useThreadsSWR<GraphState>({
     assistantId: MANAGER_GRAPH_ID,
-    refreshInterval: 15000, // Poll every 15 seconds
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
 
-  // Convert Thread objects to ThreadDisplayInfo for UI
-  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
+  const threadMetadata: ThreadMetadata[] = threads?.map(threadToMetadata) ?? [];
+  const threadIds = threadMetadata.map((thread) => thread.id);
+
+  // Get real thread statuses
+  const {
+    statusMap,
+    statusCounts,
+    groupedThreads,
+    isLoading: statusLoading,
+  } = useThreadsStatus(threadIds);
 
   // Filter and search threads
-  const filteredThreads = displayThreads.filter((thread) => {
+  const filteredThreads = threadMetadata.filter((thread) => {
     const matchesSearch =
       thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
+
+    // Filter by status if not "all"
     const matchesStatus =
-      statusFilter === "all" || thread.status === statusFilter;
+      statusFilter === "all" || statusMap[thread.id] === statusFilter;
+
     return matchesSearch && matchesStatus;
   });
 
-  // Group threads by status
-  const groupedThreads = {
-    running: filteredThreads.filter((t) => t.status === "running"),
-    completed: filteredThreads.filter((t) => t.status === "completed"),
-    failed: filteredThreads.filter((t) => t.status === "failed"),
-    pending: filteredThreads.filter((t) => t.status === "pending"),
-  };
-
-  const statusCounts = {
-    all: displayThreads.length,
-    running: displayThreads.filter((t) => t.status === "running").length,
-    completed: displayThreads.filter((t) => t.status === "completed").length,
-    failed: displayThreads.filter((t) => t.status === "failed").length,
-    pending: displayThreads.filter((t) => t.status === "pending").length,
+  // Group filtered threads by their actual status
+  const realGroupedThreads = {
+    running: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "running",
+    ),
+    completed: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "completed",
+    ),
+    failed: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "failed",
+    ),
+    pending: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "pending",
+    ),
+    idle: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "idle",
+    ),
+    paused: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "paused",
+    ),
+    error: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "error",
+    ),
   };
 
   return (
@@ -114,6 +142,9 @@ function AllThreadsPageContent() {
                   "completed",
                   "failed",
                   "pending",
+                  "idle",
+                  "paused",
+                  "error",
                 ] as FilterStatus[]
               ).map((status) => (
                 <Button
@@ -148,7 +179,7 @@ function AllThreadsPageContent() {
             {statusFilter === "all" ? (
               // Show grouped view when "all" is selected
               <div className="space-y-6">
-                {Object.entries(groupedThreads).map(([status, threads]) => {
+                {Object.entries(realGroupedThreads).map(([status, threads]) => {
                   if (threads.length === 0) return null;
                   return (
                     <div key={status}>
@@ -187,33 +218,38 @@ function AllThreadsPageContent() {
               </div>
             )}
 
-            {filteredThreads.length === 0 && !threadsLoading && (
-              <div className="py-12 text-center">
-                <div className="text-muted-foreground mb-2">
-                  No threads found
+            {filteredThreads.length === 0 &&
+              !threadsLoading &&
+              !statusLoading && (
+                <div className="py-12 text-center">
+                  <div className="text-muted-foreground mb-2">
+                    No threads found
+                  </div>
+                  <div className="text-muted-foreground/70 text-xs">
+                    {!threads || threads.length === 0
+                      ? "No threads have been created yet"
+                      : searchQuery
+                        ? "Try adjusting your search query"
+                        : "No threads match the selected filter"}
+                  </div>
                 </div>
-                <div className="text-muted-foreground/70 text-xs">
-                  {searchQuery
-                    ? "Try adjusting your search query"
-                    : "No threads match the selected filter"}
-                </div>
-              </div>
-            )}
+              )}
 
-            {threadsLoading && threads.length === 0 && (
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <h2 className="text-foreground text-base font-semibold capitalize">
-                    Loading threads...
-                  </h2>
+            {(threadsLoading || statusLoading) &&
+              (!threads || threads.length === 0) && (
+                <div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <h2 className="text-foreground text-base font-semibold capitalize">
+                      Loading threads...
+                    </h2>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                    {Array.from({ length: 9 }).map((_, index) => (
+                      <ThreadCardLoading key={`all-threads-loading-${index}`} />
+                    ))}
+                  </div>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {Array.from({ length: 9 }).map((_, index) => (
-                    <ThreadCardLoading key={`all-threads-loading-${index}`} />
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
           </div>
         </div>
       </div>

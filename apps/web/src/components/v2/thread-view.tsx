@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
-import { ThreadDisplayInfo } from "./types";
+import { ThreadDisplayInfo, ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
@@ -20,6 +20,9 @@ import {
   PROGRAMMER_GRAPH_ID,
   PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
+import { useThreadStatus } from "@/hooks/useThreadStatus";
+import { cn } from "@/lib/utils";
+
 import { StickToBottom } from "use-stick-to-bottom";
 import {
   StickyToBottomContent,
@@ -31,7 +34,7 @@ import { CancelStreamButton } from "./cancel-stream-button";
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadDisplayInfo;
-  allDisplayThreads: ThreadDisplayInfo[];
+  allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
 }
 
@@ -49,6 +52,27 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  const {
+    status: realTimeStatus,
+    isLoading: statusLoading,
+    error,
+  } = useThreadStatus(displayThread.id);
+
+  const getStatusDotColor = (status: string) => {
+    switch (status) {
+      case "running":
+        return "bg-blue-500";
+      case "completed":
+        return "bg-green-500";
+      case "paused":
+        return "bg-yellow-500";
+      case "error":
+        return "bg-red-500";
+      default:
+        return "bg-gray-500";
+    }
+  };
 
   const plannerCancelRef = useRef<(() => void) | null>(null);
   const programmerCancelRef = useRef<(() => void) | null>(null);
@@ -99,13 +123,10 @@ export function ThreadView({
           </Button>
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <div
-              className={`size-2 flex-shrink-0 rounded-full ${
-                displayThread.status === "running"
-                  ? "bg-blue-500"
-                  : displayThread.status === "completed"
-                    ? "bg-green-500"
-                    : "bg-red-500"
-              }`}
+              className={cn(
+                "size-2 flex-shrink-0 rounded-full",
+                getStatusDotColor(realTimeStatus),
+              )}
             ></div>
             <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
               {displayThread.title}

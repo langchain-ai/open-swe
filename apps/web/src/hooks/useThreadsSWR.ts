@@ -1,8 +1,9 @@
-import { createClient } from "@/providers/client";
-import { Thread } from "@langchain/langgraph-sdk";
 import useSWR from "swr";
+import { Thread } from "@langchain/langgraph-sdk";
+import { createClient } from "@/providers/client";
+import { THREAD_SWR_CONFIG } from "@/lib/swr-config";
 
-export interface UseThreadsSWROptions {
+interface UseThreadsSWROptions {
   assistantId?: string;
   refreshInterval?: number;
   revalidateOnFocus?: boolean;
@@ -14,9 +15,9 @@ export function useThreadsSWR<State extends Record<string, any>>(
 ) {
   const {
     assistantId,
-    refreshInterval = 0, // Default to no polling, can be overridden
-    revalidateOnFocus = true,
-    revalidateOnReconnect = true,
+    refreshInterval = THREAD_SWR_CONFIG.refreshInterval,
+    revalidateOnFocus = THREAD_SWR_CONFIG.revalidateOnFocus,
+    revalidateOnReconnect = THREAD_SWR_CONFIG.revalidateOnReconnect,
   } = options;
 
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -48,8 +49,9 @@ export function useThreadsSWR<State extends Record<string, any>>(
       refreshInterval,
       revalidateOnFocus,
       revalidateOnReconnect,
-      errorRetryCount: 3,
-      errorRetryInterval: 5000,
+      errorRetryCount: THREAD_SWR_CONFIG.errorRetryCount,
+      errorRetryInterval: THREAD_SWR_CONFIG.errorRetryInterval,
+      dedupingInterval: THREAD_SWR_CONFIG.dedupingInterval,
     },
   );
 
