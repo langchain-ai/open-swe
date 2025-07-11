@@ -4,7 +4,7 @@ import {
   GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { decryptGitHubToken } from "@open-swe/shared/crypto";
+import { decryptSecret } from "@open-swe/shared/crypto";
 
 export function getGitHubTokensFromConfig(config: GraphConfig): {
   githubAccessToken: string;
@@ -40,11 +40,17 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
     );
   }
 
-  // Decrypt the GitHub tokens
+  // Get the encryption key from environment variables
+  const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+  if (!encryptionKey) {
+    throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
+  }
+
+  // Decrypt the GitHub token
   const githubAccessToken = encryptedGitHubToken
-    ? decryptGitHubToken(encryptedGitHubToken, encryptionKey)
+    ? decryptSecret(encryptedGitHubToken, encryptionKey)
     : "";
-  const githubInstallationToken = decryptGitHubToken(
+  const githubInstallationToken = decryptSecret(
     encryptedInstallationToken,
     encryptionKey,
   );

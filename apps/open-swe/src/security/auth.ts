@@ -12,7 +12,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   GITHUB_PAT,
 } from "@open-swe/shared/constants";
-import { decryptGitHubToken } from "@open-swe/shared/crypto";
+import { decryptSecret } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 
@@ -50,11 +50,9 @@ export const auth = new Auth()
       return await verifyGitHubWebhookOrThrow(request);
     }
 
-    const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
+    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
     if (!encryptionKey) {
-      throw new Error(
-        "Missing GITHUB_TOKEN_ENCRYPTION_KEY environment variable.",
-      );
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
     }
 
     // Check for GitHub PAT authentication (simpler mode for evals, etc.)
@@ -131,14 +129,14 @@ export const auth = new Auth()
         });
       }
       user = await verifyGithubUserId(
-        decryptGitHubToken(encryptedInstallationToken, encryptionKey),
+        decryptSecret(encryptedInstallationToken, encryptionKey),
         Number(userIdHeader),
         userLoginHeader,
       );
     } else {
       // Ensure we decrypt the token before passing to the verification function.
       user = await verifyGithubUser(
-        decryptGitHubToken(encryptedAccessToken, encryptionKey),
+        decryptSecret(encryptedAccessToken, encryptionKey),
       );
     }
 
