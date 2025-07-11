@@ -18,7 +18,7 @@ import {
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
-import { diagnoseError } from "./nodes/diagnose-error.js";
+import { diagnoseError } from "../shared/diagnose-error.js";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,

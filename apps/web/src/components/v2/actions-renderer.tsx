@@ -127,6 +127,7 @@ const REVIEWER_NODE_IDS = [
   "take-review-actions",
   "generate-review-actions",
   "final-review",
+  "diagnose-reviewer-error",
 ];
 
 export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
