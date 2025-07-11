@@ -1,6 +1,7 @@
 import { HTTPException } from "@langchain/langgraph-sdk/auth";
 import { Webhooks } from "@octokit/webhooks";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubWebhookAuth");
 
@@ -41,21 +42,6 @@ export async function verifyGitHubWebhookOrThrow(request: Request) {
     metadata: {
       installation_name: "n/a",
     },
-    permissions: [
-      "threads:create",
-      "threads:create_run",
-      "threads:read",
-      "threads:delete",
-      "threads:update",
-      "threads:search",
-      "assistants:create",
-      "assistants:read",
-      "assistants:delete",
-      "assistants:update",
-      "assistants:search",
-      "deployments:read",
-      "deployments:search",
-      "store:access",
-    ],
+    permissions: LANGGRAPH_USER_PERMISSIONS,
   };
 }

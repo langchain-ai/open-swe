@@ -10,3 +10,20 @@ export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxParams = {
   user: "daytona",
   image: SNAPSHOT_NAME,
 };
+
+export const LANGGRAPH_USER_PERMISSIONS = [
+  "threads:create",
+  "threads:create_run",
+  "threads:read",
+  "threads:delete",
+  "threads:update",
+  "threads:search",
+  "assistants:create",
+  "assistants:read",
+  "assistants:delete",
+  "assistants:update",
+  "assistants:search",
+  "deployments:read",
+  "deployments:search",
+  "store:access",
+];
