@@ -85,7 +85,7 @@ function isNewRunRequest(reqUrlStr: string, reqMethod: string) {
   } catch {
     return false;
   }
-};
+}
 
 function isGetStateRequest(reqUrlStr: string, reqMethod: string) {
   try {
@@ -100,7 +100,7 @@ function isGetStateRequest(reqUrlStr: string, reqMethod: string) {
   } catch {
     return false;
   }
-};
+}
 
 function isSearchThreadsRequest(reqUrlStr: string, reqMethod: string) {
   try {
@@ -114,7 +114,7 @@ function isSearchThreadsRequest(reqUrlStr: string, reqMethod: string) {
   } catch {
     return false;
   }
-};
+}
 
 export async function getInstallationNameFromReq(
   req: Request,

@@ -24,9 +24,7 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
   // Get the encryption key from environment variables
   const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
   if (!encryptionKey) {
-    throw new Error(
-      "Missing SECRETS_ENCRYPTION_KEY environment variable.",
-    );
+    throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
   }
 
   // Decrypt the GitHub token

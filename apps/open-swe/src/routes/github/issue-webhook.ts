@@ -87,9 +87,7 @@ const getHeaders = (
 
 webhooks.on("issues.labeled", async ({ payload }) => {
   if (!process.env.SECRETS_ENCRYPTION_KEY) {
-    throw new Error(
-      "SECRETS_ENCRYPTION_KEY environment variable is required",
-    );
+    throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
   }
   const validOpenSWELabels = [getOpenSWELabel(), getOpenSWEAutoAcceptLabel()];
   if (

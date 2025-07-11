@@ -51,9 +51,7 @@ export const auth = new Auth()
 
     const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
     if (!encryptionKey) {
-      throw new Error(
-        "Missing SECRETS_ENCRYPTION_KEY environment variable.",
-      );
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
     }
 
     const installationNameHeader = request.headers.get(

@@ -27,10 +27,7 @@ function deriveKey(encryptionKey: string): Buffer {
  * @returns Base64 encoded encrypted data containing IV, encrypted token, and auth tag
  * @throws Error if encryption fails or inputs are invalid
  */
-export function encryptSecret(
-  secret: string,
-  encryptionKey: string,
-): string {
+export function encryptSecret(secret: string, encryptionKey: string): string {
   if (!secret || typeof secret !== "string") {
     throw new Error("Secret must be a non-empty string");
   }
@@ -95,7 +92,9 @@ export function decryptSecret(
 
     // Minimum length: IV_LENGTH + TAG_LENGTH + 1 byte for data
     if (combined.length < IV_LENGTH + TAG_LENGTH + 1) {
-      throw new Error("Invalid encrypted secret format: too short or malformed");
+      throw new Error(
+        "Invalid encrypted secret format: too short or malformed",
+      );
     }
 
     // Extract IV, encrypted data, and tag
