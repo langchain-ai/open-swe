@@ -1,0 +1,201 @@
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Eye, EyeOff, Key, Trash2 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+
+interface ApiKey {
+  id: string;
+  name: string;
+  value: string;
+  isVisible: boolean;
+  lastUsed?: string;
+}
+
+interface ApiKeySection {
+  title: string;
+  keys: ApiKey[];
+}
+
+export function APIKeysTab() {
+  // API Keys mock data
+  const [apiKeySections, setApiKeySections] = useState<
+    Record<string, ApiKeySection>
+  >({
+    llms: {
+      title: "LLMs",
+      keys: [
+        {
+          id: "anthropic-1",
+          name: "Anthropic",
+          value: "sk-ant-api03-...",
+          isVisible: false,
+          lastUsed: "2 hours ago",
+        },
+        { id: "openai-1", name: "OpenAI", value: "", isVisible: false },
+        { id: "google-1", name: "Google Gen AI", value: "", isVisible: false },
+      ],
+    },
+    infrastructure: {
+      title: "Infrastructure",
+      keys: [{ id: "daytona-1", name: "Daytona", value: "", isVisible: false }],
+    },
+  });
+
+  const toggleKeyVisibility = (sectionKey: string, keyId: string) => {
+    setApiKeySections((prev) => ({
+      ...prev,
+      [sectionKey]: {
+        ...prev[sectionKey],
+        keys: prev[sectionKey].keys.map((key) =>
+          key.id === keyId ? { ...key, isVisible: !key.isVisible } : key,
+        ),
+      },
+    }));
+  };
+
+  const updateApiKey = (sectionKey: string, keyId: string, value: string) => {
+    setApiKeySections((prev) => ({
+      ...prev,
+      [sectionKey]: {
+        ...prev[sectionKey],
+        keys: prev[sectionKey].keys.map((key) =>
+          key.id === keyId ? { ...key, value } : key,
+        ),
+      },
+    }));
+  };
+
+  const deleteApiKey = (sectionKey: string, keyId: string) => {
+    setApiKeySections((prev) => ({
+      ...prev,
+      [sectionKey]: {
+        ...prev[sectionKey],
+        keys: prev[sectionKey].keys.map((key) =>
+          key.id === keyId ? { ...key, value: "" } : key,
+        ),
+      },
+    }));
+  };
+
+  return (
+    <div className="space-y-8">
+      {Object.entries(apiKeySections).map(([sectionKey, section]) => (
+        <Card
+          key={sectionKey}
+          className="bg-white shadow-sm"
+        >
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Key className="h-5 w-5" />
+              {section.title}
+            </CardTitle>
+            <CardDescription>
+              Manage API keys for {section.title.toLowerCase()} services
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {section.keys.map((apiKey) => (
+              <div
+                key={apiKey.id}
+                className="rounded-lg border border-gray-100 p-4"
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-mono font-semibold text-gray-900">
+                      {apiKey.name}
+                    </h3>
+                    {apiKey.value && (
+                      <Badge
+                        variant="outline"
+                        className="border-green-200 bg-green-50 text-xs text-green-700"
+                      >
+                        Configured
+                      </Badge>
+                    )}
+                    {apiKey.lastUsed && (
+                      <span className="text-xs text-gray-500">
+                        Last used {apiKey.lastUsed}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Label
+                        htmlFor={`${apiKey.id}-key`}
+                        className="text-sm font-medium"
+                      >
+                        API Key
+                      </Label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <Input
+                          id={`${apiKey.id}-key`}
+                          type={apiKey.isVisible ? "text" : "password"}
+                          value={apiKey.value}
+                          onChange={(e) =>
+                            updateApiKey(sectionKey, apiKey.id, e.target.value)
+                          }
+                          placeholder={`Enter your ${apiKey.name} API key`}
+                          className="font-mono text-sm"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            toggleKeyVisibility(sectionKey, apiKey.id)
+                          }
+                          className="px-2"
+                        >
+                          {apiKey.isVisible ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </Button>
+                        {apiKey.value && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteApiKey(sectionKey, apiKey.id)}
+                            className="px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-500">
+                      Your API key is stored securely and encrypted
+                    </p>
+                    {apiKey.value && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                      >
+                        Test Connection
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
