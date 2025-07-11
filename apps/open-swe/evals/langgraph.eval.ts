@@ -7,7 +7,7 @@ import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { evaluator } from "./evaluator.js";
 import { MANAGER_GRAPH_ID, GITHUB_PAT } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../src/utils/langgraph-client.js";
-import { encryptGitHubToken } from "@open-swe/shared/crypto";
+import { encryptSecret } from "@open-swe/shared/crypto";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
@@ -86,7 +86,7 @@ ls.describe(DATASET_NAME, () => {
         );
       }
 
-      const encryptedGitHubToken = encryptGitHubToken(githubPat, encryptionKey);
+      const encryptedGitHubToken = encryptSecret(githubPat, encryptionKey);
 
       const lgClient = createLangGraphClient({
         includeApiKey: true,
@@ -105,22 +105,27 @@ ls.describe(DATASET_NAME, () => {
       // Run the agent with user input
       let managerRun;
       try {
-        managerRun = await withRetry(() => lgClient.runs.wait(threadId, MANAGER_GRAPH_ID, {
-          input,
-          config: {
-            recursion_limit: 250,
-          },
-          ifNotExists: "create",
-        }));
+        managerRun = await withRetry(() =>
+          lgClient.runs.wait(threadId, MANAGER_GRAPH_ID, {
+            input,
+            config: {
+              recursion_limit: 250,
+            },
+            ifNotExists: "create",
+          }),
+        );
       } catch (error) {
         logger.error("Error in manager run", {
           thread_id: threadId,
-          error: error instanceof Error ? {
-            message: error.message,
-            stack: error.stack,
-            name: error.name,
-            cause: error.cause,
-          } : error,
+          error:
+            error instanceof Error
+              ? {
+                  message: error.message,
+                  stack: error.stack,
+                  name: error.name,
+                  cause: error.cause,
+                }
+              : error,
         });
         return; // instead of skipping, we should award 0 points
       }
@@ -137,20 +142,22 @@ ls.describe(DATASET_NAME, () => {
 
       let plannerRun;
       try {
-        plannerRun = await withRetry(() => lgClient.runs.join(
-          plannerSession.threadId,
-          plannerSession.runId,
-        ));
+        plannerRun = await withRetry(() =>
+          lgClient.runs.join(plannerSession.threadId, plannerSession.runId),
+        );
       } catch (error) {
         logger.error("Error joining planner run", {
           thread_id: threadId,
           plannerSession,
-          error: error instanceof Error ? {
-            message: error.message,
-            stack: error.stack,
-            name: error.name,
-            cause: error.cause,
-          } : error,
+          error:
+            error instanceof Error
+              ? {
+                  message: error.message,
+                  stack: error.stack,
+                  name: error.name,
+                  cause: error.cause,
+                }
+              : error,
         });
         return; // instead of skipping, we should award 0 points
       }
@@ -168,20 +175,25 @@ ls.describe(DATASET_NAME, () => {
 
       let programmerRun;
       try {
-        programmerRun = await withRetry(() => lgClient.runs.join(
-          programmerSession.threadId,
-          programmerSession.runId,
-        ));
+        programmerRun = await withRetry(() =>
+          lgClient.runs.join(
+            programmerSession.threadId,
+            programmerSession.runId,
+          ),
+        );
       } catch (error) {
         logger.error("Error joining programmer run", {
           thread_id: threadId,
           programmerSession,
-          error: error instanceof Error ? {
-            message: error.message,
-            stack: error.stack,
-            name: error.name,
-            cause: error.cause,
-          } : error,
+          error:
+            error instanceof Error
+              ? {
+                  message: error.message,
+                  stack: error.stack,
+                  name: error.name,
+                  cause: error.cause,
+                }
+              : error,
         });
         return; // instead of skipping, we should award 0 points
       }

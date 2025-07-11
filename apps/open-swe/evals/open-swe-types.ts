@@ -66,7 +66,7 @@ export interface RuffIssue {
   cell: string | null; // Always null for regular Python files, only used for Jupyter notebooks
   code: string; // Rule code (always present)
   end_location: RuffLocation; // End position (always present)
-  filename: string; // Full file path (always present) 
+  filename: string; // Full file path (always present)
   fix: RuffFix | null; // Auto-fix suggestion (null if no fix available)
   location: RuffLocation; // Start position (always present)
   message: string; // Issue description (always present)

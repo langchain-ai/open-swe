@@ -127,25 +127,29 @@ async function runCodeTests(
       workingDir: absoluteRepoDir,
       env: undefined,
       timeoutSec: TIMEOUT_SEC * 3,
-    })
+    }),
   ]);
 
-  if (ruffResult.status === 'fulfilled') {
+  if (ruffResult.status === "fulfilled") {
     testResults.details.ruff.issues = ruffResult.value.issues;
     testResults.details.ruff.error = ruffResult.value.error;
     testResults.ruffScore = ruffResult.value.ruffScore;
   } else {
-    logger.error("Ruff test promise was rejected", { reason: ruffResult.reason });
+    logger.error("Ruff test promise was rejected", {
+      reason: ruffResult.reason,
+    });
     testResults.details.ruff.error = ruffResult.reason;
     testResults.ruffScore = 0;
   }
 
-  if (mypyResult.status === 'fulfilled') {
+  if (mypyResult.status === "fulfilled") {
     testResults.details.mypy.issues = mypyResult.value.issues;
     testResults.details.mypy.error = mypyResult.value.error;
     testResults.mypyScore = mypyResult.value.mypyScore;
   } else {
-    logger.error("MyPy test promise was rejected", { reason: mypyResult.reason });
+    logger.error("MyPy test promise was rejected", {
+      reason: mypyResult.reason,
+    });
     testResults.details.mypy.error = mypyResult.reason;
     testResults.mypyScore = 0;
   }

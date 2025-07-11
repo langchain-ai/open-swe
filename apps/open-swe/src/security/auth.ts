@@ -10,11 +10,12 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
-  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { decryptSecret } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
+import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
+import { getGitHubPatFromRequest } from "../utils/github-pat.js";
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -44,6 +45,8 @@ export const auth = new Auth()
       };
     }
 
+    const isProd = process.env.NODE_ENV === "production";
+
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
       // This will either return a valid user, or throw an error
@@ -56,12 +59,9 @@ export const auth = new Auth()
     }
 
     // Check for GitHub PAT authentication (simpler mode for evals, etc.)
-    const encryptedGitHubPat = request.headers.get(GITHUB_PAT);
-    if (encryptedGitHubPat) {
-      // PAT-only authentication mode
-      const githubPat = decryptSecret(encryptedGitHubPat, encryptionKey);
+    const githubPat = getGitHubPatFromRequest(request, encryptionKey);
+    if (githubPat && !isProd) {
       const user = await verifyGithubUser(githubPat);
-
       if (!user) {
         throw new HTTPException(401, {
           message: "Invalid GitHub PAT",
@@ -73,24 +73,9 @@ export const auth = new Auth()
         is_authenticated: true,
         display_name: user.login,
         metadata: {
-          installation_name: "pat-auth", // Dummy installation name for PAT mode
+          installation_name: "pat-auth",
         },
-        permissions: [
-          "threads:create",
-          "threads:create_run",
-          "threads:read",
-          "threads:delete",
-          "threads:update",
-          "threads:search",
-          "assistants:create",
-          "assistants:read",
-          "assistants:delete",
-          "assistants:update",
-          "assistants:search",
-          "deployments:read",
-          "deployments:search",
-          "store:access",
-        ],
+        permissions: LANGGRAPH_USER_PERMISSIONS,
       };
     }
 
@@ -153,22 +138,7 @@ export const auth = new Auth()
       metadata: {
         installation_name: installationNameHeader,
       },
-      permissions: [
-        "threads:create",
-        "threads:create_run",
-        "threads:read",
-        "threads:delete",
-        "threads:update",
-        "threads:search",
-        "assistants:create",
-        "assistants:read",
-        "assistants:delete",
-        "assistants:update",
-        "assistants:search",
-        "deployments:read",
-        "deployments:search",
-        "store:access",
-      ],
+      permissions: LANGGRAPH_USER_PERMISSIONS,
     };
   })
 

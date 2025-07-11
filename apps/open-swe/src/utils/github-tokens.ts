@@ -1,10 +1,10 @@
 import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { decryptSecret } from "@open-swe/shared/crypto";
+import { getGitHubPatFromConfig } from "./github-pat.js";
 
 export function getGitHubTokensFromConfig(config: GraphConfig): {
   githubAccessToken: string;
@@ -20,10 +20,11 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
     throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
   }
 
-  const encryptedGitHubPat = config.configurable[GITHUB_PAT];
-  if (encryptedGitHubPat) {
+  const isProd = process.env.NODE_ENV === "production";
+
+  const githubPat = getGitHubPatFromConfig(config.configurable, encryptionKey);
+  if (githubPat && !isProd) {
     // check for PAT-only mode
-    const githubPat = decryptSecret(encryptedGitHubPat, encryptionKey);
     return {
       githubAccessToken: githubPat,
       githubInstallationToken: githubPat,
