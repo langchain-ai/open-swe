@@ -12,7 +12,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
 } from "@open-swe/shared/constants";
-import { encryptGitHubToken } from "@open-swe/shared/crypto";
+import { encryptSecret } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   getOpenSWEAutoAcceptLabel,
@@ -86,9 +86,9 @@ const getHeaders = (
 };
 
 webhooks.on("issues.labeled", async ({ payload }) => {
-  if (!process.env.GITHUB_TOKEN_ENCRYPTION_KEY) {
+  if (!process.env.SECRETS_ENCRYPTION_KEY) {
     throw new Error(
-      "GITHUB_TOKEN_ENCRYPTION_KEY environment variable is required",
+      "SECRETS_ENCRYPTION_KEY environment variable is required",
     );
   }
   const validOpenSWELabels = [getOpenSWELabel(), getOpenSWEAutoAcceptLabel()];
@@ -132,9 +132,9 @@ webhooks.on("issues.labeled", async ({ payload }) => {
 
     const langGraphClient = createLangGraphClient({
       defaultHeaders: {
-        [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptGitHubToken(
+        [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptSecret(
           token,
-          process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
+          process.env.SECRETS_ENCRYPTION_KEY,
         ),
         [GITHUB_INSTALLATION_NAME]: issueData.owner,
         [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),

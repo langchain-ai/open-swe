@@ -46,10 +46,10 @@ GOOGLE_API_KEY=""
 # Daytona API key for accessing and modifying the code in the cloud sandbox.
 DAYTONA_API_KEY=""
 
-# Encryption key for GitHub tokens (32-byte hex string for AES-256)
+# Encryption key for secrets (32-byte hex string for AES-256)
 # Should be the same value as the one used in the web app.
 # Can be generated via: `openssl rand -hex 32`
-GITHUB_TOKEN_ENCRYPTION_KEY=""
+SECRETS_ENCRYPTION_KEY=""
 # Used for setting the git user name & email for commits.
 GITHUB_APP_NAME="open-swe-dev"
 
@@ -75,13 +75,13 @@ GITHUB_APP_NAME="open-swe-dev"
 GITHUB_APP_ID=""
 GITHUB_APP_PRIVATE_KEY=""
 
-# Encryption key for GitHub tokens (32-byte hex string for AES-256)
+# Encryption key for secrets (32-byte hex string for AES-256)
 # Should be the same value as the one used in the open-swe app.
 # Can be generated via: `openssl rand -hex 32`
-GITHUB_TOKEN_ENCRYPTION_KEY=""
+SECRETS_ENCRYPTION_KEY=""
 ```
 
-**REMINDER**: The `GITHUB_TOKEN_ENCRYPTION_KEY` environment variable must be the same in both the web and open-swe apps.
+**REMINDER**: The `SECRETS_ENCRYPTION_KEY` environment variable must be the same in both the web and open-swe apps.
 
 To get the GitHub App secrets, first create a new GitHub app (note: this is not the same as the OAuth app) in [the developer settings](https://github.com/settings/apps/new).
 
