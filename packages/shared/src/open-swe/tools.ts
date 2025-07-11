@@ -342,3 +342,18 @@ export function createGetURLContentToolFields() {
     schema: getURLContentSchema,
   };
 }
+
+export function createWriteTechnicalNotesToolFields() {
+  const writeTechnicalNotesSchema = z.object({
+    notes: z
+      .string()
+      .describe("The notes you've generated based on the conversation history."),
+  });
+
+  return {
+    name: "write_technical_notes",
+    description:
+      "Write technical notes based on the conversation history provided. Ensure these notes are concise, but still containing enough information to be useful to you when you go to execute the plan.",
+    schema: writeTechnicalNotesSchema,
+  };
+}

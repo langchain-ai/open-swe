@@ -22,6 +22,7 @@ import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
+import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -34,6 +35,7 @@ import {
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
   createFindInstancesOfToolFields,
+  createWriteTechnicalNotesToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -66,6 +68,9 @@ type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 
 const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
 type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
+
+const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
+type WriteTechnicalNotesToolArgs = z.infer<typeof writeTechnicalNotesTool.schema>;
 
 function CustomComponent({
   message,
@@ -305,6 +310,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === diagnoseErrorTool.name)
     : undefined;
 
+  const writeTechnicalNotesToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === writeTechnicalNotesTool.name)
+    : undefined;
+
   // We can be sure that if the task status tool call is present, it will be the
   // only tool call/result we need to render for this message.
   if (taskStatusToolCall) {
@@ -340,6 +349,25 @@ export function AssistantMessage({
         <DiagnoseErrorAction
           status={correspondingToolResult ? "done" : "generating"}
           diagnosis={args.diagnosis}
+          reasoningText={reasoningText}
+        />
+      </div>
+    );
+  }
+
+  if (writeTechnicalNotesToolCall) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === writeTechnicalNotesToolCall.id,
+    );
+
+    const args = writeTechnicalNotesToolCall.args as WriteTechnicalNotesToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <WriteTechnicalNotes
+          status={correspondingToolResult ? "done" : "generating"}
+          notes={args.notes}
           reasoningText={reasoningText}
         />
       </div>
