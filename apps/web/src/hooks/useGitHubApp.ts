@@ -3,15 +3,19 @@ import { useQueryState } from "nuqs";
 import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
 import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
+import {
+  useGitHubInstallations,
+  type Installation,
+} from "@/hooks/useGitHubInstallations";
 
-const SELECTED_REPO_STORAGE_KEY = "selected-repository";
+const GITHUB_SELECTED_REPO_KEY = "selected-repository";
 
 const saveRepositoryToLocalStorage = (repo: TargetRepository | null) => {
   try {
     if (repo) {
-      localStorage.setItem(SELECTED_REPO_STORAGE_KEY, JSON.stringify(repo));
+      localStorage.setItem(GITHUB_SELECTED_REPO_KEY, JSON.stringify(repo));
     } else {
-      localStorage.removeItem(SELECTED_REPO_STORAGE_KEY);
+      localStorage.removeItem(GITHUB_SELECTED_REPO_KEY);
     }
   } catch (error) {
     console.warn("Failed to save repository to localStorage:", error);
@@ -20,7 +24,7 @@ const saveRepositoryToLocalStorage = (repo: TargetRepository | null) => {
 
 const getRepositoryFromLocalStorage = (): TargetRepository | null => {
   try {
-    const stored = localStorage.getItem(SELECTED_REPO_STORAGE_KEY);
+    const stored = localStorage.getItem(GITHUB_SELECTED_REPO_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       if (
@@ -47,6 +51,14 @@ interface UseGitHubAppReturn {
   isInstalled: boolean | null;
   isLoading: boolean;
   error: string | null;
+
+  // Installation management
+  installations: Installation[];
+  currentInstallation: Installation | null;
+  installationsLoading: boolean;
+  installationsError: string | null;
+  switchInstallation: (installationId: string) => Promise<void>;
+  refreshInstallations: () => Promise<void>;
 
   // Repository state and pagination
   repositories: Repository[];
@@ -82,6 +94,17 @@ interface UseGitHubAppReturn {
 }
 
 export function useGitHubApp(): UseGitHubAppReturn {
+  // Use the centralized installation state
+  const {
+    currentInstallationId,
+    installations,
+    currentInstallation,
+    isLoading: installationsLoading,
+    error: installationsError,
+    switchInstallation,
+    refreshInstallations,
+  } = useGitHubInstallations();
+
   // Installation and general state
   const [isInstalled, setIsInstalled] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -111,6 +134,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   // Track if we've attempted to load from localStorage
   const hasCheckedLocalStorageRef = useRef(false);
+
+  // Track previous installation ID to detect actual changes
+  const previousInstallationIdRef = useRef<string | null>(null);
 
   const selectedRepository = useMemo(() => {
     if (!selectedRepositoryParam) return null;
@@ -268,10 +294,36 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [branchesHasMore, branchesLoadingMore, branchesPage, fetchBranches]);
 
+  // Refresh repositories when installation changes
   useEffect(() => {
-    checkInstallation();
-  }, []);
+    if (currentInstallationId) {
+      const previousInstallationId = previousInstallationIdRef.current;
 
+      // Only clear repository if installation actually changed to a different value
+      if (
+        previousInstallationId !== null &&
+        previousInstallationId !== currentInstallationId
+      ) {
+        // Clear selected repository and branches when installation changes
+        setSelectedRepository(null);
+        setBranches([]);
+        setRepositoriesPage(1);
+        setRepositoriesHasMore(false);
+
+        // Reset auto-selection flags so they can run again for the new installation
+        hasAutoSelectedRef.current = false;
+        hasCheckedLocalStorageRef.current = false;
+      }
+
+      // Update the previous installation ID reference
+      previousInstallationIdRef.current = currentInstallationId;
+
+      // Fetch repositories for the current installation
+      checkInstallation();
+    }
+  }, [currentInstallationId]);
+
+  // Check localStorage for previously selected repository
   useEffect(() => {
     if (
       !hasCheckedLocalStorageRef.current &&
@@ -396,6 +448,14 @@ export function useGitHubApp(): UseGitHubAppReturn {
     isInstalled,
     isLoading,
     error,
+
+    // Installation management
+    installations,
+    currentInstallation,
+    installationsLoading,
+    installationsError,
+    switchInstallation,
+    refreshInstallations,
 
     // Repository state and pagination
     repositories,

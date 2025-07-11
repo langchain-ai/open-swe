@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { useDraftStorage } from "@/hooks/useDraftStorage";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -29,6 +30,7 @@ interface TerminalInputProps {
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
   autoAcceptPlan: boolean;
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
+  draftToLoad?: string;
 }
 
 export function TerminalInput({
@@ -43,9 +45,10 @@ export function TerminalInput({
   setQuickActionPrompt,
   autoAcceptPlan,
   setAutoAcceptPlan,
+  draftToLoad,
 }: TerminalInputProps) {
   const { push } = useRouter();
-  const [message, setMessage] = useState("");
+  const { message, setMessage, clearCurrentDraft } = useDraftStorage();
   const { getConfig } = useConfigStore();
   const { selectedRepository } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
@@ -54,6 +57,7 @@ export function TerminalInput({
     apiUrl,
     assistantId,
     reconnectOnMount: true,
+    fetchStateHistory: false,
   });
 
   const handleSend = async () => {
@@ -104,6 +108,7 @@ export function TerminalInput({
         // set session storage so the stream can be resumed after redirect.
         sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
         push(`/chat/${newThreadId}`);
+        clearCurrentDraft();
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
@@ -129,6 +134,13 @@ export function TerminalInput({
       setQuickActionPrompt?.("");
     }
   }, [quickActionPrompt]);
+
+  // Handle draft loading from external components
+  useEffect(() => {
+    if (draftToLoad) {
+      setMessage(draftToLoad);
+    }
+  }, [draftToLoad, setMessage]);
 
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">

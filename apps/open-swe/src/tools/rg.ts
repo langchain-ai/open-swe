@@ -1,23 +1,15 @@
 import { tool } from "@langchain/core/tools";
-import { Sandbox } from "@daytonaio/sdk";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { getCurrentTaskInput } from "@langchain/langgraph";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { daytonaClient } from "../utils/sandbox.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import {
   createRgToolFields,
   formatRgCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-
-const wrapScript = (command: string): string => {
-  return `script --return --quiet -c "$(cat <<'OPEN_SWE_X'
-${command}
-OPEN_SWE_X
-)" /dev/null`;
-};
+import { wrapScript } from "../utils/wrap-script.js";
+import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
 const logger = createLogger(LogLevel.INFO, "RgTool");
 
@@ -31,25 +23,10 @@ export function createRgTool(
 ) {
   const rgTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      let sandbox: Sandbox | undefined;
       try {
-        const state = getCurrentTaskInput<GraphState>();
-        const { sandboxSessionId } = state;
-        if (!sandboxSessionId) {
-          logger.error(
-            "FAILED TO RUN COMMAND: No sandbox session ID provided",
-            {
-              input,
-            },
-          );
-          throw new Error(
-            "FAILED TO RUN COMMAND: No sandbox session ID provided",
-          );
-        }
+        const sandbox = await getSandboxSessionOrThrow(input);
 
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
-
-        sandbox = await daytonaClient().get(sandboxSessionId);
         const command = formatRgCommand({
           pattern: input.pattern,
           paths: input.paths,

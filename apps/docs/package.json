@@ -1,0 +1,12 @@
+{
+  "name": "@open-swe/docs",
+  "author": "LangChain",
+  "repository": "https://github.com/langchain-ai/open-swe",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev"
+  },
+  "devDependencies": {
+    "mint": "^4.2.12"
+  }
+}

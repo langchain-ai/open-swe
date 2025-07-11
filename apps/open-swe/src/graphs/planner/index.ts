@@ -14,9 +14,11 @@ import {
   prepareGraphState,
   notetaker,
   takeActions,
+  determineNeedsContext,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
+import { diagnoseError } from "./nodes/diagnose-error.js";
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
@@ -47,10 +49,18 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   })
   .addNode("initialize-sandbox", initializeSandbox)
   .addNode("generate-plan-context-action", generateAction)
-  .addNode("take-plan-actions", takeActions)
+  .addNode("take-plan-actions", takeActions, {
+    ends: ["generate-plan-context-action", "diagnose-error"],
+  })
   .addNode("generate-plan", generatePlan)
   .addNode("notetaker", notetaker)
-  .addNode("interrupt-proposed-plan", interruptProposedPlan)
+  .addNode("interrupt-proposed-plan", interruptProposedPlan, {
+    ends: [END, "determine-needs-context"],
+  })
+  .addNode("determine-needs-context", determineNeedsContext, {
+    ends: ["generate-plan-context-action", "generate-plan"],
+  })
+  .addNode("diagnose-error", diagnoseError)
   .addEdge(START, "prepare-graph-state")
   .addEdge("initialize-sandbox", "generate-plan-context-action")
   .addConditionalEdges(
@@ -58,10 +68,9 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
     takeActionOrGeneratePlan,
     ["take-plan-actions", "generate-plan"],
   )
-  .addEdge("take-plan-actions", "generate-plan-context-action")
+  .addEdge("diagnose-error", "generate-plan-context-action")
   .addEdge("generate-plan", "notetaker")
-  .addEdge("notetaker", "interrupt-proposed-plan")
-  .addEdge("interrupt-proposed-plan", END);
+  .addEdge("notetaker", "interrupt-proposed-plan");
 
 export const graph = workflow.compile();
 graph.name = "Open SWE - Planner";

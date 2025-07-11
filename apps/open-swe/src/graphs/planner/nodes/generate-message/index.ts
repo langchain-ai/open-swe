@@ -1,5 +1,8 @@
 import { loadModel, Task } from "../../../../utils/load-model.js";
-import { createShellTool } from "../../../../tools/index.js";
+import {
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../../tools/index.js";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -15,10 +18,12 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
-import { getTaskPlanFromIssue } from "../../../../utils/github/issue-task.js";
+import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createRgTool } from "../../../../tools/rg.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createFindInstancesOfTool } from "../../../../tools/find-instances-of.js";
+import { getMcpTools } from "../../../../utils/mcp-client.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -47,19 +52,28 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const mcpTools = await getMcpTools(config);
+
   const tools = [
     createRgTool(state),
     createShellTool(state),
+    createFindInstancesOfTool(state),
     createPlannerNotesTool(),
+    createGetURLContentTool(),
+    ...mcpTools,
   ];
+  logger.info(
+    `MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`,
+  );
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     parallel_tool_calls: true,
   });
 
-  const [missingMessages, latestTaskPlan] = await Promise.all([
+  const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
     getMissingMessages(state, config),
-    getTaskPlanFromIssue(state, config),
+    getPlansFromIssue(state, config),
   ]);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })

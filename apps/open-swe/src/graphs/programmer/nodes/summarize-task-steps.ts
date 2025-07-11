@@ -14,7 +14,6 @@ import { getMessageString } from "../../../utils/message/content.js";
 import { removeLastTaskMessages } from "../../../utils/message/modify-array.js";
 import { Command } from "@langchain/langgraph";
 import { ConfigurableModel } from "langchain/chat_models/universal";
-import { traceable } from "langsmith/traceable";
 import {
   completePlanItem,
   getActivePlanItems,
@@ -90,7 +89,7 @@ const formatUserMessage = (
     );
 };
 
-async function generateTaskSummaryFunc(
+async function generateTaskSummary(
   state: GraphState,
   model: ConfigurableModel,
 ): Promise<{ planItemIndex: number; summary: string }> {
@@ -101,26 +100,24 @@ async function generateTaskSummaryFunc(
   }
 
   logger.info(`Summarizing task steps...`);
-  const response = await model.withConfig({ tags: ["nostream"] }).invoke([
-    {
-      role: "system",
-      content: formatPrompt(activePlanItems),
-    },
-    {
-      role: "user",
-      content: formatUserMessage(state.internalMessages, activePlanItems),
-    },
-  ]);
+  const response = await model
+    .withConfig({ tags: ["nostream"], runName: "generate-task-summary" })
+    .invoke([
+      {
+        role: "system",
+        content: formatPrompt(activePlanItems),
+      },
+      {
+        role: "user",
+        content: formatUserMessage(state.internalMessages, activePlanItems),
+      },
+    ]);
 
   return {
     planItemIndex: lastCompletedTask.index,
     summary: getMessageContentString(response.content),
   };
 }
-
-const generateTaskSummary = traceable(generateTaskSummaryFunc, {
-  name: "generate-task-summary",
-});
 
 export async function summarizeTaskSteps(
   state: GraphState,

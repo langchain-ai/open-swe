@@ -5,10 +5,13 @@ import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bot, Copy, CopyCheck, Send, User } from "lucide-react";
+import { Bot, Copy, CopyCheck, Send, User, Loader2 } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
-
+import { useStream } from "@langchain/langgraph-sdk/react";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { cn } from "@/lib/utils";
+import { isAIMessageSDK } from "@/lib/langchain-messages";
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -61,6 +64,21 @@ interface ManagerChatProps {
   chatInput: string;
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
+  isLoading: boolean;
+  cancelRun: () => void;
+}
+
+function extractResponseFromMessage(message: Message): string {
+  if (!isAIMessageSDK(message)) {
+    return getMessageContentString(message.content);
+  }
+  const toolCall = message.tool_calls?.[0];
+  const response = toolCall?.args?.response;
+
+  if (!toolCall || !response) {
+    return getMessageContentString(message.content);
+  }
+  return response;
 }
 
 export function ManagerChat({
@@ -68,6 +86,8 @@ export function ManagerChat({
   chatInput,
   setChatInput,
   handleSendMessage,
+  isLoading,
+  cancelRun,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
@@ -81,39 +101,41 @@ export function ManagerChat({
             contentClassName="space-y-4 p-4"
             content={
               <>
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className="group flex gap-3"
-                  >
-                    <div className="flex-shrink-0">
-                      {message.type === "human" ? (
-                        <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
-                          <User className="text-muted-foreground h-3 w-3" />
+                {messages.map((message) => {
+                  const messageContentString =
+                    extractResponseFromMessage(message);
+                  return (
+                    <div
+                      key={message.id}
+                      className="group flex gap-3"
+                    >
+                      <div className="flex-shrink-0">
+                        {message.type === "human" ? (
+                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
+                            <User className="text-muted-foreground h-3 w-3" />
+                          </div>
+                        ) : (
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
+                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="relative flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground text-xs font-medium">
+                            {message.type === "human" ? "You" : "Agent"}
+                          </span>
                         </div>
-                      ) : (
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
-                          <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                        <div className="text-foreground text-sm leading-relaxed">
+                          {messageContentString}
                         </div>
-                      )}
-                    </div>
-                    <div className="relative flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground text-xs font-medium">
-                          {message.type === "human" ? "You" : "Agent"}
-                        </span>
-                      </div>
-                      <div className="text-foreground text-sm leading-relaxed">
-                        {getMessageContentString(message.content)}
-                      </div>
-                      <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
-                        <MessageCopyButton
-                          content={getMessageContentString(message.content)}
-                        />
+                        <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
+                          <MessageCopyButton content={messageContentString} />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             }
             footer={
@@ -133,19 +155,27 @@ export function ManagerChat({
             placeholder="Type your message..."
             className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm dark:bg-gray-900"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
                 e.preventDefault();
                 handleSendMessage();
               }
             }}
           />
           <Button
-            onClick={handleSendMessage}
-            disabled={!chatInput.trim()}
-            size="icon"
-            variant="brand"
+            onClick={isLoading ? cancelRun : handleSendMessage}
+            disabled={isLoading ? false : !chatInput.trim()}
+            size={isLoading ? "sm" : "icon"}
+            variant={isLoading ? "destructive" : "brand"}
+            className={cn(isLoading ? "h-12 px-4 py-2" : "")}
           >
-            <Send className="size-4" />
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Cancel
+              </>
+            ) : (
+              <Send className="size-4" />
+            )}
           </Button>
         </div>
         <div className="text-muted-foreground mt-2 text-xs">

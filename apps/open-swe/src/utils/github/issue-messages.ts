@@ -98,14 +98,14 @@ export async function getMissingMessages(
   return [...(issueMessage ? [issueMessage] : []), ...untrackedCommentMessages];
 }
 
-const DEFAULT_ISSUE_TITLE = "New Open SWE Request";
+export const DEFAULT_ISSUE_TITLE = "New Open SWE Request";
 export const ISSUE_TITLE_OPEN_TAG = "<open-swe-issue-title>";
 export const ISSUE_TITLE_CLOSE_TAG = "</open-swe-issue-title>";
 export const ISSUE_CONTENT_OPEN_TAG = "<open-swe-issue-content>";
 export const ISSUE_CONTENT_CLOSE_TAG = "</open-swe-issue-content>";
 
 export function extractIssueTitleAndContentFromMessage(content: string) {
-  let messageTitle = DEFAULT_ISSUE_TITLE;
+  let messageTitle: string | null = null;
   let messageContent = content;
   if (
     content.includes(ISSUE_TITLE_OPEN_TAG) &&

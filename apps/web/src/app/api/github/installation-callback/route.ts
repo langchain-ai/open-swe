@@ -2,6 +2,7 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 import {
   GITHUB_INSTALLATION_RETURN_TO_COOKIE,
   GITHUB_INSTALLATION_STATE_COOKIE,
+  getInstallationCookieOptions,
 } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -53,13 +54,11 @@ export async function GET(request: NextRequest) {
 
     // If we have an installation ID, store it in a cookie
     if (installationId) {
-      response.cookies.set(GITHUB_INSTALLATION_ID_COOKIE, installationId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-        path: "/",
-      });
+      response.cookies.set(
+        GITHUB_INSTALLATION_ID_COOKIE,
+        installationId,
+        getInstallationCookieOptions(),
+      );
     }
 
     return response;

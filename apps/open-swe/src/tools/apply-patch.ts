@@ -2,34 +2,22 @@ import { tool } from "@langchain/core/tools";
 import { applyPatch } from "diff";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
-import { getCurrentTaskInput } from "@langchain/langgraph";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { daytonaClient } from "../utils/sandbox.js";
 import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
 export function createApplyPatchTool(state: GraphState) {
   const applyPatchTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      const state = getCurrentTaskInput<GraphState>();
-      const { sandboxSessionId } = state;
-      if (!sandboxSessionId) {
-        logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
-          input,
-        });
-        throw new Error(
-          "FAILED TO RUN COMMAND: No sandbox session ID provided",
-        );
-      }
+      const sandbox = await getSandboxSessionOrThrow(input);
 
       const { diff, file_path } = input;
+
       const workDir = getRepoAbsolutePath(state.targetRepository);
-
-      const sandbox = await daytonaClient().get(sandboxSessionId);
-
       const { success: readFileSuccess, output: readFileOutput } =
         await readFile({
           sandbox,

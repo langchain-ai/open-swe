@@ -6,6 +6,7 @@ import { GitHubApp } from "../../utils/github-app.js";
 import { Webhooks } from "@octokit/webhooks";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 import {
+  GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
@@ -49,6 +50,20 @@ const getPayload = (body: string): Record<string, any> | null => {
   } catch {
     return null;
   }
+};
+
+const createDevMetadataComment = (runId: string, threadId: string) => {
+  return `<details>
+  <summary>Dev Metadata</summary>
+  ${JSON.stringify(
+    {
+      runId,
+      threadId,
+    },
+    null,
+    2,
+  )}
+</details>`;
 };
 
 const getHeaders = (
@@ -121,6 +136,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
           token,
           process.env.GITHUB_TOKEN_ENCRYPTION_KEY,
         ),
+        [GITHUB_INSTALLATION_NAME]: issueData.owner,
         [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
         [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
       },
@@ -177,7 +193,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
         owner: issueData.owner,
         repo: issueData.repo,
         issue_number: issueData.issueNumber,
-        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}`,
+        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(run.run_id, threadId)}`,
       },
     );
   } catch (error) {

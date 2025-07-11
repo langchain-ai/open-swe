@@ -4,14 +4,8 @@ import {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
-import { createIssueTitleAndBodyFromMessages } from "../utils/generate-issue-fields.js";
-import {
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-  MANAGER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
@@ -24,6 +18,7 @@ import {
   formatContentForIssueBody,
 } from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
+import { getDefaultHeaders } from "../../../utils/default-headers.js";
 
 /**
  * Create new manager session.
@@ -35,9 +30,9 @@ export async function createNewSession(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
-  const titleAndContent = await createIssueTitleAndBodyFromMessages(
+  const titleAndContent = await createIssueFieldsFromMessages(
     state.messages,
-    config,
+    config.configurable,
   );
   const { githubAccessToken } = getGitHubTokensFromConfig(config);
   const newIssue = await createIssue({
@@ -74,15 +69,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
   ];
 
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: {
-      [GITHUB_TOKEN_COOKIE]: config.configurable?.[GITHUB_TOKEN_COOKIE] ?? "",
-      [GITHUB_INSTALLATION_TOKEN_COOKIE]:
-        config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE] ?? "",
-      [GITHUB_USER_ID_HEADER]:
-        config.configurable?.[GITHUB_USER_ID_HEADER] ?? "",
-      [GITHUB_USER_LOGIN_HEADER]:
-        config.configurable?.[GITHUB_USER_LOGIN_HEADER] ?? "",
-    },
+    defaultHeaders: getDefaultHeaders(config),
   });
 
   const newManagerThreadId = uuidv4();

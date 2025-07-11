@@ -3,6 +3,7 @@ import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
   CustomNodeEvent,
@@ -20,6 +21,8 @@ import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { LoadingActionsCardContent } from "./thread-view-loading";
+import { Interrupt } from "../thread/messages/interrupt";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -67,6 +70,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -98,10 +102,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   setProgrammerSession,
   programmerSession,
   setSelectedTab,
+  onStreamReady,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
   );
+  const joinedRunId = useRef<string | undefined>(undefined);
+  const [streamLoading, setStreamLoading] = useState(false);
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -112,6 +119,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         setCustomNodeEvents((prev) => [...prev, event]);
       }
     },
+    fetchStateHistory: false,
+  });
+
+  const { cancelRun } = useCancelStream<State>({
+    stream,
+    threadId,
+    runId,
+    streamName: graphId === "planner" ? "Planner" : "Programmer",
   });
 
   const initializeEvents = customNodeEvents.filter(
@@ -157,21 +172,52 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     });
   }, [stream.messages]);
 
-  const streamJoined = useRef(false);
+  // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
-    if (!streamJoined.current && runId) {
-      streamJoined.current = true;
-      // TODO: If the SDK changes go in, use this instead:
-      // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
-      stream.joinStream(runId).catch(console.error);
+    const hasContent =
+      (stream.messages && stream.messages.length > 0) ||
+      customNodeEvents.length > 0;
+
+    if (hasContent && streamLoading) {
+      setStreamLoading(false);
     }
-  }, [runId]);
+  }, [stream.messages, customNodeEvents, streamLoading]);
+
+  // TODO: If the SDK changes go in, use this instead:
+  // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
+  useEffect(() => {
+    if (runId && runId !== joinedRunId.current) {
+      joinedRunId.current = runId;
+      setStreamLoading(true);
+      stream
+        .joinStream(runId)
+        .catch(console.error)
+        .finally(() => setStreamLoading(false));
+    } else if (!runId) {
+      joinedRunId.current = undefined;
+    }
+  }, [runId, stream]);
+
+  useEffect(() => {
+    if (stream.isLoading) {
+      onStreamReady(cancelRun);
+    } else {
+      onStreamReady(undefined);
+    }
+  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
     (m) =>
       !isHumanMessageSDK(m) &&
       !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
+  );
+  const isLastMessageHidden = !!(
+    stream.messages?.length > 0 &&
+    stream.messages[stream.messages.length - 1].id &&
+    stream.messages[stream.messages.length - 1].id?.startsWith(
+      DO_NOT_RENDER_ID_PREFIX,
+    )
   );
 
   // TODO: Need a better way to handle this. Not great like this...
@@ -195,6 +241,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       }
     }
   }, [stream.values, graphId]);
+
+  if (streamLoading) {
+    return <LoadingActionsCardContent />;
+  }
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -223,6 +273,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
             interruptType={acceptedPlanEvents[0].data.interruptType}
           />
         )}
+      {/* If the last message is hidden, but there's an interrupt, we must manually render the interrupt */}
+      {isLastMessageHidden && stream.interrupt ? (
+        <Interrupt
+          interruptValue={stream.interrupt?.value}
+          isLastMessage={true}
+          thread={stream as UseStream<Record<string, unknown>>}
+        />
+      ) : null}
     </div>
   );
 }

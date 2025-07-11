@@ -5,6 +5,8 @@ import { InstallationPrompt } from "./installation-prompt";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
+const GITHUB_INSTALLATION_SEEN_KEY = "github_installation_seen";
+
 export function GitHubInstallationBanner() {
   const { isInstalled, isLoading } = useGitHubAppProvider();
   const [dismissed, setDismissed] = useState(false);
@@ -13,11 +15,11 @@ export function GitHubInstallationBanner() {
   useEffect(() => {
     // Check if this might be a new user (no installation history in localStorage)
     const hasSeenInstallation = localStorage.getItem(
-      "github_installation_seen",
+      GITHUB_INSTALLATION_SEEN_KEY,
     );
     if (!hasSeenInstallation && !isInstalled && !isLoading) {
       setIsNewUser(true);
-      localStorage.setItem("github_installation_seen", "true");
+      localStorage.setItem(GITHUB_INSTALLATION_SEEN_KEY, "true");
     }
   }, [isInstalled, isLoading]);
 

@@ -1,6 +1,10 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { createApplyPatchTool, createShellTool } from "../../../tools/index.js";
+import {
+  createApplyPatchTool,
+  createGetURLContentTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import {
   GraphState,
   GraphConfig,
@@ -11,17 +15,18 @@ import {
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import {
-  formatBadArgsError,
-  zodSchemaToString,
+  safeSchemaToString,
+  safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { daytonaClient } from "../../../utils/sandbox.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { shouldDiagnoseError } from "../utils/tool-message-error.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createRgTool } from "../../../tools/rg.js";
+import { getMcpTools } from "../../../utils/mcp-client.js";
+import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -35,27 +40,37 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  if (!state.sandboxSessionId) {
-    throw new Error(
-      "Failed to take action: No sandbox session ID found in state.",
-    );
-  }
-
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const toolsMap = {
-    [applyPatchTool.name]: applyPatchTool,
-    [shellTool.name]: shellTool,
-    [rgTool.name]: rgTool,
-    [installDependenciesTool.name]: installDependenciesTool,
-  };
+  const getURLContentTool = createGetURLContentTool();
+
+  const mcpTools = await getMcpTools(config);
+
+  const allTools = [
+    shellTool,
+    rgTool,
+    installDependenciesTool,
+    applyPatchTool,
+    getURLContentTool,
+    ...mcpTools,
+  ];
+  const toolsMap = Object.fromEntries(
+    allTools.map((tool) => [tool.name, tool]),
+  );
 
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
   }
+
+  const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
+    state.sandboxSessionId,
+    state.targetRepository,
+    state.branchName,
+    config,
+  );
 
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
@@ -76,9 +91,19 @@ export async function takeAction(
     try {
       const toolResult: { result: string; status: "success" | "error" } =
         // @ts-expect-error tool.invoke types are weird here...
-        await tool.invoke(toolCall.args);
-      result = toolResult.result;
-      toolCallStatus = toolResult.status;
+        await tool.invoke({
+          ...toolCall.args,
+          // Pass in the existing/new sandbox session ID to the tool call.
+          // use `x` prefix to avoid name conflicts with tool args.
+          xSandboxSessionId: sandbox.id,
+        });
+      if (typeof toolResult === "string") {
+        result = toolResult;
+        toolCallStatus = "success";
+      } else {
+        result = toolResult.result;
+        toolCallStatus = toolResult.status;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -87,9 +112,9 @@ export async function takeAction(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: zodSchemaToString(tool.schema),
+          expectedSchema: safeSchemaToString(tool.schema),
         });
-        result = formatBadArgsError(tool.schema, toolCall.args);
+        result = safeBadArgsError(tool.schema, toolCall.args, toolCall.name);
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error
@@ -122,7 +147,6 @@ export async function takeAction(
 
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
-  const sandbox = await daytonaClient().get(state.sandboxSessionId);
   const changedFiles = await getChangedFilesStatus(
     getRepoAbsolutePath(state.targetRepository),
     sandbox,
@@ -150,13 +174,22 @@ export async function takeAction(
 
   const codebaseTree = await getCodebaseTree();
 
+  // Prioritize wereDependenciesInstalled over dependenciesInstalled
+  const dependenciesInstalledUpdate =
+    wereDependenciesInstalled !== null
+      ? wereDependenciesInstalled
+      : dependenciesInstalled !== null
+        ? dependenciesInstalled
+        : null;
+
   const commandUpdate: GraphUpdate = {
     messages: toolCallResults,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
     codebaseTree,
-    ...(wereDependenciesInstalled !== null && {
-      dependenciesInstalled: wereDependenciesInstalled,
+    sandboxSessionId: sandbox.id,
+    ...(dependenciesInstalledUpdate !== null && {
+      dependenciesInstalled: dependenciesInstalledUpdate,
     }),
   };
   return new Command({
