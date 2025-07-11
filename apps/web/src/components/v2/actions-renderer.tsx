@@ -14,6 +14,7 @@ import {
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PLANNER_GRAPH_ID,
+  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
@@ -23,6 +24,7 @@ import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
+import { debounce } from "lodash";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -95,6 +97,38 @@ const getCustomNodeEventsFromMessages = (
     .flat();
 };
 
+function addMessagesToState(
+  existingMessages: Message[],
+  newMessages: Message[],
+): Message[] {
+  const existingIds = new Set(existingMessages.map((message) => message.id));
+  const uniqueNewMessages = newMessages.filter(
+    (message) => !message.id || !existingIds.has(message.id),
+  );
+  return [...existingMessages, ...uniqueNewMessages];
+}
+
+function isNodeEndMessagesUpdate(
+  data: unknown
+): data is { output: { messages: Message[] } } {
+  return !!(
+    typeof data === "object" &&
+    data !== null &&
+    "output" in data &&
+    data.output &&
+    typeof data.output === "object" &&
+    "messages" in data.output &&
+    data.output.messages &&
+    Array.isArray(data.output.messages)
+  )
+}
+
+const REVIEWER_NODE_IDS = [
+  "take-review-actions",
+  "generate-review-actions",
+  "final-review",
+];
+
 export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   graphId,
   threadId,
@@ -109,6 +143,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   );
   const joinedRunId = useRef<string | undefined>(undefined);
   const [streamLoading, setStreamLoading] = useState(false);
+  const [mergedMessages, setMergedMessages] = useState<Message[]>([]);
+
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: graphId,
@@ -117,6 +153,19 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
         setCustomNodeEvents((prev) => [...prev, event]);
+      }
+    },
+    onLangChainEvent: (data) => {
+      if (
+        data.event === "on_chain_end" &&
+        data.metadata?.langgraph_node &&
+        REVIEWER_NODE_IDS.includes(data.metadata.langgraph_node as string) &&
+        data.data &&
+        isNodeEndMessagesUpdate(data.data)
+      ) {
+        console.log("setting output messages!!")
+        const outputMessages = data.data.output.messages;
+        setMergedMessages((prev) => [...prev, ...outputMessages]);
       }
     },
     fetchStateHistory: false,
@@ -147,7 +196,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }
 
   useEffect(() => {
-    const allCustomEvents = getCustomNodeEventsFromMessages(stream.messages);
+    const allCustomEvents = getCustomNodeEventsFromMessages(mergedMessages);
     if (!allCustomEvents?.length) {
       return;
     }
@@ -170,18 +219,18 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
       return prev;
     });
-  }, [stream.messages]);
+  }, [mergedMessages]);
 
   // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
     const hasContent =
-      (stream.messages && stream.messages.length > 0) ||
+      (mergedMessages && mergedMessages.length > 0) ||
       customNodeEvents.length > 0;
 
     if (hasContent && streamLoading) {
       setStreamLoading(false);
     }
-  }, [stream.messages, customNodeEvents, streamLoading]);
+  }, [mergedMessages, customNodeEvents, streamLoading]);
 
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
@@ -189,10 +238,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     if (runId && runId !== joinedRunId.current) {
       joinedRunId.current = runId;
       setStreamLoading(true);
+      console.log("Joining stream", graphId, runId);
       stream
         .joinStream(runId)
         .catch(console.error)
-        .finally(() => setStreamLoading(false));
+        .finally(() => {
+          console.log("joinStream completed", graphId, runId);
+          setStreamLoading(false);
+        });
     } else if (!runId) {
       joinedRunId.current = undefined;
     }
@@ -207,15 +260,15 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
-  const filteredMessages = stream.messages?.filter(
+  const filteredMessages = mergedMessages?.filter(
     (m) =>
       !isHumanMessageSDK(m) &&
       !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
   );
   const isLastMessageHidden = !!(
-    stream.messages?.length > 0 &&
-    stream.messages[stream.messages.length - 1].id &&
-    stream.messages[stream.messages.length - 1].id?.startsWith(
+    mergedMessages?.length > 0 &&
+    mergedMessages[mergedMessages.length - 1].id &&
+    mergedMessages[mergedMessages.length - 1].id?.startsWith(
       DO_NOT_RENDER_ID_PREFIX,
     )
   );
@@ -242,6 +295,12 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
+  useEffect(() => {
+    debounce(() => {
+      setMergedMessages((prev) => addMessagesToState(prev, stream.messages));
+    }, 100);
+  }, [stream.messages]);
+
   if (streamLoading) {
     return <LoadingActionsCardContent />;
   }
@@ -260,6 +319,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         <AssistantMessage
           key={m.id}
           thread={stream as UseStream<Record<string, unknown>>}
+          threadMessages={mergedMessages}
           message={m}
           isLoading={false}
           handleRegenerate={() => {}}
