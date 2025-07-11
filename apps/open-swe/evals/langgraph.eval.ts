@@ -77,12 +77,12 @@ ls.describe(DATASET_NAME, () => {
         inputs,
       });
 
-      const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
+      const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
       const githubPat = process.env.GITHUB_PAT;
 
       if (!encryptionKey || !githubPat) {
         throw new Error(
-          "GITHUB_TOKEN_ENCRYPTION_KEY and GITHUB_PAT environment variables are required",
+          "SECRETS_ENCRYPTION_KEY and GITHUB_PAT environment variables are required",
         );
       }
 
