@@ -16,13 +16,16 @@ export function getGitHubPatFromRequest(
 }
 
 /**
- * Simple helper to check if config has GitHub PAT and return decrypted value
+ * Helper to check if configurable has GitHub PAT and return decrypted value
  */
 export function getGitHubPatFromConfig(
-  config: Record<string, any>,
+  configurable: Record<string, any> | undefined,
   encryptionKey: string,
 ): string | null {
-  const encryptedGitHubPat = config[GITHUB_PAT];
+  if (!configurable) {
+    return null;
+  }
+  const encryptedGitHubPat = configurable[GITHUB_PAT];
   if (!encryptedGitHubPat) {
     return null;
   }

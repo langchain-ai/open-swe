@@ -13,7 +13,7 @@ const logger = createLogger(LogLevel.DEBUG, " Evaluation Tests");
 /**
  * Run ruff check and return score, error, and issues
  */
-export const ruffPromise = async (
+export const runRuffLint = async (
   sandbox: Sandbox,
   args: ExecOptions,
 ): Promise<RuffResult> => {
@@ -79,7 +79,7 @@ export const ruffPromise = async (
 /**
  * Run mypy check and return score, error, and issues
  */
-export const mypyPromise = async (
+export const runMyPyTypeCheck = async (
   sandbox: Sandbox,
   args: ExecOptions,
 ): Promise<MyPyResult> => {

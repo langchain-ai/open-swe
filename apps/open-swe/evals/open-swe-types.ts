@@ -92,7 +92,7 @@ export interface MyPyResult {
   issues: string[];
 }
 
-export type codeTestDetails = {
+export interface CodeTestDetails {
   ruff: {
     issues: RuffIssue[];
     error: Error | null;
@@ -101,4 +101,4 @@ export type codeTestDetails = {
     issues: string[];
     error: Error | null;
   };
-};
+}

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { OpenSWEInput, RuffIssue, codeTestDetails } from "./open-swe-types.js";
+import { OpenSWEInput, CodeTestDetails } from "./open-swe-types.js";
 import { Daytona, Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
@@ -8,7 +8,7 @@ import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { cloneRepo } from "../src/utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
-import { ruffPromise, mypyPromise } from "./tests.js";
+import { runRuffLint, runMyPyTypeCheck } from "./tests.js";
 
 const logger = createLogger(LogLevel.INFO, "Evaluator ");
 
@@ -92,37 +92,41 @@ async function setupEnv(
 }
 
 /**
- * Run ruff and mypy analysis on all Python files in the repository
+ * Runs ruff and mypy analysis on all Python files in the repository
  */
 async function runCodeTests(
   sandbox: Sandbox,
   absoluteRepoDir: string,
-): Promise<{ ruffScore: number; mypyScore: number; details: codeTestDetails }> {
+): Promise<{ ruffScore: number; mypyScore: number; details: CodeTestDetails }> {
   logger.info("Running code analysis on all Python files in repository");
 
-  const testResults = {
+  const testResults: {
+    ruffScore: number;
+    mypyScore: number;
+    details: CodeTestDetails;
+  } = {
     ruffScore: 0,
     mypyScore: 0,
     details: {
       ruff: {
-        issues: [] as RuffIssue[],
-        error: null as Error | null,
+        issues: [],
+        error: null,
       },
       mypy: {
-        issues: [] as string[],
-        error: null as Error | null,
+        issues: [],
+        error: null,
       },
     },
   };
 
-  const [ruffResult, mypyResult] = await Promise.allSettled([
-    ruffPromise(sandbox, {
+  const [ruffLint, mypyCheck] = await Promise.all([
+    runRuffLint(sandbox, {
       command: `${RUN_PYTHON_IN_VENV} -m ruff check . --output-format=json`,
       workingDir: absoluteRepoDir,
       env: undefined,
       timeoutSec: TIMEOUT_SEC * 3,
     }),
-    mypyPromise(sandbox, {
+    runMyPyTypeCheck(sandbox, {
       command: `${RUN_PYTHON_IN_VENV} -m mypy . --no-error-summary --show-error-codes --no-color-output`,
       workingDir: absoluteRepoDir,
       env: undefined,
@@ -130,29 +134,20 @@ async function runCodeTests(
     }),
   ]);
 
-  if (ruffResult.status === "fulfilled") {
-    testResults.details.ruff.issues = ruffResult.value.issues;
-    testResults.details.ruff.error = ruffResult.value.error;
-    testResults.ruffScore = ruffResult.value.ruffScore;
-  } else {
-    logger.error("Ruff test promise was rejected", {
-      reason: ruffResult.reason,
-    });
-    testResults.details.ruff.error = ruffResult.reason;
-    testResults.ruffScore = 0;
-  }
-
-  if (mypyResult.status === "fulfilled") {
-    testResults.details.mypy.issues = mypyResult.value.issues;
-    testResults.details.mypy.error = mypyResult.value.error;
-    testResults.mypyScore = mypyResult.value.mypyScore;
-  } else {
-    logger.error("MyPy test promise was rejected", {
-      reason: mypyResult.reason,
-    });
-    testResults.details.mypy.error = mypyResult.reason;
-    testResults.mypyScore = 0;
-  }
+  Object.assign(testResults, {
+    ruffScore: ruffLint.ruffScore,
+    mypyScore: mypyCheck.mypyScore,
+    details: {
+      ruff: {
+        issues: ruffLint.issues,
+        error: ruffLint.error,
+      },
+      mypy: {
+        issues: mypyCheck.issues,
+        error: mypyCheck.error,
+      },
+    },
+  });
 
   logger.info("Code tests completed", {
     ruffScore: testResults.ruffScore,
