@@ -290,11 +290,19 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
+  const debouncedSetMessages = useRef(
+    debounce((messages: Message[]) => {
+      setMergedMessages((prev) => addMessagesToState(prev, messages));
+    }, 100),
+  ).current;
+
   useEffect(() => {
-    debounce(() => {
-      setMergedMessages((prev) => addMessagesToState(prev, stream.messages));
-    }, 100);
-  }, [stream.messages]);
+    debouncedSetMessages(stream.messages);
+    // Return cleanup function to cancel any pending debounced calls when unmounting
+    return () => {
+      debouncedSetMessages.cancel();
+    };
+  }, [stream.messages, debouncedSetMessages]);
 
   if (streamLoading) {
     return <LoadingActionsCardContent />;
