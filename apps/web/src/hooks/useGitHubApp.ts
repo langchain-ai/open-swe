@@ -135,6 +135,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Track if we've attempted to load from localStorage
   const hasCheckedLocalStorageRef = useRef(false);
 
+  // Track previous installation ID to detect actual changes
+  const previousInstallationIdRef = useRef<string | null>(null);
+
   const selectedRepository = useMemo(() => {
     if (!selectedRepositoryParam) return null;
     try {
@@ -294,21 +297,33 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Refresh repositories when installation changes
   useEffect(() => {
     if (currentInstallationId) {
-      // Clear selected repository and branches when installation changes
-      setSelectedRepository(null);
-      setBranches([]);
-      setRepositoriesPage(1);
-      setRepositoriesHasMore(false);
+      const previousInstallationId = previousInstallationIdRef.current;
 
-      // Reset auto-selection flags so they can run again for the new installation
-      hasAutoSelectedRef.current = false;
-      hasCheckedLocalStorageRef.current = false;
+      // Only clear repository if installation actually changed to a different value
+      if (
+        previousInstallationId !== null &&
+        previousInstallationId !== currentInstallationId
+      ) {
+        // Clear selected repository and branches when installation changes
+        setSelectedRepository(null);
+        setBranches([]);
+        setRepositoriesPage(1);
+        setRepositoriesHasMore(false);
 
-      // Fetch repositories for the new installation
+        // Reset auto-selection flags so they can run again for the new installation
+        hasAutoSelectedRef.current = false;
+        hasCheckedLocalStorageRef.current = false;
+      }
+
+      // Update the previous installation ID reference
+      previousInstallationIdRef.current = currentInstallationId;
+
+      // Fetch repositories for the current installation
       checkInstallation();
     }
   }, [currentInstallationId]);
 
+  // Check localStorage for previously selected repository
   useEffect(() => {
     if (
       !hasCheckedLocalStorageRef.current &&
