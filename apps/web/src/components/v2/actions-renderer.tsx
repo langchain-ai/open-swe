@@ -298,7 +298,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   useEffect(() => {
     debouncedSetMessages(stream.messages);
-    // Return cleanup function to cancel any pending debounced calls when unmounting
     return () => {
       debouncedSetMessages.cancel();
     };
