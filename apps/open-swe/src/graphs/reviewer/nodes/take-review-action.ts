@@ -1,5 +1,8 @@
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { createShellTool } from "../../../tools/index.js";
+import {
+  createInstallDependenciesTool,
+  createShellTool,
+} from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   ReviewerGraphState,
@@ -17,13 +20,15 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
+import { Command } from "@langchain/langgraph";
+import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
 export async function takeReviewerActions(
   state: ReviewerGraphState,
   config: GraphConfig,
-): Promise<ReviewerGraphUpdate> {
+): Promise<Command> {
   const { reviewerMessages } = state;
   const lastMessage = reviewerMessages[reviewerMessages.length - 1];
 
@@ -34,7 +39,13 @@ export async function takeReviewerActions(
   const shellTool = createShellTool(state);
   const rgTool = createRgTool(state);
   const findInstancesOfTool = createFindInstancesOfTool(state);
-  const allTools = [shellTool, rgTool, findInstancesOfTool];
+  const installDependenciesTool = createInstallDependenciesTool(state);
+  const allTools = [
+    shellTool,
+    rgTool,
+    findInstancesOfTool,
+    installDependenciesTool,
+  ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -135,15 +146,30 @@ export async function takeReviewerActions(
         new ToolMessage({
           ...tc,
           content: `**WARNING**: THIS TOOL, OR A PREVIOUS TOOL HAS CHANGED FILES IN THE REPO.
-Remember that you are only permitted to take **READ** actions during the planning step. The changes have been reverted.
+Remember that you are only permitted to take **READ** actions during the review step. Any write actions you would like to take can be specified in the final review step, then executed AFTER you've provided your final review.
 
-Please ensure you only take read actions during the planning step to gather context. You may also call the \`take_notes\` tool at any time to record important information for the programmer step.
+The changes have been reverted.
 
 Command Output:\n
 ${tc.content}`,
         }),
     );
   }
+
+  let wereDependenciesInstalled: boolean | null = null;
+  toolCallResults.forEach((toolCallResult) => {
+    if (toolCallResult.name === installDependenciesTool.name) {
+      wereDependenciesInstalled = toolCallResult.status === "success";
+    }
+  });
+
+  // Prioritize wereDependenciesInstalled over dependenciesInstalled
+  const dependenciesInstalledUpdate =
+    wereDependenciesInstalled !== null
+      ? wereDependenciesInstalled
+      : dependenciesInstalled !== null
+        ? dependenciesInstalled
+        : null;
 
   logger.info("Completed review action", {
     ...toolCallResults.map((tc) => ({
@@ -152,10 +178,24 @@ ${tc.content}`,
     })),
   });
 
-  return {
+  const commandUpdate: ReviewerGraphUpdate = {
     messages: toolCallResults,
     reviewerMessages: toolCallResults,
     ...(codebaseTree ? { codebaseTree } : {}),
-    ...(dependenciesInstalled !== null ? { dependenciesInstalled } : {}),
+    ...(dependenciesInstalledUpdate !== null && {
+      dependenciesInstalled: dependenciesInstalledUpdate,
+    }),
   };
+
+  const shouldRouteDiagnoseNode = shouldDiagnoseError([
+    ...state.reviewerMessages,
+    ...toolCallResults,
+  ]);
+
+  return new Command({
+    goto: shouldRouteDiagnoseNode
+      ? "diagnose-reviewer-error"
+      : "generate-review-actions",
+    update: commandUpdate,
+  });
 }

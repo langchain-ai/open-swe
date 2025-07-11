@@ -12,6 +12,7 @@ import {
   createRgTool,
   createShellTool,
   createFindInstancesOfTool,
+  createInstallDependenciesTool,
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getUserRequest } from "../../../../utils/user-request.js";
@@ -37,6 +38,10 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
     .replaceAll("{CHANGED_FILES}", state.changedFiles)
     .replaceAll("{BASE_BRANCH_NAME}", state.baseBranchName)
     .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", tasksString)
+    .replaceAll(
+      "{DEPENDENCIES_INSTALLED}",
+      state.dependenciesInstalled ? "Yes" : "No",
+    )
     .replaceAll("{USER_REQUEST}", userRequest);
 }
 
@@ -49,6 +54,7 @@ export async function generateReviewActions(
     createRgTool(state),
     createShellTool(state),
     createFindInstancesOfTool(state),
+    createInstallDependenciesTool(state),
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",

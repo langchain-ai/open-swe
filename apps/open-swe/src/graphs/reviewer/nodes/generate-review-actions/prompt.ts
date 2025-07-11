@@ -67,6 +67,7 @@ Only gather context right now in order to inform your final review, and to provi
 **Current Working Directory**: {CURRENT_WORKING_DIRECTORY}
 **Repository Status**: Already cloned and accessible in the current directory
 **Base Branch Name**: {BASE_BRANCH_NAME}
+**Dependencies Installed**: {DEPENDENCIES_INSTALLED}
 
 **Codebase Structure** (3 levels deep, respecting .gitignore):
 Generated via: \`git ls-files | tree --fromfile -L 3\`

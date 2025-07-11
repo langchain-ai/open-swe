@@ -14,6 +14,7 @@ import {
   takeReviewerActions,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
+import { diagnoseError } from "../shared/diagnose-error.js";
 
 function takeReviewActionsOrFinalReview(
   state: ReviewerGraphState,
@@ -39,7 +40,10 @@ function takeReviewActionsOrFinalReview(
 const workflow = new StateGraph(ReviewerGraphStateObj, GraphConfiguration)
   .addNode("initialize-state", initializeState)
   .addNode("generate-review-actions", generateReviewActions)
-  .addNode("take-review-actions", takeReviewerActions)
+  .addNode("take-review-actions", takeReviewerActions, {
+    ends: ["generate-review-actions", "diagnose-reviewer-error"],
+  })
+  .addNode("diagnose-reviewer-error", diagnoseError)
   .addNode("final-review", finalReview)
   .addEdge(START, "initialize-state")
   .addEdge("initialize-state", "generate-review-actions")
@@ -49,6 +53,7 @@ const workflow = new StateGraph(ReviewerGraphStateObj, GraphConfiguration)
     ["take-review-actions", "final-review"],
   )
   .addEdge("take-review-actions", "generate-review-actions")
+  .addEdge("diagnose-reviewer-error", "generate-review-actions")
   .addEdge("final-review", END);
 
 export const graph = workflow.compile();

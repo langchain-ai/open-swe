@@ -10,6 +10,12 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
 export const ReviewerGraphStateObj = MessagesZodState.extend({
+  /**
+   * A separate list of messages for the reviewer. Used to track both
+   * internal messages which do not need to be shown to the user/propagated
+   * back to the programmer, and to determine how many reviewer actions have
+   * been executed.
+   */
   reviewerMessages: withLangGraph(z.custom<BaseMessage[]>(), {
     reducer: {
       schema: z.custom<Messages>(),
@@ -71,6 +77,12 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
   customRules: withLangGraph(z.custom<CustomRules>().optional(), {
     reducer: {
       schema: z.custom<CustomRules>().optional(),
+      fn: (_state, update) => update,
+    },
+  }),
+  dependenciesInstalled: withLangGraph(z.boolean(), {
+    reducer: {
+      schema: z.boolean(),
       fn: (_state, update) => update,
     },
   }),
