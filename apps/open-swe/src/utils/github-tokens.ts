@@ -14,17 +14,16 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
     throw new Error("No configurable object found in graph config.");
   }
 
-  const encryptionKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
+  // Get the encryption key from environment variables
+  const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
   if (!encryptionKey) {
-    throw new Error(
-      "Missing GITHUB_TOKEN_ENCRYPTION_KEY environment variable.",
-    );
+    throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
   }
 
   const encryptedGitHubPat = config.configurable[GITHUB_PAT];
   if (encryptedGitHubPat) {
     // check for PAT-only mode
-    const githubPat = decryptGitHubToken(encryptedGitHubPat, encryptionKey);
+    const githubPat = decryptSecret(encryptedGitHubPat, encryptionKey);
     return {
       githubAccessToken: githubPat,
       githubInstallationToken: githubPat,
@@ -38,12 +37,6 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
     throw new Error(
       `Missing required ${GITHUB_INSTALLATION_TOKEN_COOKIE} in configuration.`,
     );
-  }
-
-  // Get the encryption key from environment variables
-  const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-  if (!encryptionKey) {
-    throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
   }
 
   // Decrypt the GitHub token

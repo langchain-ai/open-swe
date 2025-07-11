@@ -59,7 +59,7 @@ export const auth = new Auth()
     const encryptedGitHubPat = request.headers.get(GITHUB_PAT);
     if (encryptedGitHubPat) {
       // PAT-only authentication mode
-      const githubPat = decryptGitHubToken(encryptedGitHubPat, encryptionKey);
+      const githubPat = decryptSecret(encryptedGitHubPat, encryptionKey);
       const user = await verifyGithubUser(githubPat);
 
       if (!user) {
