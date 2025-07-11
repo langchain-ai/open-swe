@@ -84,7 +84,7 @@ export function WriteTechnicalNotes({
 
       {reasoningText && status === "done" && (
         <div className="border-t border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
-          <p className="text-blue-700 text-xs font-normal dark:text-blue-300">
+          <p className="text-xs font-normal text-blue-700 dark:text-blue-300">
             {reasoningText}
           </p>
         </div>

@@ -347,7 +347,9 @@ export function createWriteTechnicalNotesToolFields() {
   const writeTechnicalNotesSchema = z.object({
     notes: z
       .string()
-      .describe("The notes you've generated based on the conversation history."),
+      .describe(
+        "The notes you've generated based on the conversation history.",
+      ),
   });
 
   return {

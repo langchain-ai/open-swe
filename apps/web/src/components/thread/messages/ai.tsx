@@ -70,7 +70,9 @@ const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
 type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
-type WriteTechnicalNotesToolArgs = z.infer<typeof writeTechnicalNotesTool.schema>;
+type WriteTechnicalNotesToolArgs = z.infer<
+  typeof writeTechnicalNotesTool.schema
+>;
 
 function CustomComponent({
   message,
@@ -360,7 +362,8 @@ export function AssistantMessage({
       (tr) => tr && tr.tool_call_id === writeTechnicalNotesToolCall.id,
     );
 
-    const args = writeTechnicalNotesToolCall.args as WriteTechnicalNotesToolArgs;
+    const args =
+      writeTechnicalNotesToolCall.args as WriteTechnicalNotesToolArgs;
     const reasoningText = getContentString(content);
 
     return (
