@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   GraphConfig,
@@ -23,11 +22,12 @@ import {
 } from "../../../utils/current-task.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
-import { createSetTaskStatusToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskNotCompletedToolFields, createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
+import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -41,8 +41,10 @@ Here is the plan, along with the summaries of each completed task:
 Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on.
 In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
 
-Take all of this information, and determine whether or not you have completed this task in the plan.
-Once you've determined the status of the current task, call the \`set_task_status\` tool.
+Take all of this information, and determine if the current task is complete, or if you still have work left to do.
+Once you've determined the status of the current task, call either:
+- \`mark_task_completed\` if the task is complete.
+- \`mark_task_not_completed\` if the task is not complete.
 `;
 
 const formatPrompt = (taskPlan: PlanItem[]): string => {
@@ -56,10 +58,11 @@ export async function progressPlanStep(
   state: GraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const setTaskStatusTool = createSetTaskStatusToolFields();
+  const markNotCompletedTool = createMarkTaskNotCompletedToolFields();
+  const markCompletedTool = createMarkTaskCompletedToolFields();
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
-  const modelWithTools = model.bindTools([setTaskStatusTool], {
-    tool_choice: setTaskStatusTool.name,
+  const modelWithTools = model.bindTools([markNotCompletedTool, markCompletedTool], {
+    tool_choice: "any",
     parallel_tool_calls: false,
   });
 
@@ -71,7 +74,7 @@ export async function progressPlanStep(
 ${removeFirstHumanMessage(state.internalMessages).map(getMessageString).join("\n")}
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
-Once you've determined the status of the current task, call the \`set_task_status\` tool.`;
+Once you've determined the status of the current task, call either the \`mark_task_completed\` or \`mark_task_not_completed\` tool.`;
 
   const activePlanItems = getActivePlanItems(state.taskPlan);
 
@@ -94,19 +97,19 @@ Once you've determined the status of the current task, call the \`set_task_statu
     );
   }
 
-  const isCompleted =
-    (toolCall.args as z.infer<typeof setTaskStatusTool.schema>).task_status ===
-    "completed";
+  const isCompleted = toolCall.name === markCompletedTool.name;
   const currentTask = getCurrentPlanItem(activePlanItems);
   const toolMessage = new ToolMessage({
     tool_call_id: toolCall.id ?? "",
-    content: `Saved task status as ${
-      toolCall.args.task_status
-    } for task ${currentTask?.plan || "unknown"}`,
+    content: `Saved task status as ${isCompleted ? "completed" : "not completed"} for task ${currentTask?.plan || "unknown"}`,
     name: toolCall.name,
   });
 
   const newMessages = [response, toolMessage];
+
+  const totalInternalTokenCount = calculateConversationHistoryTokenCount(
+    state.internalMessages,
+  );
 
   if (!isCompleted) {
     logger.info("Current task has not been completed.", {
@@ -117,11 +120,6 @@ Once you've determined the status of the current task, call the \`set_task_statu
       internalMessages: newMessages,
     };
 
-    // Check if the internal messages list is at or above the max token limit. If so, route to the summarize history step.
-    // Otherwise, route to the generate action step.
-    const totalInternalTokenCount = calculateConversationHistoryTokenCount(
-      state.internalMessages,
-    );
     if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
       logger.info(
         "Internal messages list is at or above the max token limit. Routing to summarize history step.",
@@ -141,12 +139,14 @@ Once you've determined the status of the current task, call the \`set_task_statu
       update: commandUpdate,
     });
   }
+  const summary = (toolCall.args as z.infer<typeof markCompletedTool.schema>).completed_task_summary;
 
   // LLM marked as completed, so we need to update the plan to reflect that.
   const updatedPlanTasks = completePlanItem(
     state.taskPlan,
     getActiveTask(state.taskPlan).id,
     currentTask.index,
+    summary,
   );
   // Update the github issue to reflect this task as completed.
   await addTaskPlanToIssue(
@@ -189,8 +189,22 @@ Once you've determined the status of the current task, call the \`set_task_statu
     taskPlan: updatedPlanTasks,
   };
 
+  if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
+    logger.info(
+      "Internal messages list is at or above the max token limit. Routing to summarize history step.",
+      {
+        totalInternalTokenCount,
+        maxInternalTokenCount: MAX_INTERNAL_TOKENS,
+      },
+    );
+    return new Command({
+      goto: "summarize-history",
+      update: commandUpdate,
+    });
+  }
+
   return new Command({
-    goto: "summarize-task-steps",
+    goto: "generate-action",
     update: commandUpdate,
   });
 }

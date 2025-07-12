@@ -225,28 +225,45 @@ export function createFindInstancesOfToolFields(
   };
 }
 
-export function createSetTaskStatusToolFields() {
-  const setTaskStatusToolSchema = z.object({
+export function createMarkTaskNotCompletedToolFields() {
+  const markTaskNotCompletedToolSchema = z.object({
     reasoning: z
       .string()
       .describe(
-        "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
-      ),
-    task_status: z
-      .enum(["completed", "not_completed"])
-      .describe(
-        "The status of the current task, based on the reasoning provided.",
+        "A concise reasoning summary for the status of the current task, explaining why you think it is not completed.",
       ),
   });
 
-  const setTaskStatusTool = {
-    name: "set_task_status",
+  const markTaskNotCompletedTool = {
+    name: "mark_task_not_completed",
     description:
-      "The status of the current task, along with a concise reasoning summary to support the status.",
-    schema: setTaskStatusToolSchema,
+      "Mark the current task as not completed, along with a concise reasoning summary to support the status.",
+    schema: markTaskNotCompletedToolSchema,
   };
 
-  return setTaskStatusTool;
+  return markTaskNotCompletedTool;
+}
+
+export function createMarkTaskCompletedToolFields() {
+  const markTaskCompletedToolSchema = z.object({
+    completed_task_summary: z
+      .string()
+      .describe(
+        "A detailed summary of the actions you took to complete the current task. " +
+          "Include specifics into the actions you took, insights you learned about the codebase while completing the task, and any other context which would be useful to another developer reviewing the actions you took. " +
+          "You may include file paths and lists of the changes you made, but do not include full file contents or full code changes. " +
+          "Ensure your summary is concise, thoughtful and helpful.",
+      ),
+  });
+
+  const markTaskCompletedTool = {
+    name: "mark_task_completed",
+    description:
+      "Mark the current task as completed, and provide a concise reasoning summary on the actions you took to complete the task.",
+    schema: markTaskCompletedToolSchema,
+  };
+
+  return markTaskCompletedTool;
 }
 
 export function createInstallDependenciesToolFields(
