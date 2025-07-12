@@ -31,7 +31,11 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 async function routeGeneratedAction(
   state: GraphState,
 ): Promise<
-  "generate-conclusion" | "take-action" | "request-help" | "generate-action" | Send
+  | "generate-conclusion"
+  | "take-action"
+  | "request-help"
+  | "generate-action"
+  | Send
 > {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
@@ -76,11 +80,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   })
   .addNode("update-plan", updatePlan)
   .addNode("progress-plan-step", progressPlanStep, {
-    ends: [
-      "summarize-history",
-      "generate-action",
-      "generate-conclusion",
-    ],
+    ends: ["summarize-history", "generate-action", "generate-conclusion"],
   })
   .addNode("generate-conclusion", generateConclusion)
   .addNode("request-help", requestHelp, {

@@ -22,7 +22,10 @@ import {
 } from "../../../utils/current-task.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
-import { createMarkTaskNotCompletedToolFields, createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import {
+  createMarkTaskNotCompletedToolFields,
+  createMarkTaskCompletedToolFields,
+} from "@open-swe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
   MAX_INTERNAL_TOKENS,
@@ -61,10 +64,13 @@ export async function progressPlanStep(
   const markNotCompletedTool = createMarkTaskNotCompletedToolFields();
   const markCompletedTool = createMarkTaskCompletedToolFields();
   const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
-  const modelWithTools = model.bindTools([markNotCompletedTool, markCompletedTool], {
-    tool_choice: "any",
-    parallel_tool_calls: false,
-  });
+  const modelWithTools = model.bindTools(
+    [markNotCompletedTool, markCompletedTool],
+    {
+      tool_choice: "any",
+      parallel_tool_calls: false,
+    },
+  );
 
   const userRequest = getUserRequest(state.internalMessages, {
     returnFullMessage: true,
@@ -139,7 +145,8 @@ Once you've determined the status of the current task, call either the \`mark_ta
       update: commandUpdate,
     });
   }
-  const summary = (toolCall.args as z.infer<typeof markCompletedTool.schema>).completed_task_summary;
+  const summary = (toolCall.args as z.infer<typeof markCompletedTool.schema>)
+    .completed_task_summary;
 
   // LLM marked as completed, so we need to update the plan to reflect that.
   const updatedPlanTasks = completePlanItem(
