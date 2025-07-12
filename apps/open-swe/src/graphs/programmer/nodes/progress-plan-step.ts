@@ -24,6 +24,10 @@ import {
 import { ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { createSetTaskStatusToolFields } from "@open-swe/shared/open-swe/tools";
+import {
+  calculateConversationHistoryTokenCount,
+  MAX_INTERNAL_TOKENS,
+} from "../../../utils/tokens.js";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -105,16 +109,33 @@ Once you've determined the status of the current task, call the \`set_task_statu
   const newMessages = [response, toolMessage];
 
   if (!isCompleted) {
-    logger.info(
-      "Current task has not been completed. Progressing to the next action.",
-      {
-        reasoning: toolCall.args.reasoning,
-      },
-    );
+    logger.info("Current task has not been completed.", {
+      reasoning: toolCall.args.reasoning,
+    });
     const commandUpdate: GraphUpdate = {
       messages: newMessages,
       internalMessages: newMessages,
     };
+
+    // Check if the internal messages list is at or above the max token limit. If so, route to the summarize history step.
+    // Otherwise, route to the generate action step.
+    const totalInternalTokenCount = calculateConversationHistoryTokenCount(
+      state.internalMessages,
+    );
+    if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
+      logger.info(
+        "Internal messages list is at or above the max token limit. Routing to summarize history step.",
+        {
+          totalInternalTokenCount,
+          maxInternalTokenCount: MAX_INTERNAL_TOKENS,
+        },
+      );
+      return new Command({
+        goto: "summarize-history",
+        update: commandUpdate,
+      });
+    }
+
     return new Command({
       goto: "generate-action",
       update: commandUpdate,

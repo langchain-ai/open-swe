@@ -6,12 +6,11 @@ import {
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
 import { loadModel, Task } from "../../../utils/load-model.js";
-import { AIMessage, BaseMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
-import { removeLastTaskMessages } from "../../../utils/message/modify-array.js";
 import { Command } from "@langchain/langgraph";
 import { ConfigurableModel } from "langchain/chat_models/universal";
 import {
@@ -21,6 +20,9 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { getCompletedPlanItems } from "../../../utils/current-task.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { createTaskSummaryToolFields } from "@open-swe/shared/open-swe/tools";
+import { z } from "zod";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -119,6 +121,43 @@ async function generateTaskSummary(
   };
 }
 
+/**
+ * Create an AI & tool message pair for the generated task summary.
+ * This is not included in the internal message state, but is exposed to
+ * users so they can see the summary of the actions that were taken.
+ */
+function createUserFacingTaskSummaryMessages(
+  taskSummary: string,
+  task: string,
+): BaseMessage[] {
+  const taskSummaryTool = createTaskSummaryToolFields();
+  const taskSummaryToolCallArgs: z.infer<typeof taskSummaryTool.schema> = {
+    original_task: task,
+    task_summary: taskSummary,
+  };
+  const taskSummaryToolCallId = uuidv4();
+  const taskSummaryPublicMessages = [
+    new AIMessage({
+      id: uuidv4(),
+      content: "",
+      tool_calls: [
+        {
+          id: taskSummaryToolCallId,
+          name: taskSummaryTool.name,
+          args: taskSummaryToolCallArgs,
+        },
+      ],
+    }),
+    new ToolMessage({
+      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+      tool_call_id: taskSummaryToolCallId,
+      content: "",
+    }),
+  ];
+
+  return taskSummaryPublicMessages;
+}
+
 export async function summarizeTaskSteps(
   state: GraphState,
   config: GraphConfig,
@@ -147,23 +186,16 @@ export async function summarizeTaskSteps(
     updatedTaskPlan,
   );
 
-  const removedMessages = removeLastTaskMessages(state.internalMessages);
-  logger.info(`Removing ${removedMessages.length} message(s) from state.`);
-
-  const condensedTaskMessage = new AIMessage({
-    id: uuidv4(),
-    content: `Successfully condensed task context for task: "${lastCompletedTask.plan}". This task's summary can be found in the system prompt.`,
-    additional_kwargs: {
-      summary_message: true,
-    },
-  });
-  const newMessagesStateUpdate = [...removedMessages, condensedTaskMessage];
+  const taskSummaryMessages = createUserFacingTaskSummaryMessages(
+    taskSummary.summary,
+    lastCompletedTask.plan,
+  );
 
   const allTasksCompleted = activePlanItems.every((p) => p.completed);
   if (allTasksCompleted) {
     const commandUpdate: GraphUpdate = {
-      internalMessages: newMessagesStateUpdate,
       taskPlan: updatedTaskPlan,
+      messages: taskSummaryMessages,
     };
     return new Command({
       goto: "generate-conclusion",
@@ -172,7 +204,7 @@ export async function summarizeTaskSteps(
   }
 
   const commandUpdate: GraphUpdate = {
-    internalMessages: newMessagesStateUpdate,
+    messages: taskSummaryMessages,
     taskPlan: updatedTaskPlan,
   };
   return new Command({

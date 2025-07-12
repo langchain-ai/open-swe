@@ -14,6 +14,7 @@ import {
   diagnoseError,
   requestHelp,
   updatePlan,
+  summarizeHistory,
 } from "./nodes/index.js";
 import { isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -76,6 +77,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   })
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
+  .addNode("summarize-history", summarizeHistory)
   .addEdge(START, "initialize")
   .addEdge("initialize", "generate-action")
   .addConditionalEdges("generate-action", routeGeneratedAction, [
@@ -87,6 +89,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("update-plan", "generate-action")
   .addEdge("generate-conclusion", "open-pr")
   .addEdge("diagnose-error", "generate-action")
+  .addEdge("summarize-history", "generate-action")
   .addEdge("open-pr", END);
 
 // Zod types are messed up
