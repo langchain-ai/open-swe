@@ -40,7 +40,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 
 ### Tool Usage Best Practices
 
-* **Search**: Use the \`find_instances_of\` tool when searching for specific keywords/strings in files. When preforming more complex searches (e.g. regex searches), use the \`rg\` tool (ripgrep) (not grep/ls -R) with glob patterns (e.g., \`rg -i pattern -g **/*.tsx\`).
+* **Search**: Use the \`find_instances_of\` tool when searching for specific keywords/strings in files. When performing more complex searches (e.g. regex searches), use the \`rg\` tool (ripgrep) (not grep/ls -R) with glob patterns (e.g., \`rg -i pattern -g **/*.tsx\`).
     * Both \`find_instances_of\` and \`rg\` are optimized for searching files, and should be used in place of \`grep\` or \`ls -R\`.
 * **Dependencies**: Use the correct package manager; skip if installation fails
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists

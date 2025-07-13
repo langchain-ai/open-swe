@@ -76,7 +76,7 @@ export function createShellToolFields(targetRepository: TargetRepository) {
       .optional()
       .default(TIMEOUT_SEC)
       .describe(
-        "The maximum time to wait for the command to complete in seconds.",
+        "The maximum time to wait for the command to complete in seconds. For commands which may require a long time to complete, such as running tests, you should increase this value.",
       ),
   });
   return {
