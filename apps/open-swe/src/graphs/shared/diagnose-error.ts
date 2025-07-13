@@ -72,7 +72,7 @@ interface DiagnoseErrorInputs {
   codebaseTree: string;
 }
 
-interface DiagnoseErrorUpdate extends Partial<DiagnoseErrorInputs> {}
+type DiagnoseErrorUpdate = Partial<DiagnoseErrorInputs>;
 
 export async function diagnoseError(
   state: DiagnoseErrorInputs,

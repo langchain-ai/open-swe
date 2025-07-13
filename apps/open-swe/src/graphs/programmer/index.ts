@@ -31,13 +31,12 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
  */
 function routeGeneratedAction(
   state: GraphState,
-): 
+):
   | "generate-conclusion"
   | "take-action"
   | "request-help"
   | "generate-action"
-  | Send
- {
+  | Send {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
 

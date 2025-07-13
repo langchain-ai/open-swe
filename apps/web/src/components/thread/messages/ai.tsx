@@ -72,10 +72,16 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
-const markTaskCompletedTool = createFinalReviewMarkTaskCompletedFields();
-type MarkTaskCompletedToolArgs = z.infer<typeof markTaskCompletedTool.schema>;
-const markTaskIncompleteTool = createFinalReviewMarkTaskNotCompleteFields();
-type MarkTaskIncompleteToolArgs = z.infer<typeof markTaskIncompleteTool.schema>;
+const markFinalReviewTaskCompletedTool =
+  createFinalReviewMarkTaskCompletedFields();
+type MarkFinalReviewTaskCompletedToolArgs = z.infer<
+  typeof markFinalReviewTaskCompletedTool.schema
+>;
+const markFinalReviewTaskIncompleteTool =
+  createFinalReviewMarkTaskNotCompleteFields();
+type MarkFinalReviewTaskIncompleteToolArgs = z.infer<
+  typeof markFinalReviewTaskIncompleteTool.schema
+>;
 
 const diagnoseErrorTool = createDiagnoseErrorToolFields();
 type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
@@ -108,8 +114,8 @@ function CustomComponent({
   const customComponents =
     "ui" in values
       ? (values.ui as UIMessage[]).filter(
-        (ui) => ui.metadata?.message_id === message.id,
-      )
+          (ui) => ui.metadata?.message_id === message.id,
+        )
       : [];
 
   if (!customComponents?.length) return null;
@@ -312,15 +318,15 @@ export function AssistantMessage({
 
   const actionableToolCalls = message
     ? aiToolCalls.filter(
-      (tc) =>
-        tc.name === shellTool.name ||
-        tc.name === applyPatchTool.name ||
-        tc.name === rgTool.name ||
-        tc.name === installDependenciesTool.name ||
-        tc.name === plannerNotesTool.name ||
-        tc.name === getURLContentTool.name ||
-        tc.name === findInstancesOfTool.name,
-    )
+        (tc) =>
+          tc.name === shellTool.name ||
+          tc.name === applyPatchTool.name ||
+          tc.name === rgTool.name ||
+          tc.name === installDependenciesTool.name ||
+          tc.name === plannerNotesTool.name ||
+          tc.name === getURLContentTool.name ||
+          tc.name === findInstancesOfTool.name,
+      )
     : [];
 
   const markTaskCompletedToolCall = message
@@ -335,12 +341,16 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
     : undefined;
 
-  const markTaskCompletedToolCall = message
-    ? aiToolCalls.find((tc) => tc.name === markTaskCompletedTool.name)
+  const markFinalReviewTaskCompletedToolCall = message
+    ? aiToolCalls.find(
+        (tc) => tc.name === markFinalReviewTaskCompletedTool.name,
+      )
     : undefined;
 
-  const markTaskIncompleteToolCall = message
-    ? aiToolCalls.find((tc) => tc.name === markTaskIncompleteTool.name)
+  const markFinalReviewTaskIncompleteToolCall = message
+    ? aiToolCalls.find(
+        (tc) => tc.name === markFinalReviewTaskIncompleteTool.name,
+      )
     : undefined;
 
   const diagnoseErrorToolCall = message
@@ -384,9 +394,9 @@ export function AssistantMessage({
     // Get the appropriate summary text based on which tool was called
     const summaryText = markTaskCompletedToolCall
       ? (markTaskCompletedToolCall.args as MarkTaskCompletedToolArgs)
-        .completed_task_summary
+          .completed_task_summary
       : (markTaskNotCompletedToolCall!.args as MarkTaskNotCompletedToolArgs)
-        .reasoning;
+          .reasoning;
 
     return (
       <div className="flex flex-col gap-4">
@@ -491,10 +501,11 @@ export function AssistantMessage({
   }
 
   // If task completed review tool call is present, render the task review component
-  if (markTaskCompletedToolCall) {
-    const args = markTaskCompletedToolCall.args as MarkTaskCompletedToolArgs;
+  if (markFinalReviewTaskCompletedToolCall) {
+    const args =
+      markFinalReviewTaskCompletedToolCall.args as MarkFinalReviewTaskCompletedToolArgs;
     const correspondingToolResult = toolResults.find(
-      (tr) => tr && tr.tool_call_id === markTaskCompletedToolCall.id,
+      (tr) => tr && tr.tool_call_id === markFinalReviewTaskCompletedToolCall.id,
     );
 
     const status = correspondingToolResult ? "done" : "generating";
@@ -511,10 +522,12 @@ export function AssistantMessage({
   }
 
   // If task incomplete review tool call is present, render the task review component
-  if (markTaskIncompleteToolCall) {
-    const args = markTaskIncompleteToolCall.args as MarkTaskIncompleteToolArgs;
+  if (markFinalReviewTaskIncompleteToolCall) {
+    const args =
+      markFinalReviewTaskIncompleteToolCall.args as MarkFinalReviewTaskIncompleteToolArgs;
     const correspondingToolResult = toolResults.find(
-      (tr) => tr && tr.tool_call_id === markTaskIncompleteToolCall.id,
+      (tr) =>
+        tr && tr.tool_call_id === markFinalReviewTaskIncompleteToolCall.id,
     );
 
     const status = correspondingToolResult ? "done" : "generating";
