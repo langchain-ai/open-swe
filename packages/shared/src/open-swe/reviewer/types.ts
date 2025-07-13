@@ -11,6 +11,20 @@ import { BaseMessage } from "@langchain/core/messages";
 
 export const ReviewerGraphStateObj = MessagesZodState.extend({
   /**
+   * We must include the internal messages so that the reviewer has an
+   * accurate picture of the conversation.
+   */
+  internalMessages: withLangGraph(z.custom<BaseMessage[]>(), {
+    reducer: {
+      schema: z.custom<Messages>(),
+      fn: messagesStateReducer,
+    },
+    jsonSchemaExtra: {
+      langgraph_type: "messages",
+    },
+    default: () => [],
+  }),
+  /**
    * A separate list of messages for the reviewer. Used to track both
    * internal messages which do not need to be shown to the user/propagated
    * back to the programmer, and to determine how many reviewer actions have

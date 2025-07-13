@@ -19,7 +19,7 @@ export function DiagnoseErrorAction({
   diagnosis,
   reasoningText,
 }: DiagnoseErrorActionProps) {
-  const [showReasoning, setShowReasoning] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
 
   const getStatusIcon = () => {
     switch (status) {

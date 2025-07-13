@@ -15,11 +15,23 @@ import {
   updatePlan,
   summarizeHistory,
 } from "./nodes/index.js";
-import { isAIMessage } from "@langchain/core/messages";
+import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
 import { graph as reviewerGraph } from "../reviewer/index.js";
 import { getRemainingPlanItems } from "../../utils/current-task.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+
+function lastMessagesMissingToolCalls(
+  messages: BaseMessage[],
+  threshold: number,
+) {
+  const lastMessages = messages.slice(-threshold);
+  if (!lastMessages.every(isAIMessage)) {
+    // If some of the last messages are not AI messages, we should return false.
+    return false;
+  }
+  return lastMessages.every((m) => !m.tool_calls?.length);
+}
 
 /**
  * Routes to the next appropriate node after taking action.
@@ -64,7 +76,8 @@ function routeGeneratedAction(
   const activePlanItems = getActivePlanItems(state.taskPlan);
   const hasRemainingTasks = getRemainingPlanItems(activePlanItems).length > 0;
   // If the model did not generate a tool call, but there are remaining tasks, we should route back to the generate action step.
-  if (hasRemainingTasks) {
+  // Also add a check ensuring that the last to messages generated have tool calls. Otherwise we can end.
+  if (hasRemainingTasks && !lastMessagesMissingToolCalls(internalMessages, 2)) {
     return "generate-action";
   }
 

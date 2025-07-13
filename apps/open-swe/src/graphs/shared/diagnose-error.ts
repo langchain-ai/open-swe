@@ -12,7 +12,7 @@ import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
 import { loadModel, Task } from "../../utils/load-model.js";
 
-const logger = createLogger(LogLevel.INFO, "DiagnoseError");
+const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -85,7 +85,7 @@ export async function diagnoseError(
     throw new Error("No failed action found in messages");
   }
 
-  logger.info("The last two tool calls resulted in errors. Diagnosing error.");
+  logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([diagnoseErrorTool], {

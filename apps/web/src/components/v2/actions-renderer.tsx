@@ -2,7 +2,10 @@ import { isAIMessageSDK, isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import {
+  ManagerGraphState,
+  ManagerGraphUpdate,
+} from "@open-swe/shared/open-swe/manager/types";
 import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
@@ -102,9 +105,22 @@ function addMessagesToState(
   newMessages: Message[],
 ): Message[] {
   const existingIds = new Set(existingMessages.map((message) => message.id));
-  const uniqueNewMessages = newMessages.filter(
-    (message) => !message.id || !existingIds.has(message.id),
-  );
+
+  // First deduplicate within newMessages array itself
+  const seenNewIds = new Set<string>();
+  const uniqueNewMessages = newMessages.filter((message) => {
+    // Skip messages without IDs or those already in existingMessages
+    if (message.id && existingIds.has(message.id)) return false;
+
+    // Handle duplicates within newMessages
+    if (message.id) {
+      if (seenNewIds.has(message.id)) return false;
+      seenNewIds.add(message.id);
+    }
+
+    return true;
+  });
+
   return [...existingMessages, ...uniqueNewMessages];
 }
 
@@ -123,11 +139,31 @@ function isNodeEndMessagesUpdate(
   );
 }
 
+function isNodeEndCommandUpdate(
+  data: unknown,
+): data is {
+  output: { lg_name: string; goto: string; update: ManagerGraphUpdate };
+} {
+  return !!(
+    typeof data === "object" &&
+    data !== null &&
+    "output" in data &&
+    data.output &&
+    typeof data.output === "object" &&
+    "lg_name" in data.output &&
+    "goto" in data.output &&
+    "update" in data.output &&
+    typeof data.output.lg_name === "string" &&
+    (typeof data.output.goto === "string" || Array.isArray(data.output.goto)) &&
+    typeof data.output.update === "object"
+  );
+}
+
 const REVIEWER_NODE_IDS = [
-  "take-review-actions",
   "generate-review-actions",
-  "final-review",
+  "take-review-actions",
   "diagnose-reviewer-error",
+  "final-review",
 ];
 
 export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
@@ -145,6 +181,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   const joinedRunId = useRef<string | undefined>(undefined);
   const [streamLoading, setStreamLoading] = useState(false);
   const [mergedMessages, setMergedMessages] = useState<Message[]>([]);
+  const debouncedSetMessages = useRef(
+    debounce((messages: Message[]) => {
+      setMergedMessages((prev) => addMessagesToState(prev, messages));
+    }, 100),
+  ).current;
 
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -161,11 +202,18 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         data.event === "on_chain_end" &&
         data.metadata?.langgraph_node &&
         REVIEWER_NODE_IDS.includes(data.metadata.langgraph_node as string) &&
-        data.data &&
-        isNodeEndMessagesUpdate(data.data)
+        data.data
       ) {
-        const outputMessages = data.data.output.messages;
-        setMergedMessages((prev) => [...prev, ...outputMessages]);
+        if (isNodeEndCommandUpdate(data.data)) {
+          const outputMessages = data.data.output.update
+            .messages as unknown as Message[];
+          console.log("outputMessages", outputMessages);
+          debouncedSetMessages(outputMessages);
+        } else if (isNodeEndMessagesUpdate(data.data)) {
+          const outputMessages = data.data.output.messages;
+          console.log("outputMessages", outputMessages);
+          debouncedSetMessages(outputMessages);
+        }
       }
     },
     fetchStateHistory: false,
@@ -290,12 +338,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       }
     }
   }, [stream.values, graphId]);
-
-  const debouncedSetMessages = useRef(
-    debounce((messages: Message[]) => {
-      setMergedMessages((prev) => addMessagesToState(prev, messages));
-    }, 100),
-  ).current;
 
   useEffect(() => {
     debouncedSetMessages(stream.messages);

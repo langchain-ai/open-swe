@@ -52,7 +52,6 @@ const workflow = new StateGraph(ReviewerGraphStateObj, GraphConfiguration)
     takeReviewActionsOrFinalReview,
     ["take-review-actions", "final-review"],
   )
-  .addEdge("take-review-actions", "generate-review-actions")
   .addEdge("diagnose-reviewer-error", "generate-review-actions")
   .addEdge("final-review", END);
 

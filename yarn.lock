@@ -2594,12 +2594,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph@npm:^0.3.3":
-  version: 0.3.7
-  resolution: "@langchain/langgraph@npm:0.3.7"
+"@langchain/langgraph@npm:^0.3.8":
+  version: 0.3.8
+  resolution: "@langchain/langgraph@npm:0.3.8"
   dependencies:
     "@langchain/langgraph-checkpoint": ~0.0.18
-    "@langchain/langgraph-sdk": ~0.0.90
+    "@langchain/langgraph-sdk": ~0.0.92
     uuid: ^10.0.0
     zod: ^3.25.32
   peerDependencies:
@@ -2608,7 +2608,7 @@ __metadata:
   peerDependenciesMeta:
     zod-to-json-schema:
       optional: true
-  checksum: 6a924940d92d4c0c97c18665a1d1f70bfa83c2d5f8b221ea6fe90d3d47bfa6518a6032058bb9b722199ce0c9fb511e9fe2818e2d877ffb7c43510715c1b82d84
+  checksum: 08089b5f151d43b556dba604699c52cb4d323e1fc17ab24572429db582c90ad2da477f90070b2812b03e6aec9d080c09a292c420943b65aeaba858cdf0d12e3f
   languageName: node
   linkType: hard
 
@@ -3458,7 +3458,7 @@ __metadata:
     "@langchain/community": ^0.3.47
     "@langchain/core": ^0.3.56
     "@langchain/google-genai": ^0.2.9
-    "@langchain/langgraph": ^0.3.3
+    "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-cli": latest
     "@langchain/langgraph-sdk": ^0.0.92
     "@langchain/mcp-adapters": ^0.5.2
@@ -3508,7 +3508,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
-    "@langchain/langgraph": ^0.3.3
+    "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.92
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
@@ -3533,7 +3533,7 @@ __metadata:
   dependencies:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
-    "@langchain/langgraph": ^0.3.3
+    "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.92
     "@octokit/app": ^16.0.1
     "@octokit/types": ^14.1.0

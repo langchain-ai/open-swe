@@ -10,6 +10,7 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 type MarkTaskCompletedProps = {
   status: "loading" | "generating" | "done";
@@ -25,19 +26,23 @@ export function MarkTaskCompleted({
   summaryText,
 }: MarkTaskCompletedProps) {
   const [expanded, setExpanded] = useState(!!(status === "done" && review));
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
 
   const getStatusIcon = () => {
     switch (status) {
       case "loading":
         return (
-          <div className="h-3.5 w-3.5 rounded-full border border-gray-300" />
+          <div className="h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-800" />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
+        return (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
+        );
       case "done":
-        return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+        return (
+          <CheckCircle className="h-3.5 w-3.5 text-green-500 dark:text-green-400" />
+        );
     }
   };
 
@@ -53,18 +58,18 @@ export function MarkTaskCompleted({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
+    <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-800">
       {reasoningText && (
-        <div className="border-b border-blue-100 bg-blue-50 p-2">
+        <div className="border-b border-blue-100 bg-blue-50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
+            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800">
+            <p className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-400">
               {reasoningText}
             </p>
           )}
@@ -72,7 +77,7 @@ export function MarkTaskCompleted({
       )}
 
       <div
-        className={`flex items-center border-b border-green-200 bg-green-50 p-2 ${
+        className={`flex items-center border-b border-green-200 bg-green-50 p-2 dark:border-green-800 dark:bg-green-900/50 ${
           status === "done" && review ? "cursor-pointer" : ""
         }`}
         onClick={
@@ -81,14 +86,14 @@ export function MarkTaskCompleted({
             : undefined
         }
       >
-        <CheckCircle className="mr-2 h-3.5 w-3.5 text-green-600" />
-        <span className="flex-1 text-xs font-normal text-green-800">
+        <CheckCircle className="mr-2 h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+        <span className="flex-1 text-xs font-normal text-green-800 dark:text-green-400">
           {getStatusText()}
         </span>
         <div className="flex items-center gap-2">
           {getStatusIcon()}
           {status === "done" && review && (
-            <button className="text-green-600 hover:text-green-700">
+            <button className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300">
               {expanded ? (
                 <ChevronUp className="h-3.5 w-3.5" />
               ) : (
@@ -100,27 +105,29 @@ export function MarkTaskCompleted({
       </div>
 
       {expanded && review && status === "done" && (
-        <div className="border-t border-green-200 bg-green-50 p-2">
-          <h3 className="mb-1 text-xs font-normal text-green-600">
+        <div className="border-t border-green-200 bg-green-50 p-2 dark:border-green-800 dark:bg-green-900/50">
+          <h3 className="mb-1 text-xs font-normal text-green-600 dark:text-green-400">
             Final Review
           </h3>
-          <p className="text-xs font-normal text-green-800">{review}</p>
+          <BasicMarkdownText className="text-xs font-normal text-green-800 dark:text-green-400">
+            {review}
+          </BasicMarkdownText>
         </div>
       )}
 
       {summaryText && status === "done" && (
-        <div className="border-t border-green-100 bg-green-50 p-2">
+        <div className="border-t border-green-100 bg-green-50 p-2 dark:border-green-800 dark:bg-green-900/50">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800"
+            className="flex items-center gap-1 text-xs font-normal text-green-700 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-800">
+            <BasicMarkdownText className="mt-1 text-xs text-green-800 dark:text-green-400">
               {summaryText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}
@@ -146,8 +153,8 @@ export function MarkTaskIncomplete({
   const [expanded, setExpanded] = useState(
     !!(status === "done" && (review || additionalActions)),
   );
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -174,12 +181,12 @@ export function MarkTaskIncomplete({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
+    <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-800">
       {reasoningText && (
-        <div className="border-b border-blue-100 bg-blue-50 p-2">
+        <div className="border-b border-blue-100 bg-blue-50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
+            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
@@ -193,7 +200,7 @@ export function MarkTaskIncomplete({
       )}
 
       <div
-        className={`flex items-center border-b border-red-200 bg-red-50 p-2 ${
+        className={`flex items-center border-b border-red-200 bg-red-50 p-2 dark:border-red-800 dark:bg-red-900/50 ${
           status === "done" && (review || additionalActions)
             ? "cursor-pointer"
             : ""
@@ -204,14 +211,14 @@ export function MarkTaskIncomplete({
             : undefined
         }
       >
-        <XCircle className="mr-2 h-3.5 w-3.5 text-red-600" />
-        <span className="flex-1 text-xs font-normal text-red-800">
+        <XCircle className="mr-2 h-3.5 w-3.5 text-red-600 dark:text-red-400" />
+        <span className="flex-1 text-xs font-normal text-red-800 dark:text-red-400">
           {getStatusText()}
         </span>
         <div className="flex items-center gap-2">
           {getStatusIcon()}
           {status === "done" && (review || additionalActions) && (
-            <button className="text-red-600 hover:text-red-700">
+            <button className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
               {expanded ? (
                 <ChevronUp className="h-3.5 w-3.5" />
               ) : (
@@ -223,19 +230,21 @@ export function MarkTaskIncomplete({
       </div>
 
       {expanded && status === "done" && (review || additionalActions) && (
-        <div className="space-y-3 bg-red-50 p-2">
+        <div className="space-y-3 bg-red-50 p-2 dark:bg-red-900/50">
           {review && (
             <div>
-              <h3 className="mb-1 text-xs font-normal text-red-600">
+              <h3 className="mb-1 text-xs font-normal text-red-600 dark:text-red-400">
                 Final Review
               </h3>
-              <p className="text-xs font-normal text-red-800">{review}</p>
+              <BasicMarkdownText className="text-xs font-normal text-red-800 dark:text-red-400">
+                {review}
+              </BasicMarkdownText>
             </div>
           )}
 
           {additionalActions && additionalActions.length > 0 && (
             <div>
-              <h3 className="mb-1 text-xs font-normal text-red-600">
+              <h3 className="mb-1 text-xs font-normal text-red-600 dark:text-red-400">
                 Additional Actions Required ({additionalActions.length})
               </h3>
               <ol className="space-y-1">
@@ -244,12 +253,12 @@ export function MarkTaskIncomplete({
                     key={index}
                     className="flex items-start gap-2"
                   >
-                    <div className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-red-200">
-                      <span className="text-xs font-normal text-red-700">
+                    <div className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-red-200 dark:bg-red-800">
+                      <span className="text-xs font-normal text-red-700 dark:text-red-400">
                         {index + 1}
                       </span>
                     </div>
-                    <span className="flex-1 text-xs font-normal text-red-800">
+                    <span className="flex-1 text-xs font-normal text-red-800 dark:text-red-400">
                       {action}
                     </span>
                   </li>
@@ -261,18 +270,18 @@ export function MarkTaskIncomplete({
       )}
 
       {summaryText && status === "done" && (
-        <div className="border-t border-red-100 bg-red-50 p-2">
+        <div className="border-t border-red-100 bg-red-50 p-2 dark:border-red-800 dark:bg-red-900/50">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex items-center gap-1 text-xs font-normal text-red-700 hover:text-red-800"
+            className="flex items-center gap-1 text-xs font-normal text-red-700 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-red-800">
+            <BasicMarkdownText className="mt-1 text-xs text-red-800 dark:text-red-400">
               {summaryText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}

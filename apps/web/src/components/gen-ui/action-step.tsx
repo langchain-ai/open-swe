@@ -20,7 +20,7 @@ import {
   CloudDownload,
   Hash,
 } from "lucide-react";
-import { MarkdownText } from "../thread/markdown-text";
+import { BasicMarkdownText, MarkdownText } from "../thread/markdown-text";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
@@ -353,7 +353,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.actionType === "planner_notes") {
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
             Planner Notes
           </span>
@@ -363,7 +363,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.actionType === "get_url_content") {
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           <code className="text-foreground/80 text-xs font-normal">
             {props.url}
           </code>
@@ -373,7 +373,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.actionType === "find_instances_of") {
       return (
-        <div className="flex-1">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <code className="text-foreground/80 text-xs font-normal">
               {props.query}
@@ -383,7 +383,7 @@ function ActionItem(props: ActionItemProps) {
             <MatchWholeWordIcon matchWholeWord={!!props.match_word} />
           </div>
           {(props.include_files || props.exclude_files) && (
-            <div className="text-muted-foreground mt-0.5 text-xs font-normal">
+            <div className="text-muted-foreground mt-0.5 ml-2 text-xs font-normal">
               {props.include_files && (
                 <span>Include: {props.include_files}</span>
               )}
@@ -417,7 +417,7 @@ function ActionItem(props: ActionItemProps) {
         }
       }
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           {props.workdir && (
             <div className="text-muted-foreground mb-0.5 text-xs font-normal">
               {props.workdir}
@@ -444,7 +444,7 @@ function ActionItem(props: ActionItemProps) {
         // no-op
       }
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           <code className="text-foreground/80 text-xs font-normal">
             {formattedRgCommand}
           </code>
@@ -452,7 +452,7 @@ function ActionItem(props: ActionItemProps) {
       );
     } else {
       return (
-        <code className="text-foreground/80 flex-1 text-xs font-normal">
+        <code className="text-foreground/80 flex items-center text-xs font-normal">
           {props.file_path}
         </code>
       );
@@ -547,10 +547,10 @@ function ActionItem(props: ActionItemProps) {
 
   return (
     <div className="border-border mb-2 overflow-hidden rounded-md border last:mb-0">
-      <div className="border-border flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
+      <div className="border-border flex w-full items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
         {renderHeaderIcon()}
         {renderHeaderContent()}
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <span className="text-muted-foreground text-xs font-normal">
             {getStatusText()}
           </span>
@@ -558,7 +558,7 @@ function ActionItem(props: ActionItemProps) {
           {shouldShowToggle() && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
             >
               {expanded ? (
                 <ChevronUp className="size-3.5" />
@@ -576,8 +576,8 @@ function ActionItem(props: ActionItemProps) {
 }
 
 export function ActionStep(props: ActionStepProps) {
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
 
   const reasoningText =
     "reasoningText" in props ? props.reasoningText : undefined;
@@ -623,9 +623,9 @@ export function ActionStep(props: ActionStepProps) {
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-700 dark:text-green-300">
-              {summaryText}
-            </p>
+            <span className="text-green-700 dark:text-green-300">
+              <BasicMarkdownText>{summaryText}</BasicMarkdownText>
+            </span>
           )}
         </div>
       )}

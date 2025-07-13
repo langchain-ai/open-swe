@@ -18,7 +18,7 @@ import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { ToolMessage } from "@langchain/core/messages";
+import { RemoveMessage, ToolMessage } from "@langchain/core/messages";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -28,8 +28,8 @@ You've just finished reviewing the actions taken by the Programmer Assistant, an
 or
 2. Determine that the actions taken are insufficient, and do not fully complete the user's request, and all of the individual tasks outlined in the plan.
 
-If you determine that the task is completed, you may call the \`mark_task_completed\` tool, providing your final review.
-If you determine that the task has not been fully completed, you may call the \`mark_task_incomplete\` tool, providing your review, and a list of additional actions to take which will successfully satisfy your review, and complete the task.
+If you determine that the task is completed, you may call the \`final_review_mark_task_completed\` tool, providing your final review.
+If you determine that the task has not been fully completed, you may call the \`final_review_mark_task_not_complete\` tool, providing your review, and a list of additional actions to take which will successfully satisfy your review, and complete the task.
 </primary_objective>
 
 <context>
@@ -44,8 +44,8 @@ And here are the tasks which were outlined in the plan, and completed by the Pro
 </context>
 
 <review-guidelines>
-Carefully read over all of the provided context above, and if you determine that the task has NOT been completed, call the \`mark_task_incomplete\` tool.
-Otherwise, if you determine that the task has been successfully completed, call the \`mark_task_completed\` tool.
+Carefully read over all of the provided context above, and if you determine that the task has NOT been completed, call the \`final_review_mark_task_not_complete\` tool.
+Otherwise, if you determine that the task has been successfully completed, call the \`final_review_mark_task_completed\` tool.
 </review-guidelines>`;
 
 const formatSystemPrompt = (state: ReviewerGraphState) => {
@@ -91,9 +91,11 @@ export async function finalReview(
       tool_call_id: toolCall.id ?? "",
       content: "Marked task as completed.",
     });
+    const messagesUpdate = [response, toolMessage];
     return {
-      messages: [response, toolMessage],
-      reviewerMessages: [response, toolMessage],
+      messages: messagesUpdate,
+      internalMessages: messagesUpdate,
+      reviewerMessages: messagesUpdate,
     };
   }
 
@@ -136,9 +138,16 @@ export async function finalReview(
     content: "Marked task as incomplete.",
   });
 
+  const messagesUpdate = [response, toolMessage];
+
   return {
     taskPlan: updatedTaskPlan,
-    messages: [response, toolMessage],
-    reviewerMessages: [response, toolMessage],
+    messages: messagesUpdate,
+    internalMessages: messagesUpdate,
+    // Remove all reviewer messages so that a review session after this does not
+    // have access to the previous review actions.
+    reviewerMessages: state.reviewerMessages.map(
+      (m) => new RemoveMessage({ id: m.id ?? "" }),
+    ),
   };
 }

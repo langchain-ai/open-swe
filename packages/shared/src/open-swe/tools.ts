@@ -407,7 +407,7 @@ export function createFinalReviewMarkTaskCompletedFields() {
   });
 
   return {
-    name: "mark_task_completed",
+    name: "final_review_mark_task_completed",
     schema: markTaskCompletedSchema,
     description:
       "Use this tool to mark a task as completed. This should be called if you determine that the task has been successfully completed.",
@@ -429,7 +429,7 @@ export function createFinalReviewMarkTaskNotCompleteFields() {
   });
 
   return {
-    name: "mark_task_not_complete",
+    name: "final_review_mark_task_not_complete",
     schema: markTaskNotCompleteSchema,
     description:
       "Use this tool to mark a task as not complete. This should be called if you determine that the task has not been successfully completed, and you have additional tasks the programmer should take to successfully complete the task.",

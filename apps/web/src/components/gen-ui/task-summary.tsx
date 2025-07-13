@@ -9,22 +9,22 @@ import {
   FileText,
   MinusCircle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 type TaskSummaryProps = {
   status: "loading" | "generating" | "done";
   completed?: boolean;
-  summary?: string;
   summaryText?: string;
 };
 
 export function TaskSummary({
   status,
   completed,
-  summary,
   summaryText,
 }: TaskSummaryProps) {
   const [expanded, setExpanded] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showSummary, setShowSummary] = useState(true);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -59,9 +59,9 @@ export function TaskSummary({
   return (
     <div className="border-border overflow-hidden rounded-md border">
       <div
-        className={`flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800 ${status === "done" && summary ? "cursor-pointer" : ""}`}
+        className={"flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800"}
         onClick={
-          status === "done" && summary
+          status === "done" && summaryText
             ? () => setExpanded(!expanded)
             : undefined
         }
@@ -70,25 +70,7 @@ export function TaskSummary({
         <span className="text-foreground/80 ml-2 flex-1 text-xs font-normal">
           {getStatusText()}
         </span>
-        {status === "done" && summary && (
-          <button className="text-muted-foreground hover:text-foreground">
-            {expanded ? (
-              <ChevronUp className="size-3.5" />
-            ) : (
-              <ChevronDown className="size-3.5" />
-            )}
-          </button>
-        )}
       </div>
-
-      {expanded && summary && status === "done" && (
-        <div className="border-border border-t p-2">
-          <h3 className="text-muted-foreground mb-1 text-xs font-normal">
-            Task Summary
-          </h3>
-          <p className="text-foreground/80 text-xs font-normal">{summary}</p>
-        </div>
-      )}
 
       {summaryText && status === "done" && (
         <div
@@ -110,15 +92,16 @@ export function TaskSummary({
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p
-              className={`mt-1 text-xs font-normal ${
+            <BasicMarkdownText
+              className={cn(
+                "mt-1 text-xs",
                 completed === false
                   ? "text-amber-700 dark:text-amber-300"
-                  : "text-green-700 dark:text-green-300"
-              }`}
+                  : "text-green-700 dark:text-green-300",
+              )}
             >
               {summaryText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}
