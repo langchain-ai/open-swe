@@ -67,7 +67,7 @@ When modifying files:
 * Write concise and clear code. Do not write overly verbose code
 * Any tests written should always be executed to ensure they pass.
     * If you've created a new test, ensure the plan has an explicit step to run this new test. If the plan does not include a step to run the tests, ensure you call the \`update_plan\` tool to add a step to run the tests.
-    * When running a test, ensure you include the proper flags/environment variables to exclude colors/text formatting. This can cause the output to be unreadable. For example, when running Jest tests you pass the \`--no-color\` flag. In PyTest you set the \`NO_COLOR\` environment variable (prefix the command with \`export NO_COLOR=1\`)
+    * When running a test, ensure you include the proper flags/environment variables to exclude colors/text formatting. This can cause the output to be unreadable. For example, when running Jest tests you pass the \`--no-colors\` flag. In PyTest you set the \`NO_COLOR\` environment variable (prefix the command with \`export NO_COLOR=1\`)
 * Only install trusted, well-maintained packages. If installing a new dependency which is not explicitly requested by the user, ensure it is a well-maintained, and widely used package.
     * Ensure package manager files are updated to include the new dependency.
 
