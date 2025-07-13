@@ -6,6 +6,9 @@ import {
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
 
+// After 100k tokens, summarize the conversation history.
+export const MAX_INTERNAL_TOKENS = 100_000;
+
 export function calculateConversationHistoryTokenCount(
   messages: BaseMessage[],
 ) {
@@ -27,4 +30,13 @@ export function calculateConversationHistoryTokenCount(
 
   // Estimate 1 token for every 4 characters.
   return Math.ceil(totalChars / 4);
+}
+
+export function getMessagesSinceLastSummary(
+  messages: BaseMessage[],
+): BaseMessage[] {
+  const allMessagesAfterLastSummary = messages.slice(
+    messages.findIndex((m) => m.additional_kwargs?.summary_message),
+  );
+  return allMessagesAfterLastSummary;
 }

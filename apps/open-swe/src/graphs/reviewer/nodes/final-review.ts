@@ -10,8 +10,8 @@ import {
   updateTaskPlanItems,
 } from "@open-swe/shared/open-swe/tasks";
 import {
-  createMarkTaskCompletedFields,
-  createMarkTaskIncompleteFields,
+  createFinalReviewMarkTaskCompletedFields,
+  createFinalReviewMarkTaskNotCompleteFields,
 } from "@open-swe/shared/open-swe/tools";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
@@ -64,8 +64,8 @@ export async function finalReview(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const completedTool = createMarkTaskCompletedFields();
-  const incompleteTool = createMarkTaskIncompleteFields();
+  const completedTool = createFinalReviewMarkTaskCompletedFields();
+  const incompleteTool = createFinalReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
   const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools(tools, {
