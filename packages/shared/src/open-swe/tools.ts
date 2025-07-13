@@ -384,20 +384,6 @@ export function createWriteTechnicalNotesToolFields() {
   };
 }
 
-export function createTaskSummaryToolFields() {
-  const taskSummarySchema = z.object({
-    original_task: z.string(),
-    task_summary: z.string(),
-  });
-
-  return {
-    name: "task_summary",
-    description:
-      "<not used as an actual tool call. only used as shared types between the client and agent>",
-    schema: taskSummarySchema,
-  };
-}
-
 export function createConversationHistorySummaryToolFields() {
   const conversationHistorySummarySchema = z.object({
     conversation_history_summary: z.string(),
