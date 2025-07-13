@@ -37,10 +37,12 @@ import {
   createGetURLContentToolFields,
   createFindInstancesOfToolFields,
   createWriteTechnicalNotesToolFields,
+  createConversationHistorySummaryToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -77,6 +79,12 @@ type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
   typeof writeTechnicalNotesTool.schema
+>;
+
+const conversationHistorySummaryTool =
+  createConversationHistorySummaryToolFields();
+type ConversationHistorySummaryToolArgs = z.infer<
+  typeof conversationHistorySummaryTool.schema
 >;
 
 function CustomComponent({
@@ -324,6 +332,24 @@ export function AssistantMessage({
   const writeTechnicalNotesToolCall = message
     ? aiToolCalls.find((tc) => tc.name === writeTechnicalNotesTool.name)
     : undefined;
+
+  const conversationHistorySummaryToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === conversationHistorySummaryTool.name)
+    : undefined;
+
+  // Check if this is a conversation history summary message
+  if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
+    const args =
+      conversationHistorySummaryToolCall.args as ConversationHistorySummaryToolArgs;
+
+    return (
+      <div className="flex flex-col gap-4">
+        <ConversationHistorySummary
+          summary={args.conversation_history_summary}
+        />
+      </div>
+    );
+  }
 
   // We can be sure that if either task status tool call is present, it will be the
   // only tool call/result we need to render for this message.
