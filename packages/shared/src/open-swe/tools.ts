@@ -143,7 +143,12 @@ export function createRgToolFields(targetRepository: TargetRepository) {
 const _tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
 export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
 
-export function formatRgCommand(cmd: RipgrepCommand): string[] {
+export function formatRgCommand(
+  cmd: RipgrepCommand,
+  options?: {
+    excludeRequiredFlags?: boolean;
+  },
+): string[] {
   const args = ["rg"];
 
   // Always include these flags
@@ -166,8 +171,10 @@ export function formatRgCommand(cmd: RipgrepCommand): string[] {
     args.push(...filteredFlags);
   }
 
-  // Add the required flags
-  args.push(...requiredFlags);
+  if (!options?.excludeRequiredFlags) {
+    // Add the required flags
+    args.push(...requiredFlags);
+  }
 
   if (cmd.pattern) {
     args.push(cmd.pattern);

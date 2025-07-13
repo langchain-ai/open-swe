@@ -443,11 +443,14 @@ function ActionItem(props: ActionItemProps) {
       let formattedRgCommand = "";
       try {
         formattedRgCommand =
-          formatRgCommand({
-            pattern: props.pattern,
-            paths: props.paths,
-            flags: props.flags,
-          })?.join(" ") ?? "";
+          formatRgCommand(
+            {
+              pattern: props.pattern,
+              paths: props.paths,
+              flags: props.flags,
+            },
+            { excludeRequiredFlags: true },
+          )?.join(" ") ?? "";
       } catch {
         // no-op
       }

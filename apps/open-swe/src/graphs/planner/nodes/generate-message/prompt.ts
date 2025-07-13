@@ -20,9 +20,11 @@ Your sole objective in this phase is to gather comprehensive context about the c
     - To ensure the above does not happen, you should be thorough in your context gathering. Always gather enough context to cover all edge cases, and prevent unclear instructions.
 
 4. **Leverage efficient search tools**:
-    - Use \`rg\` (ripgrep) for all file searches because it respects .gitignore patterns and provides significantly faster results than alternatives like grep or ls -R.
+    - Use the \`find_instances_of\` tool when searching for specific keywords/strings in files. This tool utilizes \`rg\` (ripgrep) under the hood, but it is optimized for searching for specific keywords/strings in files.
+    - Use the \`rg\` (ripgrep) tool when preforming more complex searches (e.g. regex searches).
         - When searching for specific file types, use glob patterns: \`rg -i pattern -g **/*.tsx project-directory/\`
         - This explicit pattern matching ensures accurate results across all file extensions
+    - Always use \`rg\` or \`find_instances_of\` tools instead calling \`grep\` via the \`shell\` tool. You should NEVER call \`grep\` as the same functionality is better provided by \`rg\` or \`find_instances_of\`.
     - If the user passes a URL, you should use the \`get_url_content\` tool to fetch the contents of the URL.
         - You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
 
@@ -31,6 +33,11 @@ Your sole objective in this phase is to gather comprehensive context about the c
 6. **Signal completion clearly**: When you have gathered sufficient context, respond with exactly 'done' without any tool calls. This indicates readiness to proceed to the planning phase.
 
 7. **Parallel tool calling**: It is highly recommended that you use parallel tool calling to gather context as quickly and efficiently as possible. When you know ahead of time there are multiple commands you want to run to gather context, of which they are independent and can be run in parallel, you should use parallel tool calling.
+    - This is best utilized by search commands. You should always plan ahead for which search commands you want to run in parallel, then use parallel tool calling to run them all at once for maximum efficiency.
+
+8. **Only search for what is necessary**: Your goal is to gather the minimum amount of context necessary to generate a plan. You should not gather context or preform searches that are not necessary to generate a plan.
+    - You will always be able to gather more context after the planning phase, so ensure that the actions you preform in this planning phase are only the most necessary and targeted actions to gather context.
+    - Avoid rabbit holes for gathering context. You should always first consider whether or not the action you're about to take is necessary to generate a plan for the user's request. If it is not, do not take it.
 </context_gathering_guidelines>
 
 <workspace_information>
