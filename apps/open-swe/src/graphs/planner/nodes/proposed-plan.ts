@@ -103,7 +103,8 @@ async function startProgrammerRun(input: {
       },
       ifNotExists: "create",
       streamResumable: true,
-      streamMode: ["values", "messages", "custom"],
+      streamSubgraphs: true,
+      streamMode: ["values", "messages", "custom", "events"],
     },
   );
 
@@ -146,6 +147,7 @@ export async function interruptProposedPlan(
     branchName: state.branchName,
     targetRepository: state.targetRepository,
     githubIssueId: state.githubIssueId,
+    internalMessages: state.messages,
   };
 
   if (state.autoAcceptPlan) {
