@@ -14,12 +14,11 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createRgTool } from "../../../tools/search.js";
+import { createSearchTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
-import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
@@ -41,18 +40,16 @@ export async function takeActions(
   }
 
   const shellTool = createShellTool(state);
-  const rgTool = createRgTool(state);
+  const searchTool = createSearchTool(state);
   const plannerNotesTool = createPlannerNotesTool();
-  const findInstancesOfTool = createFindInstancesOfTool(state);
   const getURLContentTool = createGetURLContentTool();
   const mcpTools = await getMcpTools(config);
 
   const allTools = [
     shellTool,
-    rgTool,
+    searchTool,
     plannerNotesTool,
     getURLContentTool,
-    findInstancesOfTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

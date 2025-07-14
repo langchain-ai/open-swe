@@ -41,7 +41,6 @@ import {
   createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
-  createFindInstancesOfToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
 } from "@open-swe/shared/open-swe/tools";
@@ -62,8 +61,8 @@ const markTaskNotCompletedTool = createMarkTaskNotCompletedToolFields();
 type MarkTaskNotCompletedToolArgs = z.infer<
   typeof markTaskNotCompletedTool.schema
 >;
-const rgTool = createSearchToolFields(dummyRepo);
-type RgToolArgs = z.infer<typeof rgTool.schema>;
+const searchTool = createSearchToolFields(dummyRepo);
+type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
@@ -88,9 +87,6 @@ type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-
-const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
-type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
@@ -198,14 +194,21 @@ export function mapToolMessageToActionStepProps(
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
     };
-  } else if (toolCall?.name === rgTool.name) {
-    const args = toolCall.args as RgToolArgs;
+  } else if (toolCall?.name === searchTool.name) {
+    const args = toolCall.args as SearchToolArgs;
     return {
-      actionType: "rg",
+      actionType: "search",
       status,
       success,
       pattern: args.pattern || "",
-      paths: args.paths || [],
+      regex: args.regex || false,
+      case_sensitive: args.case_sensitive || false,
+      context_lines: args.context_lines || 0,
+      max_results: args.max_results || 0,
+      follow_symlinks: args.follow_symlinks || false,
+      exclude_files: args.exclude_files || "",
+      include_files: args.include_files || "",
+      file_types: args.file_types || [],
       output: getContentString(message.content),
       reasoningText,
     };
@@ -236,24 +239,6 @@ export function mapToolMessageToActionStepProps(
       status,
       success,
       url: args.url || "",
-      output: getContentString(message.content),
-      reasoningText,
-    };
-  } else if (toolCall?.name === findInstancesOfTool.name) {
-    const args = toolCall.args as FindInstancesOfToolArgs;
-    // case_sensitive and match_word both default to true.
-    const caseSensitive =
-      args.case_sensitive === undefined ? true : args.case_sensitive;
-    const matchWord = args.match_word === undefined ? true : args.match_word;
-    return {
-      actionType: "find_instances_of",
-      status,
-      success,
-      query: args.query || "",
-      case_sensitive: caseSensitive,
-      match_word: matchWord,
-      include_files: args.include_files,
-      exclude_files: args.exclude_files,
       output: getContentString(message.content),
       reasoningText,
     };
@@ -321,11 +306,10 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === rgTool.name ||
+          tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
-          tc.name === getURLContentTool.name ||
-          tc.name === findInstancesOfTool.name,
+          tc.name === getURLContentTool.name,
       )
     : [];
 
@@ -551,7 +535,7 @@ export function AssistantMessage({
       );
 
       const isShellTool = toolCall.name === shellTool.name;
-      const isRgTool = toolCall.name === rgTool.name;
+      const isSearchTool = toolCall.name === searchTool.name;
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
 
@@ -561,13 +545,20 @@ export function AssistantMessage({
           correspondingToolResult,
           threadMessages,
         );
-      } else if (isRgTool) {
-        const args = toolCall.args as RgToolArgs;
+      } else if (isSearchTool) {
+        const args = toolCall.args as SearchToolArgs;
         return {
-          actionType: "rg",
+          actionType: "search",
           status: "generating",
           pattern: args?.pattern || "",
-          paths: args?.paths || [],
+          regex: args?.regex || false,
+          case_sensitive: args?.case_sensitive || false,
+          context_lines: args?.context_lines || 0,
+          max_results: args?.max_results || 0,
+          follow_symlinks: args?.follow_symlinks || false,
+          exclude_files: args?.exclude_files || [],
+          include_files: args?.include_files || [],
+          file_types: args?.file_types || [],
           output: "",
         } as ActionItemProps;
       } else if (isInstallDependenciesTool) {
@@ -592,23 +583,6 @@ export function AssistantMessage({
           actionType: "get_url_content",
           status: "generating",
           url: args?.url || "",
-          output: "",
-        } as ActionItemProps;
-      } else if (toolCall.name === findInstancesOfTool.name) {
-        const args = toolCall.args as FindInstancesOfToolArgs;
-        // case_sensitive and match_word both default to true.
-        const caseSensitive =
-          args.case_sensitive === undefined ? true : args.case_sensitive;
-        const matchWord =
-          args.match_word === undefined ? true : args.match_word;
-        return {
-          actionType: "find_instances_of",
-          status: "generating",
-          query: args?.query || "",
-          case_sensitive: caseSensitive,
-          match_word: matchWord,
-          include_files: args?.include_files,
-          exclude_files: args?.exclude_files,
           output: "",
         } as ActionItemProps;
       } else {

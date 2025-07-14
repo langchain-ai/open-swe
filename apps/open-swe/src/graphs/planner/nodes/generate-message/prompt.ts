@@ -24,7 +24,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
         - It's significantly faster results than alternatives like grep or ls -R.
         - When searching for specific file types, use glob patterns
         - The pattern field supports both basic strings, and regex
-    - Always use the \`search\` tools instead calling \`grep\` via the \`shell\` tool. You should NEVER call \`grep\` as the same functionality is better provided by \`rg\` or \`find_instances_of\`.
+    - Always use the \`search\` tools instead calling \`grep\` via the \`shell\` tool. You should NEVER call \`grep\` as the same functionality is better provided by \`search\`.
     - If the user passes a URL, you should use the \`get_url_content\` tool to fetch the contents of the URL.
         - You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
 

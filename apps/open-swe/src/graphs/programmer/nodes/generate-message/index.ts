@@ -26,7 +26,7 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createRgTool } from "../../../../tools/search.js";
+import { createSearchTool } from "../../../../tools/search.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -124,7 +124,7 @@ export async function generateAction(
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createRgTool(state),
+    createSearchTool(state),
     createShellTool(state),
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),

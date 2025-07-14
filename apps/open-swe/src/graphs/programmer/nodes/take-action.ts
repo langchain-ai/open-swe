@@ -24,7 +24,7 @@ import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import { createRgTool } from "../../../tools/search.js";
+import { createSearchTool } from "../../../tools/search.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 
@@ -42,7 +42,7 @@ export async function takeAction(
 
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
-  const rgTool = createRgTool(state);
+  const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const getURLContentTool = createGetURLContentTool();
 
@@ -50,7 +50,7 @@ export async function takeAction(
 
   const allTools = [
     shellTool,
-    rgTool,
+    searchTool,
     installDependenciesTool,
     applyPatchTool,
     getURLContentTool,

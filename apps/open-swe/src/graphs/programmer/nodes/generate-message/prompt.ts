@@ -56,8 +56,10 @@ You are currently executing a specific task from a pre-generated plan. You have 
 
 ### Tool Usage Best Practices
 
-* **Search**: Use the \`find_instances_of\` tool when searching for specific keywords/strings in files. When performing more complex searches (e.g. regex searches), use the \`rg\` tool (ripgrep) (not grep/ls -R) with glob patterns (e.g., \`rg -i pattern -g **/*.tsx\`).
-    * Both \`find_instances_of\` and \`rg\` are optimized for searching files, and should be used in place of \`grep\` or \`ls -R\`.
+* **Search**: Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+    * It's significantly faster results than alternatives like grep or ls -R.
+    * When searching for specific file types, use glob patterns
+    * The pattern field supports both basic strings, and regex
 * **Dependencies**: Use the correct package manager; skip if installation fails
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
 * **History**: Use \`git log\` and \`git blame\` for additional context when needed
@@ -86,6 +88,7 @@ When modifying files:
     * When running a test, ensure you include the proper flags/environment variables to exclude colors/text formatting. This can cause the output to be unreadable. For example, when running Jest tests you pass the \`--no-colors\` flag. In PyTest you set the \`NO_COLOR\` environment variable (prefix the command with \`export NO_COLOR=1\`)
 * Only install trusted, well-maintained packages. If installing a new dependency which is not explicitly requested by the user, ensure it is a well-maintained, and widely used package.
     * Ensure package manager files are updated to include the new dependency.
+* If a command you run fails (e.g. a test, build, lint, etc.), and you make changes to fix the issue, ensure you always re-run the command after making the changes to ensure the fix was successful.
 
 ### Communication Guidelines
 

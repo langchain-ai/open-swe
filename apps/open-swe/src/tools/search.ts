@@ -50,7 +50,7 @@ export function createSearchTool(
         } else if (response.exitCode > 1) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Failed to run rg command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
+            `Failed to run search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
           );
         }
 

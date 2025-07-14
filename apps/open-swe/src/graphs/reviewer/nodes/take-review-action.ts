@@ -39,11 +39,7 @@ export async function takeReviewerActions(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const allTools = [
-    shellTool,
-    searchTool,
-    installDependenciesTool,
-  ];
+  const allTools = [shellTool, searchTool, installDependenciesTool];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
