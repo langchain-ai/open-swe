@@ -127,7 +127,14 @@ ls.describe(DATASET_NAME, () => {
                 }
               : error,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: { issues: [], error: "Error in manager run" },
+            mypy: { issues: [], error: "Error in manager run" },
+          },
+        };
       }
 
       const managerState = managerRun as unknown as ManagerGraphState;
@@ -137,7 +144,20 @@ ls.describe(DATASET_NAME, () => {
         logger.info("Agent did not create a planner session", {
           thread_id: threadId,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: {
+              issues: [],
+              error: "Agent did not create a planner session",
+            },
+            mypy: {
+              issues: [],
+              error: "Agent did not create a planner session",
+            },
+          },
+        };
       }
 
       let plannerRun;
@@ -159,7 +179,14 @@ ls.describe(DATASET_NAME, () => {
                 }
               : error,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: { issues: [], error: "Error joining planner run" },
+            mypy: { issues: [], error: "Error joining planner run" },
+          },
+        };
       }
 
       // Type-safe access to planner run state
@@ -170,7 +197,20 @@ ls.describe(DATASET_NAME, () => {
         logger.info("Agent did not create a programmer session", {
           thread_id: threadId,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: {
+              issues: [],
+              error: "Agent did not create a programmer session",
+            },
+            mypy: {
+              issues: [],
+              error: "Agent did not create a programmer session",
+            },
+          },
+        };
       }
 
       let programmerRun;
@@ -195,7 +235,14 @@ ls.describe(DATASET_NAME, () => {
                 }
               : error,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: { issues: [], error: "Error joining programmer run" },
+            mypy: { issues: [], error: "Error joining programmer run" },
+          },
+        }; // instead of skipping, we should award 0 points
       }
 
       const programmerState = programmerRun as unknown as GraphState;
@@ -205,7 +252,14 @@ ls.describe(DATASET_NAME, () => {
         logger.info("Agent did not create a branch", {
           thread_id: threadId,
         });
-        return; // instead of skipping, we should award 0 points
+        return {
+          ruffScore: 0,
+          mypyScore: 0,
+          details: {
+            ruff: { issues: [], error: "Agent did not create a branch" },
+            mypy: { issues: [], error: "Agent did not create a branch" },
+          },
+        };
       }
 
       logger.info("Agent completed. Created branch:", {
@@ -229,6 +283,7 @@ ls.describe(DATASET_NAME, () => {
         thread_id: threadId,
         evalResult,
       });
+      return evalResult;
     },
     7200_000,
   );
