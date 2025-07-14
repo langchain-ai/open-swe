@@ -39,12 +39,12 @@ function lastMessagesMissingToolCalls(
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"generate-conclusion" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
+ * @returns {"reviewer-subgraph" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
  */
 function routeGeneratedAction(
   state: GraphState,
 ):
-  | "generate-conclusion"
+  | "reviewer-subgraph"
   | "take-action"
   | "request-help"
   | "generate-action"
@@ -81,8 +81,8 @@ function routeGeneratedAction(
     return "generate-action";
   }
 
-  // No tool calls, route to generate conclusion
-  return "generate-conclusion";
+  // No tool calls, route to reviewer subgraph
+  return "reviewer-subgraph";
 }
 
 /**
@@ -91,11 +91,11 @@ function routeGeneratedAction(
  */
 function routeGenerateActionsOrEnd(
   state: GraphState,
-): "open-pr" | "generate-action" {
+): "generate-conclusion" | "generate-action" {
   const activePlanItems = getActivePlanItems(state.taskPlan);
   const allCompleted = activePlanItems.every((p) => p.completed);
   if (allCompleted) {
-    return "open-pr";
+    return "generate-conclusion";
   }
 
   return "generate-action";
@@ -109,7 +109,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   })
   .addNode("update-plan", updatePlan)
   .addNode("progress-plan-step", progressPlanStep, {
-    ends: ["summarize-history", "generate-action", "generate-conclusion"],
+    ends: ["summarize-history", "generate-action", "reviewer-subgraph"],
   })
   .addNode("generate-conclusion", generateConclusion)
   .addNode("request-help", requestHelp, {
@@ -124,7 +124,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
-    "generate-conclusion",
+    "reviewer-subgraph",
     "update-plan",
     "generate-action",
   ])
@@ -132,10 +132,11 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addEdge("generate-conclusion", "reviewer-subgraph")
   .addEdge("diagnose-error", "generate-action")
   .addConditionalEdges("reviewer-subgraph", routeGenerateActionsOrEnd, [
-    "open-pr",
+    "generate-conclusion",
     "generate-action",
   ])
   .addEdge("summarize-history", "generate-action")
+  .addEdge("generate-conclusion", "open-pr")
   .addEdge("open-pr", END);
 
 // Zod types are messed up

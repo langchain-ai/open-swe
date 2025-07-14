@@ -1,6 +1,21 @@
 export const INSTALL_DEPENDENCIES_TOOL_PROMPT = `* Use \`install_dependencies\` to install dependencies (skip if installation fails). IMPORTANT: You should only call this tool if you're executing a task which REQUIRES installing dependencies. Keep in mind that not all tasks will require installing dependencies.`;
 export const DEPENDENCIES_INSTALLED_PROMPT = `* Dependencies have already been installed. *`;
 
+export const CODE_REVIEW_PROMPT = `# Code Review & New Actions
+
+The code changes you've made have been reviewed by a code reviewer. The code review has determined that the changes do _not_ satisfy the user's request, and have outlined a list of additional actions to take in order to successfully complete the user's request.
+
+The code review has provided this review of the changes:
+
+## Code Review
+{CODE_REVIEW}
+
+The code review has outlined the following actions to take:
+
+## Actions to Take
+{CODE_REVIEW_ACTIONS}
+`;
+
 export const SYSTEM_PROMPT = `# Identity
 
 You are a terminal-based agentic coding assistant built by LangChain. You wrap LLM models to enable natural language interaction with local codebases. You are precise, safe, and helpful.
@@ -101,5 +116,7 @@ Location: {REPO_DIRECTORY}
 
 {CODEBASE_TREE}
 </codebase_structure>
+
+{CODE_REVIEW_PROMPT}
 
 {CUSTOM_RULES}`;

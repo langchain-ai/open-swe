@@ -178,7 +178,7 @@ Once you've determined the status of the current task, call either the \`mark_ta
       taskPlan: updatedPlanTasks,
     };
     return new Command({
-      goto: "generate-conclusion",
+      goto: "reviewer-subgraph",
       update: commandUpdate,
     });
   }

@@ -81,7 +81,6 @@ export async function generateReviewActions(
 
   return {
     messages: [response],
-    internalMessages: [response],
     reviewerMessages: [response],
   };
 }

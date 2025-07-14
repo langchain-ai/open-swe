@@ -10,15 +10,15 @@ import {
   updateTaskPlanItems,
 } from "@open-swe/shared/open-swe/tasks";
 import {
-  createFinalReviewMarkTaskCompletedFields,
-  createFinalReviewMarkTaskNotCompleteFields,
+  createCodeReviewMarkTaskCompletedFields,
+  createCodeReviewMarkTaskNotCompleteFields,
 } from "@open-swe/shared/open-swe/tools";
 import { loadModel, Task } from "../../../utils/load-model.js";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { RemoveMessage, ToolMessage } from "@langchain/core/messages";
+import { ToolMessage } from "@langchain/core/messages";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -28,8 +28,8 @@ You've just finished reviewing the actions taken by the Programmer Assistant, an
 or
 2. Determine that the actions taken are insufficient, and do not fully complete the user's request, and all of the individual tasks outlined in the plan.
 
-If you determine that the task is completed, you may call the \`final_review_mark_task_completed\` tool, providing your final review.
-If you determine that the task has not been fully completed, you may call the \`final_review_mark_task_not_complete\` tool, providing your review, and a list of additional actions to take which will successfully satisfy your review, and complete the task.
+If you determine that the task is completed, you may call the \`{COMPLETE_TOOL_NAME}\` tool, providing your final review.
+If you determine that the task has not been fully completed, you may call the \`{NOT_COMPLETE_TOOL_NAME}\` tool, providing your review, and a list of additional actions to take which will successfully satisfy your review, and complete the task.
 </primary_objective>
 
 <context>
@@ -44,28 +44,33 @@ And here are the tasks which were outlined in the plan, and completed by the Pro
 </context>
 
 <review-guidelines>
-Carefully read over all of the provided context above, and if you determine that the task has NOT been completed, call the \`final_review_mark_task_not_complete\` tool.
-Otherwise, if you determine that the task has been successfully completed, call the \`final_review_mark_task_completed\` tool.
+Carefully read over all of the provided context above, and if you determine that the task has NOT been completed, call the \`{NOT_COMPLETE_TOOL_NAME}\` tool.
+Otherwise, if you determine that the task has been successfully completed, call the \`{COMPLETE_TOOL_NAME}\` tool.
 </review-guidelines>`;
 
 const formatSystemPrompt = (state: ReviewerGraphState) => {
+  const markCompletedToolName = createCodeReviewMarkTaskCompletedFields().name;
+  const markNotCompleteToolName =
+    createCodeReviewMarkTaskNotCompleteFields().name;
   const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
   const messagesString = state.reviewerMessages
     .map(getMessageString)
     .join("\n");
-  return SYSTEM_PROMPT.replace("{REVIEW_ACTIONS}", messagesString)
-    .replace("{USER_REQUEST}", userRequest)
-    .replace("{PLANNED_TASKS}", tasksString);
+  return SYSTEM_PROMPT.replaceAll("{REVIEW_ACTIONS}", messagesString)
+    .replaceAll("{USER_REQUEST}", userRequest)
+    .replaceAll("{PLANNED_TASKS}", tasksString)
+    .replaceAll("{COMPLETE_TOOL_NAME}", markCompletedToolName)
+    .replaceAll("{NOT_COMPLETE_TOOL_NAME}", markNotCompleteToolName);
 };
 
 export async function finalReview(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const completedTool = createFinalReviewMarkTaskCompletedFields();
-  const incompleteTool = createFinalReviewMarkTaskNotCompleteFields();
+  const completedTool = createCodeReviewMarkTaskCompletedFields();
+  const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
   const model = await loadModel(config, Task.PLANNER);
   const modelWithTools = model.bindTools(tools, {
@@ -108,10 +113,12 @@ export async function finalReview(
     .additional_actions;
   const activeTask = getActiveTask(state.taskPlan);
   const activePlanItems = getActivePlanItems(state.taskPlan);
+  const completedPlanItems = activePlanItems.filter((p) => p.completed);
   const newPlanItemsList: PlanItem[] = [
-    ...activePlanItems,
+    // Only include completed plan items from the previous task plan in the update.
+    ...completedPlanItems,
     ...newActions.map((a, index) => ({
-      index: activePlanItems.length + index,
+      index: completedPlanItems.length + index,
       plan: a,
       completed: false,
       summary: undefined,
@@ -144,10 +151,5 @@ export async function finalReview(
     taskPlan: updatedTaskPlan,
     messages: messagesUpdate,
     internalMessages: messagesUpdate,
-    // Remove all reviewer messages so that a review session after this does not
-    // have access to the previous review actions.
-    reviewerMessages: state.reviewerMessages.map(
-      (m) => new RemoveMessage({ id: m.id ?? "" }),
-    ),
   };
 }

@@ -37,8 +37,8 @@ import {
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
-  createFinalReviewMarkTaskCompletedFields,
-  createFinalReviewMarkTaskNotCompleteFields,
+  createCodeReviewMarkTaskCompletedFields,
+  createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
   createFindInstancesOfToolFields,
@@ -73,12 +73,12 @@ type InstallDependenciesToolArgs = z.infer<
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 const markFinalReviewTaskCompletedTool =
-  createFinalReviewMarkTaskCompletedFields();
+  createCodeReviewMarkTaskCompletedFields();
 type MarkFinalReviewTaskCompletedToolArgs = z.infer<
   typeof markFinalReviewTaskCompletedTool.schema
 >;
 const markFinalReviewTaskIncompleteTool =
-  createFinalReviewMarkTaskNotCompleteFields();
+  createCodeReviewMarkTaskNotCompleteFields();
 type MarkFinalReviewTaskIncompleteToolArgs = z.infer<
   typeof markFinalReviewTaskIncompleteTool.schema
 >;

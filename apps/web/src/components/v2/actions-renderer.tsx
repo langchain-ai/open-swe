@@ -139,9 +139,7 @@ function isNodeEndMessagesUpdate(
   );
 }
 
-function isNodeEndCommandUpdate(
-  data: unknown,
-): data is {
+function isNodeEndCommandUpdate(data: unknown): data is {
   output: { lg_name: string; goto: string; update: ManagerGraphUpdate };
 } {
   return !!(

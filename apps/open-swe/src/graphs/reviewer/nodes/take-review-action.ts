@@ -183,7 +183,6 @@ ${tc.content}`,
 
   const commandUpdate: ReviewerGraphUpdate = {
     messages: toolCallResults,
-    internalMessages: toolCallResults,
     reviewerMessages: toolCallResults,
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {

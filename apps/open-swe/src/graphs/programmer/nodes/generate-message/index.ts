@@ -18,6 +18,7 @@ import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import {
+  CODE_REVIEW_PROMPT,
   DEPENDENCIES_INSTALLED_PROMPT,
   INSTALL_DEPENDENCIES_TOOL_PROMPT,
   SYSTEM_PROMPT,
@@ -29,8 +30,48 @@ import { createRgTool } from "../../../../tools/rg.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
+import { BaseMessage, isAIMessage } from "@langchain/core/messages";
+import { createCodeReviewMarkTaskNotCompleteFields } from "@open-swe/shared/open-swe/tools";
+import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
+
+const formatCodeReviewPrompt = (
+  review: string,
+  newActions: string[],
+): string => {
+  return CODE_REVIEW_PROMPT.replaceAll("{CODE_REVIEW}", review).replaceAll(
+    "{CODE_REVIEW_ACTIONS}",
+    newActions.map((a) => `* ${a}`).join("\n"),
+  );
+};
+
+const getCodeReviewFields = (
+  messages: BaseMessage[],
+): { review: string; newActions: string[] } | null => {
+  const codeReviewToolFields = createCodeReviewMarkTaskNotCompleteFields();
+  const codeReviewMessage = messages
+    .filter(isAIMessage)
+    .findLast(
+      (m) =>
+        m.tool_calls?.length &&
+        m.tool_calls.some((tc) => tc.name === codeReviewToolFields.name),
+    );
+  const codeReviewToolCall = codeReviewMessage?.tool_calls?.find(
+    (tc) => tc.name === codeReviewToolFields.name,
+  );
+  if (!codeReviewMessage || !codeReviewToolCall) return null;
+  const codeReviewArgs = codeReviewToolCall.args as z.infer<
+    typeof codeReviewToolFields.schema
+  >;
+  if (!codeReviewArgs.review || !codeReviewArgs.additional_actions?.length)
+    return null;
+
+  return {
+    review: codeReviewArgs.review,
+    newActions: codeReviewArgs.additional_actions,
+  };
+};
 
 const formatPrompt = (state: GraphState): string => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
@@ -38,6 +79,7 @@ const formatPrompt = (state: GraphState): string => {
   const currentPlanItem = activePlanItems
     .filter((p) => !p.completed)
     .sort((a, b) => a.index - b.index)[0];
+  const codeReview = getCodeReviewFields(state.internalMessages);
   return SYSTEM_PROMPT.replaceAll(
     "{PLAN_PROMPT_WITH_SUMMARIES}",
     formatPlanPrompt(getActivePlanItems(state.taskPlan), {
@@ -65,7 +107,13 @@ const formatPrompt = (state: GraphState): string => {
         ? INSTALL_DEPENDENCIES_TOOL_PROMPT
         : DEPENDENCIES_INSTALLED_PROMPT,
     )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replaceAll(
+      "{CODE_REVIEW_PROMPT}",
+      codeReview
+        ? formatCodeReviewPrompt(codeReview.review, codeReview.newActions)
+        : "",
+    );
 };
 
 export async function generateAction(
