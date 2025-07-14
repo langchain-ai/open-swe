@@ -66,7 +66,9 @@ export function LoadingActionsCard() {
           </div>
         </div>
       </CardHeader>
-      <LoadingActionsCardContent />
+      <div className="p-3">
+        <LoadingActionsCardContent />
+      </div>
     </Card>
   );
 }

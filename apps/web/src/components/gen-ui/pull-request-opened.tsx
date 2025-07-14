@@ -38,7 +38,9 @@ export function PullRequestOpened({
           <div className="h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600" />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />;
+        return (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
+        );
       case "done":
         return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
     }
@@ -63,7 +65,7 @@ export function PullRequestOpened({
 
   return (
     <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
-      <div className="flex items-center border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-2">
+      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
         <GitPullRequest className="mr-2 h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
         <div className="flex-1">
           {title && status === "done" && (
@@ -114,7 +116,7 @@ export function PullRequestOpened({
       </div>
 
       {expanded && description && status === "done" && (
-        <div className="border-t border-gray-200 dark:border-gray-700 p-2 bg-white dark:bg-gray-900">
+        <div className="border-t border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
           <h3 className="mb-1 text-xs font-normal text-gray-500 dark:text-gray-400">
             Description
           </h3>
