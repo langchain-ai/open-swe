@@ -19,6 +19,7 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.test\\.ts$ --testPathIgnorePatterns=\\.int\\.test\\.ts$",
     "test:int": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.int\\.test\\.ts$",
     "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000",
+    "eval:single": "NODE_OPTIONS=--experimental-vm-modules yarn run vitest --config ls.vitest.config.ts --run",
     "postinstall": "turbo build"
   },
   "dependencies": {
@@ -63,7 +64,8 @@
     "ts-jest": "^29.1.0",
     "turbo": "^2.5.0",
     "typescript": "~5.7.2",
-    "typescript-eslint": "^8.22.0"
+    "typescript-eslint": "^8.22.0",
+    "vitest": "^3.2.3"
   },
   "packageManager": "yarn@3.5.1"
 }

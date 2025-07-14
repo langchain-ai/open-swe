@@ -19,6 +19,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  GITHUB_PAT,
   DEFAULT_MCP_SERVERS,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
@@ -433,6 +434,11 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_PAT]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
   mcpServers: {
     x_open_swe_ui_config: {
       type: "json",
@@ -627,6 +633,14 @@ export const GraphConfiguration = z.object({
     .string()
     .optional()
     .langgraph.metadata(GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME]),
+  /**
+   * GitHub Personal Access Token. Used for simpler authentication in environments like evals
+   * where GitHub App installation tokens are not available or needed.
+   */
+  [GITHUB_PAT]: z
+    .string()
+    .optional()
+    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_PAT]),
   /**
    * Custom MCP servers configuration as JSON string. Merges with default servers.
    * @default Default LangGraph docs MCP server
