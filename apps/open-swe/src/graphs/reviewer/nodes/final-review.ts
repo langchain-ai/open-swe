@@ -44,6 +44,9 @@ And here are the tasks which were outlined in the plan, and completed by the Pro
 </context>
 
 <review-guidelines>
+If you determine that the task is not completed, keep the following in mind when generating your review:
+- Formatting/linting scripts should always be executed last, since any changes made after them could cause the codebase to no longer be properly formatted/linted.
+
 Carefully read over all of the provided context above, and if you determine that the task has NOT been completed, call the \`{NOT_COMPLETE_TOOL_NAME}\` tool.
 Otherwise, if you determine that the task has been successfully completed, call the \`{COMPLETE_TOOL_NAME}\` tool.
 </review-guidelines>`;

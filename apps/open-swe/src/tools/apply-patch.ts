@@ -25,9 +25,10 @@ async function applyPatchWithGit(
   workDir: string,
   diffContent: string,
 ): Promise<{ success: boolean; output: string }> {
+  let tempDir = "";
   try {
     // Create a temporary file to store the diff
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "git-patch-"));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "git-patch-"));
     const tempPatchFile = path.join(tempDir, "patch.diff");
 
     // Write the diff to the temporary file
@@ -40,9 +41,6 @@ async function applyPatchWithGit(
       {},
       30, // 30 seconds timeout
     );
-
-    // Clean up the temporary file
-    await fs.rm(tempDir, { recursive: true, force: true });
 
     if (response.exitCode !== 0) {
       return {
@@ -63,6 +61,20 @@ async function applyPatchWithGit(
           ? error.message
           : "Unknown error applying patch with git",
     };
+  } finally {
+    // Clean up the temporary file after git apply has completed
+    if (tempDir) {
+      try {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        logger.warn(`Failed to clean up temporary directory: ${tempDir}`, {
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
+      }
+    }
   }
 }
 

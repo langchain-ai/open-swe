@@ -21,6 +21,8 @@ import {
   formatCodeReviewPrompt,
   getCodeReviewFields,
 } from "../../../../utils/review.js";
+import { BaseMessage } from "@langchain/core/messages";
+import { getMessageString } from "../../../../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
@@ -48,7 +50,7 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
     )
     .replaceAll("{USER_REQUEST}", userRequest)
     .replaceAll(
-      "PREVIOUS_REVIEW_PROMPT",
+      "{PREVIOUS_REVIEW_PROMPT}",
       codeReview
         ? formatCodeReviewPrompt(PREVIOUS_REVIEW_PROMPT, {
             review: codeReview.review,
@@ -56,6 +58,15 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
           })
         : "",
     );
+}
+
+function formatUserConversationHistoryMessage(messages: BaseMessage[]): string {
+  return `Here is the full conversation history of the programmer. This includes all of the actions taken by the programmer, as well as any user input.
+If the history has been truncated, it is because the conversation was too long. In this case, you should only consider the most recent messages.
+
+<conversation_history>
+${messages.map(getMessageString).join("\n")}
+</conversation_history>`;
 }
 
 export async function generateReviewActions(
@@ -75,8 +86,12 @@ export async function generateReviewActions(
 
   const response = await modelWithTools.invoke([
     {
-      role: "user",
+      role: "system",
       content: formatSystemPrompt(state),
+    },
+    {
+      role: "user",
+      content: formatUserConversationHistoryMessage(state.internalMessages),
     },
     ...state.reviewerMessages,
   ]);

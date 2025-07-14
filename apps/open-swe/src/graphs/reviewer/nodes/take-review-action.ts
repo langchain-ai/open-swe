@@ -15,8 +15,8 @@ import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createSearchTool } from "../../../tools/search.js";
 import {
+  checkoutBranchAndCommit,
   getChangedFilesStatus,
-  stashAndClearChanges,
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
@@ -124,31 +124,21 @@ export async function takeReviewerActions(
     return toolMessage;
   });
 
-  let toolCallResults = await Promise.all(toolCallResultsPromise);
+  const toolCallResults = await Promise.all(toolCallResultsPromise);
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
-  if (changedFiles?.length > 0) {
-    logger.warn(
-      "Changes found in the codebase after taking action. Reverting.",
+  let branchName: string | undefined = state.branchName;
+  if (changedFiles.length > 0) {
+    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+      changedFiles,
+    });
+    branchName = await checkoutBranchAndCommit(
+      config,
+      state.targetRepository,
+      sandbox,
       {
-        changedFiles,
+        branchName,
       },
-    );
-    await stashAndClearChanges(repoPath, sandbox);
-
-    // Rewrite the tool call contents to include a changed files warning.
-    toolCallResults = toolCallResults.map(
-      (tc) =>
-        new ToolMessage({
-          ...tc,
-          content: `**WARNING**: THIS TOOL, OR A PREVIOUS TOOL HAS CHANGED FILES IN THE REPO.
-Remember that you are only permitted to take **READ** actions during the review step. Any write actions you would like to take can be specified in the final review step, then executed AFTER you've provided your final review.
-
-The changes have been reverted.
-
-Command Output:\n
-${tc.content}`,
-        }),
     );
   }
 
@@ -177,6 +167,7 @@ ${tc.content}`,
   const commandUpdate: ReviewerGraphUpdate = {
     messages: toolCallResults,
     reviewerMessages: toolCallResults,
+    ...(branchName && { branchName }),
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
