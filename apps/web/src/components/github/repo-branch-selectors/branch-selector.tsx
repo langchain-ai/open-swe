@@ -193,7 +193,7 @@ export function BranchSelector({
               {selectedBranch || placeholder}
             </span>
           </div>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="h-4 w-4 shrink-0" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">
@@ -230,13 +230,13 @@ export function BranchSelector({
                         <GitBranch className="h-3 w-3" />
                         <span className="font-medium">{branch.name}</span>
                         {isDefault && (
-                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700 dark:bg-blue-900 dark:text-blue-100">
                             default
                           </span>
                         )}
                         {branch.protected && (
                           <div title="Protected branch">
-                            <Shield className="h-3 w-3 text-amber-500" />
+                            <Shield className="h-3 w-3 text-amber-500 dark:text-amber-400" />
                           </div>
                         )}
                       </div>
