@@ -47,10 +47,7 @@ export function createShellTool(
           );
         }
 
-        throw new Error(
-          "FAILED TO RUN COMMAND: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
     createShellToolFields(state.targetRepository),

@@ -70,7 +70,6 @@ You are currently executing a specific task from a pre-generated plan. You have 
 * **Scripts may require dependencies to be installed**: Remember that sometimes scripts may require dependencies to be installed before they can be run.
     * Always ensure you've installed dependencies before running a script which might require them.
 
-
 ### Coding Standards
 
 When modifying files:

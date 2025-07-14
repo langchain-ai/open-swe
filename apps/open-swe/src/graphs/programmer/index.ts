@@ -129,7 +129,6 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     "generate-action",
   ])
   .addEdge("update-plan", "generate-action")
-  .addEdge("generate-conclusion", "reviewer-subgraph")
   .addEdge("diagnose-error", "generate-action")
   .addConditionalEdges("reviewer-subgraph", routeGenerateActionsOrEnd, [
     "generate-conclusion",

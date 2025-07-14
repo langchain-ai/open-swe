@@ -57,10 +57,7 @@ export function createInstallDependenciesTool(
           );
         }
 
-        throw new Error(
-          "FAILED TO INSTALL DEPENDENCIES: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
     createInstallDependenciesToolFields(state.targetRepository),

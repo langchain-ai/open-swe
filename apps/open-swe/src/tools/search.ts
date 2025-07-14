@@ -68,10 +68,7 @@ export function createSearchTool(
           );
         }
 
-        throw new Error(
-          "FAILED TO RUN SEARCH COMMAND: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
     createSearchToolFields(state.targetRepository),

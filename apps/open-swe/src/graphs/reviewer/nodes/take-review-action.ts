@@ -110,7 +110,7 @@ export async function takeReviewerActions(
             : { error: e }),
         });
         const errMessage = e instanceof Error ? e.message : "Unknown error";
-        result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\nError: ${errMessage}`;
+        result = `FAILED TO CALL TOOL: "${toolCall.name}"\n\n${errMessage}`;
       }
     }
 

@@ -43,6 +43,7 @@ Here is the plan, along with the summaries of each completed task:
 
 Analyze the tasks you've completed, the tasks which are remaining, and the current task you just took an action on.
 In addition to this, you're also provided the full conversation history between you and the user. All of the messages in this conversation are from the previous steps/actions you've taken, and any user input.
+If the task you're working on is to fix a failing command (e.g. a test, build, lint, etc.), and you've made changes to fix the issue, you must re-run the command to ensure the fix was successful before you can mark the task as complete.
 
 Take all of this information, and determine if the current task is complete, or if you still have work left to do.
 Once you've determined the status of the current task, call either:

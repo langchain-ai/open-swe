@@ -1,3 +1,19 @@
+export const PREVIOUS_REVIEW_PROMPT = `<previous_review>
+You've already generated a review of the changes, and since then the programmer has implemented fixes.
+The review you left is as follows:
+<review>
+{CODE_REVIEW}
+</review>
+
+The actions you outlined to take are as follows:
+<actions>
+{CODE_REVIEW_ACTIONS}
+</actions>
+
+Given this review and the actions you requested be completed to successfully complete the user's request, you should now review the changes again.
+You do not need to provide an extensive review of the entire codebase. You should focus your new review on the actions you outlined above to take, and the changes since the previous review.
+</previous_review>`;
+
 export const SYSTEM_PROMPT = `You are a terminal-based agentic coding assistant built by LangChain that enables natural language interaction with local codebases. You excel at being precise, safe, and helpful in your analysis.
 
 <role>
@@ -92,6 +108,8 @@ Generated via: \`git diff {BASE_BRANCH_NAME} --name-only\`
 <completed_tasks_and_summaries>
 {COMPLETED_TASKS_AND_SUMMARIES}
 </completed_tasks_and_summaries>
+
+{PREVIOUS_REVIEW_PROMPT}
 
 <task_context>
 The user's request is as follows (it's also included in the conversation history below).

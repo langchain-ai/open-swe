@@ -6,7 +6,7 @@ import {
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { PREVIOUS_REVIEW_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   createSearchTool,
@@ -17,6 +17,10 @@ import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getUserRequest } from "../../../../utils/user-request.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { formatPlanPromptWithSummaries } from "../../../../utils/plan-prompt.js";
+import {
+  formatCodeReviewPrompt,
+  getCodeReviewFields,
+} from "../../../../utils/review.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
@@ -24,6 +28,7 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
   const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
+  const codeReview = getCodeReviewFields(state.internalMessages);
 
   return SYSTEM_PROMPT.replaceAll(
     "{CODEBASE_TREE}",
@@ -41,7 +46,16 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
       "{DEPENDENCIES_INSTALLED}",
       state.dependenciesInstalled ? "Yes" : "No",
     )
-    .replaceAll("{USER_REQUEST}", userRequest);
+    .replaceAll("{USER_REQUEST}", userRequest)
+    .replaceAll(
+      "PREVIOUS_REVIEW_PROMPT",
+      codeReview
+        ? formatCodeReviewPrompt(PREVIOUS_REVIEW_PROMPT, {
+            review: codeReview.review,
+            newActions: codeReview.newActions,
+          })
+        : "",
+    );
 }
 
 export async function generateReviewActions(
