@@ -10,76 +10,219 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { RefreshCw, GitBranch, Lock, Globe, ExternalLink } from "lucide-react";
-import { useState } from "react";
-
-interface Repository {
-  name: string;
-  fullName: string;
-  description: string | null;
-  isPrivate: boolean;
-  defaultBranch: string;
-  updatedAt: string;
-}
+import {
+  RefreshCw,
+  GitBranch,
+  Lock,
+  Globe,
+  ExternalLink,
+  Building2,
+  User,
+} from "lucide-react";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { InstallationSelector } from "@/components/github/installation-selector";
+import { InstallationPrompt } from "@/components/github/installation-prompt";
 
 export function GitHubManager() {
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const {
+    // Installation state
+    isInstalled,
+    isLoading,
+    error,
+    installations,
+    currentInstallation,
+    installationsLoading,
+    installationsError,
+    switchInstallation,
+    refreshInstallations,
 
-  // GitHub repositories mock data
-  const repositories: Repository[] = [
-    {
-      name: "chat-langchain",
-      fullName: "langchain-ai/chat-langchain",
-      description: null,
-      isPrivate: false,
-      defaultBranch: "master",
-      updatedAt: "2 days ago",
-    },
-    {
-      name: "langsmith-sdk",
-      fullName: "langchain-ai/langsmith-sdk",
-      description: "LangSmith Client SDK implementations",
-      isPrivate: false,
-      defaultBranch: "main",
-      updatedAt: "1 week ago",
-    },
-    {
-      name: "langgraph",
-      fullName: "langchain-ai/langgraph",
-      description: "Build resilient language agents as graphs.",
-      isPrivate: false,
-      defaultBranch: "main",
-      updatedAt: "3 days ago",
-    },
-    {
-      name: "open-swe",
-      fullName: "langchain-ai/open-swe",
-      description: null,
-      isPrivate: false,
-      defaultBranch: "main",
-      updatedAt: "1 day ago",
-    },
-    {
-      name: "open-swe-dev",
-      fullName: "langchain-ai/open-swe-dev",
-      description:
-        "Development repo. Should be used for testing open-swe agent",
-      isPrivate: true,
-      defaultBranch: "main",
-      updatedAt: "5 hours ago",
-    },
-  ];
+    // Repository state
+    repositories,
+    repositoriesLoadingMore,
+    refreshRepositories,
+    loadMoreRepositories,
+    repositoriesHasMore,
+  } = useGitHubAppProvider();
 
   const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsRefreshing(false);
+    await Promise.all([refreshRepositories(), refreshInstallations()]);
   };
+
+  const handleInstallApp = () => {
+    window.location.href = "/api/github/installation";
+  };
+
+  const handleManageOnGitHub = () => {
+    window.open("https://github.com/settings/installations", "_blank");
+  };
+
+  // Show loading state
+  if (isLoading || installationsLoading) {
+    return (
+      <div className="space-y-8">
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl">GitHub Integration</CardTitle>
+                <CardDescription>Loading your GitHub setup...</CardDescription>
+              </div>
+              <div className="bg-muted h-10 w-24 animate-pulse rounded"></div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="bg-muted h-20 animate-pulse rounded"
+              ></div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error || installationsError) {
+    return (
+      <div className="space-y-8">
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-destructive text-xl">
+              GitHub Integration Error
+            </CardTitle>
+            <CardDescription>{error || installationsError}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              onClick={handleRefresh}
+              variant="outline"
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show installation prompt if not installed
+  if (!isInstalled) {
+    return (
+      <div className="space-y-8">
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-xl">GitHub App Installation</CardTitle>
+            <CardDescription>
+              Install the GitHub App to connect your repositories
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="border-border bg-muted/50 rounded-lg border p-6">
+              <div className="mb-4">
+                <h3 className="text-foreground mb-2 font-semibold">
+                  Get Started with GitHub Integration
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  To access your GitHub repositories, you need to install our
+                  GitHub App and grant it access to the repositories you want to
+                  use.
+                </p>
+              </div>
+              <Button
+                onClick={handleInstallApp}
+                className="w-full"
+              >
+                Install GitHub App
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
+      {/* Installation Management Section */}
+      <Card className="bg-card border-border shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-xl">GitHub Organizations</CardTitle>
+          <CardDescription>
+            Manage your GitHub App installations and switch between
+            organizations
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="border-border bg-muted/50 flex items-center justify-between rounded-lg border p-4">
+            <div className="flex-1">
+              <h3 className="text-foreground mb-1 font-semibold">
+                Current Organization
+              </h3>
+              <p className="text-muted-foreground text-sm">
+                Select which GitHub organization or user account to work with
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <InstallationSelector
+                size="default"
+                className="min-w-[250px]"
+              />
+              <Button
+                onClick={refreshInstallations}
+                variant="outline"
+                size="sm"
+                disabled={installationsLoading}
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${installationsLoading ? "animate-spin" : ""}`}
+                />
+              </Button>
+            </div>
+          </div>
+
+          {currentInstallation && (
+            <div className="border-border flex items-center gap-4 rounded-lg border p-4">
+              <img
+                src={currentInstallation.avatarUrl}
+                alt={`${currentInstallation.accountName} avatar`}
+                className="h-12 w-12 rounded-full"
+              />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-foreground font-semibold">
+                    {currentInstallation.accountName}
+                  </h4>
+                  <Badge
+                    variant="outline"
+                    className="text-xs"
+                  >
+                    {currentInstallation.accountType === "Organization" ? (
+                      <>
+                        <Building2 className="mr-1 h-3 w-3" />
+                        Organization
+                      </>
+                    ) : (
+                      <>
+                        <User className="mr-1 h-3 w-3" />
+                        Personal
+                      </>
+                    )}
+                  </Badge>
+                </div>
+                <p className="text-muted-foreground text-sm">
+                  {repositories.length} repositories accessible
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Repository Access Section */}
-      <Card className="bg-white shadow-sm">
+      <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -91,19 +234,18 @@ export function GitHubManager() {
             <div className="flex items-center gap-3">
               <Badge
                 variant="secondary"
-                className="bg-gray-100 font-mono"
+                className="font-mono"
               >
                 {repositories.length} repositories
               </Badge>
               <Button
                 onClick={handleRefresh}
-                disabled={isRefreshing}
+                disabled={isLoading || repositoriesLoadingMore}
                 variant="outline"
                 size="sm"
-                className="bg-white"
               >
                 <RefreshCw
-                  className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`}
+                  className={`mr-2 h-4 w-4 ${isLoading || repositoriesLoadingMore ? "animate-spin" : ""}`}
                 />
                 Refresh
               </Button>
@@ -111,66 +253,97 @@ export function GitHubManager() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {repositories.map((repo, index) => (
-            <div key={repo.fullName}>
-              <div className="flex items-start justify-between rounded-lg border border-gray-100 p-4 transition-colors hover:border-gray-200">
-                <div className="min-w-0 flex-1">
-                  <div className="mb-2 flex items-center gap-2">
-                    <h3 className="cursor-pointer font-mono font-semibold text-blue-600 hover:text-blue-700">
-                      {repo.fullName}
-                    </h3>
-                    <Badge
-                      variant={repo.isPrivate ? "secondary" : "outline"}
-                      className="text-xs"
-                    >
-                      {repo.isPrivate ? (
-                        <>
-                          <Lock className="mr-1 h-3 w-3" />
-                          Private
-                        </>
-                      ) : (
-                        <>
-                          <Globe className="mr-1 h-3 w-3" />
-                          Public
-                        </>
-                      )}
-                    </Badge>
-                  </div>
-
-                  {repo.description && (
-                    <p className="mb-3 text-sm text-gray-600">
-                      {repo.description}
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-4 text-sm text-gray-500">
-                    <div className="flex items-center gap-1">
-                      <GitBranch className="h-3 w-3" />
-                      <span className="font-mono">
-                        Default: {repo.defaultBranch}
-                      </span>
-                    </div>
-                    <span>Updated {repo.updatedAt}</span>
-                  </div>
-                </div>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-4"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-              </div>
-              {index < repositories.length - 1 && (
-                <Separator className="my-2" />
-              )}
+          {repositories.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-muted-foreground">
+                No repositories found. Make sure you've granted access to at
+                least one repository for the selected organization.
+              </p>
             </div>
-          ))}
+          ) : (
+            <>
+              {repositories.map((repo, index) => (
+                <div key={repo.id}>
+                  <div className="border-border hover:bg-muted/50 flex items-start justify-between rounded-lg border p-4 transition-colors">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-2 flex items-center gap-2">
+                        <h3 className="text-primary hover:text-primary/80 cursor-pointer font-mono font-semibold">
+                          {repo.full_name}
+                        </h3>
+                        <Badge
+                          variant={repo.private ? "secondary" : "outline"}
+                          className="text-xs"
+                        >
+                          {repo.private ? (
+                            <>
+                              <Lock className="mr-1 h-3 w-3" />
+                              Private
+                            </>
+                          ) : (
+                            <>
+                              <Globe className="mr-1 h-3 w-3" />
+                              Public
+                            </>
+                          )}
+                        </Badge>
+                      </div>
+
+                      {repo.description && (
+                        <p className="text-muted-foreground mb-3 text-sm">
+                          {repo.description}
+                        </p>
+                      )}
+
+                      <div className="text-muted-foreground flex items-center gap-4 text-sm">
+                        <div className="flex items-center gap-1">
+                          <GitBranch className="h-3 w-3" />
+                          <span className="font-mono">
+                            Default: {repo.default_branch}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-4"
+                      onClick={() => window.open(repo.html_url, "_blank")}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {index < repositories.length - 1 && (
+                    <Separator className="my-2" />
+                  )}
+                </div>
+              ))}
+
+              {repositoriesHasMore && (
+                <div className="pt-4 text-center">
+                  <Button
+                    onClick={loadMoreRepositories}
+                    disabled={repositoriesLoadingMore}
+                    variant="outline"
+                  >
+                    {repositoriesLoadingMore ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      "Load More Repositories"
+                    )}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 
-      <Card className="bg-white shadow-sm">
+      {/* GitHub App Management Section */}
+      <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl">GitHub App Management</CardTitle>
           <CardDescription>
@@ -178,19 +351,19 @@ export function GitHubManager() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4">
+          <div className="border-border bg-muted/50 flex items-center justify-between rounded-lg border p-4">
             <div>
-              <h3 className="mb-1 font-semibold text-gray-900">
+              <h3 className="text-foreground mb-1 font-semibold">
                 GitHub App Installation
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-muted-foreground text-sm">
                 You can manage your GitHub App installation, including adding or
                 removing repositories, through GitHub.
               </p>
             </div>
             <Button
+              onClick={handleManageOnGitHub}
               variant="outline"
-              className="bg-white"
             >
               <ExternalLink className="mr-2 h-4 w-4" />
               Manage on GitHub

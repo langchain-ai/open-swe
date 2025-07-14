@@ -91,7 +91,7 @@ export function APIKeysTab() {
       {Object.entries(apiKeySections).map(([sectionKey, section]) => (
         <Card
           key={sectionKey}
-          className="bg-white shadow-sm"
+          className="bg-card border-border shadow-sm"
         >
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
@@ -106,23 +106,23 @@ export function APIKeysTab() {
             {section.keys.map((apiKey) => (
               <div
                 key={apiKey.id}
-                className="rounded-lg border border-gray-100 p-4"
+                className="border-border rounded-lg border p-4"
               >
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-mono font-semibold text-gray-900">
+                    <h3 className="text-foreground font-mono font-semibold">
                       {apiKey.name}
                     </h3>
                     {apiKey.value && (
                       <Badge
                         variant="outline"
-                        className="border-green-200 bg-green-50 text-xs text-green-700"
+                        className="border-green-200 bg-green-50 text-xs text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400"
                       >
                         Configured
                       </Badge>
                     )}
                     {apiKey.lastUsed && (
-                      <span className="text-xs text-gray-500">
+                      <span className="text-muted-foreground text-xs">
                         Last used {apiKey.lastUsed}
                       </span>
                     )}
@@ -168,7 +168,7 @@ export function APIKeysTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => deleteApiKey(sectionKey, apiKey.id)}
-                            className="px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive px-2"
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -178,7 +178,7 @@ export function APIKeysTab() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500">
+                    <p className="text-muted-foreground text-xs">
                       Your API key is stored securely and encrypted
                     </p>
                     {apiKey.value && (
