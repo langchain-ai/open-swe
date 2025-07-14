@@ -18,10 +18,11 @@ import {
   ExternalLink,
   Building2,
   User,
+  Github,
+  LogIn,
 } from "lucide-react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationSelector } from "@/components/github/installation-selector";
-import { InstallationPrompt } from "@/components/github/installation-prompt";
 
 export function GitHubManager() {
   const {
@@ -56,6 +57,73 @@ export function GitHubManager() {
     window.open("https://github.com/settings/installations", "_blank");
   };
 
+  const handleLogin = () => {
+    window.location.href = "/api/auth/github/login";
+  };
+
+  // Check if the error is an authentication error
+  const isAuthError = (errorMessage: string | null) => {
+    return (
+      errorMessage?.includes("GitHub access token not found") ||
+      errorMessage?.includes("Please authenticate first") ||
+      errorMessage?.includes("authentication") ||
+      errorMessage?.includes("access token")
+    );
+  };
+
+  // Show authentication prompt if user isn't logged in
+  if (isAuthError(installationsError) || isAuthError(error)) {
+    return (
+      <div className="space-y-8">
+        <Card className="bg-card border-border shadow-sm">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Github className="h-6 w-6" />
+              GitHub Authentication Required
+            </CardTitle>
+            <CardDescription>
+              Sign in with GitHub to access your repositories and manage
+              installations
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="border-border bg-muted/50 rounded-lg border p-6">
+              <div className="mb-6 text-center">
+                <Github className="text-muted-foreground mx-auto mb-4 h-16 w-16" />
+                <h3 className="text-foreground mb-2 text-lg font-semibold">
+                  Connect Your GitHub Account
+                </h3>
+                <p className="text-muted-foreground mx-auto max-w-md text-sm">
+                  To manage your GitHub repositories and app installations, you
+                  need to authenticate with GitHub first. This will allow you to
+                  select repositories and work with your code.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Button
+                  onClick={handleLogin}
+                  className="w-full"
+                  size="lg"
+                >
+                  <LogIn className="mr-2 h-4 w-4" />
+                  Sign in with GitHub
+                </Button>
+                <Button
+                  onClick={handleRefresh}
+                  variant="outline"
+                  className="w-full"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Check Authentication Status
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Show loading state
   if (isLoading || installationsLoading) {
     return (
@@ -83,8 +151,11 @@ export function GitHubManager() {
     );
   }
 
-  // Show error state
-  if (error || installationsError) {
+  // Show error state (non-authentication errors)
+  if (
+    (error && !isAuthError(error)) ||
+    (installationsError && !isAuthError(installationsError))
+  ) {
     return (
       <div className="space-y-8">
         <Card className="bg-card border-border shadow-sm">
@@ -95,13 +166,22 @@ export function GitHubManager() {
             <CardDescription>{error || installationsError}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button
-              onClick={handleRefresh}
-              variant="outline"
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Try Again
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleRefresh}
+                variant="outline"
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Try Again
+              </Button>
+              <Button
+                onClick={handleLogin}
+                variant="default"
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                Re-authenticate
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
