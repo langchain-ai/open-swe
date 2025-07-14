@@ -3,19 +3,24 @@
 import { JSX, useState } from "react";
 import {
   Terminal,
-  FileCode,
-  Loader2,
-  CheckCircle,
-  XCircle,
+  FileText,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   MessageSquare,
-  FileText,
-  CloudDownload,
   Search,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  Loader2,
   Globe,
+  Pencil,
+  Package,
+  FileCode,
+  CloudDownload,
   Hash,
 } from "lucide-react";
+import { MarkdownText } from "../thread/markdown-text";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
@@ -34,6 +39,7 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
+import { ToolIconWithTooltip } from "./tool-icon-tooltip";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -134,23 +140,6 @@ const ACTION_GENERATING_TEXT_MAP = {
   [getURLContentTool.name]: "Fetching URL content...",
   [findInstancesOfTool.name]: "Finding instances...",
 };
-
-function ToolIconWithTooltip({
-  toolNamePretty,
-  icon,
-}: {
-  toolNamePretty: string;
-  icon: JSX.Element;
-}) {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>{icon}</TooltipTrigger>
-        <TooltipContent>{toolNamePretty}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
   return (
@@ -443,11 +432,14 @@ function ActionItem(props: ActionItemProps) {
       let formattedRgCommand = "";
       try {
         formattedRgCommand =
-          formatRgCommand({
-            pattern: props.pattern,
-            paths: props.paths,
-            flags: props.flags,
-          })?.join(" ") ?? "";
+          formatRgCommand(
+            {
+              pattern: props.pattern,
+              paths: props.paths,
+              flags: props.flags,
+            },
+            { excludeRequiredFlags: true },
+          )?.join(" ") ?? "";
       } catch {
         // no-op
       }

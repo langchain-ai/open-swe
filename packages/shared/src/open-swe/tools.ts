@@ -76,7 +76,7 @@ export function createShellToolFields(targetRepository: TargetRepository) {
       .optional()
       .default(TIMEOUT_SEC)
       .describe(
-        "The maximum time to wait for the command to complete in seconds.",
+        "The maximum time to wait for the command to complete in seconds. For commands which may require a long time to complete, such as running tests, you should increase this value.",
       ),
   });
   return {
@@ -143,7 +143,12 @@ export function createRgToolFields(targetRepository: TargetRepository) {
 const _tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
 export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
 
-export function formatRgCommand(cmd: RipgrepCommand): string[] {
+export function formatRgCommand(
+  cmd: RipgrepCommand,
+  options?: {
+    excludeRequiredFlags?: boolean;
+  },
+): string[] {
   const args = ["rg"];
 
   // Always include these flags
@@ -166,8 +171,10 @@ export function formatRgCommand(cmd: RipgrepCommand): string[] {
     args.push(...filteredFlags);
   }
 
-  // Add the required flags
-  args.push(...requiredFlags);
+  if (!options?.excludeRequiredFlags) {
+    // Add the required flags
+    args.push(...requiredFlags);
+  }
 
   if (cmd.pattern) {
     args.push(cmd.pattern);
@@ -225,28 +232,45 @@ export function createFindInstancesOfToolFields(
   };
 }
 
-export function createSetTaskStatusToolFields() {
-  const setTaskStatusToolSchema = z.object({
+export function createMarkTaskNotCompletedToolFields() {
+  const markTaskNotCompletedToolSchema = z.object({
     reasoning: z
       .string()
       .describe(
-        "A concise reasoning summary for the status of the current task, explaining why you think it is completed or not completed.",
-      ),
-    task_status: z
-      .enum(["completed", "not_completed"])
-      .describe(
-        "The status of the current task, based on the reasoning provided.",
+        "A concise reasoning summary for the status of the current task, explaining why you think it is not completed.",
       ),
   });
 
-  const setTaskStatusTool = {
-    name: "set_task_status",
+  const markTaskNotCompletedTool = {
+    name: "mark_task_not_completed",
     description:
-      "The status of the current task, along with a concise reasoning summary to support the status.",
-    schema: setTaskStatusToolSchema,
+      "Mark the current task as not completed, along with a concise reasoning summary to support the status.",
+    schema: markTaskNotCompletedToolSchema,
   };
 
-  return setTaskStatusTool;
+  return markTaskNotCompletedTool;
+}
+
+export function createMarkTaskCompletedToolFields() {
+  const markTaskCompletedToolSchema = z.object({
+    completed_task_summary: z
+      .string()
+      .describe(
+        "A detailed summary of the actions you took to complete the current task. " +
+          "Include specifics into the actions you took, insights you learned about the codebase while completing the task, and any other context which would be useful to another developer reviewing the actions you took. " +
+          "You may include file paths and lists of the changes you made, but do not include full file contents or full code changes. " +
+          "Ensure your summary is concise, thoughtful and helpful.",
+      ),
+  });
+
+  const markTaskCompletedTool = {
+    name: "mark_task_completed",
+    description:
+      "Mark the current task as completed, and provide a concise reasoning summary on the actions you took to complete the task.",
+    schema: markTaskCompletedToolSchema,
+  };
+
+  return markTaskCompletedTool;
 }
 
 export function createInstallDependenciesToolFields(
@@ -340,5 +364,35 @@ export function createGetURLContentToolFields() {
     name: "get_url_content",
     description: "Get the full page content of a given URL in markdown format.",
     schema: getURLContentSchema,
+  };
+}
+
+export function createWriteTechnicalNotesToolFields() {
+  const writeTechnicalNotesSchema = z.object({
+    notes: z
+      .string()
+      .describe(
+        "The notes you've generated based on the conversation history.",
+      ),
+  });
+
+  return {
+    name: "write_technical_notes",
+    description:
+      "Write technical notes based on the conversation history provided. Ensure these notes are concise, but still containing enough information to be useful to you when you go to execute the plan.",
+    schema: writeTechnicalNotesSchema,
+  };
+}
+
+export function createConversationHistorySummaryToolFields() {
+  const conversationHistorySummarySchema = z.object({
+    conversation_history_summary: z.string(),
+  });
+
+  return {
+    name: "conversation_history_summary",
+    description:
+      "<not used as an actual tool call. only used as shared types between the client and agent>",
+    schema: conversationHistorySummarySchema,
   };
 }

@@ -12,6 +12,7 @@ import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../utils/get-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 
 const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
@@ -93,17 +94,7 @@ const formatPrompt = (state: PlannerGraphState): string => {
     );
 };
 
-const condenseContextToolSchema = z.object({
-  notes: z
-    .string()
-    .describe("The notes you've generated based on the conversation history."),
-});
-const condenseContextTool = {
-  name: "write_technical_notes",
-  description:
-    "Write technical notes based on the conversation history provided. Ensure these notes are concise, but still containing enough information to be useful to you when you go to execute the plan.",
-  schema: condenseContextToolSchema,
-};
+const condenseContextTool = createWriteTechnicalNotesToolFields();
 
 export async function notetaker(
   state: PlannerGraphState,
@@ -144,7 +135,7 @@ ${state.messages.map(getMessageString).join("\n")}`;
   return {
     messages: [response, toolResponse],
     contextGatheringNotes: (
-      toolCall.args as z.infer<typeof condenseContextToolSchema>
+      toolCall.args as z.infer<typeof condenseContextTool.schema>
     ).notes,
   };
 }
