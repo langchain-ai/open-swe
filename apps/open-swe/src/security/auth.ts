@@ -14,6 +14,8 @@ import {
 import { decryptSecret } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
+import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
+import { getGitHubPatFromRequest } from "../utils/github-pat.js";
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -43,6 +45,8 @@ export const auth = new Auth()
       };
     }
 
+    const isProd = process.env.NODE_ENV === "production";
+
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
       // This will either return a valid user, or throw an error
@@ -54,6 +58,28 @@ export const auth = new Auth()
       throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
     }
 
+    // Check for GitHub PAT authentication (simpler mode for evals, etc.)
+    const githubPat = getGitHubPatFromRequest(request, encryptionKey);
+    if (githubPat && !isProd) {
+      const user = await verifyGithubUser(githubPat);
+      if (!user) {
+        throw new HTTPException(401, {
+          message: "Invalid GitHub PAT",
+        });
+      }
+
+      return {
+        identity: user.id.toString(),
+        is_authenticated: true,
+        display_name: user.login,
+        metadata: {
+          installation_name: "pat-auth",
+        },
+        permissions: LANGGRAPH_USER_PERMISSIONS,
+      };
+    }
+
+    // GitHub App authentication mode (existing logic)
     const installationNameHeader = request.headers.get(
       GITHUB_INSTALLATION_NAME,
     );
@@ -112,22 +138,7 @@ export const auth = new Auth()
       metadata: {
         installation_name: installationNameHeader,
       },
-      permissions: [
-        "threads:create",
-        "threads:create_run",
-        "threads:read",
-        "threads:delete",
-        "threads:update",
-        "threads:search",
-        "assistants:create",
-        "assistants:read",
-        "assistants:delete",
-        "assistants:update",
-        "assistants:search",
-        "deployments:read",
-        "deployments:search",
-        "store:access",
-      ],
+      permissions: LANGGRAPH_USER_PERMISSIONS,
     };
   })
 
