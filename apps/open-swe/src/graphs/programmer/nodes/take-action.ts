@@ -24,7 +24,7 @@ import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import { createRgTool } from "../../../tools/rg.js";
+import { createRgTool } from "../../../tools/search.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 

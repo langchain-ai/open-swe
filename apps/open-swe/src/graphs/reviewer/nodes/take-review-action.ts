@@ -13,14 +13,13 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createRgTool } from "../../../tools/rg.js";
+import { createSearchTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { createFindInstancesOfTool } from "../../../tools/find-instances-of.js";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 
@@ -38,13 +37,11 @@ export async function takeReviewerActions(
   }
 
   const shellTool = createShellTool(state);
-  const rgTool = createRgTool(state);
-  const findInstancesOfTool = createFindInstancesOfTool(state);
+  const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const allTools = [
     shellTool,
-    rgTool,
-    findInstancesOfTool,
+    searchTool,
     installDependenciesTool,
   ];
   const toolsMap = Object.fromEntries(

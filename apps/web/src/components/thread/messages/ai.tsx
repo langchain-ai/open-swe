@@ -33,7 +33,7 @@ import {
   createShellToolFields,
   createMarkTaskCompletedToolFields,
   createMarkTaskNotCompletedToolFields,
-  createRgToolFields,
+  createSearchToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
@@ -62,7 +62,7 @@ const markTaskNotCompletedTool = createMarkTaskNotCompletedToolFields();
 type MarkTaskNotCompletedToolArgs = z.infer<
   typeof markTaskNotCompletedTool.schema
 >;
-const rgTool = createRgToolFields(dummyRepo);
+const rgTool = createSearchToolFields(dummyRepo);
 type RgToolArgs = z.infer<typeof rgTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;

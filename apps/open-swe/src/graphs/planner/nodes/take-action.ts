@@ -14,7 +14,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createRgTool } from "../../../tools/rg.js";
+import { createRgTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,

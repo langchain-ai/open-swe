@@ -9,9 +9,8 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
-  createRgTool,
+  createSearchTool,
   createShellTool,
-  createFindInstancesOfTool,
   createInstallDependenciesTool,
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
@@ -51,9 +50,8 @@ export async function generateReviewActions(
 ): Promise<ReviewerGraphUpdate> {
   const model = await loadModel(config, Task.ACTION_GENERATOR);
   const tools = [
-    createRgTool(state),
+    createSearchTool(state),
     createShellTool(state),
-    createFindInstancesOfTool(state),
     createInstallDependenciesTool(state),
   ];
   const modelWithTools = model.bindTools(tools, {

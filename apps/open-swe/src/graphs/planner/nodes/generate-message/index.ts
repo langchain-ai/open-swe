@@ -19,7 +19,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createRgTool } from "../../../../tools/rg.js";
+import { createRgTool } from "../../../../tools/search.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 import { createFindInstancesOfTool } from "../../../../tools/find-instances-of.js";

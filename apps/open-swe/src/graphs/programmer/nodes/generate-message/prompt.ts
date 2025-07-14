@@ -41,6 +41,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 * Previous completed tasks and their summaries contain crucial context - always review them first
 * Condensed context messages in conversation history summarize previous work - read these to avoid duplication
 * The plan generation summary provides important codebase insights
+* After some tasks are completed, you may be provided with a code review and additional tasks. Ensure you inspect the code review (if present) and new tasks to ensure the work you're doing satisfies the user's request.
 
 ### File and Code Management
 

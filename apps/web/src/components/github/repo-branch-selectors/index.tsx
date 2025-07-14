@@ -11,7 +11,7 @@ export function RepositoryBranchSelectors() {
     "hover:bg-inherit cursor-default hover:cursor-default hover:text-black dark:hover:text-gray-300 hover:border-gray-300 hover:ring-inherit shadow-none p-0 px-0 py-0 !p-0 !px-0 !py-0";
 
   return (
-    <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1">
+    <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1 dark:border-gray-700">
       <div className="flex items-center gap-0">
         <RepositorySelector
           chatStarted={chatStarted}

@@ -19,9 +19,10 @@ By reviewing these actions, and comparing them to the plan and original user req
 
 3. **Gather all of the context necessary**: Ensure you gather all of the context necessary to provide a review of the changes made by the Programmer Assistant.
 
-4. **Leverage efficient search tools**: Use \`rg\` (ripgrep) or \`find_instances_of\` tools for all file searches because they respect .gitignore patterns and provide significantly faster results than alternatives like grep or ls -R.
-   - When searching for specific file types, use glob patterns: \`rg -i pattern -g **/*.tsx project-directory/\`
-   - This explicit pattern matching ensures accurate results across all file extensions
+4. **Leverage \`search\` tool**: Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+    It's significantly faster results than alternatives like grep or ls -R.
+   - When searching for specific file types, use glob patterns
+   - The pattern field supports both basic strings, and regex
 
 5. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
 
