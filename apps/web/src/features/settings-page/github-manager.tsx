@@ -23,10 +23,10 @@ import {
 } from "lucide-react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationSelector } from "@/components/github/installation-selector";
+import { cn } from "@/lib/utils";
 
 export function GitHubManager() {
   const {
-    // Installation state
     isInstalled,
     isLoading,
     error,
@@ -36,8 +36,6 @@ export function GitHubManager() {
     installationsError,
     switchInstallation,
     refreshInstallations,
-
-    // Repository state
     repositories,
     repositoriesLoadingMore,
     refreshRepositories,
@@ -61,7 +59,6 @@ export function GitHubManager() {
     window.location.href = "/api/auth/github/login";
   };
 
-  // Check if the error is an authentication error
   const isAuthError = (errorMessage: string | null) => {
     return (
       errorMessage?.includes("GitHub access token not found") ||
@@ -71,7 +68,6 @@ export function GitHubManager() {
     );
   };
 
-  // Show authentication prompt if user isn't logged in
   if (isAuthError(installationsError) || isAuthError(error)) {
     return (
       <div className="space-y-8">
@@ -124,7 +120,6 @@ export function GitHubManager() {
     );
   }
 
-  // Show loading state
   if (isLoading || installationsLoading) {
     return (
       <div className="space-y-8">
@@ -151,7 +146,6 @@ export function GitHubManager() {
     );
   }
 
-  // Show error state (non-authentication errors)
   if (
     (error && !isAuthError(error)) ||
     (installationsError && !isAuthError(installationsError))
@@ -188,7 +182,6 @@ export function GitHubManager() {
     );
   }
 
-  // Show installation prompt if not installed
   if (!isInstalled) {
     return (
       <div className="space-y-8">
@@ -226,7 +219,6 @@ export function GitHubManager() {
 
   return (
     <div className="space-y-8">
-      {/* Installation Management Section */}
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl">GitHub Organizations</CardTitle>
@@ -257,7 +249,10 @@ export function GitHubManager() {
                 disabled={installationsLoading}
               >
                 <RefreshCw
-                  className={`h-4 w-4 ${installationsLoading ? "animate-spin" : ""}`}
+                  className={cn(
+                    "h-4 w-4",
+                    installationsLoading && "animate-spin",
+                  )}
                 />
               </Button>
             </div>
@@ -301,7 +296,6 @@ export function GitHubManager() {
         </CardContent>
       </Card>
 
-      {/* Repository Access Section */}
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -325,7 +319,10 @@ export function GitHubManager() {
                 size="sm"
               >
                 <RefreshCw
-                  className={`mr-2 h-4 w-4 ${isLoading || repositoriesLoadingMore ? "animate-spin" : ""}`}
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    (isLoading || repositoriesLoadingMore) && "animate-spin",
+                  )}
                 />
                 Refresh
               </Button>
@@ -422,7 +419,6 @@ export function GitHubManager() {
         </CardContent>
       </Card>
 
-      {/* GitHub App Management Section */}
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl">GitHub App Management</CardTitle>

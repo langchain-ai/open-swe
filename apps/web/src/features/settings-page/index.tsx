@@ -6,9 +6,18 @@ import { GitHubManager } from "./github-manager";
 import { APIKeysTab } from "./api-keys";
 import { GitHubSVG } from "@/components/icons/github";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
+import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<"github" | "api-keys">("github");
+
+  const getTabClassName = (isActive: boolean) =>
+    cn(
+      "relative border-b-2 px-4 py-3 text-sm font-medium transition-colors",
+      isActive
+        ? "border-primary bg-background text-primary"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground border-transparent",
+    );
 
   return (
     <GitHubAppProvider>
@@ -24,11 +33,7 @@ export default function SettingsPage() {
           <div className="border-border bg-muted/50 flex rounded-t-lg border-b">
             <button
               onClick={() => setActiveTab("github")}
-              className={`relative border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                activeTab === "github"
-                  ? "border-primary bg-background text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
-              }`}
+              className={getTabClassName(activeTab === "github")}
             >
               <span className="flex items-center gap-2 font-mono">
                 <GitHubSVG
@@ -40,11 +45,7 @@ export default function SettingsPage() {
             </button>
             <button
               onClick={() => setActiveTab("api-keys")}
-              className={`relative border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                activeTab === "api-keys"
-                  ? "border-primary bg-background text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
-              }`}
+              className={getTabClassName(activeTab === "api-keys")}
             >
               <span className="flex items-center gap-2 font-mono">
                 <Key className="size-4" />
@@ -54,7 +55,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Tab Content */}
         <div className="border-border bg-background rounded-b-lg border border-t-0 p-6">
           {activeTab === "github" && <GitHubManager />}
           {activeTab === "api-keys" && <APIKeysTab />}

@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Eye, EyeOff, Key, Trash2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 interface ApiKey {
   id: string;
@@ -26,7 +27,6 @@ interface ApiKeySection {
 }
 
 export function APIKeysTab() {
-  // API Keys mock data
   const [apiKeySections, setApiKeySections] = useState<
     Record<string, ApiKeySection>
   >({
@@ -116,7 +116,11 @@ export function APIKeysTab() {
                     {apiKey.value && (
                       <Badge
                         variant="outline"
-                        className="border-green-200 bg-green-50 text-xs text-green-700 dark:border-green-800 dark:bg-green-900/20 dark:text-green-400"
+                        className={cn(
+                          "text-xs",
+                          "border-green-200 bg-green-50 text-green-700",
+                          "dark:border-green-800 dark:bg-green-900/20 dark:text-green-400",
+                        )}
                       >
                         Configured
                       </Badge>
@@ -168,7 +172,10 @@ export function APIKeysTab() {
                             variant="ghost"
                             size="sm"
                             onClick={() => deleteApiKey(sectionKey, apiKey.id)}
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive px-2"
+                            className={cn(
+                              "px-2",
+                              "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                            )}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
