@@ -26,18 +26,20 @@ import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { InstallationSelector } from "../github/installation-selector";
 import { Settings } from "lucide-react";
+import NextLink from "next/link";
 
 function OpenSettingsButton() {
-  const router = useRouter();
   return (
-    <TooltipIconButton
-      tooltip="Open Settings"
-      onClick={() => router.push("/settings")}
-      className="text-xs"
-      size="sm"
-    >
-      <Settings className="size-4" />
-    </TooltipIconButton>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <NextLink href="/settings">
+            <Settings className="size-4" />
+          </NextLink>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open Settings</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

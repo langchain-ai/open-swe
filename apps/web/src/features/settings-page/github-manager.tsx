@@ -228,7 +228,12 @@ export function GitHubManager() {
     <div className="space-y-8">
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
-          <CardTitle className="text-xl">GitHub Organizations</CardTitle>
+          <CardTitle className="text-xl">
+            GitHub{" "}
+            {currentInstallation?.accountType === "Organization"
+              ? "Organization"
+              : "User"}
+          </CardTitle>
           <CardDescription>
             Manage your GitHub App installations and switch between
             organizations
@@ -238,7 +243,10 @@ export function GitHubManager() {
           <div className="border-border bg-muted/50 flex items-center justify-between rounded-lg border p-4">
             <div className="flex-1">
               <h3 className="text-foreground mb-1 font-semibold">
-                Current Organization
+                Current{" "}
+                {currentInstallation?.accountType === "Organization"
+                  ? "Organization"
+                  : "User"}
               </h3>
               <p className="text-muted-foreground text-sm">
                 Select which GitHub organization or user account to work with

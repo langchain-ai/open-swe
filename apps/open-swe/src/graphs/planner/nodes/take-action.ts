@@ -210,12 +210,7 @@ ${tc.content}`,
     });
     return new Command({
       goto: "generate-plan",
-      update: {
-        messages: toolCallResults,
-        sandboxSessionId: sandbox.id,
-        ...(codebaseTree && { codebaseTree }),
-        ...(dependenciesInstalled !== null && { dependenciesInstalled }),
-      },
+      update: commandUpdate,
     });
   }
 
