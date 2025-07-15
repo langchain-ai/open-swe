@@ -33,7 +33,9 @@ By reviewing these actions, and comparing them to the plan and original user req
 3. **Use git commands to gather context**: Below you're provided with a section '<changed_files>', which lists all of the files that were modified/created/deleted in the current branch.
     - Ensure you use this, paired with commands such as 'git diff {BASE_BRANCH_NAME} <file_path>' to inspect a diff of a file to gather context about the changes made by the Programmer Assistant.
 
-3. **Gather all of the context necessary**: Ensure you gather all of the context necessary to provide a review of the changes made by the Programmer Assistant.
+3. **Only search for what is necessary**: Ensure you gather all of the context necessary to provide a review of the changes made by the Programmer Assistant.
+    - Ensure that the actions you perform in this review phase are only the most necessary and targeted actions to gather context.
+    - Avoid rabbit holes for gathering context. You should always first consider whether or not the action you're about to take is necessary to generate a review for the user's request. If it is not, do not take it.
 
 4. **Leverage \`search\` tool**: Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
     - It's significantly faster results than alternatives like grep or ls -R.

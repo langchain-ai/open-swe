@@ -2483,14 +2483,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph-api@npm:0.0.45":
-  version: 0.0.45
-  resolution: "@langchain/langgraph-api@npm:0.0.45"
+"@langchain/langgraph-api@npm:0.0.47":
+  version: 0.0.47
+  resolution: "@langchain/langgraph-api@npm:0.0.47"
   dependencies:
     "@babel/code-frame": ^7.26.2
     "@hono/node-server": ^1.12.0
     "@hono/zod-validator": ^0.2.2
-    "@langchain/langgraph-ui": 0.0.45
+    "@langchain/langgraph-ui": 0.0.47
     "@types/json-schema": ^7.0.15
     "@typescript/vfs": ^1.6.0
     dedent: ^1.5.3
@@ -2516,7 +2516,7 @@ __metadata:
   peerDependenciesMeta:
     "@langchain/langgraph-sdk":
       optional: true
-  checksum: ceddae262fe3e9064820dfb0faf53af771c29eb9b7e0a1862e2982666dadcc5e329ce0c286af171315135c963c5c56c4bd49c519edb745c8a1c40ab1187081c5
+  checksum: 9d2ff14cc9fc360e200ea9ad134701593f2f717f49409155d7b3e42f8dd3cdda4736a75a31ffe4be4d18cd4b5cce1673098778d338a50dcf75d44ddc88a7e802
   languageName: node
   linkType: hard
 
@@ -2531,13 +2531,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/langgraph-cli@npm:latest":
-  version: 0.0.45
-  resolution: "@langchain/langgraph-cli@npm:0.0.45"
+"@langchain/langgraph-cli@npm:^0.0.47":
+  version: 0.0.47
+  resolution: "@langchain/langgraph-cli@npm:0.0.47"
   dependencies:
     "@babel/code-frame": ^7.26.2
     "@commander-js/extra-typings": ^13.0.0
-    "@langchain/langgraph-api": 0.0.45
+    "@langchain/langgraph-api": 0.0.47
     chokidar: ^4.0.3
     commander: ^13.0.0
     dedent: ^1.5.3
@@ -2555,13 +2555,13 @@ __metadata:
     zod: ^3.23.8
   bin:
     langgraphjs: dist/cli/cli.mjs
-  checksum: 5136009dbf8b2ba078be7dfe421f3a9d9b1c86ac52503e26d2d1b667ab8fea677f9596da5f5fced4191c1188861390ed11d2329c907cdb917fb86dc274d361ec
+  checksum: 159bac73345e98821e84c415faabb3e936b304ca51967017db4acd29090b9a631ca5bf3129a50caf21e19a57e8886144a16571f7e7049864414abaacb625d563
   languageName: node
   linkType: hard
 
-"@langchain/langgraph-sdk@npm:^0.0.92":
-  version: 0.0.92
-  resolution: "@langchain/langgraph-sdk@npm:0.0.92"
+"@langchain/langgraph-sdk@npm:^0.0.95":
+  version: 0.0.95
+  resolution: "@langchain/langgraph-sdk@npm:0.0.95"
   dependencies:
     "@types/json-schema": ^7.0.15
     p-queue: ^6.6.2
@@ -2578,13 +2578,13 @@ __metadata:
       optional: true
     react-dom:
       optional: true
-  checksum: 905380f0785da27dd5638b37e6215f3f2655cd0cb9111f6178e4b72085e930f1e250dfbfa6bb3b0ce4b7dc7f129f988095fac2240b420c09f63d65c3a8d5b8d6
+  checksum: a8eaf39a3f69bf7fd3645bdaec4869ced7916427669cf1c8480dc8ee4efbc42b2c6431deedd41d02f977de3305832713d3bb894307246f15ba06562fb8384bd3
   languageName: node
   linkType: hard
 
-"@langchain/langgraph-ui@npm:0.0.45":
-  version: 0.0.45
-  resolution: "@langchain/langgraph-ui@npm:0.0.45"
+"@langchain/langgraph-ui@npm:0.0.47":
+  version: 0.0.47
+  resolution: "@langchain/langgraph-ui@npm:0.0.47"
   dependencies:
     "@commander-js/extra-typings": ^13.0.0
     commander: ^13.0.0
@@ -2593,7 +2593,7 @@ __metadata:
     zod: ^3.23.8
   bin:
     langgraphjs-ui: ./dist/cli.mjs
-  checksum: e48c0aa52f898765a240f185318fe18668594a67eb0c059b99adf22e46c9f4a3a217c6696533df6c755863ff2c79925753bd17e5c98d73a865e84f933db81939
+  checksum: cdacbba249ac6ce6ea07104b57c0c73bea7332be3d7a2f63b63b386bf5d1a4112acf7a3adc53b64fe7f10999756879b5aac90c6c8ad91bb05e0cd57e36710afc
   languageName: node
   linkType: hard
 
@@ -3462,8 +3462,8 @@ __metadata:
     "@langchain/core": ^0.3.56
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.8
-    "@langchain/langgraph-cli": latest
-    "@langchain/langgraph-sdk": ^0.0.92
+    "@langchain/langgraph-cli": ^0.0.47
+    "@langchain/langgraph-sdk": ^0.0.95
     "@langchain/mcp-adapters": ^0.5.2
     "@langchain/openai": ^0.5.10
     "@mendable/firecrawl-js": ^1.29.1
@@ -3513,7 +3513,7 @@ __metadata:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.56
     "@langchain/langgraph": ^0.3.8
-    "@langchain/langgraph-sdk": ^0.0.92
+    "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
@@ -3538,7 +3538,7 @@ __metadata:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.57
     "@langchain/langgraph": ^0.3.8
-    "@langchain/langgraph-sdk": ^0.0.92
+    "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/app": ^16.0.1
     "@octokit/types": ^14.1.0
     "@open-swe/shared": "*"

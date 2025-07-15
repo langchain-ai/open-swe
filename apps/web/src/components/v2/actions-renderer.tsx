@@ -17,7 +17,6 @@ import {
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PLANNER_GRAPH_ID,
-  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
@@ -158,6 +157,7 @@ function isNodeEndCommandUpdate(data: unknown): data is {
 }
 
 const REVIEWER_NODE_IDS = [
+  "initialize-state",
   "generate-review-actions",
   "take-review-actions",
   "diagnose-reviewer-error",
@@ -205,11 +205,9 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         if (isNodeEndCommandUpdate(data.data)) {
           const outputMessages = data.data.output.update
             .messages as unknown as Message[];
-          console.log("outputMessages", outputMessages);
           debouncedSetMessages(outputMessages);
         } else if (isNodeEndMessagesUpdate(data.data)) {
           const outputMessages = data.data.output.messages;
-          console.log("outputMessages", outputMessages);
           debouncedSetMessages(outputMessages);
         }
       }
