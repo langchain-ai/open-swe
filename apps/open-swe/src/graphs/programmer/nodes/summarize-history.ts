@@ -18,8 +18,6 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { createConversationHistorySummaryToolFields } from "@open-swe/shared/open-swe/tools";
-import { z } from "zod";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
 
@@ -91,45 +89,9 @@ const formatPrompt = (inputs: {
     );
 };
 
-/**
- * Create an AI & tool message pair for the generated task summary.
- * This is not included in the internal message state, but is exposed to
- * users so they can see the summary of the actions that were taken.
- */
-function createUserFacingConversationSummaryMessages(
-  summary: string,
-): BaseMessage[] {
-  const conversationSummaryTool = createConversationHistorySummaryToolFields();
-  const conversationSummaryToolCallArgs: z.infer<
-    typeof conversationSummaryTool.schema
-  > = {
-    conversation_history_summary: summary,
-  };
-  const conversationSummaryToolCallId = uuidv4();
-  const conversationSummaryPublicMessages = [
-    new AIMessage({
-      id: uuidv4(),
-      content: "",
-      tool_calls: [
-        {
-          id: conversationSummaryToolCallId,
-          name: conversationSummaryTool.name,
-          args: conversationSummaryToolCallArgs,
-        },
-      ],
-    }),
-    new ToolMessage({
-      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
-      tool_call_id: conversationSummaryToolCallId,
-      content: "Summarized message",
-    }),
-  ];
-
-  return conversationSummaryPublicMessages;
-}
-
-function createInternalSummaryMessages(summary: string): BaseMessage[] {
-  const dummySummarizeHistoryToolName = "summarize_conversation_history";
+function createSummaryMessages(summary: string): BaseMessage[] {
+  const dummySummarizeHistoryToolName =
+    createConversationHistorySummaryToolFields().name;
   const dummySummarizeHistoryToolCallId = uuidv4();
   return [
     new AIMessage({
@@ -169,7 +131,7 @@ export async function summarizeHistory(
 
   const userRequest = getUserRequest(state.messages);
   const plan = getActivePlanItems(state.taskPlan);
-  const conversationHistoryToSummarize = getMessagesSinceLastSummary(
+  const conversationHistoryToSummarize = await getMessagesSinceLastSummary(
     state.internalMessages,
     {
       excludeHiddenMessages: true,
@@ -193,14 +155,13 @@ export async function summarizeHistory(
   ]);
 
   const summaryString = getMessageContentString(response.content);
-  const taskSummaryMessages =
-    createUserFacingConversationSummaryMessages(summaryString);
+  const summaryMessages = createSummaryMessages(summaryString);
 
   const newInternalMessages = [
     ...conversationHistoryToSummarize.map(
       (m) => new RemoveMessage({ id: m.id ?? "" }),
     ),
-    ...createInternalSummaryMessages(summaryString),
+    ...summaryMessages,
   ];
 
   logger.info(
@@ -208,7 +169,7 @@ export async function summarizeHistory(
   );
 
   return {
-    messages: taskSummaryMessages,
+    messages: summaryMessages,
     internalMessages: newInternalMessages,
   };
 }

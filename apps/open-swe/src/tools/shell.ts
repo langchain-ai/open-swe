@@ -34,7 +34,7 @@ export function createShellTool(
         }
 
         return {
-          result: response.result,
+          result: response.result ?? `exit code: ${response.exitCode}`,
           status: "success",
         };
       } catch (e) {

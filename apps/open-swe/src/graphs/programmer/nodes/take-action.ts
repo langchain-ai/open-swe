@@ -106,6 +106,10 @@ export async function takeAction(
         result = toolResult.result;
         toolCallStatus = toolResult.status;
       }
+
+      if (!result) {
+        result = toolCallStatus;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (

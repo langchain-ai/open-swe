@@ -410,11 +410,11 @@ export function createWriteTechnicalNotesToolFields() {
 
 export function createConversationHistorySummaryToolFields() {
   const conversationHistorySummarySchema = z.object({
-    conversation_history_summary: z.string(),
+    reasoning: z.string(),
   });
 
   return {
-    name: "conversation_history_summary",
+    name: "summarize_conversation_history",
     description:
       "<not used as an actual tool call. only used as shared types between the client and agent>",
     schema: conversationHistorySummarySchema,

@@ -96,6 +96,9 @@ export async function takeReviewerActions(
           status: "success" | "error";
         };
       result = toolResult.result;
+      if (!result) {
+        result = toolResult.status;
+      }
       toolCallStatus = toolResult.status;
     } catch (e) {
       toolCallStatus = "error";

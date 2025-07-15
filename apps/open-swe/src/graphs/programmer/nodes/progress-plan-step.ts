@@ -29,6 +29,7 @@ import {
 } from "@open-swe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
+  getMessagesSinceLastSummary,
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
@@ -117,8 +118,14 @@ Once you've determined the status of the current task, call either the \`mark_ta
 
   const newMessages = [response, toolMessage];
 
+  const newMessageList = [...state.internalMessages, ...newMessages];
+  const wouldBeConversationHistoryToSummarize =
+    await getMessagesSinceLastSummary(newMessageList, {
+      excludeHiddenMessages: true,
+      excludeCountFromEnd: 20,
+    });
   const totalInternalTokenCount = calculateConversationHistoryTokenCount(
-    state.internalMessages,
+    wouldBeConversationHistoryToSummarize,
     {
       // Retain the last 20 messages from state
       excludeHiddenMessages: true,
@@ -135,12 +142,15 @@ Once you've determined the status of the current task, call either the \`mark_ta
       internalMessages: newMessages,
     };
 
+    // Check if we have any messages to summarize, and if we're at or above the max token limit.
     if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
       logger.info(
         "Internal messages list is at or above the max token limit. Routing to summarize history step.",
         {
           totalInternalTokenCount,
           maxInternalTokenCount: MAX_INTERNAL_TOKENS,
+          wouldBeConversationHistoryToSummarizeLength:
+            wouldBeConversationHistoryToSummarize.length,
         },
       );
       return new Command({
