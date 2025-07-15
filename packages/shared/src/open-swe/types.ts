@@ -291,15 +291,16 @@ export const GraphConfigurationMetadata: {
       description: "Maximum number of review actions during planning",
     },
   },
-  plannerModelName: {
+  programmerModelName: {
     x_open_swe_ui_config: {
       type: "select",
       default: "anthropic:claude-sonnet-4-0",
-      description: "The model to use for planning",
+      description:
+        "The model to use for programming/other advanced technical tasks",
       options: MODEL_OPTIONS_NO_THINKING,
     },
   },
-  plannerTemperature: {
+  programmerTemperature: {
     x_open_swe_ui_config: {
       type: "slider",
       default: 0,
@@ -309,51 +310,15 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
-  plannerContextModelName: {
+  routerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description: "The model to use for planning",
+      default: "anthropic:claude-3-5-haiku-latest",
+      description: "The model to use for routing tasks",
       options: MODEL_OPTIONS,
     },
   },
-  plannerContextTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
-    },
-  },
-  actionGeneratorModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description: "The model to use for action generation",
-      options: MODEL_OPTIONS,
-    },
-  },
-  actionGeneratorTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
-    },
-  },
-  progressPlanCheckerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description: "The model to use for progress plan checking",
-      options: MODEL_OPTIONS_NO_THINKING,
-    },
-  },
-  progressPlanCheckerTemperature: {
+  routerTemperature: {
     x_open_swe_ui_config: {
       type: "slider",
       default: 0,
@@ -367,29 +332,12 @@ export const GraphConfigurationMetadata: {
     x_open_swe_ui_config: {
       type: "select",
       default: "anthropic:claude-sonnet-4-0",
-      description: "The model to use for summarizing the conversation history",
+      description:
+        "The model to use for summarizing the conversation history, or extracting key context from large inputs",
       options: MODEL_OPTIONS_NO_THINKING,
     },
   },
   summarizerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
-    },
-  },
-  classificationModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-3-5-haiku-latest",
-      description: "The model to use for classifying the user's message",
-      options: MODEL_OPTIONS_NO_THINKING,
-    },
-  },
-  classificationTemperature: {
     x_open_swe_ui_config: {
       type: "slider",
       default: 0,
@@ -456,200 +404,124 @@ export const GraphConfiguration = z.object({
    * Total messages = maxContextActions * 2 + 1
    * @default 75
    */
-  maxContextActions: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.maxContextActions),
+  maxContextActions: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.maxContextActions,
+  }),
   /**
    * The maximum number of context gathering actions to take during review.
    * Each action consists of 2 messages (request & result), plus 1 human message.
    * Total messages = maxReviewActions * 2 + 1
    * @default 30
    */
-  maxReviewActions: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.maxReviewActions),
+  maxReviewActions: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.maxReviewActions,
+  }),
 
   /**
-   * The model ID to use for the planning step.
-   * This includes initial planning, and rewriting.
+   * The model ID to use for programming/other advanced technical tasks.
    * @default "anthropic:claude-sonnet-4-0"
    */
-  plannerModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.plannerModelName),
+  programmerModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.programmerModelName,
+  }),
   /**
-   * The temperature to use for the planning step.
-   * This includes initial planning, and rewriting.
-   * If selecting a reasoning model, this will be ignored.
+   * The temperature to use for programming/other advanced technical tasks.
    * @default 0
    */
-  plannerTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.plannerTemperature),
+  programmerTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.programmerTemperature,
+  }),
   /**
-   * The model ID to use for the planning step.
-   * This includes initial planning, and rewriting.
-   * @default "anthropic:claude-sonnet-4-0"
-   */
-  plannerContextModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.plannerContextModelName),
-  /**
-   * The temperature to use for the planning step.
-   * This includes initial planning, and rewriting.
-   * If selecting a reasoning model, this will be ignored.
-   * @default 0
-   */
-  plannerContextTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.plannerContextTemperature),
-
-  /**
-   * The model ID to use for action generation.
-   * @default "anthropic:claude-sonnet-4-0"
-   */
-  actionGeneratorModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.actionGeneratorModelName),
-  /**
-   * The temperature to use for action generation.
-   * If selecting a reasoning model, this will be ignored.
-   * @default 0
-   */
-  actionGeneratorTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.actionGeneratorTemperature),
-
-  /**
-   * The model ID to use for progress plan checking.
-   * @default "anthropic:claude-sonnet-4-0"
-   */
-  progressPlanCheckerModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(
-      GraphConfigurationMetadata.progressPlanCheckerModelName,
-    ),
-  /**
-   * The temperature to use for progress plan checking.
-   * If selecting a reasoning model, this will be ignored.
-   * @default 0
-   */
-  progressPlanCheckerTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(
-      GraphConfigurationMetadata.progressPlanCheckerTemperature,
-    ),
-
-  /**
-   * The model ID to use for summarizing the conversation history.
-   * @default "anthropic:claude-sonnet-4-0"
-   */
-  summarizerModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.summarizerModelName),
-  /**
-   * The temperature to use for summarizing the conversation history.
-   * If selecting a reasoning model, this will be ignored.
-   * @default 0
-   */
-  summarizerTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.summarizerTemperature),
-
-  /**
-   * The model ID to use for classifying the user's message.
+   * The model ID to use for routing tasks.
    * @default "anthropic:claude-3-5-haiku-latest"
    */
-  classificationModelName: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.classificationModelName),
+  routerModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.routerModelName,
+  }),
   /**
-   * The temperature to use for classifying the user's message.
-   * If selecting a reasoning model, this will be ignored.
+   * The temperature to use for routing tasks.
    * @default 0
    */
-  classificationTemperature: z
-    .number()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata.classificationTemperature),
+  routerTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.routerTemperature,
+  }),
 
+  /**
+   * The model ID to use for summarizing the conversation history, or extracting key context from large inputs.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
+  summarizerModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.summarizerModelName,
+  }),
+  /**
+   * The temperature to use for summarizing the conversation history, or extracting key context from large inputs.
+   * @default 0
+   */
+  summarizerTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.actionGeneratorTemperature,
+  }),
   /**
    * The maximum number of tokens to generate in an individual generation.
    * @default 10_000
    */
-  maxTokens: z
-    .number()
-    .optional()
-    .default(() => 10_000)
-    .langgraph.metadata(GraphConfigurationMetadata.maxTokens),
+  maxTokens: withLangGraph(z.number(), {
+    metadata: GraphConfigurationMetadata.maxTokens,
+    reducer: {
+      schema: z.number(),
+      fn: (_state, update) => update,
+    },
+    default: () => 10_000,
+  }),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */
-  [GITHUB_TOKEN_COOKIE]: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_TOKEN_COOKIE]),
+  [GITHUB_TOKEN_COOKIE]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_TOKEN_COOKIE],
+  }),
   /**
    * The installation token from the GitHub app. This token allows us to take actions
    * on the repos the user has granted us access to, but on behalf of the app, not the user.
    */
-  [GITHUB_INSTALLATION_TOKEN_COOKIE]: z
-    .string()
-    .optional()
-    .langgraph.metadata(
-      GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
-    ),
+  [GITHUB_INSTALLATION_TOKEN_COOKIE]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
+  }),
   /**
    * The user's GitHub ID. Required when creating runs triggered by a bot (e.g. GitHub issue)
    */
-  [GITHUB_USER_ID_HEADER]: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_ID_HEADER]),
+  [GITHUB_USER_ID_HEADER]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_USER_ID_HEADER],
+  }),
   /**
    * The user's GitHub login. Required when creating runs triggered by a bot (e.g. GitHub issue)
    */
-  [GITHUB_USER_LOGIN_HEADER]: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER]),
+  [GITHUB_USER_LOGIN_HEADER]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER],
+  }),
   /**
    * The installation name of the GitHub app. Required when creating runs triggered by a bot (e.g. GitHub issue)
    */
-  [GITHUB_INSTALLATION_NAME]: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME]),
+  [GITHUB_INSTALLATION_NAME]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME],
+  }),
   /**
    * GitHub Personal Access Token. Used for simpler authentication in environments like evals
    * where GitHub App installation tokens are not available or needed.
    */
-  [GITHUB_PAT]: z
-    .string()
-    .optional()
-    .langgraph.metadata(GraphConfigurationMetadata[GITHUB_PAT]),
+  [GITHUB_PAT]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_PAT],
+  }),
   /**
    * Custom MCP servers configuration as JSON string. Merges with default servers.
    * @default Default LangGraph docs MCP server
    */
-  mcpServers: z
-    .string()
-    .optional()
-    .default(JSON.stringify(DEFAULT_MCP_SERVERS))
-    .langgraph.metadata(GraphConfigurationMetadata.mcpServers),
+  mcpServers: withLangGraph(z.string(), {
+    metadata: GraphConfigurationMetadata.mcpServers,
+    default: () => JSON.stringify(DEFAULT_MCP_SERVERS),
+    reducer: {
+      schema: z.string(),
+      fn: (_state, update) => update,
+    },
+  }),
 });
 
 export type GraphConfig = LangGraphRunnableConfig<

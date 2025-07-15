@@ -50,7 +50,7 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const mcpTools = await getMcpTools(config);
 
   const tools = [

@@ -113,7 +113,7 @@ export async function determineNeedsContext(
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
     getMissingMessages(state, config),
-    loadModel(config, Task.CLASSIFICATION),
+    loadModel(config, Task.ROUTER),
   ]);
   if (!missingMessages.length) {
     throw new Error(

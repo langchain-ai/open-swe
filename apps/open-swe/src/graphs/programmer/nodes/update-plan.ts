@@ -117,7 +117,7 @@ export async function updatePlan(
     ...updatePlanToolCall,
   });
 
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const modelWithTools = model.bindTools([updatePlanTool], {
     tool_choice: updatePlanTool.name,
     parallel_tool_calls: false,

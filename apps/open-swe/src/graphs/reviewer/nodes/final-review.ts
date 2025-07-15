@@ -75,7 +75,7 @@ export async function finalReview(
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",
     parallel_tool_calls: false,
