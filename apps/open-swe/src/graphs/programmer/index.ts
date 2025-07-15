@@ -137,7 +137,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ends: ["generate-action", END],
   })
   .addNode("route-to-review-or-conclusion", routeToReviewOrConclusion, {
-    ends: ["generate-conclusion", "route-to-review-or-conclusion"],
+    ends: ["generate-conclusion", "reviewer-subgraph"],
   })
   .addNode("reviewer-subgraph", reviewerGraph)
   .addNode("open-pr", openPullRequest)
