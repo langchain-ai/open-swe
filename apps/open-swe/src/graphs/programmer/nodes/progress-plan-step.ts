@@ -65,7 +65,7 @@ export async function progressPlanStep(
 ): Promise<Command> {
   const markNotCompletedTool = createMarkTaskNotCompletedToolFields();
   const markCompletedTool = createMarkTaskCompletedToolFields();
-  const model = await loadModel(config, Task.PROGRESS_PLAN_CHECKER);
+  const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools(
     [markNotCompletedTool, markCompletedTool],
     {

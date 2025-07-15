@@ -2,37 +2,35 @@ import { initChatModel } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 export enum Task {
-  PLANNER = "planner",
-  PLANNER_CONTEXT = "plannerContext",
-  ACTION_GENERATOR = "actionGenerator",
-  PROGRESS_PLAN_CHECKER = "progressPlanChecker",
+  /**
+   * Used for programmer tasks. This includes: writing code,
+   * generating plans, taking context gathering actions, etc.
+   */
+  PROGRAMMER = "programmer",
+  /**
+   * Used for routing tasks. This includes: initial request
+   * routing to different agents.
+   */
+  ROUTER = "router",
+  /**
+   * Used for summarizing tasks. This includes: summarizing
+   * the conversation history, summarizing actions taken during
+   * a task execution, etc. Should be a slightly advanced model.
+   */
   SUMMARIZER = "summarizer",
-  CLASSIFICATION = "classification",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
-  [Task.PLANNER]: {
+  [Task.PROGRAMMER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
-  [Task.PLANNER_CONTEXT]: {
-    modelName: "anthropic:claude-sonnet-4-0",
-    temperature: 0,
-  },
-  [Task.ACTION_GENERATOR]: {
-    modelName: "anthropic:claude-sonnet-4-0",
-    temperature: 0,
-  },
-  [Task.PROGRESS_PLAN_CHECKER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
+  [Task.ROUTER]: {
+    modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
   [Task.SUMMARIZER]: {
     modelName: "anthropic:claude-sonnet-4-0",
-    temperature: 0,
-  },
-  [Task.CLASSIFICATION]: {
-    modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
 };

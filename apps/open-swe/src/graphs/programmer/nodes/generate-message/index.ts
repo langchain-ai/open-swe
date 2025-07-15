@@ -87,7 +87,7 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const mcpTools = await getMcpTools(config);
 
   const tools = [

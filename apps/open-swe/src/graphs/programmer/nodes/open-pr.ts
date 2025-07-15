@@ -88,7 +88,8 @@ export async function openPullRequest(
   }
 
   const openPrTool = createOpenPrToolFields();
-  const model = await loadModel(config, Task.SUMMARIZER);
+  // use the router model since this is a simple task that doesn't need an advanced model
+  const model = await loadModel(config, Task.ROUTER);
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
     parallel_tool_calls: false,
