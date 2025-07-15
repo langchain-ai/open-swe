@@ -20,6 +20,7 @@ import {
   User,
   Github,
   LogIn,
+  Plus,
 } from "lucide-react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationSelector } from "@/components/github/installation-selector";
@@ -242,6 +243,14 @@ export function GitHubManager() {
                 size="default"
                 className="min-w-[250px]"
               />
+              <Button
+                onClick={handleInstallApp}
+                variant="outline"
+                size="sm"
+                title="Add new organization"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
               <Button
                 onClick={refreshInstallations}
                 variant="outline"
