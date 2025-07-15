@@ -53,7 +53,13 @@ export function GitHubManager() {
   };
 
   const handleManageOnGitHub = () => {
-    window.open("https://github.com/settings/installations", "_blank");
+    const appId = process.env.NEXT_PUBLIC_GITHUB_APP_ID;
+    const fallbackInstallationsUrl =
+      "https://github.com/settings/installations";
+    const applicationUrl = appId
+      ? `https://github.com/settings/connections/applications/${appId}`
+      : fallbackInstallationsUrl;
+    window.open(applicationUrl, "_blank");
   };
 
   const handleLogin = () => {

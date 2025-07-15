@@ -10,6 +10,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
+import { getCustomConfigurableFields } from "../../../utils/config.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -43,6 +44,7 @@ export async function startPlanner(
         input: runInput,
         config: {
           recursion_limit: 400,
+          configurable: getCustomConfigurableFields(config),
         },
         ifNotExists: "create",
         multitaskStrategy: "enqueue",

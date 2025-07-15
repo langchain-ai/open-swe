@@ -36,9 +36,8 @@ export function APIKeysTab() {
         {
           id: "anthropic-1",
           name: "Anthropic",
-          value: "sk-ant-api03-...",
+          value: "",
           isVisible: false,
-          lastUsed: "2 hours ago",
         },
         { id: "openai-1", name: "OpenAI", value: "", isVisible: false },
         { id: "google-1", name: "Google Gen AI", value: "", isVisible: false },

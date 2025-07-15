@@ -1,15 +1,25 @@
 "use client";
 
-import { useState } from "react";
-import { Key } from "lucide-react";
+import { useQueryState } from "nuqs";
+import { Key, Settings } from "lucide-react";
 import { GitHubManager } from "./github-manager";
 import { APIKeysTab } from "./api-keys";
+import { ConfigManager } from "./config-manager";
 import { GitHubSVG } from "@/components/icons/github";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<"github" | "api-keys">("github");
+  const [activeTab, setActiveTab] = useQueryState("tab", {
+    defaultValue: "github" as "github" | "api-keys" | "configuration",
+    parse: (value: string) => {
+      if (["github", "api-keys", "configuration"].includes(value)) {
+        return value as "github" | "api-keys" | "configuration";
+      }
+      return "github";
+    },
+    serialize: (value) => value,
+  });
 
   const getTabClassName = (isActive: boolean) =>
     cn(
@@ -52,12 +62,22 @@ export default function SettingsPage() {
                 API Keys
               </span>
             </button>
+            <button
+              onClick={() => setActiveTab("configuration")}
+              className={getTabClassName(activeTab === "configuration")}
+            >
+              <span className="flex items-center gap-2 font-mono">
+                <Settings className="size-4" />
+                Configuration
+              </span>
+            </button>
           </div>
         </div>
 
         <div className="border-border bg-background rounded-b-lg border border-t-0 p-6">
           {activeTab === "github" && <GitHubManager />}
           {activeTab === "api-keys" && <APIKeysTab />}
+          {activeTab === "configuration" && <ConfigManager />}
         </div>
       </div>
     </GitHubAppProvider>
