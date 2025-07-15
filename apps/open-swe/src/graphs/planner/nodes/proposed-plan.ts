@@ -33,6 +33,7 @@ import {
   CustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
+import { getCustomConfigurableFields } from "../../../utils/config.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -100,11 +101,12 @@ async function startProgrammerRun(input: {
       input: runInput,
       config: {
         recursion_limit: 400,
+        configurable: getCustomConfigurableFields(config),
       },
       ifNotExists: "create",
       streamResumable: true,
       streamSubgraphs: true,
-      streamMode: ["values", "messages", "custom", "events"],
+      streamMode: ["values", "messages-tuple", "custom"],
     },
   );
 

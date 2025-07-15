@@ -19,6 +19,7 @@ import {
 } from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
+import { getCustomConfigurableFields } from "../../../utils/config.js";
 
 /**
  * Create new manager session.
@@ -87,10 +88,11 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     },
     config: {
       recursion_limit: 400,
+      configurable: getCustomConfigurableFields(config),
     },
     ifNotExists: "create",
     streamResumable: true,
-    streamMode: ["values", "messages", "custom"],
+    streamMode: ["values", "messages-tuple", "custom"],
   });
 
   return {

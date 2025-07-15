@@ -24,11 +24,29 @@ import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { InstallationSelector } from "../github/installation-selector";
+
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
+import { Settings } from "lucide-react";
+import NextLink from "next/link";
+
+function OpenSettingsButton() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <NextLink href="/settings">
+            <Settings className="size-4" />
+          </NextLink>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open Settings</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 interface DefaultViewProps {
   threads: Thread<ManagerGraphState>[];
@@ -81,11 +99,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             </span>
           </div>
           <div className="flex items-center gap-4">
+            <InstallationSelector />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
-              <div className="bg-muted h-1 w-1 rounded-full"></div>
+              <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
-            <InstallationSelector />
+            <OpenSettingsButton />
             <ThemeToggle />
             <GitHubLogoutButton />
           </div>

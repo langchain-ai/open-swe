@@ -166,7 +166,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       },
       ifNotExists: "create",
       streamResumable: true,
-      streamMode: ["values", "messages", "custom"],
+      streamMode: ["values", "messages-tuple", "custom"],
     });
 
     logger.info("Created new run from GitHub issue.", {

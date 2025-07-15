@@ -8,7 +8,7 @@ export async function createIssueFieldsFromMessages(
   messages: BaseMessage[],
   configurable: GraphConfig["configurable"],
 ): Promise<{ title: string; body: string }> {
-  const model = await loadModel({ configurable }, Task.SUMMARIZER);
+  const model = await loadModel({ configurable }, Task.ROUTER);
   const githubIssueTool = {
     name: "create_github_issue",
     description: "Create a new GitHub issue with the given title and body.",

@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   GraphConfig,
   GraphState,
@@ -140,6 +141,7 @@ export async function openPullRequest(
       },
     }),
     new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: pr
         ? `Created pull request: ${pr.html_url}`
