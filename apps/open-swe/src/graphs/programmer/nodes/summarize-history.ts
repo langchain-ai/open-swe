@@ -121,7 +121,7 @@ function createUserFacingConversationSummaryMessages(
     new ToolMessage({
       id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
       tool_call_id: conversationSummaryToolCallId,
-      content: "",
+      content: "Summarized message",
     }),
   ];
 

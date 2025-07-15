@@ -37,7 +37,7 @@ function createReviewStartedMessage() {
     new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCallId,
-      content: "",
+      content: "Review started",
       additional_kwargs: {
         hidden: true,
       },
