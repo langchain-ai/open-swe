@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
@@ -78,6 +79,7 @@ export async function takeAction(
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
       const toolMessage = new ToolMessage({
+        id: uuidv4(),
         tool_call_id: toolCall.id ?? "",
         content: `Unknown tool: ${toolCall.name}`,
         name: toolCall.name,
@@ -127,6 +129,7 @@ export async function takeAction(
     }
 
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: truncateOutput(result),
       name: toolCall.name,

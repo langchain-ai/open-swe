@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   isAIMessage,
   isToolMessage,
@@ -30,6 +31,7 @@ import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -79,6 +81,7 @@ export async function takeActions(
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
       const toolMessage = new ToolMessage({
+        id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
         tool_call_id: toolCall.id ?? "",
         content: `Unknown tool: ${toolCall.name}`,
         name: toolCall.name,
@@ -145,6 +148,7 @@ export async function takeActions(
         : truncateOutput(result);
 
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: truncatedOutput,
       name: toolCall.name,

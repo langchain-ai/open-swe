@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   GraphConfig,
@@ -108,6 +109,7 @@ Once you've determined the status of the current task, call either the \`mark_ta
   const isCompleted = toolCall.name === markCompletedTool.name;
   const currentTask = getCurrentPlanItem(activePlanItems);
   const toolMessage = new ToolMessage({
+    id: uuidv4(),
     tool_call_id: toolCall.id ?? "",
     content: `Saved task status as ${isCompleted ? "completed" : "not completed"} for task ${currentTask?.plan || "unknown"}`,
     name: toolCall.name,

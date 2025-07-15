@@ -61,6 +61,7 @@ export async function generatePlan(
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
     const lastMessageToolCall = lastMessage.tool_calls?.[0];
     optionalToolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: lastMessageToolCall.id ?? "",
       name: lastMessageToolCall.name,
       content: "Tool call not executed. Max actions reached.",

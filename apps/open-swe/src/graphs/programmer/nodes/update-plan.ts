@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   GraphState,
   GraphConfig,
@@ -174,6 +175,7 @@ export async function updatePlan(
     "agent",
   );
   const toolMessage = new ToolMessage({
+    id: uuidv4(),
     tool_call_id: updatePlanToolCallId,
     content:
       "Successfully updated the plan. The complete updated plan items are as follow:\n\n" +

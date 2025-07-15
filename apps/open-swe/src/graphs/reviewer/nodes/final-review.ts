@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -96,6 +97,7 @@ export async function finalReview(
   if (toolCall.name === completedTool.name) {
     // Marked as completed. No further actions necessary.
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: "Marked task as completed.",
     });
@@ -144,6 +146,7 @@ export async function finalReview(
   );
 
   const toolMessage = new ToolMessage({
+    id: uuidv4(),
     tool_call_id: toolCall.id ?? "",
     content: "Marked task as incomplete.",
   });

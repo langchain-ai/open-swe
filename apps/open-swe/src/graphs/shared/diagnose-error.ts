@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   BaseMessage,
   isToolMessage,
@@ -115,6 +116,7 @@ export async function diagnoseError(
   });
 
   const toolMessage = new ToolMessage({
+    id: uuidv4(),
     tool_call_id: toolCall.id ?? "",
     content: `Successfully diagnosed error. Please use the diagnosis to continue with the next action.`,
     name: toolCall.name,
