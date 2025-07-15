@@ -60,7 +60,10 @@ export function getMessageString(message: BaseMessage): string {
   return getUnknownMessageString(message);
 }
 
-export function filterMessagesWithoutContent(messages: BaseMessage[], filterHidden = true): BaseMessage[] {
+export function filterMessagesWithoutContent(
+  messages: BaseMessage[],
+  filterHidden = true,
+): BaseMessage[] {
   return messages.filter((m) => {
     if (filterHidden && m.additional_kwargs?.hidden) {
       return false;

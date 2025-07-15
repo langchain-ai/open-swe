@@ -68,13 +68,13 @@ export async function generatePlan(
     });
   }
 
-    const inputMessages = filterMessagesWithoutContent([
-      ...state.messages,
-      ...(optionalToolMessage ? [optionalToolMessage] : [])
-    ]);
-    if (!inputMessages.length) {
-      throw new Error("No messages to process.");
-    }
+  const inputMessages = filterMessagesWithoutContent([
+    ...state.messages,
+    ...(optionalToolMessage ? [optionalToolMessage] : []),
+  ]);
+  if (!inputMessages.length) {
+    throw new Error("No messages to process.");
+  }
 
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
@@ -83,7 +83,7 @@ export async function generatePlan(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      ...inputMessages
+      ...inputMessages,
     ]);
 
   const toolCall = response.tool_calls?.[0];
