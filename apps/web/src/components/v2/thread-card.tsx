@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
+import { cn } from "@/lib/utils";
 
 export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
   const router = useRouter();
@@ -82,7 +83,7 @@ export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
           </div>
           <Badge
             variant="secondary"
-            className={`${getStatusColor(thread.status)} text-xs`}
+            className={cn(getStatusColor(thread.status), "text-xs")}
           >
             <div className="flex items-center gap-1">
               {getStatusIcon(thread.status)}
@@ -122,7 +123,10 @@ export function ThreadCard({ thread }: { thread: ThreadDisplayInfo }) {
               <Button
                 variant="ghost"
                 size="sm"
-                className={`h-5 w-5 p-0 hover:text-gray-300 ${getPRStatusColor(thread.pullRequest.status)}`}
+                className={cn(
+                  "h-5 w-5 p-0 hover:text-gray-300",
+                  getPRStatusColor(thread.pullRequest.status),
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.open(thread.pullRequest!.url, "_blank");

@@ -37,13 +37,9 @@ export function createInstallDependenciesTool(
         );
 
         if (response.exitCode !== 0) {
-          logger.error("Failed to install dependencies", {
-            error: response.result,
-            error_result: response,
-            input,
-          });
+          const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
+            `Failed to install dependencies. Exit code: ${response.exitCode}\nError: ${errorResult}`,
           );
         }
 
@@ -54,27 +50,14 @@ export function createInstallDependenciesTool(
       } catch (e) {
         const errorFields = getSandboxErrorFields(e);
         if (errorFields) {
-          logger.error("Failed to install dependencies", {
-            input,
-            error: errorFields,
-          });
+          const errorResult =
+            errorFields.result ?? errorFields.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
+            `Failed to install dependencies. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
         }
 
-        logger.error(
-          "Failed to install dependencies: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-          {
-            error: e,
-            input,
-          },
-        );
-        throw new Error(
-          "FAILED TO INSTALL DEPENDENCIES: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
     createInstallDependenciesToolFields(state.targetRepository),

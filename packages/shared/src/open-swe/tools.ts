@@ -106,113 +106,36 @@ export function createUpdatePlanToolFields() {
   };
 }
 
-export function createRgToolFields(targetRepository: TargetRepository) {
+export function createSearchToolFields(targetRepository: TargetRepository) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
-  // Main ripgrep command schema
-  const ripgrepCommandSchema = z.object({
-    pattern: z
-      .string()
-      .optional()
-      .describe(
-        "The search pattern (regex). Leave empty when using flags like --files or --type-list",
-      ),
-
-    paths: z
-      .array(z.string())
-      .optional()
-      .describe(
-        "Files or directories to search. If empty, searches current directory",
-      ),
-
-    flags: z
-      .array(z.string())
-      .optional()
-      .describe(
-        'Array of flags with their values. Examples: ["-i", "--type=rust", "-A", "3", "--files"]. Short flags like -i can be standalone, flags with values can be separate strings or use = for long flags',
-      ),
-  });
-
-  return {
-    name: "rg",
-    schema: ripgrepCommandSchema,
-    description: `Call this tool to run the rg command (ripgrep). This should ONLY be called if you want to search for files in the repository. The working directory this command will be executed in is \`${repoRoot}\`.`,
-  };
-}
-
-// Only used for type inference
-const _tmpRgToolSchema = createRgToolFields({ owner: "x", repo: "x" }).schema;
-export type RipgrepCommand = z.infer<typeof _tmpRgToolSchema>;
-
-export function formatRgCommand(
-  cmd: RipgrepCommand,
-  options?: {
-    excludeRequiredFlags?: boolean;
-  },
-): string[] {
-  const args = ["rg"];
-
-  // Always include these flags
-  const requiredFlags = ["--color", "never", "--line-number", "--heading"];
-
-  // Add user-provided flags, ensuring we don't duplicate the required ones
-  if (cmd.flags) {
-    // Filter out any flags that would duplicate our required flags
-    const filteredFlags = cmd.flags.filter((flag) => {
-      // Check for exact matches or flags that start with our required prefixes
-      return (
-        !requiredFlags.includes(flag) &&
-        !flag.startsWith("--color=") &&
-        flag !== "--line-number" &&
-        flag !== "-n" &&
-        flag !== "--heading"
-      );
-    });
-
-    args.push(...filteredFlags);
-  }
-
-  if (!options?.excludeRequiredFlags) {
-    // Add the required flags
-    args.push(...requiredFlags);
-  }
-
-  if (cmd.pattern) {
-    args.push(cmd.pattern);
-  }
-
-  if (cmd.paths) {
-    args.push(...cmd.paths);
-  }
-
-  return args;
-}
-
-export function createFindInstancesOfToolFields(
-  targetRepository: TargetRepository,
-) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
-  const findInstancesOfSchema = z.object({
+  const searchSchema = z.object({
     query: z
       .string()
       .describe(
-        "The query/keyword to search for. This should be a literal string, not a regex.",
+        "The string or regex to search the codebase for. If passing a plain string, ensure to also set the 'match_string' field to true. If passing a regex, ensure to also set the 'match_string' field to false.",
+      ),
+
+    match_string: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "Whether or not to treat the query as a fixed string to search for. If true, it will search for results which match the query exactly. If false, the query will be treated as a regex. Defaults to false.",
       ),
 
     case_sensitive: z
       .boolean()
       .optional()
-      .default(true)
+      .default(false)
       .describe(
-        "Whether or not to make the query search case sensitive. Defaults to true",
+        "Whether or not to make the search case sensitive. Defaults to false.",
       ),
 
-    match_word: z
-      .boolean()
+    context_lines: z
+      .number()
       .optional()
-      .default(true)
-      .describe(
-        "Whether or not to only show results which match the exact keyword. Defaults to true",
-      ),
+      .default(0)
+      .describe("Number of lines of context to include before/after matches."),
 
     exclude_files: z
       .string()
@@ -223,13 +146,114 @@ export function createFindInstancesOfToolFields(
       .string()
       .optional()
       .describe("Glob pattern of files to include"),
+
+    max_results: z
+      .number()
+      .optional()
+      .default(0)
+      .describe(
+        "Maximum number of results to return. Defaults to 0, which returns all results.",
+      ),
+    file_types: z
+      .array(z.string())
+      .optional()
+      .describe("Restrict to certain file extensions (e.g., ['.js', '.ts'])."),
+    follow_symlinks: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Whether or not to follow symlinks. Defaults to false."),
   });
 
   return {
-    name: "find_instances_of",
-    schema: findInstancesOfSchema,
-    description: `Find all instances of a string in the repository. Returns results with 3 lines of context above and below each match, absolute file paths, and total result count. The working directory this command will be executed in is \`${repoRoot}\`.`,
+    name: "search",
+    schema: searchSchema,
+    description: `Execute a search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
   };
+}
+
+// Only used for type inference
+const _tmpSearchToolSchema = createSearchToolFields({
+  owner: "x",
+  repo: "x",
+}).schema;
+export type SearchCommand = z.infer<typeof _tmpSearchToolSchema>;
+
+function escapeShellArg(arg: string): string {
+  // If the string contains a single quote, close the string, escape the single quote, and reopen it
+  // Example: foo'bar → 'foo'\''bar'
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+export function formatSearchCommand(
+  cmd: SearchCommand,
+  options?: {
+    excludeRequiredFlags?: boolean;
+  },
+): string[] {
+  const args = ["rg"];
+
+  // Required flags to keep formatting and output consistent
+  const requiredFlags = ["--color=never", "--line-number", "--heading"];
+
+  if (!options?.excludeRequiredFlags) {
+    args.push(...requiredFlags);
+  }
+
+  // Case sensitivity
+  if (!cmd.case_sensitive) {
+    args.push("-i");
+  }
+
+  // Regex vs fixed string
+  if (cmd.match_string) {
+    args.push("--fixed-strings");
+  }
+
+  // Context lines
+  if (cmd.context_lines && cmd.context_lines > 0) {
+    args.push(`-C`, String(cmd.context_lines));
+  }
+
+  // File globs - use ripgrep's glob handling instead of shell expansion
+  if (cmd.include_files) {
+    // Quote the glob pattern to prevent shell interpretation
+    args.push("--glob", escapeShellArg(cmd.include_files));
+  }
+
+  if (cmd.exclude_files) {
+    // Quote the exclude pattern to prevent shell interpretation
+    args.push("--glob", escapeShellArg(`!${cmd.exclude_files}`));
+  }
+
+  // File types
+  if (cmd.file_types && cmd.file_types.length > 0) {
+    // Process each file type individually to avoid glob expansion issues
+    for (const ext of cmd.file_types) {
+      // Normalize extension format (ensure it has a leading dot)
+      const normalizedExt = ext.startsWith(".") ? ext : `.${ext}`;
+      // Quote the glob pattern to prevent shell interpretation
+      args.push("--glob", escapeShellArg(`**/*${normalizedExt}`));
+    }
+  }
+
+  // Follow symlinks
+  if (cmd.follow_symlinks) {
+    args.push("-L");
+  }
+
+  // Max results (0 = unlimited)
+  if (cmd.max_results && cmd.max_results > 0) {
+    args.push("--max-count", String(cmd.max_results));
+  }
+
+  // The query (must come after path for ripgrep to interpret it correctly)
+  if (cmd.query) {
+    // Double-quote the pattern to ensure it's treated as a pattern and not a path
+    args.push(escapeShellArg(cmd.query));
+  }
+
+  return args;
 }
 
 export function createMarkTaskNotCompletedToolFields() {
@@ -394,5 +418,57 @@ export function createConversationHistorySummaryToolFields() {
     description:
       "<not used as an actual tool call. only used as shared types between the client and agent>",
     schema: conversationHistorySummarySchema,
+  };
+}
+
+export function createCodeReviewMarkTaskCompletedFields() {
+  const markTaskCompletedSchema = z.object({
+    review: z
+      .string()
+      .describe(
+        "Your final review for the completed task. This should be concise, but descriptive.",
+      ),
+  });
+
+  return {
+    name: "code_review_mark_task_completed",
+    schema: markTaskCompletedSchema,
+    description:
+      "Use this tool to mark a task as completed. This should be called if you determine that the task has been successfully completed.",
+  };
+}
+
+export function createCodeReviewMarkTaskNotCompleteFields() {
+  const markTaskNotCompleteSchema = z.object({
+    review: z
+      .string()
+      .describe(
+        "Your final review for the completed task. This should be concise, but descriptive.",
+      ),
+    additional_actions: z
+      .array(z.string())
+      .describe(
+        "A list of additional actions to take which will successfully satisfy your review, and complete the task.",
+      ),
+  });
+
+  return {
+    name: "code_review_mark_task_not_complete",
+    schema: markTaskNotCompleteSchema,
+    description:
+      "Use this tool to mark a task as not complete. This should be called if you determine that the task has not been successfully completed, and you have additional tasks the programmer should take to successfully complete the task.",
+  };
+}
+
+export function createReviewStartedToolFields() {
+  const reviewStartedSchema = z.object({
+    review_started: z.boolean(),
+  });
+
+  return {
+    name: "review_started",
+    description:
+      "<not used as an actual tool call. only used as shared types between the client and agent>",
+    schema: reviewStartedSchema,
   };
 }

@@ -3,6 +3,7 @@ import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationPrompt } from "./installation-prompt";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface RepositoryListProps {
   className?: string;
@@ -14,7 +15,7 @@ export function RepositoryList({ className = "" }: RepositoryListProps) {
 
   if (isLoading) {
     return (
-      <div className={`p-4 ${className}`}>
+      <div className={cn("p-4", className)}>
         <div className="mb-4 h-6 w-24 animate-pulse rounded bg-gray-200"></div>
         {[1, 2, 3].map((i) => (
           <div
@@ -31,7 +32,7 @@ export function RepositoryList({ className = "" }: RepositoryListProps) {
 
   if (error) {
     return (
-      <div className={`p-4 ${className}`}>
+      <div className={cn("p-4", className)}>
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-800">{error}</p>
         </div>
@@ -47,14 +48,14 @@ export function RepositoryList({ className = "" }: RepositoryListProps) {
 
   if (!isInstalled) {
     return (
-      <div className={`p-4 ${className}`}>
+      <div className={cn("p-4", className)}>
         <InstallationPrompt />
       </div>
     );
   }
 
   return (
-    <div className={`p-4 ${className}`}>
+    <div className={cn("p-4", className)}>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-medium">Your GitHub Repositories</h2>
         <Button
@@ -107,7 +108,12 @@ export function RepositoryList({ className = "" }: RepositoryListProps) {
                   </p>
                   <div className="mt-2 flex items-center text-xs">
                     <span
-                      className={`rounded-full px-2 py-0.5 ${repo.private ? "bg-gray-100" : "bg-green-100 text-green-800"} mr-2`}
+                      className={cn(
+                        "rounded-full px-2 py-0.5",
+                        repo.private
+                          ? "bg-gray-100"
+                          : "bg-green-100 text-green-800",
+                      )}
                     >
                       {repo.private ? "Private" : "Public"}
                     </span>

@@ -1,61 +1,45 @@
+import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
-  createApplyPatchTool,
-  createGetURLContentTool,
+  createInstallDependenciesTool,
   createShellTool,
 } from "../../../tools/index.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
-  GraphState,
-  GraphConfig,
-  GraphUpdate,
-} from "@open-swe/shared/open-swe/types";
+  ReviewerGraphState,
+  ReviewerGraphUpdate,
+} from "@open-swe/shared/open-swe/reviewer/types";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { zodSchemaToString } from "../../../utils/zod-to-string.js";
+import { formatBadArgsError } from "../../../utils/zod-to-string.js";
+import { truncateOutput } from "../../../utils/truncate-outputs.js";
+import { createSearchTool } from "../../../tools/search.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
-import {
-  safeSchemaToString,
-  safeBadArgsError,
-} from "../../../utils/zod-to-string.js";
-import { Command } from "@langchain/langgraph";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { getCodebaseTree } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import { createSearchTool } from "../../../tools/search.js";
-import { getMcpTools } from "../../../utils/mcp-client.js";
+import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 
-const logger = createLogger(LogLevel.INFO, "TakeAction");
+const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
-export async function takeAction(
-  state: GraphState,
+export async function takeReviewerActions(
+  state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const lastMessage = state.internalMessages[state.internalMessages.length - 1];
+  const { reviewerMessages } = state;
+  const lastMessage = reviewerMessages[reviewerMessages.length - 1];
 
   if (!isAIMessage(lastMessage) || !lastMessage.tool_calls?.length) {
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const getURLContentTool = createGetURLContentTool();
-
-  const mcpTools = await getMcpTools(config);
-
-  const allTools = [
-    shellTool,
-    searchTool,
-    installDependenciesTool,
-    applyPatchTool,
-    getURLContentTool,
-    ...mcpTools,
-  ];
+  const allTools = [shellTool, searchTool, installDependenciesTool];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -65,45 +49,49 @@ export async function takeAction(
     throw new Error("No tool calls found.");
   }
 
-  const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
-    state.sandboxSessionId,
-    state.targetRepository,
-    state.branchName,
-    config,
-  );
+  const { sandbox, codebaseTree, dependenciesInstalled } =
+    await getSandboxWithErrorHandling(
+      state.sandboxSessionId,
+      state.targetRepository,
+      state.branchName,
+      config,
+    );
 
   const toolCallResultsPromise = toolCalls.map(async (toolCall) => {
     const tool = toolsMap[toolCall.name];
-
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
       const toolMessage = new ToolMessage({
+        id: uuidv4(),
         tool_call_id: toolCall.id ?? "",
         content: `Unknown tool: ${toolCall.name}`,
         name: toolCall.name,
         status: "error",
       });
+
       return toolMessage;
     }
+
+    logger.info("Executing review action", {
+      ...toolCall,
+    });
 
     let result = "";
     let toolCallStatus: "success" | "error" = "success";
     try {
-      const toolResult: { result: string; status: "success" | "error" } =
+      const toolResult =
         // @ts-expect-error tool.invoke types are weird here...
-        await tool.invoke({
+        (await tool.invoke({
           ...toolCall.args,
           // Pass in the existing/new sandbox session ID to the tool call.
           // use `x` prefix to avoid name conflicts with tool args.
           xSandboxSessionId: sandbox.id,
-        });
-      if (typeof toolResult === "string") {
-        result = toolResult;
-        toolCallStatus = "success";
-      } else {
-        result = toolResult.result;
-        toolCallStatus = toolResult.status;
-      }
+        })) as {
+          result: string;
+          status: "success" | "error";
+        };
+      result = toolResult.result;
+      toolCallStatus = toolResult.status;
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -112,9 +100,9 @@ export async function takeAction(
       ) {
         logger.error("Received tool input did not match expected schema", {
           toolCall,
-          expectedSchema: safeSchemaToString(tool.schema),
+          expectedSchema: zodSchemaToString(tool.schema),
         });
-        result = safeBadArgsError(tool.schema, toolCall.args, toolCall.name);
+        result = formatBadArgsError(tool.schema, toolCall.args);
       } else {
         logger.error("Failed to call tool", {
           ...(e instanceof Error
@@ -127,31 +115,18 @@ export async function takeAction(
     }
 
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: truncateOutput(result),
       name: toolCall.name,
       status: toolCallStatus,
     });
-
     return toolMessage;
   });
 
   const toolCallResults = await Promise.all(toolCallResultsPromise);
-
-  let wereDependenciesInstalled: boolean | null = null;
-  toolCallResults.forEach((toolCallResult) => {
-    if (toolCallResult.name === installDependenciesTool.name) {
-      wereDependenciesInstalled = toolCallResult.status === "success";
-    }
-  });
-
-  // Always check if there are changed files after running a tool.
-  // If there are, commit them.
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
-
+  const repoPath = getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   let branchName: string | undefined = state.branchName;
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
@@ -167,12 +142,12 @@ export async function takeAction(
     );
   }
 
-  const shouldRouteDiagnoseNode = shouldDiagnoseError([
-    ...state.internalMessages,
-    ...toolCallResults,
-  ]);
-
-  const codebaseTree = await getCodebaseTree();
+  let wereDependenciesInstalled: boolean | null = null;
+  toolCallResults.forEach((toolCallResult) => {
+    if (toolCallResult.name === installDependenciesTool.name) {
+      wereDependenciesInstalled = toolCallResult.status === "success";
+    }
+  });
 
   // Prioritize wereDependenciesInstalled over dependenciesInstalled
   const dependenciesInstalledUpdate =
@@ -182,18 +157,32 @@ export async function takeAction(
         ? dependenciesInstalled
         : null;
 
-  const commandUpdate: GraphUpdate = {
+  logger.info("Completed review action", {
+    ...toolCallResults.map((tc) => ({
+      tool_call_id: tc.tool_call_id,
+      status: tc.status,
+    })),
+  });
+
+  const commandUpdate: ReviewerGraphUpdate = {
     messages: toolCallResults,
-    internalMessages: toolCallResults,
+    reviewerMessages: toolCallResults,
     ...(branchName && { branchName }),
-    codebaseTree,
-    sandboxSessionId: sandbox.id,
+    ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
   };
+
+  const shouldRouteDiagnoseNode = shouldDiagnoseError([
+    ...state.reviewerMessages,
+    ...toolCallResults,
+  ]);
+
   return new Command({
-    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
+    goto: shouldRouteDiagnoseNode
+      ? "diagnose-reviewer-error"
+      : "generate-review-actions",
     update: commandUpdate,
   });
 }

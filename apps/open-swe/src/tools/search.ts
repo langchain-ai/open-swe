@@ -4,35 +4,31 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import {
-  createRgToolFields,
-  formatRgCommand,
+  createSearchToolFields,
+  formatSearchCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { wrapScript } from "../utils/wrap-script.js";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
-const logger = createLogger(LogLevel.INFO, "RgTool");
+const logger = createLogger(LogLevel.INFO, "SearchTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-export function createRgTool(
+export function createSearchTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
-  const rgTool = tool(
+  const searchTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const sandbox = await getSandboxSessionOrThrow(input);
 
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
-        const command = formatRgCommand({
-          pattern: input.pattern,
-          paths: input.paths,
-          flags: input.flags,
-        });
-        logger.info("Running rg command", {
+        const command = formatSearchCommand(input);
+        logger.info("Running search command", {
           command: command.join(" "),
           repoRoot,
         });
@@ -49,18 +45,12 @@ export function createRgTool(
           response.exitCode === 1 ||
           (response.exitCode === 127 && response.result.startsWith("sh: 1: "))
         ) {
-          logger.info("Exit code 1. no results found", {
-            ...response,
-          });
-          successResult = `Exit code 1. No results found.\n\n${response.result}`;
+          const errorResult = response.result ?? response.artifacts?.stdout;
+          successResult = `Exit code 1. No results found.\n\n${errorResult}`;
         } else if (response.exitCode > 1) {
-          logger.error("Failed to run rg command", {
-            error: response.result,
-            error_result: response,
-            input,
-          });
+          const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
+            `Failed to run search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
           );
         }
 
@@ -71,31 +61,18 @@ export function createRgTool(
       } catch (e) {
         const errorFields = getSandboxErrorFields(e);
         if (errorFields) {
-          logger.error("Failed to run rg command", {
-            input,
-            error: errorFields,
-          });
+          const errorResult =
+            errorFields.result ?? errorFields.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
+            `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
         }
 
-        logger.error(
-          "Failed to run rg command: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-          {
-            error: e,
-            input,
-          },
-        );
-        throw new Error(
-          "FAILED TO RUN RG COMMAND: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
-    createRgToolFields(state.targetRepository),
+    createSearchToolFields(state.targetRepository),
   );
 
-  return rgTool;
+  return searchTool;
 }

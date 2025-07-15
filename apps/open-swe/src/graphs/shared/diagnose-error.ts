@@ -5,18 +5,14 @@ import {
 } from "@langchain/core/messages";
 import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 
-import { getMessageString } from "../../../utils/message/content.js";
-import { loadModel, Task } from "../../../utils/load-model.js";
 import { z } from "zod";
-import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getAllLastFailedActions } from "../../../utils/tool-message-error.js";
-import {
-  PlannerGraphState,
-  PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { createLogger, LogLevel } from "../../utils/logger.js";
+import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
+import { getMessageString } from "../../utils/message/content.js";
+import { loadModel, Task } from "../../utils/load-model.js";
 
-const logger = createLogger(LogLevel.INFO, "DiagnoseError");
+const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -71,10 +67,17 @@ const formatUserPrompt = (messages: BaseMessage[]): string => {
   );
 };
 
+interface DiagnoseErrorInputs {
+  messages: BaseMessage[];
+  codebaseTree: string;
+}
+
+type DiagnoseErrorUpdate = Partial<DiagnoseErrorInputs>;
+
 export async function diagnoseError(
-  state: PlannerGraphState,
+  state: DiagnoseErrorInputs,
   config: GraphConfig,
-): Promise<PlannerGraphUpdate> {
+): Promise<DiagnoseErrorUpdate> {
   const lastFailedAction = state.messages.findLast(
     (m) => isToolMessage(m) && m.status === "error",
   );
@@ -82,7 +85,7 @@ export async function diagnoseError(
     throw new Error("No failed action found in messages");
   }
 
-  logger.info("The last two tool calls resulted in errors. Diagnosing error.");
+  logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([diagnoseErrorTool], {

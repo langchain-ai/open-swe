@@ -35,10 +35,12 @@ export function PullRequestOpened({
     switch (status) {
       case "loading":
         return (
-          <div className="h-3.5 w-3.5 rounded-full border border-gray-300" />
+          <div className="h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600" />
         );
       case "generating":
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
+        return (
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
+        );
       case "done":
         return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
     }
@@ -62,28 +64,28 @@ export function PullRequestOpened({
   };
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200">
-      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2">
-        <GitPullRequest className="mr-2 h-3.5 w-3.5 text-gray-500" />
+    <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
+      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+        <GitPullRequest className="mr-2 h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
         <div className="flex-1">
           {title && status === "done" && (
-            <div className="mb-0.5 text-xs font-normal text-gray-800">
+            <div className="mb-0.5 text-xs font-normal text-gray-800 dark:text-gray-200">
               {title}
             </div>
           )}
           {branch && status === "done" && (
-            <div className="text-xs font-normal text-gray-500">
+            <div className="text-xs font-normal text-gray-500 dark:text-gray-400">
               {branch} → {targetBranch}
             </div>
           )}
           {!title && (
-            <span className="text-xs font-normal text-gray-800">
+            <span className="text-xs font-normal text-gray-800 dark:text-gray-200">
               {getStatusText()}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-normal text-gray-500">
+          <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
             {getStatusText()}
           </span>
           {getStatusIcon()}
@@ -92,7 +94,7 @@ export function PullRequestOpened({
               href={url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
               title="Open pull request"
             >
               <ExternalLink className="h-3.5 w-3.5" />
@@ -101,7 +103,7 @@ export function PullRequestOpened({
           {shouldShowToggle() && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
             >
               {expanded ? (
                 <ChevronUp className="h-3.5 w-3.5" />
@@ -114,11 +116,11 @@ export function PullRequestOpened({
       </div>
 
       {expanded && description && status === "done" && (
-        <div className="border-t border-gray-200 p-2">
-          <h3 className="mb-1 text-xs font-normal text-gray-500">
+        <div className="border-t border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
+          <h3 className="mb-1 text-xs font-normal text-gray-500 dark:text-gray-400">
             Description
           </h3>
-          <div className="text-xs font-normal whitespace-pre-wrap text-gray-800">
+          <div className="text-xs font-normal whitespace-pre-wrap text-gray-800 dark:text-gray-200">
             {description}
           </div>
         </div>

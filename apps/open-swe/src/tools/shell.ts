@@ -1,12 +1,9 @@
 import { tool } from "@langchain/core/tools";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
-import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-
-const logger = createLogger(LogLevel.INFO, "ShellTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
@@ -30,13 +27,9 @@ export function createShellTool(
         );
 
         if (response.exitCode !== 0) {
-          logger.error("Failed to run command", {
-            error: response.result,
-            error_result: response,
-            input,
-          });
+          const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${response.exitCode}\nResult: ${response.result}\nStdout:\n${response.artifacts?.stdout}`,
+            `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`,
           );
         }
 
@@ -47,27 +40,14 @@ export function createShellTool(
       } catch (e) {
         const errorFields = getSandboxErrorFields(e);
         if (errorFields) {
-          logger.error("Failed to run command", {
-            input,
-            error: errorFields,
-          });
+          const errorResult =
+            errorFields.result ?? errorFields.artifacts?.stdout;
           throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorFields.result}\nStdout:\n${errorFields.artifacts?.stdout}`,
+            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
         }
 
-        logger.error(
-          "Failed to run command: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-          {
-            error: e,
-            input,
-          },
-        );
-        throw new Error(
-          "FAILED TO RUN COMMAND: " +
-            (e instanceof Error ? e.message : "Unknown error"),
-        );
+        throw e;
       }
     },
     createShellToolFields(state.targetRepository),

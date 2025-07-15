@@ -49,12 +49,10 @@ async function readFileFunc(inputs: {
     );
 
     if (readOutput.exitCode !== 0) {
-      logger.error(`Error reading file '${filePath}' from sandbox via cat:`, {
-        readOutput,
-      });
+      const errorResult = readOutput.result ?? readOutput.artifacts?.stdout;
       return {
         success: false,
-        output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nResult: ${readOutput.result}\nStdout: ${readOutput.artifacts?.stdout}`,
+        output: `FAILED TO READ FILE from sandbox '${filePath}'. Exit code: ${readOutput.exitCode}.\nResult: ${errorResult}`,
       };
     }
 
@@ -89,7 +87,9 @@ async function readFileFunc(inputs: {
     let outputMessage = `FAILED TO EXECUTE READ COMMAND for sandbox '${filePath}'.`;
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorFields.result}\nStdout: ${errorFields.artifacts?.stdout}`;
+      const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
+
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
     }
@@ -134,12 +134,10 @@ ${delimiter}`;
     );
 
     if (writeOutput.exitCode !== 0) {
-      logger.error(`Error writing file '${filePath}' to sandbox via cat:`, {
-        writeOutput,
-      });
+      const errorResult = writeOutput.result ?? writeOutput.artifacts?.stdout;
       return {
         success: false,
-        output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}\nResult: ${writeOutput.result}\nStdout: ${writeOutput.artifacts?.stdout}`,
+        output: `FAILED TO WRITE FILE to sandbox '${filePath}'. Exit code: ${writeOutput.exitCode}\nResult: ${errorResult}`,
       };
     }
     return {
@@ -159,7 +157,8 @@ ${delimiter}`;
     let outputMessage = `FAILED TO EXECUTE WRITE COMMAND for sandbox '${filePath}'.`;
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorFields.result}\nStdout: ${errorFields.artifacts?.stdout}`;
+      const errorResult = errorFields.result ?? errorFields.artifacts?.stdout;
+      outputMessage += `\nExit code: ${errorFields.exitCode}\nResult: ${errorResult}`;
     } else {
       outputMessage += ` Error: ${(e as Error).message || String(e)}`;
     }

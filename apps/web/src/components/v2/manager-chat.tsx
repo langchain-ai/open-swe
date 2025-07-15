@@ -12,6 +12,7 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { cn } from "@/lib/utils";
 import { isAIMessageSDK } from "@/lib/langchain-messages";
+import { BasicMarkdownText } from "../thread/markdown-text";
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -121,17 +122,17 @@ export function ManagerChat({
                         )}
                       </div>
                       <div className="relative flex-1 space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human" ? "You" : "Agent"}
                           </span>
+                          <div className="opacity-0 transition-opacity group-hover:opacity-100">
+                            <MessageCopyButton content={messageContentString} />
+                          </div>
                         </div>
-                        <div className="text-foreground text-sm leading-relaxed">
+                        <BasicMarkdownText className="text-foreground text-sm">
                           {messageContentString}
-                        </div>
-                        <div className="absolute right-0 -bottom-5 opacity-0 transition-opacity group-hover:opacity-100">
-                          <MessageCopyButton content={messageContentString} />
-                        </div>
+                        </BasicMarkdownText>
                       </div>
                     </div>
                   );

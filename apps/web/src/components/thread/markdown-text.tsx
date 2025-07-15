@@ -114,7 +114,7 @@ const defaultComponents: any = {
   ),
   p: ({ className, ...props }: { className?: string }) => (
     <p
-      className={cn("mt-5 mb-5 leading-7 first:mt-0 last:mb-0", className)}
+      className={cn("mt-1 mb-1 leading-5 first:mt-0 last:mb-0", className)}
       {...props}
     />
   ),
@@ -135,13 +135,13 @@ const defaultComponents: any = {
   ),
   ul: ({ className, ...props }: { className?: string }) => (
     <ul
-      className={cn("my-5 ml-6 list-disc [&>li]:mt-2", className)}
+      className={cn("my-2 ml-6 list-disc [&>li]:mt-1", className)}
       {...props}
     />
   ),
   ol: ({ className, ...props }: { className?: string }) => (
     <ol
-      className={cn("my-5 ml-6 list-decimal [&>li]:mt-2", className)}
+      className={cn("my-2 ml-6 list-decimal [&>li]:mt-2", className)}
       {...props}
     />
   ),
@@ -243,9 +243,12 @@ const defaultComponents: any = {
   },
 };
 
-const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+const MarkdownTextImpl: FC<{ children: string; className?: string }> = ({
+  children,
+  className,
+}) => {
   return (
-    <div className="markdown-content">
+    <div className={cn("markdown-content", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -258,3 +261,31 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
 };
 
 export const MarkdownText = memo(MarkdownTextImpl);
+
+const BasicMarkdownTextImpl: FC<{ children: string; className?: string }> = ({
+  children,
+  className,
+}) => {
+  const basicMarkdownComponents = { ...defaultComponents };
+  // Don't render headers, instead render them as bold text
+  delete basicMarkdownComponents.h1;
+  delete basicMarkdownComponents.h2;
+  delete basicMarkdownComponents.h3;
+  delete basicMarkdownComponents.h4;
+  delete basicMarkdownComponents.h5;
+  delete basicMarkdownComponents.h6;
+
+  return (
+    <div className={cn("markdown-content", className)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={basicMarkdownComponents}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+};
+
+export const BasicMarkdownText = memo(BasicMarkdownTextImpl);

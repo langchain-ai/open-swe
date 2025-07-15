@@ -21,23 +21,30 @@ import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
 import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
+import {
+  MarkTaskCompleted,
+  MarkTaskIncomplete,
+} from "@/components/gen-ui/task-review";
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
+import { CodeReviewStarted } from "@/components/gen-ui/code-review-started";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
   createMarkTaskCompletedToolFields,
   createMarkTaskNotCompletedToolFields,
-  createRgToolFields,
+  createSearchToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
+  createCodeReviewMarkTaskCompletedFields,
+  createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
-  createFindInstancesOfToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
+  createReviewStartedToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -56,8 +63,10 @@ const markTaskNotCompletedTool = createMarkTaskNotCompletedToolFields();
 type MarkTaskNotCompletedToolArgs = z.infer<
   typeof markTaskNotCompletedTool.schema
 >;
-const rgTool = createRgToolFields(dummyRepo);
-type RgToolArgs = z.infer<typeof rgTool.schema>;
+const reviewStartedTool = createReviewStartedToolFields();
+type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
+const searchTool = createSearchToolFields(dummyRepo);
+type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
@@ -66,15 +75,22 @@ type InstallDependenciesToolArgs = z.infer<
 >;
 const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const markFinalReviewTaskCompletedTool =
+  createCodeReviewMarkTaskCompletedFields();
+type MarkFinalReviewTaskCompletedToolArgs = z.infer<
+  typeof markFinalReviewTaskCompletedTool.schema
+>;
+const markFinalReviewTaskIncompleteTool =
+  createCodeReviewMarkTaskNotCompleteFields();
+type MarkFinalReviewTaskIncompleteToolArgs = z.infer<
+  typeof markFinalReviewTaskIncompleteTool.schema
+>;
 
 const diagnoseErrorTool = createDiagnoseErrorToolFields();
 type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-
-const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
-type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
@@ -182,14 +198,21 @@ export function mapToolMessageToActionStepProps(
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
     };
-  } else if (toolCall?.name === rgTool.name) {
-    const args = toolCall.args as RgToolArgs;
+  } else if (toolCall?.name === searchTool.name) {
+    const args = toolCall.args as SearchToolArgs;
     return {
-      actionType: "rg",
+      actionType: "search",
       status,
       success,
-      pattern: args.pattern || "",
-      paths: args.paths || [],
+      query: args.query || "",
+      match_string: args.match_string || false,
+      case_sensitive: args.case_sensitive || false,
+      context_lines: args.context_lines || 0,
+      max_results: args.max_results || 0,
+      follow_symlinks: args.follow_symlinks || false,
+      exclude_files: args.exclude_files || "",
+      include_files: args.include_files || "",
+      file_types: args.file_types || [],
       output: getContentString(message.content),
       reasoningText,
     };
@@ -220,24 +243,6 @@ export function mapToolMessageToActionStepProps(
       status,
       success,
       url: args.url || "",
-      output: getContentString(message.content),
-      reasoningText,
-    };
-  } else if (toolCall?.name === findInstancesOfTool.name) {
-    const args = toolCall.args as FindInstancesOfToolArgs;
-    // case_sensitive and match_word both default to true.
-    const caseSensitive =
-      args.case_sensitive === undefined ? true : args.case_sensitive;
-    const matchWord = args.match_word === undefined ? true : args.match_word;
-    return {
-      actionType: "find_instances_of",
-      status,
-      success,
-      query: args.query || "",
-      case_sensitive: caseSensitive,
-      match_word: matchWord,
-      include_files: args.include_files,
-      exclude_files: args.exclude_files,
       output: getContentString(message.content),
       reasoningText,
     };
@@ -305,11 +310,10 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === rgTool.name ||
+          tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
-          tc.name === getURLContentTool.name ||
-          tc.name === findInstancesOfTool.name,
+          tc.name === getURLContentTool.name,
       )
     : [];
 
@@ -325,6 +329,18 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
     : undefined;
 
+  const markFinalReviewTaskCompletedToolCall = message
+    ? aiToolCalls.find(
+        (tc) => tc.name === markFinalReviewTaskCompletedTool.name,
+      )
+    : undefined;
+
+  const markFinalReviewTaskIncompleteToolCall = message
+    ? aiToolCalls.find(
+        (tc) => tc.name === markFinalReviewTaskIncompleteTool.name,
+      )
+    : undefined;
+
   const diagnoseErrorToolCall = message
     ? aiToolCalls.find((tc) => tc.name === diagnoseErrorTool.name)
     : undefined;
@@ -337,6 +353,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === conversationHistorySummaryTool.name)
     : undefined;
 
+  const reviewStartedToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === reviewStartedTool.name)
+    : undefined;
+
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
     const args =
@@ -346,6 +366,21 @@ export function AssistantMessage({
       <div className="flex flex-col gap-4">
         <ConversationHistorySummary
           summary={args.conversation_history_summary}
+        />
+      </div>
+    );
+  }
+
+  // Check if this is a review started message
+  if (reviewStartedToolCall && aiToolCalls.length === 1) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === reviewStartedToolCall.id,
+    );
+
+    return (
+      <div className="flex flex-col gap-4">
+        <CodeReviewStarted
+          status={correspondingToolResult ? "done" : "generating"}
         />
       </div>
     );
@@ -472,6 +507,50 @@ export function AssistantMessage({
     );
   }
 
+  // If task completed review tool call is present, render the task review component
+  if (markFinalReviewTaskCompletedToolCall) {
+    const args =
+      markFinalReviewTaskCompletedToolCall.args as MarkFinalReviewTaskCompletedToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === markFinalReviewTaskCompletedToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+
+    return (
+      <div className="flex flex-col gap-4">
+        <MarkTaskCompleted
+          status={status}
+          review={args.review}
+          reasoningText={contentString}
+        />
+      </div>
+    );
+  }
+
+  // If task incomplete review tool call is present, render the task review component
+  if (markFinalReviewTaskIncompleteToolCall) {
+    const args =
+      markFinalReviewTaskIncompleteToolCall.args as MarkFinalReviewTaskIncompleteToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) =>
+        tr && tr.tool_call_id === markFinalReviewTaskIncompleteToolCall.id,
+    );
+
+    const status = correspondingToolResult ? "done" : "generating";
+
+    return (
+      <div className="flex flex-col gap-4">
+        <MarkTaskIncomplete
+          status={status}
+          review={args.review}
+          additionalActions={args.additional_actions}
+          reasoningText={contentString}
+        />
+      </div>
+    );
+  }
+
   if (actionableToolCalls.length > 0) {
     const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
       const correspondingToolResult = toolResults.find(
@@ -479,7 +558,7 @@ export function AssistantMessage({
       );
 
       const isShellTool = toolCall.name === shellTool.name;
-      const isRgTool = toolCall.name === rgTool.name;
+      const isSearchTool = toolCall.name === searchTool.name;
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
 
@@ -489,13 +568,20 @@ export function AssistantMessage({
           correspondingToolResult,
           threadMessages,
         );
-      } else if (isRgTool) {
-        const args = toolCall.args as RgToolArgs;
+      } else if (isSearchTool) {
+        const args = toolCall.args as SearchToolArgs;
         return {
-          actionType: "rg",
+          actionType: "search",
           status: "generating",
-          pattern: args?.pattern || "",
-          paths: args?.paths || [],
+          query: args?.query || "",
+          match_string: args?.match_string || false,
+          case_sensitive: args?.case_sensitive || false,
+          context_lines: args?.context_lines || 0,
+          max_results: args?.max_results || 0,
+          follow_symlinks: args?.follow_symlinks || false,
+          exclude_files: args?.exclude_files || [],
+          include_files: args?.include_files || [],
+          file_types: args?.file_types || [],
           output: "",
         } as ActionItemProps;
       } else if (isInstallDependenciesTool) {
@@ -520,23 +606,6 @@ export function AssistantMessage({
           actionType: "get_url_content",
           status: "generating",
           url: args?.url || "",
-          output: "",
-        } as ActionItemProps;
-      } else if (toolCall.name === findInstancesOfTool.name) {
-        const args = toolCall.args as FindInstancesOfToolArgs;
-        // case_sensitive and match_word both default to true.
-        const caseSensitive =
-          args.case_sensitive === undefined ? true : args.case_sensitive;
-        const matchWord =
-          args.match_word === undefined ? true : args.match_word;
-        return {
-          actionType: "find_instances_of",
-          status: "generating",
-          query: args?.query || "",
-          case_sensitive: caseSensitive,
-          match_word: matchWord,
-          include_files: args?.include_files,
-          exclude_files: args?.exclude_files,
           output: "",
         } as ActionItemProps;
       } else {

@@ -15,10 +15,23 @@ import {
   updatePlan,
   summarizeHistory,
 } from "./nodes/index.js";
-import { isAIMessage } from "@langchain/core/messages";
+import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
+import { graph as reviewerGraph } from "../reviewer/index.js";
 import { getRemainingPlanItems } from "../../utils/current-task.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+
+function lastMessagesMissingToolCalls(
+  messages: BaseMessage[],
+  threshold: number,
+) {
+  const lastMessages = messages.slice(-threshold);
+  if (!lastMessages.every(isAIMessage)) {
+    // If some of the last messages are not AI messages, we should return false.
+    return false;
+  }
+  return lastMessages.every((m) => !m.tool_calls?.length);
+}
 
 /**
  * Routes to the next appropriate node after taking action.
@@ -26,17 +39,16 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"generate-conclusion" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
+ * @returns {"reviewer-subgraph" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
  */
-async function routeGeneratedAction(
+function routeGeneratedAction(
   state: GraphState,
-): Promise<
-  | "generate-conclusion"
+):
+  | "reviewer-subgraph"
   | "take-action"
   | "request-help"
   | "generate-action"
-  | Send
-> {
+  | Send {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
 
@@ -64,12 +76,29 @@ async function routeGeneratedAction(
   const activePlanItems = getActivePlanItems(state.taskPlan);
   const hasRemainingTasks = getRemainingPlanItems(activePlanItems).length > 0;
   // If the model did not generate a tool call, but there are remaining tasks, we should route back to the generate action step.
-  if (hasRemainingTasks) {
+  // Also add a check ensuring that the last to messages generated have tool calls. Otherwise we can end.
+  if (hasRemainingTasks && !lastMessagesMissingToolCalls(internalMessages, 2)) {
     return "generate-action";
   }
 
-  // No tool calls, generate a conclusion.
-  return "generate-conclusion";
+  // No tool calls, route to reviewer subgraph
+  return "reviewer-subgraph";
+}
+
+/**
+ * Conditional edge called after the reviewer. If there are no more actions to take, then open a PR.
+ * Otherwise, route to generate actions to continue with the new tasks.
+ */
+function routeGenerateActionsOrEnd(
+  state: GraphState,
+): "generate-conclusion" | "generate-action" {
+  const activePlanItems = getActivePlanItems(state.taskPlan);
+  const allCompleted = activePlanItems.every((p) => p.completed);
+  if (allCompleted) {
+    return "generate-conclusion";
+  }
+
+  return "generate-action";
 }
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
@@ -80,12 +109,13 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   })
   .addNode("update-plan", updatePlan)
   .addNode("progress-plan-step", progressPlanStep, {
-    ends: ["summarize-history", "generate-action", "generate-conclusion"],
+    ends: ["summarize-history", "generate-action", "reviewer-subgraph"],
   })
   .addNode("generate-conclusion", generateConclusion)
   .addNode("request-help", requestHelp, {
     ends: ["generate-action", END],
   })
+  .addNode("reviewer-subgraph", reviewerGraph)
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
   .addNode("summarize-history", summarizeHistory)
@@ -94,14 +124,18 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
-    "generate-conclusion",
+    "reviewer-subgraph",
     "update-plan",
     "generate-action",
   ])
   .addEdge("update-plan", "generate-action")
-  .addEdge("generate-conclusion", "open-pr")
   .addEdge("diagnose-error", "generate-action")
+  .addConditionalEdges("reviewer-subgraph", routeGenerateActionsOrEnd, [
+    "generate-conclusion",
+    "generate-action",
+  ])
   .addEdge("summarize-history", "generate-action")
+  .addEdge("generate-conclusion", "open-pr")
   .addEdge("open-pr", END);
 
 // Zod types are messed up

@@ -190,7 +190,7 @@ export function RepositorySelector({
               {selectedValue || placeholder}
             </span>
           </div>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="h-4 w-4 shrink-0" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">

@@ -145,7 +145,7 @@ export function TerminalInput({
   return (
     <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
       <div className="text-foreground flex items-center gap-1">
-        <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1">
+        <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1 dark:border-gray-700">
           <span className="text-muted-foreground">open-swe</span>
           <span className="text-muted-foreground/70">@</span>
           <span className="text-muted-foreground">github</span>

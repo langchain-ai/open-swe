@@ -1,35 +1,28 @@
 "use client";
 
-import { JSX, useState } from "react";
+import { useState } from "react";
 import {
   Terminal,
   FileText,
   ChevronDown,
-  ChevronRight,
   ChevronUp,
   MessageSquare,
   Search,
-  AlertCircle,
   CheckCircle,
   XCircle,
   Loader2,
   Globe,
-  Pencil,
-  Package,
   FileCode,
   CloudDownload,
-  Hash,
 } from "lucide-react";
-import { MarkdownText } from "../thread/markdown-text";
+import { BasicMarkdownText } from "../thread/markdown-text";
 import {
   createApplyPatchToolFields,
   createShellToolFields,
   createInstallDependenciesToolFields,
   createTakePlannerNotesFields,
   createGetURLContentToolFields,
-  createFindInstancesOfToolFields,
-  formatRgCommand,
-  RipgrepCommand,
+  createSearchToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import {
@@ -55,8 +48,8 @@ const plannerNotesTool = createTakePlannerNotesFields();
 type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-const findInstancesOfTool = createFindInstancesOfToolFields(dummyRepo);
-type FindInstancesOfToolArgs = z.infer<typeof findInstancesOfTool.schema>;
+const searchTool = createSearchToolFields(dummyRepo);
+type SearchToolArgs = z.infer<typeof searchTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -83,13 +76,6 @@ type PatchActionProps = BaseActionProps &
     fixedDiff?: string;
   };
 
-type RgActionProps = BaseActionProps &
-  Partial<RipgrepCommand> & {
-    actionType: "rg";
-    output?: string;
-    errorCode?: number;
-  };
-
 type InstallDependenciesActionProps = BaseActionProps &
   Partial<InstallDependenciesToolArgs> & {
     actionType: "install_dependencies";
@@ -108,9 +94,9 @@ type GetURLContentActionProps = BaseActionProps &
     output?: string;
   };
 
-type FindInstancesOfActionProps = BaseActionProps &
-  Partial<FindInstancesOfToolArgs> & {
-    actionType: "find_instances_of";
+type SearchActionProps = BaseActionProps &
+  Partial<SearchToolArgs> & {
+    actionType: "search";
     output?: string;
     errorCode?: number;
   };
@@ -119,11 +105,10 @@ export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
   | PatchActionProps
-  | RgActionProps
   | InstallDependenciesActionProps
   | PlannerNotesActionProps
   | GetURLContentActionProps
-  | FindInstancesOfActionProps;
+  | SearchActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -134,11 +119,10 @@ export type ActionStepProps = {
 const ACTION_GENERATING_TEXT_MAP = {
   [shellTool.name]: "Executing...",
   [applyPatchTool.name]: "Applying patch...",
-  ["rg"]: "Searching...",
   [installDependenciesTool.name]: "Installing dependencies...",
   [plannerNotesTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
-  [findInstancesOfTool.name]: "Finding instances...",
+  [searchTool.name]: "Searching...",
 };
 
 function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
@@ -237,8 +221,6 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Command completed" : "Command failed";
       } else if (props.actionType === "apply-patch") {
         return props.success ? "Patch applied" : "Patch failed";
-      } else if (props.actionType === "rg") {
-        return props.success ? "Search completed" : "Search failed";
       } else if (props.actionType === "install_dependencies") {
         return props.success ? "Dependencies installed" : "Installation failed";
       } else if (props.actionType === "planner_notes") {
@@ -247,7 +229,7 @@ function ActionItem(props: ActionItemProps) {
         return props.success
           ? "URL content fetched"
           : "Failed to fetch URL content";
-      } else if (props.actionType === "find_instances_of") {
+      } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
       }
     }
@@ -261,10 +243,9 @@ function ActionItem(props: ActionItemProps) {
 
     if (
       props.actionType === "shell" ||
-      props.actionType === "rg" ||
       props.actionType === "install_dependencies" ||
       props.actionType === "get_url_content" ||
-      props.actionType === "find_instances_of"
+      props.actionType === "search"
     ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
@@ -310,13 +291,6 @@ function ActionItem(props: ActionItemProps) {
           icon={<FileCode className={cn(defaultIconStyling)} />}
         />
       );
-    } else if (props.actionType === "rg") {
-      return (
-        <ToolIconWithTooltip
-          toolNamePretty="Ripgrep (rg)"
-          icon={<Search className={cn(defaultIconStyling)} />}
-        />
-      );
     } else if (props.actionType === "get_url_content") {
       return (
         <ToolIconWithTooltip
@@ -324,11 +298,11 @@ function ActionItem(props: ActionItemProps) {
           icon={<Globe className={cn(defaultIconStyling)} />}
         />
       );
-    } else if (props.actionType === "find_instances_of") {
+    } else if (props.actionType === "search") {
       return (
         <ToolIconWithTooltip
-          toolNamePretty="Find Instances of"
-          icon={<Hash className={cn(defaultIconStyling)} />}
+          toolNamePretty="Search"
+          icon={<Search className={cn(defaultIconStyling)} />}
         />
       );
     } else {
@@ -353,7 +327,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.actionType === "planner_notes") {
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
             Planner Notes
           </span>
@@ -363,7 +337,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.actionType === "get_url_content") {
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           <code className="text-foreground/80 text-xs font-normal">
             {props.url}
           </code>
@@ -371,28 +345,44 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "find_instances_of") {
+    if (props.actionType === "search") {
+      const castProps = props as SearchActionProps;
       return (
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <code className="text-foreground/80 text-xs font-normal">
-              {props.query}
-            </code>
-            <div className="bg-border h-4 w-[1px] dark:bg-white"></div>
-            <MatchCaseIcon matchCase={!!props.case_sensitive} />
-            <MatchWholeWordIcon matchWholeWord={!!props.match_word} />
-          </div>
-          {(props.include_files || props.exclude_files) && (
-            <div className="text-muted-foreground mt-0.5 text-xs font-normal">
-              {props.include_files && (
-                <span>Include: {props.include_files}</span>
-              )}
-              {props.include_files && props.exclude_files && <span> | </span>}
-              {props.exclude_files && (
-                <span>Exclude: {props.exclude_files}</span>
+        <div className="flex flex-col">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <code className="text-foreground/80 text-xs font-normal">
+                {castProps.query}
+              </code>
+              <div className="bg-border h-4 w-[1px] dark:bg-white"></div>
+              <MatchCaseIcon matchCase={!!castProps.case_sensitive} />
+              {!castProps.match_string && (
+                <span className="text-muted-foreground bg-muted/50 rounded px-1 text-xs font-normal">
+                  regex
+                </span>
               )}
             </div>
-          )}
+          </div>
+          <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal">
+            {castProps.include_files && (
+              <span>Include: {castProps.include_files}</span>
+            )}
+            {castProps.exclude_files && (
+              <span>Exclude: {castProps.exclude_files}</span>
+            )}
+            {castProps.context_lines !== undefined &&
+              castProps.context_lines > 0 && (
+                <span>Context: {castProps.context_lines} lines</span>
+              )}
+            {castProps.max_results !== undefined &&
+              castProps.max_results > 0 && (
+                <span>Max results: {castProps.max_results}</span>
+              )}
+            {castProps.file_types && castProps.file_types.length > 0 && (
+              <span>File types: {castProps.file_types.join(", ")}</span>
+            )}
+            {castProps.follow_symlinks && <span>Follow symlinks</span>}
+          </div>
         </div>
       );
     }
@@ -417,7 +407,7 @@ function ActionItem(props: ActionItemProps) {
         }
       }
       return (
-        <div className="flex-1">
+        <div className="flex items-center">
           {props.workdir && (
             <div className="text-muted-foreground mb-0.5 text-xs font-normal">
               {props.workdir}
@@ -428,31 +418,9 @@ function ActionItem(props: ActionItemProps) {
           </code>
         </div>
       );
-    } else if (props.actionType === "rg") {
-      let formattedRgCommand = "";
-      try {
-        formattedRgCommand =
-          formatRgCommand(
-            {
-              pattern: props.pattern,
-              paths: props.paths,
-              flags: props.flags,
-            },
-            { excludeRequiredFlags: true },
-          )?.join(" ") ?? "";
-      } catch {
-        // no-op
-      }
-      return (
-        <div className="flex-1">
-          <code className="text-foreground/80 text-xs font-normal">
-            {formattedRgCommand}
-          </code>
-        </div>
-      );
     } else {
       return (
-        <code className="text-foreground/80 flex-1 text-xs font-normal">
+        <code className="text-foreground/80 flex items-center text-xs font-normal">
           {props.file_path}
         </code>
       );
@@ -467,8 +435,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (
       (props.actionType === "shell" ||
-        props.actionType === "rg" ||
-        props.actionType === "find_instances_of" ||
+        props.actionType === "search" ||
         props.actionType === "install_dependencies") &&
       props.output
     ) {
@@ -547,10 +514,10 @@ function ActionItem(props: ActionItemProps) {
 
   return (
     <div className="border-border mb-2 overflow-hidden rounded-md border last:mb-0">
-      <div className="border-border flex items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
+      <div className="border-border flex w-full items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
         {renderHeaderIcon()}
         {renderHeaderContent()}
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <span className="text-muted-foreground text-xs font-normal">
             {getStatusText()}
           </span>
@@ -558,7 +525,7 @@ function ActionItem(props: ActionItemProps) {
           {shouldShowToggle() && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
             >
               {expanded ? (
                 <ChevronUp className="size-3.5" />
@@ -576,8 +543,8 @@ function ActionItem(props: ActionItemProps) {
 }
 
 export function ActionStep(props: ActionStepProps) {
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
 
   const reasoningText =
     "reasoningText" in props ? props.reasoningText : undefined;
@@ -623,9 +590,9 @@ export function ActionStep(props: ActionStepProps) {
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-700 dark:text-green-300">
-              {summaryText}
-            </p>
+            <span className="text-green-700 dark:text-green-300">
+              <BasicMarkdownText>{summaryText}</BasicMarkdownText>
+            </span>
           )}
         </div>
       )}

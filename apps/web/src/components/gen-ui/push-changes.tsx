@@ -12,6 +12,7 @@ import {
   MessageSquare,
   FileText,
 } from "lucide-react";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 type PushChangesProps = {
   status: "loading" | "generating" | "done";
@@ -35,8 +36,8 @@ export function PushChanges({
   const [expanded, setExpanded] = useState(
     Boolean(status === "done" && gitStatus),
   );
-  const [showReasoning, setShowReasoning] = useState(false);
-  const [showSummary, setShowSummary] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
+  const [showSummary, setShowSummary] = useState(true);
 
   const getStatusIcon = () => {
     switch (status) {
@@ -152,9 +153,9 @@ export function PushChanges({
             {showSummary ? "Hide summary" : "Show summary"}
           </button>
           {showSummary && (
-            <p className="mt-1 text-xs font-normal text-green-800">
+            <BasicMarkdownText className="mt-1 text-xs text-green-800 dark:text-green-400">
               {summaryText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}

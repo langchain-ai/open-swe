@@ -18,6 +18,7 @@ import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import {
+  CODE_REVIEW_PROMPT,
   DEPENDENCIES_INSTALLED_PROMPT,
   INSTALL_DEPENDENCIES_TOOL_PROMPT,
   SYSTEM_PROMPT,
@@ -25,10 +26,14 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createRgTool } from "../../../../tools/rg.js";
+import { createSearchTool } from "../../../../tools/search.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
+import {
+  formatCodeReviewPrompt,
+  getCodeReviewFields,
+} from "../../../../utils/review.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -38,6 +43,7 @@ const formatPrompt = (state: GraphState): string => {
   const currentPlanItem = activePlanItems
     .filter((p) => !p.completed)
     .sort((a, b) => a.index - b.index)[0];
+  const codeReview = getCodeReviewFields(state.internalMessages);
   return SYSTEM_PROMPT.replaceAll(
     "{PLAN_PROMPT_WITH_SUMMARIES}",
     formatPlanPrompt(getActivePlanItems(state.taskPlan), {
@@ -65,7 +71,16 @@ const formatPrompt = (state: GraphState): string => {
         ? INSTALL_DEPENDENCIES_TOOL_PROMPT
         : DEPENDENCIES_INSTALLED_PROMPT,
     )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replaceAll(
+      "{CODE_REVIEW_PROMPT}",
+      codeReview
+        ? formatCodeReviewPrompt(CODE_REVIEW_PROMPT, {
+            review: codeReview.review,
+            newActions: codeReview.newActions,
+          })
+        : "",
+    );
 };
 
 export async function generateAction(
@@ -76,7 +91,7 @@ export async function generateAction(
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createRgTool(state),
+    createSearchTool(state),
     createShellTool(state),
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),

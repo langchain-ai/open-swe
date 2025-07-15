@@ -17,7 +17,6 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { getCompletedPlanItems } from "../../../utils/current-task.js";
 import { createConversationHistorySummaryToolFields } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
@@ -166,18 +165,16 @@ export async function summarizeHistory(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const activePlanItems = getActivePlanItems(state.taskPlan);
-  const lastCompletedTask = getCompletedPlanItems(activePlanItems).pop();
-  if (!lastCompletedTask) {
-    throw new Error("Unable to find last completed task.");
-  }
-
   const model = await loadModel(config, Task.SUMMARIZER);
 
   const userRequest = getUserRequest(state.messages);
   const plan = getActivePlanItems(state.taskPlan);
   const conversationHistoryToSummarize = getMessagesSinceLastSummary(
     state.internalMessages,
+    {
+      excludeHiddenMessages: true,
+      excludeCountFromEnd: 20,
+    },
   );
 
   logger.info(
