@@ -1,15 +1,19 @@
 "use client";
 
 import { useQueryState } from "nuqs";
-import { Key, Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Key, Settings, ArrowLeft } from "lucide-react";
 import { GitHubManager } from "./github-manager";
 import { APIKeysTab } from "./api-keys";
 import { ConfigManager } from "./config-manager";
 import { GitHubSVG } from "@/components/icons/github";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useQueryState("tab", {
     defaultValue: "github" as "github" | "api-keys" | "configuration",
     parse: (value: string) => {
@@ -32,6 +36,20 @@ export default function SettingsPage() {
   return (
     <GitHubAppProvider>
       <div className="mx-auto max-w-6xl p-6">
+        {/* Header with back button and theme toggle */}
+        <div className="mb-6 flex items-center justify-between">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push("/chat")}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="size-4" />
+            Back to Chat
+          </Button>
+          <ThemeToggle />
+        </div>
+
         <div className="mb-8">
           <h1 className="text-foreground mb-2 text-3xl font-bold">Settings</h1>
           <p className="text-muted-foreground">

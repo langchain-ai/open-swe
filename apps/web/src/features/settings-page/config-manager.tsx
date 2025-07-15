@@ -50,6 +50,9 @@ function extractConfigurationsFromSchema(
 
 export function ConfigManager() {
   const { configs, updateConfig, getConfig } = useConfigStore();
+  const [defaultConfig, setDefaultConfig] = useState<
+    ConfigurableFieldUIMetadata[]
+  >([]);
   const [configurations, setConfigurations] = useState<
     ConfigurableFieldUIMetadata[]
   >([]);
@@ -59,6 +62,8 @@ export function ConfigManager() {
     // TODO: If we implement a concept of users and start storing config on assistants,
     // we will need to update this to fetch configs from the assistant first.
     setLoading(true);
+    setDefaultConfig(extractConfigurationsFromSchema({}));
+
     if (getConfig(DEFAULT_CONFIG_KEY)) {
       const actualConfigs = extractConfigurationsFromSchema(
         getConfig(DEFAULT_CONFIG_KEY),
@@ -81,7 +86,10 @@ export function ConfigManager() {
 
   const hasConfiguredValues = configurations.some((config) => {
     const currentValue = configs[DEFAULT_CONFIG_KEY]?.[config.label];
-    return currentValue !== undefined && currentValue !== config.default;
+    const defaultValue = defaultConfig.find(
+      (c) => c.label === config.label,
+    )?.default;
+    return currentValue !== undefined && currentValue !== defaultValue;
   });
 
   return (
@@ -134,9 +142,12 @@ export function ConfigManager() {
                       {(() => {
                         const currentValue =
                           configs[DEFAULT_CONFIG_KEY]?.[config.label];
+                        const defaultValue = defaultConfig.find(
+                          (c) => c.label === config.label,
+                        )?.default;
                         const isModified =
                           currentValue !== undefined &&
-                          currentValue !== config.default;
+                          currentValue !== defaultValue;
 
                         return (
                           isModified && (
@@ -182,9 +193,12 @@ export function ConfigManager() {
                       {(() => {
                         const currentValue =
                           configs[DEFAULT_CONFIG_KEY]?.[config.label];
+                        const defaultValue = defaultConfig.find(
+                          (c) => c.label === config.label,
+                        )?.default;
                         const isModified =
                           currentValue !== undefined &&
-                          currentValue !== config.default;
+                          currentValue !== defaultValue;
 
                         return (
                           isModified && (
@@ -195,7 +209,7 @@ export function ConfigManager() {
                                 updateConfig(
                                   DEFAULT_CONFIG_KEY,
                                   config.label,
-                                  config.default,
+                                  defaultValue,
                                 )
                               }
                             >

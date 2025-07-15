@@ -25,6 +25,21 @@ import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { InstallationSelector } from "../github/installation-selector";
+import { Settings } from "lucide-react";
+
+function OpenSettingsButton() {
+  const router = useRouter();
+  return (
+    <TooltipIconButton
+      tooltip="Open Settings"
+      onClick={() => router.push("/settings")}
+      className="text-xs"
+      size="sm"
+    >
+      <Settings className="size-4" />
+    </TooltipIconButton>
+  );
+}
 
 interface DefaultViewProps {
   threads: ThreadDisplayInfo[];
@@ -68,11 +83,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             </span>
           </div>
           <div className="flex items-center gap-4">
+            <InstallationSelector />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
-              <div className="bg-muted h-1 w-1 rounded-full"></div>
+              <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
-            <InstallationSelector />
+            <OpenSettingsButton />
             <ThemeToggle />
             <GitHubLogoutButton />
           </div>
