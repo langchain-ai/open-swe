@@ -11,6 +11,7 @@ import {
   FileText,
 } from "lucide-react";
 import { BasicMarkdownText } from "../thread/markdown-text";
+import { cn } from "@/lib/utils";
 
 type MarkTaskCompletedProps = {
   status: "loading" | "generating" | "done";
@@ -77,9 +78,10 @@ export function MarkTaskCompleted({
       )}
 
       <div
-        className={`flex items-center border-b border-green-200 bg-green-50 p-2 dark:border-green-800 dark:bg-green-900/50 ${
-          status === "done" && review ? "cursor-pointer" : ""
-        }`}
+        className={cn(
+          "flex items-center border-b border-green-200 bg-green-50 p-2 dark:border-green-800 dark:bg-green-900/50",
+          status === "done" && review ? "cursor-pointer" : "",
+        )}
         onClick={
           status === "done" && review
             ? () => setExpanded((prev) => !prev)
@@ -200,11 +202,12 @@ export function MarkTaskIncomplete({
       )}
 
       <div
-        className={`flex items-center border-b border-red-200 bg-red-50 p-2 dark:border-red-800 dark:bg-red-900/50 ${
+        className={cn(
+          "flex items-center border-b border-red-200 bg-red-50 p-2 dark:border-red-800 dark:bg-red-900/50",
           status === "done" && (review || additionalActions)
             ? "cursor-pointer"
-            : ""
-        }`}
+            : "",
+        )}
         onClick={
           status === "done" && (review || additionalActions)
             ? () => setExpanded((prev) => !prev)

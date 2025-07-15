@@ -115,9 +115,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("request-help", requestHelp, {
     ends: ["generate-action", END],
   })
-  .addNode("reviewer-subgraph", reviewerGraph, {
-    subgraphs: [reviewerGraph],
-  })
+  .addNode("reviewer-subgraph", reviewerGraph)
   .addNode("open-pr", openPullRequest)
   .addNode("diagnose-error", diagnoseError)
   .addNode("summarize-history", summarizeHistory)

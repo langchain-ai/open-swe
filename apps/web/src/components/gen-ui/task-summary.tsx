@@ -74,19 +74,21 @@ export function TaskSummary({
 
       {summaryText && status === "done" && (
         <div
-          className={`border-t p-2 ${
+          className={cn(
+            "border-t p-2",
             completed === false
               ? "border-amber-300 bg-amber-100/50 dark:border-amber-800 dark:bg-amber-900/50"
-              : "border-green-300 bg-green-100/50 dark:border-green-800 dark:bg-green-900/50"
-          }`}
+              : "border-green-300 bg-green-100/50 dark:border-green-800 dark:bg-green-900/50",
+          )}
         >
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className={`flex cursor-pointer items-center gap-1 text-xs font-normal ${
+            className={cn(
+              "flex cursor-pointer items-center gap-1 text-xs font-normal",
               completed === false
                 ? "text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
-                : "text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-            }`}
+                : "text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300",
+            )}
           >
             <FileText className="h-3 w-3" />
             {showSummary ? "Hide summary" : "Show summary"}

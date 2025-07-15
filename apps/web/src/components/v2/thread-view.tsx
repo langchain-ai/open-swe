@@ -27,6 +27,7 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
+import { cn } from "@/lib/utils";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -99,13 +100,14 @@ export function ThreadView({
           </Button>
           <div className="flex min-w-0 flex-1 items-center gap-2">
             <div
-              className={`size-2 flex-shrink-0 rounded-full ${
+              className={cn(
+                "size-2 flex-shrink-0 rounded-full",
                 displayThread.status === "running"
                   ? "bg-blue-500"
                   : displayThread.status === "completed"
                     ? "bg-green-500"
-                    : "bg-red-500"
-              }`}
+                    : "bg-red-500",
+              )}
             ></div>
             <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
               {displayThread.title}
