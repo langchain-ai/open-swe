@@ -34,18 +34,25 @@ export function APIKeysTab() {
       title: "LLMs",
       keys: [
         {
-          id: "anthropic-1",
+          id: "anthropicApiKey",
           name: "Anthropic",
           value: "",
           isVisible: false,
         },
-        { id: "openai-1", name: "OpenAI", value: "", isVisible: false },
-        { id: "google-1", name: "Google Gen AI", value: "", isVisible: false },
+        { id: "openaiApiKey", name: "OpenAI", value: "", isVisible: false },
+        {
+          id: "googleApiKey",
+          name: "Google Gen AI",
+          value: "",
+          isVisible: false,
+        },
       ],
     },
     infrastructure: {
       title: "Infrastructure",
-      keys: [{ id: "daytona-1", name: "Daytona", value: "", isVisible: false }],
+      keys: [
+        { id: "daytonaApiKey", name: "Daytona", value: "", isVisible: false },
+      ],
     },
   });
 
