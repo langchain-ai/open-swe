@@ -109,15 +109,18 @@ export function createUpdatePlanToolFields() {
 export function createSearchToolFields(targetRepository: TargetRepository) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
   const searchSchema = z.object({
-    pattern: z
+    query: z
       .string()
-      .describe("The string or regex to search the codebase for."),
-    regex: z
+      .describe(
+        "The string or regex to search the codebase for. If passing a plain string, ensure to also set the 'match_string' field to true. If passing a regex, ensure to also set the 'match_string' field to false.",
+      ),
+
+    match_string: z
       .boolean()
       .optional()
       .default(false)
       .describe(
-        "Whether or not to treat the pattern as a regex. Defaults to false.",
+        "Whether or not to treat the query as a fixed string to search for. If true, it will search for results which match the query exactly. If false, the query will be treated as a regex. Defaults to false.",
       ),
 
     case_sensitive: z
@@ -203,7 +206,7 @@ export function formatSearchCommand(
   }
 
   // Regex vs fixed string
-  if (!cmd.regex) {
+  if (cmd.match_string) {
     args.push("--fixed-strings");
   }
 
@@ -212,19 +215,25 @@ export function formatSearchCommand(
     args.push(`-C`, String(cmd.context_lines));
   }
 
-  // File globs
+  // File globs - use ripgrep's glob handling instead of shell expansion
   if (cmd.include_files) {
-    args.push("--glob", cmd.include_files);
+    // Quote the glob pattern to prevent shell interpretation
+    args.push("--glob", escapeShellArg(cmd.include_files));
   }
 
   if (cmd.exclude_files) {
-    args.push("--glob", `!${cmd.exclude_files}`);
+    // Quote the exclude pattern to prevent shell interpretation
+    args.push("--glob", escapeShellArg(`!${cmd.exclude_files}`));
   }
 
   // File types
   if (cmd.file_types && cmd.file_types.length > 0) {
+    // Process each file type individually to avoid glob expansion issues
     for (const ext of cmd.file_types) {
-      args.push("--glob", `**/*${ext}`);
+      // Normalize extension format (ensure it has a leading dot)
+      const normalizedExt = ext.startsWith(".") ? ext : `.${ext}`;
+      // Quote the glob pattern to prevent shell interpretation
+      args.push("--glob", escapeShellArg(`**/*${normalizedExt}`));
     }
   }
 
@@ -238,9 +247,10 @@ export function formatSearchCommand(
     args.push("--max-count", String(cmd.max_results));
   }
 
-  // The pattern (must come after flags)
-  if (cmd.pattern) {
-    args.push(escapeShellArg(cmd.pattern));
+  // The query (must come after path for ripgrep to interpret it correctly)
+  if (cmd.query) {
+    // Double-quote the pattern to ensure it's treated as a pattern and not a path
+    args.push(escapeShellArg(cmd.query));
   }
 
   return args;
@@ -447,5 +457,18 @@ export function createCodeReviewMarkTaskNotCompleteFields() {
     schema: markTaskNotCompleteSchema,
     description:
       "Use this tool to mark a task as not complete. This should be called if you determine that the task has not been successfully completed, and you have additional tasks the programmer should take to successfully complete the task.",
+  };
+}
+
+export function createReviewStartedToolFields() {
+  const reviewStartedSchema = z.object({
+    review_started: z.boolean(),
+  });
+
+  return {
+    name: "review_started",
+    description:
+      "<not used as an actual tool call. only used as shared types between the client and agent>",
+    schema: reviewStartedSchema,
   };
 }

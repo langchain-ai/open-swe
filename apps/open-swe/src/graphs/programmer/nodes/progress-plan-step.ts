@@ -117,6 +117,11 @@ Once you've determined the status of the current task, call either the \`mark_ta
 
   const totalInternalTokenCount = calculateConversationHistoryTokenCount(
     state.internalMessages,
+    {
+      // Retain the last 20 messages from state
+      excludeHiddenMessages: true,
+      excludeCountFromEnd: 20,
+    },
   );
 
   if (!isCompleted) {

@@ -59,7 +59,7 @@ You are currently executing a specific task from a pre-generated plan. You have 
 * **Search**: Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
     * It's significantly faster results than alternatives like grep or ls -R.
     * When searching for specific file types, use glob patterns
-    * The pattern field supports both basic strings, and regex
+    * The query field supports both basic strings, and regex
 * **Dependencies**: Use the correct package manager; skip if installation fails
 * **Pre-commit**: Run \`pre-commit run --files ...\` if .pre-commit-config.yaml exists
 * **History**: Use \`git log\` and \`git blame\` for additional context when needed

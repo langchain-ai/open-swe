@@ -38,7 +38,7 @@ By reviewing these actions, and comparing them to the plan and original user req
 4. **Leverage \`search\` tool**: Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
     - It's significantly faster results than alternatives like grep or ls -R.
     - When searching for specific file types, use glob patterns
-    - The pattern field supports both basic strings, and regex
+    - The query field supports both basic strings, and regex
 
 5. **Format shell commands precisely**: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.
 

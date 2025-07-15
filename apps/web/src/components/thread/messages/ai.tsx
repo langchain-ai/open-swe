@@ -27,6 +27,7 @@ import {
 } from "@/components/gen-ui/task-review";
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
+import { CodeReviewStarted } from "@/components/gen-ui/code-review-started";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -43,6 +44,7 @@ import {
   createGetURLContentToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
+  createReviewStartedToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -61,6 +63,8 @@ const markTaskNotCompletedTool = createMarkTaskNotCompletedToolFields();
 type MarkTaskNotCompletedToolArgs = z.infer<
   typeof markTaskNotCompletedTool.schema
 >;
+const reviewStartedTool = createReviewStartedToolFields();
+type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
 const searchTool = createSearchToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const openPrTool = createOpenPrToolFields();
@@ -200,8 +204,8 @@ export function mapToolMessageToActionStepProps(
       actionType: "search",
       status,
       success,
-      pattern: args.pattern || "",
-      regex: args.regex || false,
+      query: args.query || "",
+      match_string: args.match_string || false,
       case_sensitive: args.case_sensitive || false,
       context_lines: args.context_lines || 0,
       max_results: args.max_results || 0,
@@ -349,6 +353,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === conversationHistorySummaryTool.name)
     : undefined;
 
+  const reviewStartedToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === reviewStartedTool.name)
+    : undefined;
+
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
     const args =
@@ -358,6 +366,21 @@ export function AssistantMessage({
       <div className="flex flex-col gap-4">
         <ConversationHistorySummary
           summary={args.conversation_history_summary}
+        />
+      </div>
+    );
+  }
+
+  // Check if this is a review started message
+  if (reviewStartedToolCall && aiToolCalls.length === 1) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === reviewStartedToolCall.id,
+    );
+
+    return (
+      <div className="flex flex-col gap-4">
+        <CodeReviewStarted
+          status={correspondingToolResult ? "done" : "generating"}
         />
       </div>
     );
@@ -550,8 +573,8 @@ export function AssistantMessage({
         return {
           actionType: "search",
           status: "generating",
-          pattern: args?.pattern || "",
-          regex: args?.regex || false,
+          query: args?.query || "",
+          match_string: args?.match_string || false,
           case_sensitive: args?.case_sensitive || false,
           context_lines: args?.context_lines || 0,
           max_results: args?.max_results || 0,

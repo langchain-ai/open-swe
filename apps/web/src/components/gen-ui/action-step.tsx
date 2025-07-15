@@ -352,11 +352,11 @@ function ActionItem(props: ActionItemProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <code className="text-foreground/80 text-xs font-normal">
-                {castProps.pattern}
+                {castProps.query}
               </code>
               <div className="bg-border h-4 w-[1px] dark:bg-white"></div>
               <MatchCaseIcon matchCase={!!castProps.case_sensitive} />
-              {castProps.regex && (
+              {!castProps.match_string && (
                 <span className="text-muted-foreground bg-muted/50 rounded px-1 text-xs font-normal">
                   regex
                 </span>

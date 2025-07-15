@@ -178,6 +178,10 @@ export async function summarizeHistory(
   const plan = getActivePlanItems(state.taskPlan);
   const conversationHistoryToSummarize = getMessagesSinceLastSummary(
     state.internalMessages,
+    {
+      excludeHiddenMessages: true,
+      excludeCountFromEnd: 20,
+    },
   );
 
   logger.info(
