@@ -168,7 +168,7 @@ export function createSearchToolFields(targetRepository: TargetRepository) {
   return {
     name: "search",
     schema: searchSchema,
-    description: `Execute a search in the repository. The working directory this command will be executed in is \`${repoRoot}\`.`,
+    description: `Execute a search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
   };
 }
 
