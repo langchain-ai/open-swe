@@ -53,7 +53,7 @@ export function GitHubManager() {
   };
 
   const handleManageOnGitHub = () => {
-    const appId = process.env.NEXT_PUBLIC_GITHUB_APP_ID;
+    const appId = process.env.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID;
     const fallbackInstallationsUrl =
       "https://github.com/settings/installations";
     const applicationUrl = appId

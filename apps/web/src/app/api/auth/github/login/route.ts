@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(_request: NextRequest) {
   try {
-    const clientId = process.env.NEXT_PUBLIC_GITHUB_APP_ID;
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID;
     const redirectUri = process.env.GITHUB_APP_REDIRECT_URI;
 
     if (!clientId || !redirectUri) {
