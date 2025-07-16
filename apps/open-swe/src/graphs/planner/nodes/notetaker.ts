@@ -26,18 +26,6 @@ const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the c
 const CUSTOM_RULES_EXTRA_CONTEXT =
   "- Carefully read over the user's custom rules to ensure you don't duplicate or repeat information found in that section, as you will always have access to it (even after the planning step!).";
 
-const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request
-## User request:
-{USER_REQUEST}`;
-
-const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request
-## User initial request:
-{USER_REQUEST}
-
-And here is the user's followup request you're now processing
-## User followup request:
-{USER_FOLLOWUP_REQUEST}`;
-
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
 You've just finished gathering context to aid in generating a development plan to address the user's request. The context you've gathered is provided in the conversation history below.
@@ -78,14 +66,7 @@ const formatPrompt = (state: PlannerGraphState): string => {
     .join("\n");
 
   return systemPrompt
-    .replace(
-      "{USER_REQUEST_PROMPT}",
-      formatUserRequestPrompt(
-        state.messages,
-        SINGLE_USER_REQUEST_PROMPT,
-        USER_SENDING_FOLLOWUP_PROMPT,
-      ),
-    )
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replace(
       "{CONVERSATION_HISTORY}",
       state.messages.map(getMessageString).join("\n"),

@@ -4,15 +4,6 @@ export const PLANNER_NOTES_PROMPT = `Here is a collection of technical notes you
 {PLANNER_NOTES}
 </planner_notes>`;
 
-export const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
-{USER_REQUEST}`;
-
-export const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request:
-{USER_REQUEST}
-
-And here is the user's followup request you're now processing:
-{USER_FOLLOWUP_REQUEST}`;
-
 export const SYSTEM_PROMPT = `You are a terminal-based agentic coding assistant built by LangChain, designed to enable natural language interaction with local codebases through wrapped LLM models.
 
 <context>{FOLLOWUP_MESSAGE_PROMPT}

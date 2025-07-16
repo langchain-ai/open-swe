@@ -34,29 +34,16 @@ const formatPrompt = (taskPlan: PlanItem[]): string => {
   );
 };
 
-const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
-{USER_REQUEST}`;
-
-const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request:
-{USER_REQUEST}
-
-And here is the user's followup request you're now processing:
-{USER_FOLLOWUP_REQUEST}`;
-
 export async function generateConclusion(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const userRequestPrompt = formatUserRequestPrompt(
-    state.messages,
-    SINGLE_USER_REQUEST_PROMPT,
-    USER_SENDING_FOLLOWUP_PROMPT,
-  );
+  const userRequestPrompt = formatUserRequestPrompt(state.messages);
   const userMessage = `${userRequestPrompt}
 
-The conversation history is as follows:
+The full conversation history is as follows:
 ${state.internalMessages.map(getMessageString).join("\n")}
 
 Given all of this, please respond with the concise conclusion. Do not include any additional text besides the conclusion.`;

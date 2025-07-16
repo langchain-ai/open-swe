@@ -184,7 +184,7 @@ export async function interruptProposedPlan(
           planTitle: state.proposedPlanTitle,
           planItems,
           interruptType: "accept",
-          runId: (config.configurable as any)?.run_id,
+          runId: config.configurable?.run_id ?? "",
         }),
       ],
     });
@@ -283,7 +283,7 @@ export async function interruptProposedPlan(
         planTitle: state.proposedPlanTitle,
         planItems,
         interruptType: humanResponse.type,
-        runId: (config.configurable as any)?.run_id,
+        runId: config.configurable?.run_id ?? "",
       }),
     ],
   });
