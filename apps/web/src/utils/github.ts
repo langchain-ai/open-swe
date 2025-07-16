@@ -187,7 +187,10 @@ export async function getRepositoryBranches(
 /**
  * Fetches a specific repository using OAuth access token
  */
-export async function getRepository(owner: string, repo: string) {
+export async function getRepository(
+  owner: string,
+  repo: string,
+): Promise<Repository> {
   const response = await fetch(
     `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}`,
     {
@@ -203,8 +206,43 @@ export async function getRepository(owner: string, repo: string) {
     throw new Error(`Failed to fetch repository: ${JSON.stringify(errorData)}`);
   }
 
-  const data = await response.json();
-  return data;
+  return response.json();
+}
+
+/**
+ * Searches for a specific branch by name in a repository
+ */
+export async function searchBranch(
+  owner: string,
+  repo: string,
+  branchName: string,
+): Promise<Branch | null> {
+  try {
+    const response = await fetch(
+      `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches/${encodeURIComponent(branchName)}`,
+      {
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "OpenSWE-Agent",
+        },
+      },
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null; // Branch not found
+      }
+      const errorData = await response.json();
+      throw new Error(
+        `Failed to search for branch: ${JSON.stringify(errorData)}`,
+      );
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error(`Error searching for branch ${branchName}:`, error);
+    return null;
+  }
 }
 
 /**
