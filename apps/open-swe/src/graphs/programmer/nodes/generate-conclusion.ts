@@ -8,7 +8,7 @@ import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import {
   completeTask,
   getActivePlanItems,
@@ -34,15 +34,27 @@ const formatPrompt = (taskPlan: PlanItem[]): string => {
   );
 };
 
+const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
+{USER_REQUEST}`;
+
+const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request:
+{USER_REQUEST}
+
+And here is the user's followup request you're now processing:
+{USER_FOLLOWUP_REQUEST}`;
+
 export async function generateConclusion(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const userRequest = getUserRequest(state.internalMessages);
-  const userMessage = `The user's initial request is as follows:
-${userRequest || "No user message found"}
+  const userRequestPrompt = formatUserRequestPrompt(
+    state.messages,
+    SINGLE_USER_REQUEST_PROMPT,
+    USER_SENDING_FOLLOWUP_PROMPT,
+  );
+  const userMessage = `${userRequestPrompt}
 
 The conversation history is as follows:
 ${state.internalMessages.map(getMessageString).join("\n")}

@@ -14,8 +14,7 @@ import {
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
 import { getMessageString } from "../../../utils/message/content.js";
-import { removeFirstHumanMessage } from "../../../utils/message/modify-array.js";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import {
   completePlanItem,
   getActivePlanItems,
@@ -88,12 +87,11 @@ export async function progressPlanStep(
     },
   );
 
-  const userRequest = getUserRequest(state.internalMessages, {
-    returnFullMessage: true,
-  });
-  const conversationHistoryStr = `Here is the full conversation history after the user's request:
+  const conversationHistoryStr = `Here is the full conversation history including the user's request(s):
   
-${removeFirstHumanMessage(state.internalMessages).map(getMessageString).join("\n")}
+${state.internalMessages.map(getMessageString).join("\n")}
+
+${formatUserRequestPrompt(state.internalMessages)}
 
 Take all of this information, and determine whether or not you have completed this task in the plan.
 Once you've determined the status of the current task, call either the \`mark_task_completed\` or \`mark_task_not_completed\` tool.`;
@@ -105,7 +103,6 @@ Once you've determined the status of the current task, call either the \`mark_ta
       role: "system",
       content: formatPrompt(activePlanItems),
     },
-    userRequest,
     {
       role: "user",
       content: conversationHistoryStr,

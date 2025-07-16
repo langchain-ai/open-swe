@@ -25,6 +25,7 @@ import {
 import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
 import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
 import {
+  extractContentWithoutDetailsFromIssueBody,
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
 } from "../../../../utils/github/issue-messages.js";
@@ -110,7 +111,12 @@ export async function classifyMessage(
       role: "system",
       content: prompt,
     },
-    userMessage,
+    {
+      role: "user",
+      content: extractContentWithoutDetailsFromIssueBody(
+        getMessageContentString(userMessage.content),
+      ),
+    },
   ]);
 
   const toolCall = response.tool_calls?.[0];
@@ -217,8 +223,14 @@ export async function classifyMessage(
           new HumanMessage({
             ...message,
             additional_kwargs: {
-              githubIssueId: githubIssueId,
+              githubIssueId,
               githubIssueCommentId: createdIssue.id,
+              ...((toolCallArgs.route as string) ===
+              "start_planner_for_followup"
+                ? {
+                    isFollowup: true,
+                  }
+                : {}),
             },
           }),
         ],
@@ -228,6 +240,8 @@ export async function classifyMessage(
     await Promise.all(createCommentsPromise);
 
     let newPlannerId: string | undefined;
+    let goto = END;
+
     if (plannerStatus === "interrupted") {
       if (!state.plannerSession?.threadId) {
         throw new Error("No planner session found. Unable to resume planner.");
@@ -255,6 +269,10 @@ export async function classifyMessage(
       });
     }
 
+    if (toolCallArgs.route === "start_planner_for_followup") {
+      goto = "start-planner";
+    }
+
     // After creating the new comment, we can add the message to state and end.
     const commandUpdate: ManagerGraphUpdate = {
       messages: newMessages,
@@ -269,7 +287,7 @@ export async function classifyMessage(
     };
     return new Command({
       update: commandUpdate,
-      goto: END,
+      goto,
     });
   }
 
@@ -294,7 +312,10 @@ export async function classifyMessage(
     });
   }
 
-  if (toolCallArgs.route === "start_planner") {
+  if (
+    toolCallArgs.route === "start_planner" ||
+    toolCallArgs.route === "start_planner_for_followup"
+  ) {
     // Always kickoff a new start planner node. This will enqueue new runs on the planner graph.
     return new Command({
       update: commandUpdate,

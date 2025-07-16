@@ -14,7 +14,10 @@ import {
 } from "@langchain/langgraph/prebuilt";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
-import { getUserRequest } from "../../../utils/user-request.js";
+import {
+  getInitialUserRequest,
+  getRecentUserRequest,
+} from "../../../utils/user-request.js";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
@@ -143,7 +146,9 @@ export async function interruptProposedPlan(
   }
 
   let planItems: PlanItem[];
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getInitialUserRequest(state.messages);
+  const userFollowupRequest = getRecentUserRequest(state.messages);
+  const userTaskRequest = userFollowupRequest || userRequest;
   const runInput: GraphUpdate = {
     contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
@@ -160,7 +165,7 @@ export async function interruptProposedPlan(
       completed: false,
     }));
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },
@@ -238,7 +243,7 @@ export async function interruptProposedPlan(
     }));
 
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },
@@ -255,7 +260,7 @@ export async function interruptProposedPlan(
     }));
 
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },

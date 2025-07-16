@@ -11,7 +11,7 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
-import { getUserRequest } from "../../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
@@ -20,14 +20,18 @@ import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../../utils/get-notes.js";
-import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import {
+  PLANNER_NOTES_PROMPT,
+  SINGLE_USER_REQUEST_PROMPT,
+  SYSTEM_PROMPT,
+  USER_SENDING_FOLLOWUP_PROMPT,
+} from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  const userRequest = getUserRequest(state.messages);
   const plannerNotes = getPlannerNotes(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
@@ -39,7 +43,14 @@ function formatSystemPrompt(state: PlannerGraphState): string {
           "\n\n"
       : "",
   )
-    .replace("{USER_REQUEST}", userRequest)
+    .replace(
+      "{USER_REQUEST_PROMPT}",
+      formatUserRequestPrompt(
+        state.messages,
+        SINGLE_USER_REQUEST_PROMPT,
+        USER_SENDING_FOLLOWUP_PROMPT,
+      ),
+    )
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll(
       "{PLANNER_NOTES}",

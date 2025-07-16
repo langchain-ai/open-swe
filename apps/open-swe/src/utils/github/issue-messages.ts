@@ -8,6 +8,7 @@ import { GitHubIssue, GitHubIssueComment } from "./types.js";
 import { getIssue, getIssueComments } from "./api.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
+import { DETAILS_OPEN_TAG } from "./issue-task.js";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
@@ -144,6 +145,19 @@ function extractContentFromIssueBody(body: string): string {
     body.indexOf(ISSUE_CONTENT_OPEN_TAG) + ISSUE_CONTENT_OPEN_TAG.length,
     body.indexOf(ISSUE_CONTENT_CLOSE_TAG),
   );
+}
+
+export function extractContentWithoutDetailsFromIssueBody(
+  body: string,
+): string {
+  if (!body.includes(DETAILS_OPEN_TAG)) {
+    return extractContentFromIssueBody(body);
+  }
+
+  const bodyWithoutDetails = extractContentFromIssueBody(
+    body.split(DETAILS_OPEN_TAG)[0],
+  );
+  return bodyWithoutDetails;
 }
 
 export function getMessageContentFromIssue(

@@ -4,28 +4,95 @@ import {
   HumanMessage,
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { extractContentWithoutDetailsFromIssueBody } from "./github/issue-messages.js";
 
 // TODO: Might want a better way of doing this.
 // maybe add a new kwarg `isRequest` and have this return the last human message with that field?
-export function getUserRequest(
+export function getInitialUserRequest(
   messages: BaseMessage[],
   options?: { returnFullMessage?: never | false },
 ): string;
-export function getUserRequest(
+export function getInitialUserRequest(
   messages: BaseMessage[],
   options?: { returnFullMessage?: true },
 ): HumanMessage;
-export function getUserRequest(
+export function getInitialUserRequest(
+  messages: BaseMessage[],
+  options?: { returnFullMessage?: boolean },
+): string | HumanMessage {
+  const initialMessage = messages.findLast(
+    (m) => isHumanMessage(m) && m.additional_kwargs?.isOriginalIssue,
+  );
+
+  if (!initialMessage) {
+    return "";
+  }
+
+  const parsedContent = extractContentWithoutDetailsFromIssueBody(
+    getMessageContentString(initialMessage.content),
+  );
+  return options?.returnFullMessage
+    ? new HumanMessage({
+        ...initialMessage,
+        content: parsedContent,
+      })
+    : parsedContent;
+}
+
+export function getRecentUserRequest(
+  messages: BaseMessage[],
+  options?: { returnFullMessage?: never | false },
+): string;
+export function getRecentUserRequest(
+  messages: BaseMessage[],
+  options?: { returnFullMessage?: true },
+): HumanMessage;
+export function getRecentUserRequest(
   messages: BaseMessage[],
   options?: { returnFullMessage?: boolean },
 ): string | HumanMessage {
   const recentUserMessage = messages.findLast(
-    (m) => isHumanMessage(m) && m.additional_kwargs?.isOriginalIssue,
+    (m) => isHumanMessage(m) && m.additional_kwargs?.isFollowup,
   );
+
   if (!recentUserMessage) {
     return "";
   }
+
+  const parsedContent = extractContentWithoutDetailsFromIssueBody(
+    getMessageContentString(recentUserMessage.content),
+  );
   return options?.returnFullMessage
-    ? recentUserMessage
-    : getMessageContentString(recentUserMessage.content);
+    ? new HumanMessage({
+        ...recentUserMessage,
+        content: parsedContent,
+      })
+    : parsedContent;
+}
+
+const DEFAULT_SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
+{USER_REQUEST}`;
+
+const DEFAULT_USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request:
+{USER_REQUEST}
+
+And here is the user's followup request you're now processing:
+{USER_FOLLOWUP_REQUEST}`;
+
+export function formatUserRequestPrompt(
+  messages: BaseMessage[],
+  singleRequestPrompt: string = DEFAULT_SINGLE_USER_REQUEST_PROMPT,
+  followupRequestPrompt: string = DEFAULT_USER_SENDING_FOLLOWUP_PROMPT,
+): string {
+  const noRequestMessage = "No user request provided.";
+  const userRequest = getInitialUserRequest(messages) || noRequestMessage;
+  const userFollowupRequest = getRecentUserRequest(messages);
+
+  if (userFollowupRequest) {
+    return singleRequestPrompt
+      .replace("{USER_REQUEST}", userRequest)
+      .replace("{USER_FOLLOWUP_REQUEST}", userFollowupRequest);
+  }
+
+  return followupRequestPrompt.replace("{USER_REQUEST}", userRequest);
 }

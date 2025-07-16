@@ -11,7 +11,7 @@ import {
   Task,
 } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../utils/get-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
@@ -25,6 +25,18 @@ const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the c
 </planner_notes>`;
 const CUSTOM_RULES_EXTRA_CONTEXT =
   "- Carefully read over the user's custom rules to ensure you don't duplicate or repeat information found in that section, as you will always have access to it (even after the planning step!).";
+
+const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request
+## User request:
+{USER_REQUEST}`;
+
+const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request
+## User initial request:
+{USER_REQUEST}
+
+And here is the user's followup request you're now processing
+## User followup request:
+{USER_FOLLOWUP_REQUEST}`;
 
 const systemPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -47,9 +59,7 @@ You MUST adhere to the following criteria when generating your notes:
 - Carefully inspect the proposed plan. Your notes should be focused on context which will be most useful to you when you execute the plan. You may reference specific proposed plan items in your notes.
 {EXTRA_RULES}
 
-Here is the user's request
-## User request:
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 
 Here is the conversation history:
 ## Conversation history:
@@ -63,14 +73,19 @@ With all of this in mind, please carefully inspect the conversation history, and
 `;
 
 const formatPrompt = (state: PlannerGraphState): string => {
-  const userRequest =
-    getUserRequest(state.messages) || "No user request provided.";
   const plannerNotes = getPlannerNotes(state.messages)
     .map((n) => `  - ${n}`)
     .join("\n");
 
   return systemPrompt
-    .replace("{USER_REQUEST}", userRequest)
+    .replace(
+      "{USER_REQUEST_PROMPT}",
+      formatUserRequestPrompt(
+        state.messages,
+        SINGLE_USER_REQUEST_PROMPT,
+        USER_SENDING_FOLLOWUP_PROMPT,
+      ),
+    )
     .replace(
       "{CONVERSATION_HISTORY}",
       state.messages.map(getMessageString).join("\n"),

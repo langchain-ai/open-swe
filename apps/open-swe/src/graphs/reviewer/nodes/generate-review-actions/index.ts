@@ -18,7 +18,7 @@ import {
   createInstallDependenciesTool,
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { getUserRequest } from "../../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { formatPlanPromptWithSummaries } from "../../../../utils/plan-prompt.js";
 import {
@@ -31,7 +31,6 @@ import { getMessageString } from "../../../../utils/message/content.js";
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
 function formatSystemPrompt(state: ReviewerGraphState): string {
-  const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
   const codeReview = getCodeReviewFields(state.internalMessages);
@@ -52,7 +51,10 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
       "{DEPENDENCIES_INSTALLED}",
       state.dependenciesInstalled ? "Yes" : "No",
     )
-    .replaceAll("{USER_REQUEST}", userRequest)
+    .replaceAll(
+      "{USER_REQUEST_PROMPT}",
+      formatUserRequestPrompt(state.messages),
+    )
     .replaceAll(
       "{PREVIOUS_REVIEW_PROMPT}",
       codeReview
