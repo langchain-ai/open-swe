@@ -17,15 +17,15 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check for docs in apps/docs
+    - name: Check for MDX files in apps/docs
       id: check-files
       run: |
-        if [ -d "apps/docs" ] && [ "$(ls -A apps/docs)" ]; then
+        if find apps/docs -name "*.mdx" -type f | head -1 | grep -q .; then
           echo "docs_found=true" >> $GITHUB_OUTPUT
-          echo "Found documentation files to sync"
+          echo "Found MDX files to sync"
         else
           echo "docs_found=false" >> $GITHUB_OUTPUT
-          echo "No documentation files found in apps/docs"
+          echo "No MDX files found in apps/docs"
         fi
 
     - name: Clone LangChain docs repository
@@ -52,15 +52,23 @@ jobs:
         rm -rf src/labs/swe
         mkdir -p src/labs/swe
 
-    - name: Copy documentation files to LangChain docs
+    - name: Copy MDX files to LangChain docs
       if: steps.check-files.outputs.docs_found == 'true'
       run: |
-        # Copy all contents from apps/docs to the target directory, preserving structure
-        cp -r apps/docs/* langchain-docs/src/labs/swe/
+        # Copy all .mdx files from apps/docs to the target directory, preserving structure
+        find apps/docs -name "*.mdx" -type f | while read file; do
+          # Get the relative path from apps/docs
+          rel_path="${file#apps/docs/}"
+          # Create the directory structure in target
+          target_dir="langchain-docs/src/labs/swe/$(dirname "$rel_path")"
+          mkdir -p "$target_dir"
+          # Copy the file
+          cp "$file" "langchain-docs/src/labs/swe/$rel_path"
+        done
         
         # List copied files for verification
-        echo "Copied files and directories:"
-        find langchain-docs/src/labs/swe/ -type f -name "*" | head -20
+        echo "Copied MDX files:"
+        find langchain-docs/src/labs/swe/ -name "*.mdx" -type f
         echo "Directory structure:"
         tree langchain-docs/src/labs/swe/ || find langchain-docs/src/labs/swe/ -type d
 
@@ -77,7 +85,7 @@ jobs:
         else
           git commit -m "Sync OpenSWE documentation files
           
-          - Updated documentation files from apps/docs/
+          - Updated MDX files from apps/docs/
           - Synced at $(date -u '+%Y-%m-%d %H:%M:%S UTC')
           - Source commit: ${{ github.sha }}"
           echo "has_changes=true" >> $GITHUB_OUTPUT
@@ -95,7 +103,7 @@ jobs:
           --body "This PR syncs documentation files from the OpenSWE repository.
           
           **Changes:**
-          - Updated documentation files from \`apps/docs/\`
+          - Updated MDX files from \`apps/docs/\`
           - Target directory: \`src/labs/swe/\`
           - Source commit: ${{ github.sha }}
           - Synced at $(date -u '+%Y-%m-%d %H:%M:%S UTC')
