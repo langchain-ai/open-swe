@@ -17,19 +17,19 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check for MDX files in apps/docs
+    - name: Check for docs in apps/docs
       id: check-files
       run: |
-        if find apps/docs -name "*.mdx" -type f | head -1 | grep -q .; then
-          echo "mdx_files_found=true" >> $GITHUB_OUTPUT
-          echo "Found MDX files to sync"
+        if [ -d "apps/docs" ] && [ "$(ls -A apps/docs)" ]; then
+          echo "docs_found=true" >> $GITHUB_OUTPUT
+          echo "Found documentation files to sync"
         else
-          echo "mdx_files_found=false" >> $GITHUB_OUTPUT
-          echo "No MDX files found in apps/docs"
+          echo "docs_found=false" >> $GITHUB_OUTPUT
+          echo "No documentation files found in apps/docs"
         fi
 
     - name: Clone LangChain docs repository
-      if: steps.check-files.outputs.mdx_files_found == 'true'
+      if: steps.check-files.outputs.docs_found == 'true'
       run: |
         git clone https://x-access-token:${{ secrets.LANGCHAIN_DOCS_TOKEN }}@github.com/langchain-ai/docs.git langchain-docs
         cd langchain-docs
@@ -37,7 +37,7 @@ jobs:
         git config user.email "openswe-bot@langchain.com"
 
     - name: Create branch for documentation sync
-      if: steps.check-files.outputs.mdx_files_found == 'true'
+      if: steps.check-files.outputs.docs_found == 'true'
       run: |
         cd langchain-docs
         BRANCH_NAME="sync-openswe-docs-$(date +%Y%m%d-%H%M%S)"
@@ -45,27 +45,31 @@ jobs:
         git checkout -b "$BRANCH_NAME"
 
     - name: Prepare target directory
-      if: steps.check-files.outputs.mdx_files_found == 'true'
+      if: steps.check-files.outputs.docs_found == 'true'
       run: |
         cd langchain-docs
-        mkdir -p docs/src/labs/swe
+        # Remove existing content to ensure clean sync
+        rm -rf src/labs/swe
+        mkdir -p src/labs/swe
 
-    - name: Copy MDX files to LangChain docs
-      if: steps.check-files.outputs.mdx_files_found == 'true'
+    - name: Copy documentation files to LangChain docs
+      if: steps.check-files.outputs.docs_found == 'true'
       run: |
-        # Find and copy all .mdx files from apps/docs to the target directory
-        find apps/docs -name "*.mdx" -type f -exec cp {} langchain-docs/docs/src/labs/swe/ \;
+        # Copy all contents from apps/docs to the target directory, preserving structure
+        cp -r apps/docs/* langchain-docs/src/labs/swe/
         
         # List copied files for verification
-        echo "Copied files:"
-        ls -la langchain-docs/docs/src/labs/swe/
+        echo "Copied files and directories:"
+        find langchain-docs/src/labs/swe/ -type f -name "*" | head -20
+        echo "Directory structure:"
+        tree langchain-docs/src/labs/swe/ || find langchain-docs/src/labs/swe/ -type d
 
     - name: Commit changes
-      if: steps.check-files.outputs.mdx_files_found == 'true'
+      if: steps.check-files.outputs.docs_found == 'true'
       id: commit
       run: |
         cd langchain-docs
-        git add docs/src/labs/swe/
+        git add src/labs/swe/
         
         if git diff --staged --quiet; then
           echo "No changes to commit"
@@ -73,14 +77,14 @@ jobs:
         else
           git commit -m "Sync OpenSWE documentation files
           
-          - Updated MDX files from apps/docs/
+          - Updated documentation files from apps/docs/
           - Synced at $(date -u '+%Y-%m-%d %H:%M:%S UTC')
           - Source commit: ${{ github.sha }}"
           echo "has_changes=true" >> $GITHUB_OUTPUT
         fi
 
     - name: Push branch and create pull request
-      if: steps.check-files.outputs.mdx_files_found == 'true' && steps.commit.outputs.has_changes == 'true'
+      if: steps.check-files.outputs.docs_found == 'true' && steps.commit.outputs.has_changes == 'true'
       run: |
         cd langchain-docs
         git push origin "$BRANCH_NAME"
@@ -91,8 +95,8 @@ jobs:
           --body "This PR syncs documentation files from the OpenSWE repository.
           
           **Changes:**
-          - Updated MDX files from \`apps/docs/\`
-          - Target directory: \`docs/src/labs/swe/\`
+          - Updated documentation files from \`apps/docs/\`
+          - Target directory: \`src/labs/swe/\`
           - Source commit: ${{ github.sha }}
           - Synced at $(date -u '+%Y-%m-%d %H:%M:%S UTC')
           
