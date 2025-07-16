@@ -11,7 +11,11 @@ import {
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 
@@ -137,9 +141,11 @@ async function identifyTasksToModifyFunc(
     {
       // The model should always call the tool when identifying plan changes.
       tool_choice: identifyPlanChangesTool.name,
-      ...(supportsParallelToolCallsParam ? {
-        parallel_tool_calls: false,
-      } : {}),
+      ...(supportsParallelToolCallsParam
+        ? {
+            parallel_tool_calls: false,
+          }
+        : {}),
     },
   );
 
@@ -204,9 +210,11 @@ async function updatePlanTasksFunc(
   const modelWithUpdatePlanTasksTool = model.bindTools([updatePlanTasksTool], {
     // The model should always call the tool when identifying plan changes.
     tool_choice: updatePlanTasksTool.name,
-    ...(supportsParallelToolCallsParam ? {
-      parallel_tool_calls: false,
-    } : {})
+    ...(supportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const userRequest = getUserRequest(state.messages);
@@ -247,9 +255,21 @@ export async function rewritePlan(
   }
 
   const model = await loadModel(config, Task.PROGRAMMER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.PROGRAMMER);
-  const tasksToModify = await identifyTasksToModify(state, model, modelSupportsParallelToolCallsParam);
-  const updatedPlanTasks = await updatePlanTasks(state, tasksToModify, model, modelSupportsParallelToolCallsParam);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
+  const tasksToModify = await identifyTasksToModify(
+    state,
+    model,
+    modelSupportsParallelToolCallsParam,
+  );
+  const updatedPlanTasks = await updatePlanTasks(
+    state,
+    tasksToModify,
+    model,
+    modelSupportsParallelToolCallsParam,
+  );
 
   return {
     proposedPlan: updatedPlanTasks,

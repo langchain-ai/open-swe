@@ -245,7 +245,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   useEffect(() => {
     console.log(stream.messages);
-  }, [stream.messages])
+  }, [stream.messages]);
 
   if (streamLoading) {
     return <LoadingActionsCardContent />;

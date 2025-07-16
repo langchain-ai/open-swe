@@ -6,7 +6,11 @@ import {
   GraphUpdate,
   CustomRules,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { z } from "zod";
 import {
   getActiveTask,
@@ -119,12 +123,17 @@ export async function updatePlan(
   });
 
   const model = await loadModel(config, Task.PROGRAMMER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
   const modelWithTools = model.bindTools([updatePlanTool], {
     tool_choice: updatePlanTool.name,
-    ...(modelSupportsParallelToolCallsParam ? {
-      parallel_tool_calls: false,
-    } : {})
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const activeTask = getActiveTask(state.taskPlan);

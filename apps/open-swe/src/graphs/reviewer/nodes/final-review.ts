@@ -14,7 +14,11 @@ import {
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
 } from "@open-swe/shared/open-swe/tools";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
@@ -77,12 +81,17 @@ export async function finalReview(
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
   const model = await loadModel(config, Task.PROGRAMMER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",
-    ...(modelSupportsParallelToolCallsParam ? {
-      parallel_tool_calls: false,
-    } : {})
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const response = await modelWithTools.invoke([

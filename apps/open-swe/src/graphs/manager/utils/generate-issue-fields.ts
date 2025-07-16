@@ -1,7 +1,11 @@
 import { BaseMessage } from "@langchain/core/messages";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
 
 export async function createIssueFieldsFromMessages(
@@ -25,13 +29,18 @@ export async function createIssueFieldsFromMessages(
         ),
     }),
   };
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam({ configurable }, Task.ROUTER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    { configurable },
+    Task.ROUTER,
+  );
   const modelWithTools = model
     .bindTools([githubIssueTool], {
       tool_choice: githubIssueTool.name,
-      ...(modelSupportsParallelToolCallsParam ? {
-        parallel_tool_calls: false,
-      } : {})
+      ...(modelSupportsParallelToolCallsParam
+        ? {
+            parallel_tool_calls: false,
+          }
+        : {}),
     })
     .withConfig({ tags: ["nostream"], runName: "create-issue-fields" });
 

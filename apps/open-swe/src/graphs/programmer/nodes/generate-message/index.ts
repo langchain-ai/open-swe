@@ -3,7 +3,11 @@ import {
   GraphConfig,
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../../utils/load-model.js";
 import {
   createShellTool,
   createApplyPatchTool,
@@ -89,7 +93,10 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
   const mcpTools = await getMcpTools(config);
 
   const tools = [
@@ -111,9 +118,11 @@ export async function generateAction(
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    ...(modelSupportsParallelToolCallsParam ? {
-      parallel_tool_calls: true,
-    } : {})
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: true,
+        }
+      : {}),
   });
 
   const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([

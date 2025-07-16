@@ -109,7 +109,8 @@ export function createClassificationPromptAndToolSchema(inputs: {
   const plannerInterrupted = inputs.plannerStatus === "interrupted";
   const plannerNotStarted = inputs.plannerStatus === "not_started";
   // If both are idle, we should allow 'start_planner' to start a new planning run on the same request.
-  const plannerAndProgrammerIdle = inputs.programmerStatus === "idle" && inputs.plannerStatus === "idle";
+  const plannerAndProgrammerIdle =
+    inputs.programmerStatus === "idle" && inputs.plannerStatus === "idle";
 
   const showCreateIssueOption =
     inputs.programmerStatus !== "not_started" ||
@@ -118,7 +119,9 @@ export function createClassificationPromptAndToolSchema(inputs: {
   const routingOptions: [string, ...string[]] = [
     "no_op",
     ...(programmerRunning ? ["update_programmer"] : []),
-    ...(plannerNotStarted ?? plannerAndProgrammerIdle ? ["start_planner"] : []),
+    ...((plannerNotStarted ?? plannerAndProgrammerIdle)
+      ? ["start_planner"]
+      : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
     ...(showCreateIssueOption ? ["create_new_issue"] : []),
@@ -141,7 +144,10 @@ export function createClassificationPromptAndToolSchema(inputs: {
       "{START_PLANNER_ROUTING_OPTION}",
       plannerNotStarted ? START_PLANNER_ROUTING_OPTION : "",
     )
-    .replaceAll("{START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION}", plannerAndProgrammerIdle ? START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION : "")
+    .replaceAll(
+      "{START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION}",
+      plannerAndProgrammerIdle ? START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION : "",
+    )
     .replaceAll(
       "{UPDATE_PLANNER_ROUTING_OPTION}",
       plannerRunning ? UPDATE_PLANNER_ROUTING_OPTION : "",

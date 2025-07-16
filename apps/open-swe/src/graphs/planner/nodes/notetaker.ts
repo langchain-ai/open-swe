@@ -5,7 +5,11 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
-import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
@@ -101,12 +105,17 @@ export async function notetaker(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.SUMMARIZER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.SUMMARIZER,
+  );
   const modelWithTools = model.bindTools([condenseContextTool], {
     tool_choice: condenseContextTool.name,
-    ...(modelSupportsParallelToolCallsParam ? {
-      parallel_tool_calls: false,
-    } : {})
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const conversationHistoryStr = `Here is the full conversation history:
