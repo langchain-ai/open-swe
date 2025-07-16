@@ -19,7 +19,8 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.test\\.ts$ --testPathIgnorePatterns=\\.int\\.test\\.ts$",
     "test:int": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPattern=\\.int\\.test\\.ts$",
     "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000",
-    "eval:single": "NODE_OPTIONS=--experimental-vm-modules yarn run vitest --config ls.vitest.config.ts --run"
+    "eval:single": "NODE_OPTIONS=--experimental-vm-modules yarn run vitest --config ls.vitest.config.ts --run",
+    "postinstall": "turbo build"
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.23.0",
