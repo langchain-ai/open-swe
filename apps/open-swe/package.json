@@ -23,6 +23,8 @@
     "postinstall": "turbo build"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.845.0",
+    "@aws-sdk/lib-storage": "^3.845.0",
     "@daytonaio/sdk": "^0.23.0",
     "@langchain/anthropic": "^0.3.20",
     "@langchain/community": "^0.3.47",
