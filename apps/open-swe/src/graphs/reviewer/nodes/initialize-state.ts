@@ -71,6 +71,32 @@ async function getChangedFiles(
   }
 }
 
+async function getBaseBranchName(
+  sandbox: Sandbox,
+  repoRoot: string,
+): Promise<string> {
+  try {
+    const baseBranchNameRes = await sandbox.process.executeCommand(
+      "git config init.defaultBranch",
+      repoRoot,
+    );
+    if (baseBranchNameRes.exitCode !== 0) {
+      const errorFields = getSandboxErrorFields(baseBranchNameRes);
+      logger.error("Failed to get base branch name", {
+        ...(errorFields ?? baseBranchNameRes),
+      });
+      return "";
+    }
+    return baseBranchNameRes.result.trim();
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error("Failed to get base branch name.", {
+      ...(errorFields ? { errorFields } : { e }),
+    });
+    return "";
+  }
+}
+
 export async function initializeState(
   state: ReviewerGraphState,
   config: GraphConfig,
@@ -88,19 +114,11 @@ export async function initializeState(
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
-    const baseBranchNameRes = await sandbox.process.executeCommand(
-      "git config init.defaultBranch",
-      repoRoot,
-    );
-    if (baseBranchNameRes.exitCode !== 0) {
-      throw new Error(
-        `Failed to get base branch name: ${JSON.stringify(baseBranchNameRes, null, 2)}`,
-      );
-    }
-    baseBranchName = baseBranchNameRes.result.trim();
+    baseBranchName = await getBaseBranchName(sandbox, repoRoot);
   }
-
-  const changedFiles = await getChangedFiles(sandbox, baseBranchName, repoRoot);
+  const changedFiles = baseBranchName
+    ? await getChangedFiles(sandbox, baseBranchName, repoRoot)
+    : "";
 
   logger.info("Finished getting state for reviewer");
 
