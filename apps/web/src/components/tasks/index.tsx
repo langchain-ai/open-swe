@@ -186,7 +186,10 @@ export const TasksSidebar = memo(function TasksSidebar({
                 }}
               >
                 {taskPlan.tasks.map((task, index) => (
-                  <option key={task.id} value={task.id}>
+                  <option
+                    key={task.id}
+                    value={task.id}
+                  >
                     Task {index + 1}: {task.request.substring(0, 50)}
                     {index === taskPlan.activeTaskIndex && " (Active)"}
                   </option>

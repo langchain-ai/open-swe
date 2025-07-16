@@ -34,15 +34,7 @@ import { ProgressBar } from "../tasks/progress-bar";
 import { TasksSidebar } from "../tasks";
 import { useActiveTaskPlan } from "../tasks/useTaskPlan";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
-
-// Simple task plan comparison for stabilization
-function taskPlansEqual(a?: TaskPlan, b?: TaskPlan): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  if (a.activeTaskIndex !== b.activeTaskIndex) return false;
-  if (a.tasks.length !== b.tasks.length) return false;
-  return JSON.stringify(a) === JSON.stringify(b);
-}
+import { taskPlansEqual } from "@/lib/task-plan-utils";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -75,8 +67,10 @@ export function ThreadView({
   );
 
   // Stabilize stream task plan to prevent rapid object reference changes
-  const [stableStreamTaskPlan, setStableStreamTaskPlan] = useState<TaskPlan | undefined>();
-  
+  const [stableStreamTaskPlan, setStableStreamTaskPlan] = useState<
+    TaskPlan | undefined
+  >();
+
   useEffect(() => {
     const newStreamTaskPlan = stream.values?.taskPlan;
     if (!taskPlansEqual(stableStreamTaskPlan, newStreamTaskPlan)) {
@@ -110,7 +104,6 @@ export function ThreadView({
   const programmerCancelRef = useRef<(() => void) | null>(null);
 
   const cancelRun = () => {
-    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
     stream.stop();
   };
 
@@ -223,8 +216,6 @@ export function ThreadView({
                           onOpenSidebar={() => setIsTaskSidebarOpen(true)}
                         />
                       )}
-
-
                     </div>
 
                     <TabsContent value="planner">

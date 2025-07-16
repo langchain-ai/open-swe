@@ -52,7 +52,10 @@ export class StatusResolver {
       return planner;
     }
 
-    if (programmer && (programmer.status === "running" || programmer.status === "error")) {
+    if (
+      programmer &&
+      (programmer.status === "running" || programmer.status === "error")
+    ) {
       return programmer;
     }
 

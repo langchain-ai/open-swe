@@ -1,12 +1,6 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { List } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
@@ -16,6 +10,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { memo } from "react";
+import { taskPlansEqual } from "@/lib/task-plan-utils";
 
 interface ProgressBarProps {
   taskPlan?: TaskPlan;
@@ -23,51 +18,15 @@ interface ProgressBarProps {
   onOpenSidebar?: () => void;
 }
 
-// Custom comparison function for memo to prevent unnecessary re-renders
 function areProgressBarPropsEqual(
   prevProps: ProgressBarProps,
   nextProps: ProgressBarProps,
 ): boolean {
-  // Compare non-task plan props
-  if (prevProps.className !== nextProps.className) return false;
-  if (prevProps.onOpenSidebar !== nextProps.onOpenSidebar) return false;
-
-  // Handle task plan comparison
-  const prevTaskPlan = prevProps.taskPlan;
-  const nextTaskPlan = nextProps.taskPlan;
-
-  // If both are undefined/null, they're equal
-  if (!prevTaskPlan && !nextTaskPlan) return true;
-  
-  // If one is undefined and the other isn't, they're not equal
-  if (!prevTaskPlan || !nextTaskPlan) return false;
-
-  // Compare key task plan properties that affect the progress bar display
-  if (prevTaskPlan.activeTaskIndex !== nextTaskPlan.activeTaskIndex) return false;
-  if (prevTaskPlan.tasks.length !== nextTaskPlan.tasks.length) return false;
-
-  // Compare active task details
-  const prevActiveTask = prevTaskPlan.tasks[prevTaskPlan.activeTaskIndex];
-  const nextActiveTask = nextTaskPlan.tasks[nextTaskPlan.activeTaskIndex];
-
-  if (!prevActiveTask || !nextActiveTask) return false;
-  if (prevActiveTask.activeRevisionIndex !== nextActiveTask.activeRevisionIndex) return false;
-
-  // Compare plan items completion status in the active revision
-  const prevActiveRevision = prevActiveTask.planRevisions[prevActiveTask.activeRevisionIndex];
-  const nextActiveRevision = nextActiveTask.planRevisions[nextActiveTask.activeRevisionIndex];
-
-  if (!prevActiveRevision || !nextActiveRevision) return false;
-  if (prevActiveRevision.plans.length !== nextActiveRevision.plans.length) return false;
-
-  // Check if any plan item completion status changed
-  for (let i = 0; i < prevActiveRevision.plans.length; i++) {
-    if (prevActiveRevision.plans[i].completed !== nextActiveRevision.plans[i].completed) {
-      return false;
-    }
-  }
-
-  return true;
+  return (
+    prevProps.className === nextProps.className &&
+    prevProps.onOpenSidebar === nextProps.onOpenSidebar &&
+    taskPlansEqual(prevProps.taskPlan, nextProps.taskPlan)
+  );
 }
 
 export const ProgressBar = memo(function ProgressBar({
@@ -188,9 +147,9 @@ export const ProgressBar = memo(function ProgressBar({
                   <HoverCardTrigger asChild>
                     <div
                       className={cn(
-                        "transition-all duration-200 relative",
+                        "relative transition-all duration-200",
                         state === "completed" && "bg-green-400",
-                        state === "current" && "bg-blue-400 ",
+                        state === "current" && "bg-blue-400",
                         state === "remaining" && "bg-gray-200",
                       )}
                       style={{ width: segmentWidth }}
@@ -213,7 +172,12 @@ export const ProgressBar = memo(function ProgressBar({
                           state === "remaining" && "text-gray-500",
                         )}
                       >
-                        Status: {state === "completed" ? "Completed" : state === "current" ? "In Progress" : "Pending"}
+                        Status:{" "}
+                        {state === "completed"
+                          ? "Completed"
+                          : state === "current"
+                            ? "In Progress"
+                            : "Pending"}
                       </p>
                     </div>
                   </HoverCardContent>
