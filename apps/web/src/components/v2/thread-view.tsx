@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -30,6 +30,19 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
+import { ProgressBar } from "../tasks/progress-bar";
+import { TasksSidebar } from "../tasks";
+import { useActiveTaskPlan } from "../tasks/useTaskPlan";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
+
+// Simple task plan comparison for stabilization
+function taskPlansEqual(a?: TaskPlan, b?: TaskPlan): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.activeTaskIndex !== b.activeTaskIndex) return false;
+  if (a.tasks.length !== b.tasks.length) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -52,6 +65,29 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+  const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
+
+  const { taskPlan: activeTaskPlan, isProgrammerActive } = useActiveTaskPlan(
+    displayThread.taskPlan,
+    programmerSession,
+    displayThread.id,
+    plannerThreadId,
+  );
+
+  // Stabilize stream task plan to prevent rapid object reference changes
+  const [stableStreamTaskPlan, setStableStreamTaskPlan] = useState<TaskPlan | undefined>();
+  
+  useEffect(() => {
+    const newStreamTaskPlan = stream.values?.taskPlan;
+    if (!taskPlansEqual(stableStreamTaskPlan, newStreamTaskPlan)) {
+      setStableStreamTaskPlan(newStreamTaskPlan);
+    }
+  }, [stream.values?.taskPlan, stableStreamTaskPlan]);
+
+  // Stabilize finalTaskPlan to prevent unnecessary re-renders
+  const finalTaskPlan = useMemo(() => {
+    return activeTaskPlan || stableStreamTaskPlan;
+  }, [activeTaskPlan, stableStreamTaskPlan]);
 
   const { status: realTimeStatus } = useThreadStatus(displayThread.id);
 
@@ -180,27 +216,15 @@ export function ThreadView({
                         <TabsTrigger value="programmer">Programmer</TabsTrigger>
                       </TabsList>
 
-                      <div className="flex gap-2">
-                        {selectedTab === "planner" &&
-                          plannerCancelRef.current && (
-                            <CancelStreamButton
-                              stream={stream}
-                              threadId={plannerThreadId}
-                              runId={plannerRunId}
-                              streamName="Planner"
-                            />
-                          )}
+                      {/* Task Progress Bar */}
+                      {finalTaskPlan && (
+                        <ProgressBar
+                          taskPlan={finalTaskPlan}
+                          onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                        />
+                      )}
 
-                        {selectedTab === "programmer" &&
-                          programmerCancelRef.current && (
-                            <CancelStreamButton
-                              stream={stream}
-                              threadId={plannerThreadId}
-                              runId={plannerRunId}
-                              streamName="Programmer"
-                            />
-                          )}
-                      </div>
+
                     </div>
 
                     <TabsContent value="planner">
@@ -274,6 +298,15 @@ export function ThreadView({
           </div>
         </div>
       </div>
+
+      {/* Tasks Sidebar */}
+      {finalTaskPlan && (
+        <TasksSidebar
+          isOpen={isTaskSidebarOpen}
+          onClose={() => setIsTaskSidebarOpen(false)}
+          taskPlan={finalTaskPlan}
+        />
+      )}
     </div>
   );
 }

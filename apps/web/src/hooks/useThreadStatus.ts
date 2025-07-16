@@ -6,6 +6,7 @@ import { fetchThreadStatus } from "@/services/thread-status.service";
 interface UseThreadStatusOptions {
   enabled?: boolean;
   refreshInterval?: number;
+  includeTaskPlan?: boolean;
 }
 
 interface ThreadStatusResult {
@@ -13,6 +14,10 @@ interface ThreadStatusResult {
   isLoading: boolean;
   error: Error | null;
   mutate: () => void;
+}
+
+interface ThreadStatusDataResult extends ThreadStatusResult {
+  statusData: ThreadStatusData | null;
 }
 
 /**
@@ -26,6 +31,7 @@ export function useThreadStatus(
   const {
     enabled = true,
     refreshInterval = THREAD_STATUS_SWR_CONFIG.refreshInterval,
+    includeTaskPlan = false,
   } = options;
 
   const swrKey = enabled ? `thread-status-${threadId}` : null;
@@ -38,6 +44,16 @@ export function useThreadStatus(
       refreshInterval,
     },
   );
+
+  if (includeTaskPlan) {
+    return {
+      statusData: data || null,
+      status: data?.status || "idle",
+      isLoading,
+      error,
+      mutate,
+    } as ThreadStatusDataResult;
+  }
 
   return {
     status: data?.status || "idle",

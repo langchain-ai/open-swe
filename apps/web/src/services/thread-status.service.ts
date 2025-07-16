@@ -35,7 +35,7 @@ export class StatusResolver {
     manager: StatusResult,
     planner?: StatusResult,
     programmer?: StatusResult,
-  ): ThreadStatusData {
+  ): StatusResult {
     if (manager.status === "running" || manager.status === "error") {
       return manager;
     }
@@ -50,6 +50,10 @@ export class StatusResolver {
 
     if (planner.status === "error") {
       return planner;
+    }
+
+    if (programmer && (programmer.status === "running" || programmer.status === "error")) {
+      return programmer;
     }
 
     if (!programmer) {
@@ -218,6 +222,7 @@ async function checkLastKnownGraph(
           runId: lastState.runId,
           threadId: lastState.threadId,
           status: plannerStatusValue,
+          taskPlan: plannerThread.values?.taskPlan,
         };
 
         if (
@@ -261,6 +266,7 @@ async function checkLastKnownGraph(
               runId: "",
               threadId: lastState.threadId,
               status: "idle",
+              taskPlan: undefined,
             },
             plannerStatus,
             programmerStatus,
@@ -280,6 +286,7 @@ async function checkLastKnownGraph(
         runId: "",
         threadId: lastState.threadId,
         status: mapLangGraphToUIStatus(managerThread.status),
+        taskPlan: managerThread.values?.taskPlan,
       };
 
       if (
@@ -316,6 +323,7 @@ async function performFullStatusCheck(
     runId: "",
     threadId,
     status: mapLangGraphToUIStatus(managerThread.status),
+    taskPlan: managerThread.values?.taskPlan,
   };
 
   // If manager is running or has error, return immediately without checking sub-sessions
@@ -366,6 +374,7 @@ async function performFullStatusCheck(
     runId: plannerSession.runId,
     threadId: plannerSession.threadId,
     status: plannerStatusValue,
+    taskPlan: plannerThread.values?.taskPlan,
   };
 
   if (

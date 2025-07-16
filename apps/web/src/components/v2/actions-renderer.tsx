@@ -221,7 +221,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     )
   );
 
-  // TODO: Need a better way to handle this. Not great like this...
   useEffect(() => {
     if (
       "programmerSession" in stream.values &&
@@ -232,10 +231,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     ) {
       setProgrammerSession?.(stream.values.programmerSession);
 
-      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
-      // This allows the accepted plan step to be visible before switching
       if (graphId === PLANNER_GRAPH_ID) {
-        // Add a small delay to allow the accepted plan step to render first
         setTimeout(() => {
           setSelectedTab?.("programmer");
         }, 2000);

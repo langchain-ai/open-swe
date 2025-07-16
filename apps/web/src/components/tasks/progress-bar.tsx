@@ -7,15 +7,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { List, HelpCircle } from "lucide-react";
+import { List } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
 import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { memo } from "react";
 
 interface ProgressBarProps {
   taskPlan?: TaskPlan;
@@ -23,23 +23,71 @@ interface ProgressBarProps {
   onOpenSidebar?: () => void;
 }
 
-export function ProgressBar({
+// Custom comparison function for memo to prevent unnecessary re-renders
+function areProgressBarPropsEqual(
+  prevProps: ProgressBarProps,
+  nextProps: ProgressBarProps,
+): boolean {
+  // Compare non-task plan props
+  if (prevProps.className !== nextProps.className) return false;
+  if (prevProps.onOpenSidebar !== nextProps.onOpenSidebar) return false;
+
+  // Handle task plan comparison
+  const prevTaskPlan = prevProps.taskPlan;
+  const nextTaskPlan = nextProps.taskPlan;
+
+  // If both are undefined/null, they're equal
+  if (!prevTaskPlan && !nextTaskPlan) return true;
+  
+  // If one is undefined and the other isn't, they're not equal
+  if (!prevTaskPlan || !nextTaskPlan) return false;
+
+  // Compare key task plan properties that affect the progress bar display
+  if (prevTaskPlan.activeTaskIndex !== nextTaskPlan.activeTaskIndex) return false;
+  if (prevTaskPlan.tasks.length !== nextTaskPlan.tasks.length) return false;
+
+  // Compare active task details
+  const prevActiveTask = prevTaskPlan.tasks[prevTaskPlan.activeTaskIndex];
+  const nextActiveTask = nextTaskPlan.tasks[nextTaskPlan.activeTaskIndex];
+
+  if (!prevActiveTask || !nextActiveTask) return false;
+  if (prevActiveTask.activeRevisionIndex !== nextActiveTask.activeRevisionIndex) return false;
+
+  // Compare plan items completion status in the active revision
+  const prevActiveRevision = prevActiveTask.planRevisions[prevActiveTask.activeRevisionIndex];
+  const nextActiveRevision = nextActiveTask.planRevisions[nextActiveTask.activeRevisionIndex];
+
+  if (!prevActiveRevision || !nextActiveRevision) return false;
+  if (prevActiveRevision.plans.length !== nextActiveRevision.plans.length) return false;
+
+  // Check if any plan item completion status changed
+  for (let i = 0; i < prevActiveRevision.plans.length; i++) {
+    if (prevActiveRevision.plans[i].completed !== nextActiveRevision.plans[i].completed) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export const ProgressBar = memo(function ProgressBar({
   taskPlan,
   className,
   onOpenSidebar,
 }: ProgressBarProps) {
-  const [showLegend, setShowLegend] = useState(false);
-
+  // Early return for no task plan
   if (!taskPlan || !taskPlan.tasks.length) {
     return (
       <div
         className={cn(
-          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4",
+          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >
         <div className="flex items-center justify-between">
-          <div className="text-xs text-gray-500">No active plan</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            No active plan
+          </div>
         </div>
       </div>
     );
@@ -50,20 +98,26 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4",
+          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >
         <div className="flex items-center justify-between">
-          <div className="text-xs text-gray-500">No active plan</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400">
+            No active plan
+          </div>
         </div>
       </div>
     );
   }
 
-  const activeRevision =
+  const currentRevision =
     currentTask.planRevisions[currentTask.activeRevisionIndex];
-  const planItems = [...activeRevision.plans].sort((a, b) => a.index - b.index);
+  const planItems = currentRevision?.plans || [];
+
+  const completedCount = planItems.filter((item) => item.completed).length;
+  const progressPercentage =
+    planItems.length > 0 ? (completedCount / planItems.length) * 100 : 0;
 
   // Find the current task (lowest index among uncompleted tasks)
   const currentTaskIndex = planItems
@@ -73,127 +127,54 @@ export function ProgressBar({
       Number.POSITIVE_INFINITY,
     );
 
-  const getItemState = (
-    item: PlanItem,
-  ): "completed" | "current" | "remaining" => {
+  const getItemState = (item: PlanItem) => {
     if (item.completed) return "completed";
     if (item.index === currentTaskIndex) return "current";
     return "remaining";
   };
 
-  const completedCount = planItems.filter((item) => item.completed).length;
-  const progressPercentage =
-    planItems.length > 0 ? (completedCount / planItems.length) * 100 : 0;
-
-  const getSegmentColor = (state: string) => {
-    switch (state) {
-      case "completed":
-        return "bg-green-400";
-      case "current":
-        return "bg-blue-400";
-      default:
-        return "bg-gray-200";
-    }
-  };
+  // Create a unique key based on completion state to force re-render when tasks complete
+  const progressKey = `${taskPlan.activeTaskIndex}-${currentTask.activeRevisionIndex}-${completedCount}-${planItems.length}`;
 
   return (
     <div
       className={cn(
-        "w-full rounded-md border border-gray-200 bg-white shadow-sm",
+        "w-96 rounded-md border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900",
         className,
       )}
+      key={progressKey}
     >
-      {/* Compact header */}
-      <div className="overflow-hidden px-1 py-1.5 sm:px-2">
-        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-gray-700 sm:text-sm">
+      {/* Compact header - 2 rows instead of 3 */}
+      <div className="overflow-hidden px-2 py-1">
+        {/* Row 1: Title, progress stats, and Tasks button */}
+        <div className="mb-1 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-medium text-gray-700 dark:text-gray-200">
               Plan Progress
             </span>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-4 w-4 p-0 sm:h-5 sm:w-5"
-                    onClick={() => setShowLegend(!showLegend)}
-                  >
-                    <HelpCircle className="h-3 w-3 text-gray-500" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  className="max-w-xs p-2 text-xs"
-                >
-                  <div className="space-y-1">
-                    <p className="font-medium">Plan Progress</p>
-                    <p>
-                      Shows the current progress of the AI agent's plan
-                      execution.
-                    </p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500 sm:text-sm">
+            <span className="text-xs text-gray-600 dark:text-gray-300">
+              {completedCount} of {planItems.length} completed
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
               {Math.round(progressPercentage)}%
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onOpenSidebar}
-              className="h-6 border-blue-200 text-xs hover:bg-blue-50"
-            >
-              <List className="size-3" />
-              <span className="hidden sm:inline">Tasks</span>
-              <span className="sm:hidden">View</span>
-            </Button>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenSidebar}
+            className="h-6 border-blue-200 text-xs hover:bg-blue-50"
+          >
+            <List className="size-3" />
+            <span className="hidden sm:inline">Tasks</span>
+            <span className="sm:hidden">View</span>
+          </Button>
         </div>
 
-        {/* Legend - conditionally shown */}
-        {showLegend && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs sm:gap-3">
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 rounded-full bg-green-400"></div>
-              <span>Completed</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400"></div>
-              <span>Current</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 rounded-full bg-gray-200"></div>
-              <span>Pending</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-4 touch-manipulation p-0 text-xs"
-              onClick={() => setShowLegend(false)}
-            >
-              ×
-            </Button>
-          </div>
-        )}
-
-        {/* Progress Stats */}
-        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-gray-600 sm:text-sm">
-            {completedCount} of {planItems.length} tasks completed
-          </span>
-          <span className="text-xs text-gray-500 sm:text-sm">
-            Task #{currentTask.taskIndex + 1}
-          </span>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="space-y-2">
+        {/* Row 2: Progress Bar */}
+        <div>
           <div
-            className="flex h-3 cursor-pointer touch-manipulation gap-[1px] overflow-hidden rounded-sm bg-gray-100 transition-all sm:h-2"
+            className="flex h-4 cursor-pointer touch-manipulation gap-[1px] overflow-hidden rounded-sm bg-gray-100 transition-all dark:bg-gray-700"
             onClick={onOpenSidebar}
             aria-label="Click to view all tasks"
             title="Click to view all tasks"
@@ -203,35 +184,37 @@ export function ProgressBar({
               const segmentWidth = `${100 / planItems.length}%`;
 
               return (
-                <HoverCard key={item.index}>
+                <HoverCard key={`${progressKey}-item-${item.index}`}>
                   <HoverCardTrigger asChild>
                     <div
                       className={cn(
-                        "transition-all hover:opacity-80",
-                        getSegmentColor(state),
-                        state === "current" && "animate-pulse",
+                        "transition-all duration-200 relative",
+                        state === "completed" && "bg-green-400",
+                        state === "current" && "bg-blue-400 ",
+                        state === "remaining" && "bg-gray-200",
                       )}
                       style={{ width: segmentWidth }}
+                      role="button"
+                      tabIndex={0}
                     />
                   </HoverCardTrigger>
                   <HoverCardContent
-                    side="bottom"
-                    className="min-w-xs p-2 text-xs sm:max-w-sm md:max-w-lg"
+                    side="top"
+                    className="z-50 w-64 p-2 text-xs"
                   >
                     <div className="space-y-1">
-                      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-1">
-                        <span className="font-medium">
-                          Task #{item.index + 1}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {state === "completed"
-                            ? "Completed"
-                            : state === "current"
-                              ? "Current"
-                              : "Pending"}
-                        </span>
-                      </div>
-                      <p className="text-xs break-words">{item.plan}</p>
+                      <p className="font-medium">Item #{item.index + 1}</p>
+                      <p className="text-muted-foreground">{item.plan}</p>
+                      <p
+                        className={cn(
+                          "text-xs",
+                          state === "completed" && "text-green-600",
+                          state === "current" && "text-blue-600",
+                          state === "remaining" && "text-gray-500",
+                        )}
+                      >
+                        Status: {state === "completed" ? "Completed" : state === "current" ? "In Progress" : "Pending"}
+                      </p>
                     </div>
                   </HoverCardContent>
                 </HoverCard>
@@ -242,4 +225,4 @@ export function ProgressBar({
       </div>
     </div>
   );
-}
+}, areProgressBarPropsEqual);
