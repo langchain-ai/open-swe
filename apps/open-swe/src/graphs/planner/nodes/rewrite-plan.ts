@@ -11,7 +11,11 @@ import {
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
 import { getUserRequest } from "../../../utils/user-request.js";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 
@@ -91,6 +95,7 @@ const formatSysPromptRewritePlan = (
 async function identifyTasksToModifyFunc(
   state: PlannerGraphState,
   model: ConfigurableModel,
+  supportsParallelToolCallsParam: boolean,
 ): Promise<PlanItem[]> {
   if (!state.planChangeRequest) {
     throw new Error("No plan change request found.");
@@ -136,7 +141,11 @@ async function identifyTasksToModifyFunc(
     {
       // The model should always call the tool when identifying plan changes.
       tool_choice: identifyPlanChangesTool.name,
-      parallel_tool_calls: false,
+      ...(supportsParallelToolCallsParam
+        ? {
+            parallel_tool_calls: false,
+          }
+        : {}),
     },
   );
 
@@ -173,6 +182,7 @@ async function updatePlanTasksFunc(
   state: PlannerGraphState,
   tasksToModify: PlanItem[],
   model: ConfigurableModel,
+  supportsParallelToolCallsParam: boolean,
 ): Promise<string[]> {
   if (!state.planChangeRequest) {
     throw new Error("No plan change request found.");
@@ -200,7 +210,11 @@ async function updatePlanTasksFunc(
   const modelWithUpdatePlanTasksTool = model.bindTools([updatePlanTasksTool], {
     // The model should always call the tool when identifying plan changes.
     tool_choice: updatePlanTasksTool.name,
-    parallel_tool_calls: false,
+    ...(supportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const userRequest = getUserRequest(state.messages);
@@ -241,8 +255,21 @@ export async function rewritePlan(
   }
 
   const model = await loadModel(config, Task.PROGRAMMER);
-  const tasksToModify = await identifyTasksToModify(state, model);
-  const updatedPlanTasks = await updatePlanTasks(state, tasksToModify, model);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
+  const tasksToModify = await identifyTasksToModify(
+    state,
+    model,
+    modelSupportsParallelToolCallsParam,
+  );
+  const updatedPlanTasks = await updatePlanTasks(
+    state,
+    tasksToModify,
+    model,
+    modelSupportsParallelToolCallsParam,
+  );
 
   return {
     proposedPlan: updatedPlanTasks,

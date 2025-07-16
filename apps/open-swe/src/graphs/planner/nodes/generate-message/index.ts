@@ -1,4 +1,8 @@
-import { loadModel, Task } from "../../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../../utils/load-model.js";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -51,6 +55,10 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.PROGRAMMER,
+  );
   const mcpTools = await getMcpTools(config);
 
   const tools = [
@@ -66,7 +74,11 @@ export async function generateAction(
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: true,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: true,
+        }
+      : {}),
   });
 
   const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([

@@ -2,7 +2,11 @@ import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createSessionPlanToolFields } from "../../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../../utils/load-model.js";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -50,10 +54,18 @@ export async function generatePlan(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.SUMMARIZER,
+  );
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   let optionalToolMessage: ToolMessage | undefined;

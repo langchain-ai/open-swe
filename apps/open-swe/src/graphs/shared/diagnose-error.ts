@@ -11,7 +11,11 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
-import { loadModel, Task } from "../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../utils/load-model.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
@@ -89,9 +93,17 @@ export async function diagnoseError(
   logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.SUMMARIZER,
+  );
   const modelWithTools = model.bindTools([diagnoseErrorTool], {
     tool_choice: diagnoseErrorTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const response = await modelWithTools.invoke([

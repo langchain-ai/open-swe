@@ -79,3 +79,16 @@ export async function loadModel(config: GraphConfig, task: Task) {
 
   return model;
 }
+
+const MODELS_NO_PARALLEL_TOOL_CALLING = ["openai:o3", "openai:o3-mini"];
+
+export function supportsParallelToolCallsParam(
+  config: GraphConfig,
+  task: Task,
+): boolean {
+  const modelStr =
+    config.configurable?.[`${task}ModelName`] ??
+    TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName;
+
+  return !MODELS_NO_PARALLEL_TOOL_CALLING.some((model) => modelStr === model);
+}

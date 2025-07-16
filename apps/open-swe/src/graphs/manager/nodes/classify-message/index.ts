@@ -11,7 +11,11 @@ import {
   RemoveMessage,
 } from "@langchain/core/messages";
 import { z } from "zod";
-import { loadModel, Task } from "../../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../../utils/load-model.js";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import {
@@ -88,9 +92,17 @@ export async function classifyMessage(
     schema,
   };
   const model = await loadModel(config, Task.ROUTER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.ROUTER,
+  );
   const modelWithTools = model.bindTools([respondAndRouteTool], {
     tool_choice: respondAndRouteTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const response = await modelWithTools.invoke([

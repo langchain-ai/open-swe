@@ -12,7 +12,11 @@ import {
 import { createPullRequest } from "../../../utils/github/api.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getUserRequest } from "../../../utils/user-request.js";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
@@ -91,9 +95,17 @@ export async function openPullRequest(
   const openPrTool = createOpenPrToolFields();
   // use the router model since this is a simple task that doesn't need an advanced model
   const model = await loadModel(config, Task.ROUTER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.ROUTER,
+  );
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const userRequest = getUserRequest(state.internalMessages);

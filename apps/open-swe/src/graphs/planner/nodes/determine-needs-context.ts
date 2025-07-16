@@ -5,7 +5,11 @@ import {
 } from "@open-swe/shared/open-swe/planner/types";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import {
+  loadModel,
+  supportsParallelToolCallsParam,
+  Task,
+} from "../../../utils/load-model.js";
 import { getMissingMessages } from "../../../utils/github/issue-messages.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";
@@ -120,9 +124,17 @@ export async function determineNeedsContext(
       "Can not determine if more context is needed if there are no missing messages.",
     );
   }
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.ROUTER,
+  );
   const modelWithTools = model.bindTools([determineContextTool], {
     tool_choice: determineContextTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam
+      ? {
+          parallel_tool_calls: false,
+        }
+      : {}),
   });
 
   const response = await modelWithTools.invoke([
