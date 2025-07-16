@@ -343,7 +343,7 @@ async function performFullStatusCheck(
     // No run fetch needed for planners - thread status is sufficient
 
     setCachedSessionData(sessionCache, plannerCacheKey, {
-      plannerData: { thread: plannerThread, run: null },
+      plannerData: { thread: plannerThread },
     });
   }
 
@@ -399,7 +399,7 @@ async function performFullStatusCheck(
     // No run fetch needed - we only check task completion from thread data
 
     setCachedSessionData(sessionCache, programmerCacheKey, {
-      programmerData: { thread: programmerThread, run: null },
+      programmerData: { thread: programmerThread },
     });
   }
 
