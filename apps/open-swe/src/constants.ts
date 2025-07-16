@@ -9,7 +9,7 @@ export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromImageParams = {
   },
   user: "daytona",
   image: SNAPSHOT_NAME,
-  autoArchiveInterval: 15, // archive after 15 minutes
+  autoDeleteInterval: 15, // delete after 15 minutes
 };
 
 export const LANGGRAPH_USER_PERMISSIONS = [
