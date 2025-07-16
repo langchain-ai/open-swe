@@ -272,11 +272,20 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         />
       ))}
       {acceptedPlanEvents.length > 0 &&
-        isAcceptedPlanEvents(acceptedPlanEvents) && (
+        isAcceptedPlanEvents(acceptedPlanEvents) &&
+        acceptedPlanEvents[acceptedPlanEvents.length - 1].data.runId ===
+          runId && (
           <AcceptedPlanStep
-            planTitle={acceptedPlanEvents[0].data.planTitle}
-            planItems={acceptedPlanEvents[0].data.planItems}
-            interruptType={acceptedPlanEvents[0].data.interruptType}
+            planTitle={
+              acceptedPlanEvents[acceptedPlanEvents.length - 1].data.planTitle
+            }
+            planItems={
+              acceptedPlanEvents[acceptedPlanEvents.length - 1].data.planItems
+            }
+            interruptType={
+              acceptedPlanEvents[acceptedPlanEvents.length - 1].data
+                .interruptType
+            }
           />
         )}
       {/* If the last message is hidden, but there's an interrupt, we must manually render the interrupt */}

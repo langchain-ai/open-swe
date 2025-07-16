@@ -44,8 +44,9 @@ function createAcceptedPlanMessage(input: {
   planTitle: string;
   planItems: PlanItem[];
   interruptType: HumanResponse["type"];
+  runId: string;
 }) {
-  const { planTitle, planItems, interruptType } = input;
+  const { planTitle, planItems, interruptType, runId } = input;
   const acceptedPlanEvent: CustomNodeEvent = {
     nodeId: ACCEPTED_PLAN_NODE_ID,
     actionId: uuidv4(),
@@ -56,6 +57,7 @@ function createAcceptedPlanMessage(input: {
       planTitle,
       planItems,
       interruptType,
+      runId,
     },
   };
 
@@ -182,6 +184,7 @@ export async function interruptProposedPlan(
           planTitle: state.proposedPlanTitle,
           planItems,
           interruptType: "accept",
+          runId: (config.configurable as any)?.run_id,
         }),
       ],
     });
@@ -280,6 +283,7 @@ export async function interruptProposedPlan(
         planTitle: state.proposedPlanTitle,
         planItems,
         interruptType: humanResponse.type,
+        runId: (config.configurable as any)?.run_id,
       }),
     ],
   });
