@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'apps/docs/**'
   workflow_dispatch:
 
 jobs:
