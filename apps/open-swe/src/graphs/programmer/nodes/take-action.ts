@@ -22,7 +22,10 @@ import {
 import { Command } from "@langchain/langgraph";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { getCodebaseTree } from "../../../utils/tree.js";
+import {
+  FAILED_TO_GENERATE_TREE_MESSAGE,
+  getCodebaseTree,
+} from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import { createSearchTool } from "../../../tools/search.js";
@@ -180,6 +183,11 @@ export async function takeAction(
   ]);
 
   const codebaseTree = await getCodebaseTree();
+  // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
+  const codebaseTreeToReturn =
+    codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE
+      ? (state.codebaseTree ?? codebaseTree)
+      : codebaseTree;
 
   // Prioritize wereDependenciesInstalled over dependenciesInstalled
   const dependenciesInstalledUpdate =
@@ -193,7 +201,7 @@ export async function takeAction(
     messages: toolCallResults,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
-    codebaseTree,
+    codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandbox.id,
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,

@@ -5,7 +5,7 @@ import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
 import { cloneRepo, configureGitUserInRepo } from "./github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { getCodebaseTree } from "./tree.js";
+import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -65,6 +65,28 @@ export async function deleteSandbox(
   }
 }
 
+async function createSandbox(attempt: number): Promise<Sandbox | null> {
+  try {
+    return await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS, {
+      timeout: 100, // 100s timeout on creation.
+    });
+  } catch (e) {
+    logger.error("Failed to create sandbox", {
+      attempt,
+      ...(e instanceof Error
+        ? {
+            name: e.name,
+            message: e.message,
+            stack: e.stack,
+          }
+        : {
+            error: e,
+          }),
+    });
+    return null;
+  }
+}
+
 export async function getSandboxWithErrorHandling(
   sandboxSessionId: string | undefined,
   targetRepository: TargetRepository,
@@ -112,7 +134,19 @@ export async function getSandboxWithErrorHandling(
       error,
     });
 
-    const sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
+    let sandbox: Sandbox | null = null;
+    let numSandboxCreateAttempts = 0;
+    while (!sandbox && numSandboxCreateAttempts < 3) {
+      sandbox = await createSandbox(numSandboxCreateAttempts);
+      if (!sandbox) {
+        numSandboxCreateAttempts++;
+      }
+    }
+
+    if (!sandbox) {
+      throw new Error("Failed to create sandbox after 3 attempts");
+    }
+
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
 
     // Clone repository
@@ -130,14 +164,16 @@ export async function getSandboxWithErrorHandling(
     });
 
     // Get codebase tree
-    const codebaseTree = await getCodebaseTree(sandbox.id);
+    const codebaseTree = await getCodebaseTree(sandbox.id, targetRepository);
+    const codebaseTreeToReturn =
+      codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
 
     logger.info("Sandbox created successfully", {
       sandboxId: sandbox.id,
     });
     return {
       sandbox,
-      codebaseTree,
+      codebaseTree: codebaseTreeToReturn,
       dependenciesInstalled: false,
     };
   }

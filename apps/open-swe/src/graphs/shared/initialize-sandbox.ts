@@ -14,7 +14,10 @@ import {
   configureGitUserInRepo,
   pullLatestChanges,
 } from "../../utils/github/git.js";
-import { getCodebaseTree } from "../../utils/tree.js";
+import {
+  FAILED_TO_GENERATE_TREE_MESSAGE,
+  getCodebaseTree,
+} from "../../utils/tree.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import {
   CustomNodeEvent,
@@ -171,7 +174,15 @@ export async function initializeSandbox(
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
       try {
         const codebaseTree = await getCodebaseTree(existingSandbox.id);
-        emitStepEvent(baseGenerateCodebaseTreeAction, "success");
+        if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
+          emitStepEvent(
+            baseGenerateCodebaseTreeAction,
+            "error",
+            FAILED_TO_GENERATE_TREE_MESSAGE,
+          );
+        } else {
+          emitStepEvent(baseGenerateCodebaseTreeAction, "success");
+        }
 
         return {
           sandboxSessionId: existingSandbox.id,
@@ -183,9 +194,14 @@ export async function initializeSandbox(
         emitStepEvent(
           baseGenerateCodebaseTreeAction,
           "error",
-          "Failed to generate codebase tree. Please try again later.",
+          FAILED_TO_GENERATE_TREE_MESSAGE,
         );
-        throw new Error("Failed to generate codebase tree.");
+        return {
+          sandboxSessionId: existingSandbox.id,
+          codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
+          messages: createEventsMessage(),
+          customRules: await getCustomRules(existingSandbox, absoluteRepoDir),
+        };
       }
     } catch {
       emitStepEvent(
