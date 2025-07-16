@@ -29,6 +29,7 @@ export default function ThreadPage({
     assistantId: MANAGER_GRAPH_ID,
     threadId: thread_id,
     reconnectOnMount: true,
+    fetchStateHistory: false,
   });
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
@@ -60,8 +61,6 @@ export default function ThreadPage({
   if (!thread || threadsLoading) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
-
-  // Threads metadata is already computed by the hook
 
   return (
     <div className="bg-background fixed inset-0">

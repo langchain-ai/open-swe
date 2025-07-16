@@ -9,8 +9,8 @@ import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 
 export interface SessionCacheData {
-  plannerData?: { thread: Thread<PlannerGraphState>; run: null };
-  programmerData?: { thread: Thread<GraphState>; run: null };
+  plannerData?: { thread: Thread<PlannerGraphState> };
+  programmerData?: { thread: Thread<GraphState> };
   timestamp: number;
 }
 
