@@ -5,7 +5,7 @@
  * across all thread data fetching in the application.
  */
 export const THREAD_SWR_CONFIG = {
-  refreshInterval: 15000,
+  refreshInterval: 3000, // Reduced from 15s to 3s for better real-time experience
   revalidateOnFocus: false,
   revalidateOnReconnect: true,
   errorRetryCount: 3,
@@ -20,7 +20,7 @@ export const THREAD_SWR_CONFIG = {
 export const THREAD_STATUS_SWR_CONFIG = {
   ...THREAD_SWR_CONFIG,
   revalidateOnFocus: true,
-  dedupingInterval: 5000,
+  dedupingInterval: 2000, // Reduced for more responsive updates
 } as const;
 
 /**

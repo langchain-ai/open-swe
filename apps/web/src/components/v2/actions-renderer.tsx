@@ -14,6 +14,7 @@ import {
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PLANNER_GRAPH_ID,
+  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
@@ -23,6 +24,7 @@ import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
+import { AgentSession, TaskPlan } from "@open-swe/shared/open-swe/types";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -62,15 +64,15 @@ function isAcceptedPlanEvents(
 }
 
 interface ActionsRendererProps {
-  graphId: string;
-  threadId: string;
+  graphId: "planner" | "programmer";
+  threadId?: string;
   runId?: string;
-  setProgrammerSession?: (
-    session: ManagerGraphState["programmerSession"],
-  ) => void;
-  programmerSession?: ManagerGraphState["programmerSession"];
-  setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
-  onStreamReady: (cancelFn: (() => void) | undefined) => void;
+  setProgrammerSession?: (session: AgentSession) => void;
+  programmerSession?: AgentSession;
+  setSelectedTab?: (tab: "planner" | "programmer") => void;
+  onStreamReady?: (cancelFn?: (() => void) | undefined) => void;
+  onPlannerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
+  onProgrammerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -103,6 +105,8 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   programmerSession,
   setSelectedTab,
   onStreamReady,
+  onPlannerTaskPlan,
+  onProgrammerTaskPlan,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
     [],
@@ -201,9 +205,9 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   useEffect(() => {
     if (stream.isLoading) {
-      onStreamReady(cancelRun);
+      onStreamReady?.(cancelRun);
     } else {
-      onStreamReady(undefined);
+      onStreamReady?.(undefined);
     }
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
@@ -246,6 +250,22 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   useEffect(() => {
     console.log(stream.messages);
   }, [stream.messages]);
+
+  // Pass planner task plan to parent component when available
+  useEffect(() => {
+    if (graphId === PLANNER_GRAPH_ID && onPlannerTaskPlan) {
+      const plannerTaskPlan = (stream.values as PlannerGraphState)?.taskPlan;
+      onPlannerTaskPlan(plannerTaskPlan);
+    }
+  }, [graphId, onPlannerTaskPlan, stream.values]);
+
+  // Pass programmer task plan to parent component when available
+  useEffect(() => {
+    if (graphId === PROGRAMMER_GRAPH_ID && onProgrammerTaskPlan) {
+      const programmerTaskPlan = (stream.values as GraphState)?.taskPlan;
+      onProgrammerTaskPlan(programmerTaskPlan);
+    }
+  }, [graphId, onProgrammerTaskPlan, stream.values]);
 
   if (streamLoading) {
     return <LoadingActionsCardContent />;

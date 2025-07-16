@@ -2,6 +2,7 @@ import useSWR from "swr";
 import { THREAD_STATUS_SWR_CONFIG } from "@/lib/swr-config";
 import { ThreadUIStatus, ThreadStatusData } from "@/lib/schemas/thread-status";
 import { fetchThreadStatus } from "@/services/thread-status.service";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 interface UseThreadStatusOptions {
   enabled?: boolean;
@@ -10,6 +11,7 @@ interface UseThreadStatusOptions {
 
 interface ThreadStatusResult {
   status: ThreadUIStatus;
+  taskPlan?: TaskPlan;
   isLoading: boolean;
   error: Error | null;
   mutate: () => void;
@@ -41,6 +43,7 @@ export function useThreadStatus(
 
   return {
     status: data?.status || "idle",
+    taskPlan: data?.taskPlan,
     isLoading,
     error,
     mutate,

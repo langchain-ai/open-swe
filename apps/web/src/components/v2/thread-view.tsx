@@ -30,6 +30,9 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
+import { ProgressBar } from "@/components/tasks/progress-bar";
+import { TasksSidebar } from "@/components/tasks";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -52,8 +55,35 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+  const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
+  const [plannerTaskPlan, setPlannerTaskPlan] = useState<TaskPlan>();
+  const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
 
-  const { status: realTimeStatus } = useThreadStatus(displayThread.id);
+  const { status: realTimeStatus, taskPlan: statusTaskPlan } = useThreadStatus(
+    displayThread.id,
+  );
+
+  // Use the most current task plan available in priority order:
+  // 1. Programmer task plan (from programmer stream with real-time progress) - highest priority for real-time updates
+  // 2. Status task plan (from thread status service with 15s polling) - fallback for accuracy
+  // 3. Planner task plan (from planner when user accepts) - shows plan immediately
+  // 4. Manager task plan (fallback) - initial state
+  const currentTaskPlan =
+    programmerTaskPlan ||
+    statusTaskPlan ||
+    plannerTaskPlan ||
+    stream.values?.taskPlan;
+
+  // Debug logging for development
+  if (process.env.NODE_ENV === "development") {
+    console.log("Task plan sources:", {
+      programmerTaskPlan: !!programmerTaskPlan,
+      statusTaskPlan: !!statusTaskPlan,
+      plannerTaskPlan: !!plannerTaskPlan,
+      managerTaskPlan: !!stream.values?.taskPlan,
+      currentTaskPlan: !!currentTaskPlan,
+    });
+  }
 
   const getStatusDotColor = (status: string) => {
     switch (status) {
@@ -180,6 +210,14 @@ export function ThreadView({
                         <TabsTrigger value="programmer">Programmer</TabsTrigger>
                       </TabsList>
 
+                      <div className="flex flex-1 items-center justify-center px-4">
+                        <ProgressBar
+                          taskPlan={currentTaskPlan}
+                          className="max-w-md"
+                          onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                        />
+                      </div>
+
                       <div className="flex gap-2">
                         {selectedTab === "planner" &&
                           plannerCancelRef.current && (
@@ -221,6 +259,7 @@ export function ThreadView({
                                   plannerCancelRef.current = null;
                                 }
                               }}
+                              onPlannerTaskPlan={setPlannerTaskPlan}
                             />
                           )}
                           {!(plannerThreadId && plannerRunId) && (
@@ -249,6 +288,7 @@ export function ThreadView({
                                   programmerCancelRef.current = null;
                                 }
                               }}
+                              onProgrammerTaskPlan={setProgrammerTaskPlan}
                             />
                           )}
                           {!programmerSession && (
@@ -274,6 +314,15 @@ export function ThreadView({
           </div>
         </div>
       </div>
+
+      {/* Task Sidebar */}
+      {currentTaskPlan && (
+        <TasksSidebar
+          isOpen={isTaskSidebarOpen}
+          onClose={() => setIsTaskSidebarOpen(false)}
+          taskPlan={currentTaskPlan}
+        />
+      )}
     </div>
   );
 }
