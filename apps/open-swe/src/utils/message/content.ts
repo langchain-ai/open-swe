@@ -59,3 +59,20 @@ export function getMessageString(message: BaseMessage): string {
 
   return getUnknownMessageString(message);
 }
+
+export function filterMessagesWithoutContent(
+  messages: BaseMessage[],
+  filterHidden = true,
+): BaseMessage[] {
+  return messages.filter((m) => {
+    if (filterHidden && m.additional_kwargs?.hidden) {
+      return false;
+    }
+    const messageContentStr = getMessageContentString(m.content);
+    if (!isAIMessage(m)) {
+      return !!messageContentStr;
+    }
+    const toolCallsCount = m.tool_calls?.length || 0;
+    return !!messageContentStr || toolCallsCount > 0;
+  });
+}

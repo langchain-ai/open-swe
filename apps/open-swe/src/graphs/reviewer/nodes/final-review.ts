@@ -157,5 +157,6 @@ export async function finalReview(
     taskPlan: updatedTaskPlan,
     messages: messagesUpdate,
     internalMessages: messagesUpdate,
+    reviewsCount: (state.reviewsCount || 0) + 1,
   };
 }

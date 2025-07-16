@@ -58,7 +58,7 @@ function createAcceptedPlanMessage(input: {
 
   const acceptedPlanMessage = new AIMessage({
     id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
-    content: "",
+    content: "Accepted plan",
     additional_kwargs: {
       hidden: true,
       customNodeEvents: [acceptedPlanEvent],

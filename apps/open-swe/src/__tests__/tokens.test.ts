@@ -6,13 +6,13 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../utils/tokens.js";
 
-describe("calculateConversationHistoryTokenCount", () => {
-  it("should return 0 for empty messages array", () => {
+describe("calculateConversationHistoryTokenCount", async () => {
+  it("should return 0 for empty messages array", async () => {
     const result = calculateConversationHistoryTokenCount([]);
     expect(result).toBe(0);
   });
 
-  it("should calculate token count for human messages", () => {
+  it("should calculate token count for human messages", async () => {
     const messages = [
       new HumanMessage({
         content: "This is a test message with exactly 10 words in it.",
@@ -25,7 +25,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(result).toBe(13);
   });
 
-  it("should calculate token count for AI messages with usage metadata", () => {
+  it("should calculate token count for AI messages with usage metadata", async () => {
     const messages = [
       new AIMessage({
         content: "AI response",
@@ -41,7 +41,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(result).toBe(20);
   });
 
-  it("should calculate token count for AI messages without usage metadata", () => {
+  it("should calculate token count for AI messages without usage metadata", async () => {
     const messages = [
       new AIMessage({
         content: "This is an AI response with no usage metadata.",
@@ -54,7 +54,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(result).toBe(12);
   });
 
-  it("should calculate token count for AI messages with tool calls", () => {
+  it("should calculate token count for AI messages with tool calls", async () => {
     const messages = [
       new AIMessage({
         content: "Using a tool",
@@ -75,7 +75,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(result).toBeGreaterThan(0);
   });
 
-  it("should calculate token count for tool messages", () => {
+  it("should calculate token count for tool messages", async () => {
     const messages = [
       new ToolMessage({
         content: "Result of tool execution with some data.",
@@ -89,7 +89,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(result).toBe(10);
   });
 
-  it("should exclude hidden messages when option is provided", () => {
+  it("should exclude hidden messages when option is provided", async () => {
     const messages = [
       new HumanMessage({
         content: "Visible message",
@@ -110,7 +110,7 @@ describe("calculateConversationHistoryTokenCount", () => {
     expect(resultWithOption).toBe(4); // "Visible message" is ~4 tokens
   });
 
-  it("should exclude messages from the end when option is provided", () => {
+  it("should exclude messages from the end when option is provided", async () => {
     const messages = [
       new HumanMessage({ content: "First message" }),
       new HumanMessage({ content: "Second message" }),
@@ -127,22 +127,107 @@ describe("calculateConversationHistoryTokenCount", () => {
     // First two messages should be ~7 tokens
     expect(resultWithOption).toBe(7);
   });
+
+  it("should not separate AI messages with tool calls from their tool messages when excluding from end", async () => {
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll help you with that",
+      tool_calls: [
+        {
+          name: "test_tool",
+          args: { param: "value" },
+          id: "call_123",
+        },
+      ],
+    });
+
+    const toolMessage = new ToolMessage({
+      content: "Tool result",
+      tool_call_id: "call_123",
+    });
+
+    const messages = [
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage,
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 2 messages from the end, which would normally cut between AI and tool message
+    const result = calculateConversationHistoryTokenCount(messages, {
+      excludeCountFromEnd: 2,
+    });
+
+    // Should only count the first human message since we can't separate AI/tool pair
+    const expectedResult = calculateConversationHistoryTokenCount([
+      new HumanMessage({ content: "First message" }),
+    ]);
+
+    expect(result).toBe(expectedResult);
+  });
+
+  it("should preserve multiple tool messages following an AI message", async () => {
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll use multiple tools",
+      tool_calls: [
+        {
+          name: "tool1",
+          args: { param: "value1" },
+          id: "call_1",
+        },
+        {
+          name: "tool2",
+          args: { param: "value2" },
+          id: "call_2",
+        },
+      ],
+    });
+
+    const toolMessage1 = new ToolMessage({
+      content: "Tool 1 result",
+      tool_call_id: "call_1",
+    });
+
+    const toolMessage2 = new ToolMessage({
+      content: "Tool 2 result",
+      tool_call_id: "call_2",
+    });
+
+    const messages = [
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage1,
+      toolMessage2,
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 3 messages from the end, which would cut in the middle of tool messages
+    const result = calculateConversationHistoryTokenCount(messages, {
+      excludeCountFromEnd: 3,
+    });
+
+    // Should only count the first human message
+    const expectedResult = calculateConversationHistoryTokenCount([
+      new HumanMessage({ content: "First message" }),
+    ]);
+
+    expect(result).toBe(expectedResult);
+  });
 });
 
-describe("getMessagesSinceLastSummary", () => {
-  it("should return all messages when there is no summary message", () => {
+describe("getMessagesSinceLastSummary", async () => {
+  it("should return all messages when there is no summary message", async () => {
     const messages = [
       new HumanMessage({ content: "Message 1" }),
       new AIMessage({ content: "Message 2" }),
       new HumanMessage({ content: "Message 3" }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages);
+    const result = await getMessagesSinceLastSummary(messages);
     expect(result).toHaveLength(3);
     expect(result).toEqual(messages);
   });
 
-  it("should return messages after the last summary message", () => {
+  it("should return messages after the last summary message", async () => {
     const summaryMessage = new AIMessage({
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
@@ -155,13 +240,13 @@ describe("getMessagesSinceLastSummary", () => {
       new AIMessage({ content: "Message 4" }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages);
+    const result = await getMessagesSinceLastSummary(messages);
     expect(result).toHaveLength(2);
     expect(result[0].content).toBe("Message 3");
     expect(result[1].content).toBe("Message 4");
   });
 
-  it("should exclude hidden messages when option is provided", () => {
+  it("should exclude hidden messages when option is provided", async () => {
     const summaryMessage = new AIMessage({
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
@@ -177,7 +262,7 @@ describe("getMessagesSinceLastSummary", () => {
       new AIMessage({ content: "Another visible message" }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages, {
+    const result = await getMessagesSinceLastSummary(messages, {
       excludeHiddenMessages: true,
     });
 
@@ -186,7 +271,7 @@ describe("getMessagesSinceLastSummary", () => {
     expect(result[1].content).toBe("Another visible message");
   });
 
-  it("should exclude messages from the end when option is provided", () => {
+  it("should exclude messages from the end when option is provided", async () => {
     const summaryMessage = new AIMessage({
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
@@ -199,7 +284,7 @@ describe("getMessagesSinceLastSummary", () => {
       new HumanMessage({ content: "Message 3" }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages, {
+    const result = await getMessagesSinceLastSummary(messages, {
       excludeCountFromEnd: 1,
     });
 
@@ -208,7 +293,7 @@ describe("getMessagesSinceLastSummary", () => {
     expect(result[1].content).toBe("Message 2");
   });
 
-  it("should handle both excludeHiddenMessages and excludeCountFromEnd options", () => {
+  it("should handle both excludeHiddenMessages and excludeCountFromEnd options", async () => {
     const summaryMessage = new AIMessage({
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
@@ -225,7 +310,7 @@ describe("getMessagesSinceLastSummary", () => {
       new HumanMessage({ content: "Message 4" }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages, {
+    const result = await getMessagesSinceLastSummary(messages, {
       excludeHiddenMessages: true,
       excludeCountFromEnd: 1,
     });
@@ -235,7 +320,304 @@ describe("getMessagesSinceLastSummary", () => {
     expect(result[1].content).toBe("Message 3");
   });
 
-  it("should return empty array if all messages are before the summary", () => {
+  it("should not separate AI messages with tool calls from their tool messages when excluding from end", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll help you with that",
+      tool_calls: [
+        {
+          name: "test_tool",
+          args: { param: "value" },
+          id: "call_123",
+        },
+      ],
+    });
+
+    const toolMessage = new ToolMessage({
+      content: "Tool result",
+      tool_call_id: "call_123",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage,
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 2 messages from the end, which would normally cut between AI and tool message
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 2,
+    });
+
+    // Should only include the first human message since we can't separate AI/tool pair
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("First message");
+  });
+
+  it("should preserve multiple tool messages following an AI message in getMessagesSinceLastSummary", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll use multiple tools",
+      tool_calls: [
+        {
+          name: "tool1",
+          args: { param: "value1" },
+          id: "call_1",
+        },
+        {
+          name: "tool2",
+          args: { param: "value2" },
+          id: "call_2",
+        },
+      ],
+    });
+
+    const toolMessage1 = new ToolMessage({
+      content: "Tool 1 result",
+      tool_call_id: "call_1",
+    });
+
+    const toolMessage2 = new ToolMessage({
+      content: "Tool 2 result",
+      tool_call_id: "call_2",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage1,
+      toolMessage2,
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 3 messages from the end, which would cut in the middle of tool messages
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 3,
+    });
+
+    // Should only include the first human message
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("First message");
+  });
+
+  it("should exclude entire AI/tool group when cut point would separate them", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll use a tool",
+      tool_calls: [
+        {
+          name: "test_tool",
+          args: { param: "value" },
+          id: "call_123",
+        },
+      ],
+    });
+
+    const toolMessage = new ToolMessage({
+      content: "Tool result",
+      tool_call_id: "call_123",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage,
+    ];
+
+    // Try to exclude 1 message from the end (just the tool message)
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 1,
+    });
+
+    // Should exclude the entire AI/tool group to maintain integrity
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("First message");
+  });
+
+  it("should preserve AI message with multiple tool calls and their corresponding tool messages", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithMultipleToolCalls = new AIMessage({
+      content: "I'll use multiple tools to help you",
+      tool_calls: [
+        {
+          name: "search_tool",
+          args: { query: "example query" },
+          id: "call_search_123",
+        },
+        {
+          name: "calculator_tool",
+          args: { expression: "2 + 2" },
+          id: "call_calc_456",
+        },
+        {
+          name: "file_tool",
+          args: { filename: "test.txt" },
+          id: "call_file_789",
+        },
+      ],
+    });
+
+    const searchToolMessage = new ToolMessage({
+      content: "Search results found",
+      tool_call_id: "call_search_123",
+    });
+
+    const calculatorToolMessage = new ToolMessage({
+      content: "Result: 4",
+      tool_call_id: "call_calc_456",
+    });
+
+    const fileToolMessage = new ToolMessage({
+      content: "File contents: Hello world",
+      tool_call_id: "call_file_789",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithMultipleToolCalls,
+      searchToolMessage,
+      calculatorToolMessage,
+      fileToolMessage,
+      new HumanMessage({ content: "After all tools" }),
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 4 messages from the end, which would cut in the middle of the tool messages
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 4,
+    });
+
+    // Should include the first human message and the complete AI/tool group since we can't separate them
+    expect(result).toHaveLength(5);
+    expect(result[0].content).toBe("First message");
+    expect(result[1].content).toBe("I'll use multiple tools to help you");
+    expect(result[2].content).toBe("Search results found");
+    expect(result[3].content).toBe("Result: 4");
+    expect(result[4].content).toBe("File contents: Hello world");
+  });
+
+  it("should include complete AI/tool group when exclusion doesn't break the group", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithMultipleToolCalls = new AIMessage({
+      content: "I'll use two tools",
+      tool_calls: [
+        {
+          name: "tool1",
+          args: { param: "value1" },
+          id: "call_1",
+        },
+        {
+          name: "tool2",
+          args: { param: "value2" },
+          id: "call_2",
+        },
+      ],
+    });
+
+    const tool1Message = new ToolMessage({
+      content: "Tool 1 result",
+      tool_call_id: "call_1",
+    });
+
+    const tool2Message = new ToolMessage({
+      content: "Tool 2 result",
+      tool_call_id: "call_2",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithMultipleToolCalls,
+      tool1Message,
+      tool2Message,
+      new HumanMessage({ content: "After tools" }),
+      new HumanMessage({ content: "Second to last" }),
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 2 messages from the end (just the last two human messages)
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 2,
+    });
+
+    // Should include the first human message, the AI message, both tool messages, and the "After tools" message
+    expect(result).toHaveLength(5);
+    expect(result[0].content).toBe("First message");
+    expect(result[1].content).toBe("I'll use two tools");
+    expect(result[2].content).toBe("Tool 1 result");
+    expect(result[3].content).toBe("Tool 2 result");
+    expect(result[4].content).toBe("After tools");
+  });
+
+  it("should handle case where AI/tool group can be included entirely", async () => {
+    const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const aiMessageWithToolCalls = new AIMessage({
+      content: "I'll use a tool",
+      tool_calls: [
+        {
+          name: "test_tool",
+          args: { param: "value" },
+          id: "call_123",
+        },
+      ],
+    });
+
+    const toolMessage = new ToolMessage({
+      content: "Tool result",
+      tool_call_id: "call_123",
+    });
+
+    const messages = [
+      summaryMessage,
+      new HumanMessage({ content: "First message" }),
+      aiMessageWithToolCalls,
+      toolMessage,
+      new HumanMessage({ content: "After tool message" }),
+      new HumanMessage({ content: "Last message" }),
+    ];
+
+    // Try to exclude 2 messages from the end (the last two human messages)
+    const result = await getMessagesSinceLastSummary(messages, {
+      excludeCountFromEnd: 2,
+    });
+
+    // Should include the first human message and the complete AI/tool group
+    expect(result).toHaveLength(3);
+    expect(result[0].content).toBe("First message");
+    expect(result[1].content).toBe("I'll use a tool");
+    expect(result[2].content).toBe("Tool result");
+  });
+
+  it("should return empty array if all messages are before the summary", async () => {
     const messages = [
       new HumanMessage({ content: "Message 1" }),
       new AIMessage({ content: "Message 2" }),
@@ -245,13 +627,13 @@ describe("getMessagesSinceLastSummary", () => {
       }),
     ];
 
-    const result = getMessagesSinceLastSummary(messages);
+    const result = await getMessagesSinceLastSummary(messages);
     expect(result).toHaveLength(0);
   });
 });
 
-describe("MAX_INTERNAL_TOKENS constant", () => {
-  it("should be defined as 60,000", () => {
+describe("MAX_INTERNAL_TOKENS constant", async () => {
+  it("should be defined as 60,000", async () => {
     expect(MAX_INTERNAL_TOKENS).toBe(60_000);
   });
 });

@@ -5,6 +5,7 @@ import {
   isToolMessage,
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { traceable } from "langsmith/traceable";
 
 // After 60k tokens, summarize the conversation history.
 export const MAX_INTERNAL_TOKENS = 60_000;
@@ -17,39 +18,121 @@ export function calculateConversationHistoryTokenCount(
   },
 ) {
   let totalChars = 0;
-  const messagesToCount = options?.excludeCountFromEnd
-    ? messages.slice(0, -options.excludeCountFromEnd)
-    : messages;
+  let messagesToCount = messages;
+
+  if (options?.excludeCountFromEnd && options.excludeCountFromEnd > 0) {
+    messagesToCount = getMessagesExcludingFromEnd(
+      messages,
+      options.excludeCountFromEnd,
+    );
+  }
   messagesToCount.forEach((m) => {
     if (options?.excludeHiddenMessages && m.additional_kwargs?.hidden) {
       return;
     }
     if (isHumanMessage(m) || isToolMessage(m)) {
       const contentString = getMessageContentString(m.content);
-      totalChars += contentString.length;
+      // Divide each char by 4 as it's roughly one token per 4 characters.
+      totalChars += contentString.length / 4;
     }
 
     if (isAIMessage(m)) {
       const usageMetadata = m.usage_metadata;
       if (usageMetadata) {
-        // multiply by 4 here since we divide by 4 to estimate tokens.
-        totalChars += usageMetadata.total_tokens * 4;
+        totalChars += usageMetadata.output_tokens;
       } else {
         const contentString = getMessageContentString(m.content);
-        totalChars += contentString.length;
+        totalChars += contentString.length / 4;
         m.tool_calls?.forEach((tc) => {
-          totalChars += tc.name.length;
-          totalChars += JSON.stringify(tc.args).length;
+          const nameAndArgs = tc.name + JSON.stringify(tc.args);
+          totalChars += nameAndArgs.length / 4;
         });
       }
     }
   });
 
-  // Estimate 1 token for every 4 characters.
-  return Math.ceil(totalChars / 4);
+  return totalChars;
 }
 
-export function getMessagesSinceLastSummary(
+/**
+ * Helper function to exclude messages from the end while preserving AI/tool message pairs
+ */
+function getMessagesExcludingFromEnd(
+  messages: BaseMessage[],
+  excludeCount: number,
+): BaseMessage[] {
+  if (excludeCount <= 0 || excludeCount >= messages.length) {
+    return excludeCount >= messages.length ? [] : messages;
+  }
+
+  let endIndex = messages.length - excludeCount;
+
+  // Check if we're breaking up an AI message with tool calls and its corresponding tool messages
+  // We need to look backwards from the cut point to ensure we don't separate AI/tool pairs
+  while (endIndex > 0 && endIndex < messages.length) {
+    const messageAtCutPoint = messages[endIndex - 1];
+
+    // If the message before the cut point is an AI message with tool calls,
+    // we need to check if there are corresponding tool messages after it
+    if (
+      isAIMessage(messageAtCutPoint) &&
+      (messageAtCutPoint as any).tool_calls &&
+      (messageAtCutPoint as any).tool_calls.length > 0
+    ) {
+      // Count how many tool messages follow this AI message
+      let toolMessageCount = 0;
+      for (
+        let i = endIndex;
+        i < messages.length && isToolMessage(messages[i]);
+        i++
+      ) {
+        toolMessageCount++;
+      }
+
+      // If there are tool messages that would be cut off, move the cut point back
+      // to include the AI message and all its tool messages, or exclude them entirely
+      if (toolMessageCount > 0) {
+        // Move cut point back to exclude the AI message entirely (safer approach)
+        endIndex--;
+        continue;
+      }
+    }
+
+    // If the message at the cut point is a tool message, check if it belongs to an AI message
+    if (isToolMessage(messages[endIndex])) {
+      // Look backwards to find the corresponding AI message
+      let aiMessageIndex = endIndex - 1;
+      while (aiMessageIndex >= 0 && isToolMessage(messages[aiMessageIndex])) {
+        aiMessageIndex--;
+      }
+
+      // If we found an AI message with tool calls, include all related messages
+      if (
+        aiMessageIndex >= 0 &&
+        isAIMessage(messages[aiMessageIndex]) &&
+        (messages[aiMessageIndex] as any).tool_calls &&
+        (messages[aiMessageIndex] as any).tool_calls.length > 0
+      ) {
+        // Move cut point to include the entire AI/tool group
+        let toolGroupEnd = endIndex;
+        while (
+          toolGroupEnd < messages.length &&
+          isToolMessage(messages[toolGroupEnd])
+        ) {
+          toolGroupEnd++;
+        }
+        endIndex = toolGroupEnd;
+        break;
+      }
+    }
+
+    break;
+  }
+
+  return messages.slice(0, endIndex);
+}
+
+export function getMessagesSinceLastSummaryFunc(
   messages: BaseMessage[],
   options?: {
     excludeHiddenMessages?: boolean;
@@ -76,14 +159,18 @@ export function getMessagesSinceLastSummary(
 
   // Apply excludeCountFromEnd option if provided
   if (options?.excludeCountFromEnd && options.excludeCountFromEnd > 0) {
-    messagesAfterLastSummary = messagesAfterLastSummary.slice(
-      0,
-      Math.max(
-        0,
-        messagesAfterLastSummary.length - options.excludeCountFromEnd,
-      ),
+    messagesAfterLastSummary = getMessagesExcludingFromEnd(
+      messagesAfterLastSummary,
+      options.excludeCountFromEnd,
     );
   }
 
   return messagesAfterLastSummary;
 }
+
+export const getMessagesSinceLastSummary = traceable(
+  getMessagesSinceLastSummaryFunc,
+  {
+    name: "get-messages-since-last-summary",
+  },
+);
