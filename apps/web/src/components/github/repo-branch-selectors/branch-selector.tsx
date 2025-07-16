@@ -18,6 +18,8 @@ import { useState, useEffect } from "react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitBranch, Shield } from "lucide-react";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { Branch } from "@/utils/github";
+import { toast } from "sonner";
 
 interface BranchSelectorProps {
   disabled?: boolean;
@@ -26,6 +28,21 @@ interface BranchSelectorProps {
   chatStarted?: boolean;
   streamTargetRepository?: TargetRepository;
 }
+
+const findDefaultBranch = (
+  branches: Branch[],
+  defaultBranch: string | null,
+) => {
+  const actualDefaultBranch = defaultBranch
+    ? branches.find((branch) => branch.name === defaultBranch)
+    : null;
+
+  return actualDefaultBranch
+    ? actualDefaultBranch.name
+    : branches.length > 0
+      ? branches[0].name
+      : null;
+};
 
 export function BranchSelector({
   disabled = false,
@@ -64,19 +81,16 @@ export function BranchSelector({
         selectedBranch &&
         branches.some((branch) => branch.name === selectedBranch);
 
-      // Auto-select default branch if no branch is selected OR if the selected branch doesn't exist in this repo
-      if (!selectedBranch || !currentBranchExists) {
-        // Try to find the repository's actual default branch first
-        const actualDefaultBranch = defaultBranch
-          ? branches.find((branch) => branch.name === defaultBranch)
-          : null;
-
-        if (actualDefaultBranch) {
-          setSelectedBranch(actualDefaultBranch.name);
-        } else if (branches.length > 0) {
-          // If default branch doesn't exist in branches list, select the first available branch
-          setSelectedBranch(branches[0].name);
-        }
+      if (selectedBranch && !currentBranchExists) {
+        searchForBranch(selectedBranch).then((b) => {
+          if (b) {
+            // branch was found after search. can return early
+            return;
+          }
+          setSelectedBranch(findDefaultBranch(branches, defaultBranch));
+        });
+      } else if (!selectedBranch || !currentBranchExists) {
+        setSelectedBranch(findDefaultBranch(branches, defaultBranch));
       }
     }
   }, [
@@ -95,6 +109,20 @@ export function BranchSelector({
     setOpen(false);
   };
 
+  const handleSearchForBranch = async () => {
+    if (!searchQuery.trim() || !selectedRepository) return;
+
+    setIsSearching(true);
+    try {
+      const foundBranch = await searchForBranch(searchQuery.trim());
+      if (!foundBranch) {
+        toast.warning(`Branch "${searchQuery.trim()}" not found`);
+      }
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   if (!selectedRepository) {
     return (
       <Button
@@ -109,7 +137,7 @@ export function BranchSelector({
     );
   }
 
-  if (branchesLoading) {
+  if (branchesLoading && !branches.length) {
     return (
       <Button
         variant="outline"
@@ -201,9 +229,32 @@ export function BranchSelector({
       </PopoverTrigger>
       <PopoverContent className="w-[340px] p-0">
         <Command>
-          <CommandInput placeholder="Search branches..." />
+          <CommandInput
+            placeholder="Search branches..."
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+          />
           <CommandList>
-            <CommandEmpty>No branches found.</CommandEmpty>
+            <CommandEmpty>
+              <div className="flex flex-col items-center gap-2 py-4">
+                <span className="text-muted-foreground text-sm">
+                  No branches found.
+                </span>
+                {searchQuery.trim() && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSearchForBranch}
+                    disabled={isSearching}
+                    className="text-xs"
+                  >
+                    {isSearching
+                      ? "Searching..."
+                      : `Search for "${searchQuery.trim()}"`}
+                  </Button>
+                )}
+              </div>
+            </CommandEmpty>
             <CommandGroup>
               {branches
                 .slice()
@@ -247,6 +298,26 @@ export function BranchSelector({
                   );
                 })}
             </CommandGroup>
+            {/* Show this search button if there is a search query, and there are some results. this is for
+            cases when some results do show, just not the exact result the user is looking for */}
+            {searchQuery.trim() &&
+              branches.some((branch) =>
+                branch.name.toLowerCase().includes(searchQuery.toLowerCase()),
+              ) && (
+                <div className="px-2 py-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSearchForBranch}
+                    disabled={isSearching}
+                    className="w-full text-xs"
+                  >
+                    {isSearching
+                      ? "Searching..."
+                      : `Search for "${searchQuery.trim()}"`}
+                  </Button>
+                </div>
+              )}
             {branchesHasMore && (
               <CommandGroup>
                 <CommandItem
