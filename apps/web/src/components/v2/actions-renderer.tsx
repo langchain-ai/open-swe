@@ -243,6 +243,10 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
+  useEffect(() => {
+    console.log(stream.messages);
+  }, [stream.messages])
+
   if (streamLoading) {
     return <LoadingActionsCardContent />;
   }

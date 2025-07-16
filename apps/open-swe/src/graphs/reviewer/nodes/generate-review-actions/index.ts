@@ -1,4 +1,4 @@
-import { loadModel, Task } from "../../../../utils/load-model.js";
+import { loadModel, supportsParallelToolCallsParam, Task } from "../../../../utils/load-model.js";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -74,6 +74,7 @@ export async function generateReviewActions(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.PROGRAMMER);
   const tools = [
     createSearchTool(state),
     createShellTool(state),
@@ -81,7 +82,9 @@ export async function generateReviewActions(
   ];
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
-    parallel_tool_calls: true,
+    ...(modelSupportsParallelToolCallsParam ? {
+      parallel_tool_calls: true,
+    } : {})
   });
 
   const response = await modelWithTools.invoke([

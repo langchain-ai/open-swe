@@ -6,7 +6,7 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { Command } from "@langchain/langgraph";
 import { getMessageString } from "../../../utils/message/content.js";
@@ -68,11 +68,14 @@ export async function progressPlanStep(
   const markNotCompletedTool = createMarkTaskNotCompletedToolFields();
   const markCompletedTool = createMarkTaskCompletedToolFields();
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools(
     [markNotCompletedTool, markCompletedTool],
     {
       tool_choice: "any",
-      parallel_tool_calls: false,
+      ...(modelSupportsParallelToolCallsParam ? {
+        parallel_tool_calls: false,
+      } : {}),
     },
   );
 

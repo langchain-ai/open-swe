@@ -14,7 +14,7 @@ import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import { loadModel, supportsParallelToolCallsParam, Task } from "../../../utils/load-model.js";
 import { z } from "zod";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
@@ -105,9 +105,12 @@ export async function diagnoseError(
   logger.info("The last two tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(config, Task.SUMMARIZER);
   const modelWithTools = model.bindTools([diagnoseErrorTool], {
     tool_choice: diagnoseErrorTool.name,
-    parallel_tool_calls: false,
+    ...(modelSupportsParallelToolCallsParam ? {
+      parallel_tool_calls: false,
+    } : {})
   });
 
   const response = await modelWithTools.invoke([

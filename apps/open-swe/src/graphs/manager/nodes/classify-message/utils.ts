@@ -28,6 +28,7 @@ import {
   RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION,
   START_PLANNER_ROUTING_OPTION,
   TASK_PLAN_PROMPT,
+  START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION,
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
 
@@ -107,6 +108,8 @@ export function createClassificationPromptAndToolSchema(inputs: {
   const plannerRunning = inputs.plannerStatus === "busy";
   const plannerInterrupted = inputs.plannerStatus === "interrupted";
   const plannerNotStarted = inputs.plannerStatus === "not_started";
+  // If both are idle, we should allow 'start_planner' to start a new planning run on the same request.
+  const plannerAndProgrammerIdle = inputs.programmerStatus === "idle" && inputs.plannerStatus === "idle";
 
   const showCreateIssueOption =
     inputs.programmerStatus !== "not_started" ||
@@ -115,7 +118,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
   const routingOptions: [string, ...string[]] = [
     "no_op",
     ...(programmerRunning ? ["update_programmer"] : []),
-    ...(plannerNotStarted ? ["start_planner"] : []),
+    ...(plannerNotStarted ?? plannerAndProgrammerIdle ? ["start_planner"] : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
     ...(showCreateIssueOption ? ["create_new_issue"] : []),
@@ -138,13 +141,14 @@ export function createClassificationPromptAndToolSchema(inputs: {
       "{START_PLANNER_ROUTING_OPTION}",
       plannerNotStarted ? START_PLANNER_ROUTING_OPTION : "",
     )
+    .replaceAll("{START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION}", plannerAndProgrammerIdle ? START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION : "")
     .replaceAll(
       "{UPDATE_PLANNER_ROUTING_OPTION}",
       plannerRunning ? UPDATE_PLANNER_ROUTING_OPTION : "",
     )
     .replaceAll(
       "{RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION}",
-      plannerNotStarted ? RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION : "",
+      plannerInterrupted ? RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION : "",
     )
     .replaceAll(
       "{CREATE_NEW_ISSUE_ROUTING_OPTION}",
