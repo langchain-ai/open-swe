@@ -16,8 +16,7 @@
           {
             "group": "Get Started",
             "pages": [
-              "index",
-              "concepts"
+              "index"
             ]
           },
           {

@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQueryState } from "nuqs";
-import { Repository, getRepositoryBranches, Branch } from "@/utils/github";
+import {
+  Repository,
+  getRepositoryBranches,
+  Branch,
+  searchBranch,
+} from "@/utils/github";
 import { getRepository } from "@/utils/github";
 import type { TargetRepository } from "@open-swe/shared/open-swe/types";
 import {
@@ -88,6 +93,7 @@ interface UseGitHubAppReturn {
   selectedBranch: string | null;
   setSelectedBranch: (branch: string | null) => void;
   refreshBranches: () => Promise<void>;
+  searchForBranch: (branchName: string) => Promise<Branch | null>;
 
   // Repository metadata
   defaultBranch: string | null;
@@ -294,6 +300,39 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
   }, [branchesHasMore, branchesLoadingMore, branchesPage, fetchBranches]);
 
+  const searchForBranch = useCallback(
+    async (branchName: string): Promise<Branch | null> => {
+      if (!selectedRepository) {
+        return null;
+      }
+
+      try {
+        const branch = await searchBranch(
+          selectedRepository.owner,
+          selectedRepository.repo,
+          branchName,
+        );
+
+        if (branch) {
+          // Add the found branch to the existing branches list if it's not already there
+          setBranches((prev) => {
+            const exists = prev.some((b) => b.name === branch.name);
+            if (!exists) {
+              return [...prev, branch];
+            }
+            return prev;
+          });
+        }
+
+        return branch;
+      } catch (error) {
+        console.error(`Error searching for branch ${branchName}:`, error);
+        return null;
+      }
+    },
+    [selectedRepository?.owner, selectedRepository?.repo],
+  );
+
   // Refresh repositories when installation changes
   useEffect(() => {
     if (currentInstallationId) {
@@ -483,6 +522,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     selectedBranch,
     setSelectedBranch,
     refreshBranches,
+    searchForBranch,
     setBranchesPage,
     setBranches,
 
