@@ -3,7 +3,6 @@ import { App } from "@octokit/app";
 import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 import { encryptSecret } from "@open-swe/shared/crypto";
 import { NextRequest } from "next/server";
-import { validate } from "uuid";
 
 export function getGitHubAccessTokenOrThrow(
   req: NextRequest,
@@ -64,58 +63,6 @@ async function getInstallationName(installationId: string) {
   return installationName ?? "";
 }
 
-function isNewRunRequest(reqUrlStr: string, reqMethod: string) {
-  try {
-    const reqPathnameParts = new URL(reqUrlStr).pathname.split("/");
-    const isCreateNewRunReq =
-      reqPathnameParts?.[1] === "api" &&
-      reqPathnameParts?.[2] === "threads" &&
-      validate(reqPathnameParts?.[3]) &&
-      reqPathnameParts?.[4] === "runs" &&
-      reqMethod.toLowerCase() === "post";
-    const isStreamRunReq =
-      reqPathnameParts?.[1] === "api" &&
-      reqPathnameParts?.[2] === "threads" &&
-      validate(reqPathnameParts?.[3]) &&
-      reqPathnameParts?.[4] === "runs" &&
-      validate(reqPathnameParts?.[5]) &&
-      reqPathnameParts?.[6]?.startsWith("stream") &&
-      reqMethod.toLowerCase() === "get";
-    return isCreateNewRunReq || isStreamRunReq;
-  } catch {
-    return false;
-  }
-}
-
-function isGetStateRequest(reqUrlStr: string, reqMethod: string) {
-  try {
-    const reqPathnameParts = new URL(reqUrlStr).pathname.split("/");
-    const isGetStateReq =
-      reqPathnameParts?.[1] === "api" &&
-      reqPathnameParts?.[2] === "threads" &&
-      validate(reqPathnameParts?.[3]) &&
-      reqPathnameParts?.[4] === "state" &&
-      reqMethod.toLowerCase() === "get";
-    return isGetStateReq;
-  } catch {
-    return false;
-  }
-}
-
-function isSearchThreadsRequest(reqUrlStr: string, reqMethod: string) {
-  try {
-    const reqPathnameParts = new URL(reqUrlStr).pathname.split("/");
-    const isGetStateReq =
-      reqPathnameParts?.[1] === "api" &&
-      reqPathnameParts?.[2] === "threads" &&
-      reqPathnameParts?.[3] === "search" &&
-      reqMethod.toLowerCase() === "post";
-    return isGetStateReq;
-  } catch {
-    return false;
-  }
-}
-
 export async function getInstallationNameFromReq(
   req: Request,
   installationId: string,
@@ -131,14 +78,7 @@ export async function getInstallationNameFromReq(
   }
 
   try {
-    if (
-      isNewRunRequest(req.url, req.method) ||
-      isGetStateRequest(req.url, req.method) ||
-      isSearchThreadsRequest(req.url, req.method)
-    ) {
-      return await getInstallationName(installationId);
-    }
-    return "";
+    return await getInstallationName(installationId);
   } catch {
     return "";
   }

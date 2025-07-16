@@ -100,6 +100,16 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * The number of times the reviewer subgraph has been executed.
+   */
+  reviewsCount: withLangGraph(z.custom<number>(), {
+    reducer: {
+      schema: z.custom<number>(),
+      fn: (_state, update) => update,
+    },
+    default: () => 0,
+  }),
 });
 
 export type ReviewerGraphState = z.infer<typeof ReviewerGraphStateObj>;

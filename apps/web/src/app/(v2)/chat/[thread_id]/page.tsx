@@ -2,15 +2,16 @@
 
 import { ThreadView } from "@/components/v2/thread-view";
 import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
-import { ThreadDisplayInfo, threadToDisplayInfo } from "@/components/v2/types";
-import { useThreads } from "@/hooks/useThreads";
+import { ThreadMetadata } from "@/components/v2/types";
+import { useThreadMetadata } from "@/hooks/useThreadMetadata";
+import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import { use } from "react";
+import { use, useMemo } from "react";
+import { threadsToMetadata } from "@/lib/thread-utils";
 
 interface ThreadPageProps {
   thread_id: string;
@@ -31,9 +32,27 @@ export default function ThreadPage({
     fetchStateHistory: false,
   });
 
-  const { threads, threadsLoading } = useThreads<GraphState>(MANAGER_GRAPH_ID);
+  const { threads, isLoading: threadsLoading } = useThreadsSWR({
+    assistantId: MANAGER_GRAPH_ID,
+  });
+
+  const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
+
   // Find the thread by ID
   const thread = threads.find((t) => t.thread_id === thread_id);
+
+  // We need a thread object for the hook, so use a dummy if not found
+  const dummyThread = thread || {
+    thread_id: thread_id,
+    values: {},
+    status: "idle" as const,
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
+
+  const { metadata: currentDisplayThread } = useThreadMetadata(
+    dummyThread as any,
+  );
 
   const handleBackToHome = () => {
     router.push("/chat");
@@ -43,16 +62,12 @@ export default function ThreadPage({
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
-  // Convert all threads to display format
-  const displayThreads: ThreadDisplayInfo[] = threads.map(threadToDisplayInfo);
-  const currentDisplayThread = threadToDisplayInfo(thread);
-
   return (
     <div className="bg-background fixed inset-0">
       <ThreadView
         stream={stream}
         displayThread={currentDisplayThread}
-        allDisplayThreads={displayThreads}
+        allDisplayThreads={threadsMetadata}
         onBackToHome={handleBackToHome}
       />
     </div>

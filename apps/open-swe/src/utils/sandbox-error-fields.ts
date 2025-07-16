@@ -1,4 +1,4 @@
-import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
+import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 
 export function getSandboxErrorFields(
   error: unknown,

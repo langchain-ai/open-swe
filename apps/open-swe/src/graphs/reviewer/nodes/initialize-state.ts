@@ -9,6 +9,8 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
 import { createReviewStartedToolFields } from "@open-swe/shared/open-swe/tools";
+import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
+import { Sandbox } from "@daytonaio/sdk";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
@@ -35,12 +37,64 @@ function createReviewStartedMessage() {
     new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCallId,
-      content: "",
+      content: "Review started",
       additional_kwargs: {
         hidden: true,
       },
     }),
   ];
+}
+
+async function getChangedFiles(
+  sandbox: Sandbox,
+  baseBranchName: string,
+  repoRoot: string,
+): Promise<string> {
+  try {
+    const changedFilesRes = await sandbox.process.executeCommand(
+      `git diff ${baseBranchName} --name-only`,
+      repoRoot,
+    );
+    if (changedFilesRes.exitCode !== 0) {
+      const errorFields = getSandboxErrorFields(changedFilesRes);
+      logger.error(
+        `Failed to get changed files: ${JSON.stringify(errorFields, null, 2)}`,
+      );
+    }
+    return changedFilesRes.result.trim();
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error("Failed to get changed files.", {
+      ...(errorFields ? { errorFields } : { e }),
+    });
+    return "Failed to get changed files.";
+  }
+}
+
+async function getBaseBranchName(
+  sandbox: Sandbox,
+  repoRoot: string,
+): Promise<string> {
+  try {
+    const baseBranchNameRes = await sandbox.process.executeCommand(
+      "git config init.defaultBranch",
+      repoRoot,
+    );
+    if (baseBranchNameRes.exitCode !== 0) {
+      const errorFields = getSandboxErrorFields(baseBranchNameRes);
+      logger.error("Failed to get base branch name", {
+        ...(errorFields ?? baseBranchNameRes),
+      });
+      return "";
+    }
+    return baseBranchNameRes.result.trim();
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error("Failed to get base branch name.", {
+      ...(errorFields ? { errorFields } : { e }),
+    });
+    return "";
+  }
 }
 
 export async function initializeState(
@@ -60,28 +114,11 @@ export async function initializeState(
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
-    const baseBranchNameRes = await sandbox.process.executeCommand(
-      "git config init.defaultBranch",
-      repoRoot,
-    );
-    if (baseBranchNameRes.exitCode !== 0) {
-      throw new Error(
-        `Failed to get base branch name: ${JSON.stringify(baseBranchNameRes, null, 2)}`,
-      );
-    }
-    baseBranchName = baseBranchNameRes.result.trim();
+    baseBranchName = await getBaseBranchName(sandbox, repoRoot);
   }
-
-  const changedFilesRes = await sandbox.process.executeCommand(
-    `git diff ${baseBranchName} --name-only`,
-    repoRoot,
-  );
-  if (changedFilesRes.exitCode !== 0) {
-    throw new Error(
-      `Failed to get changed files: ${JSON.stringify(changedFilesRes, null, 2)}`,
-    );
-  }
-  const changedFiles = changedFilesRes.result.trim();
+  const changedFiles = baseBranchName
+    ? await getChangedFiles(sandbox, baseBranchName, repoRoot)
+    : "";
 
   logger.info("Finished getting state for reviewer");
 

@@ -50,6 +50,7 @@ import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -386,13 +387,16 @@ export function AssistantMessage({
 
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
-    const args =
-      conversationHistorySummaryToolCall.args as ConversationHistorySummaryToolArgs;
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === conversationHistorySummaryToolCall.id,
+    );
 
     return (
       <div className="flex flex-col gap-4">
         <ConversationHistorySummary
-          summary={args.conversation_history_summary}
+          summary={getMessageContentString(
+            correspondingToolResult?.content ?? "",
+          )}
         />
       </div>
     );

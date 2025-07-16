@@ -1,5 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  isAIMessage,
+  isToolMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import {
   createInstallDependenciesTool,
   createShellTool,
@@ -22,6 +26,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
+import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -91,6 +96,9 @@ export async function takeReviewerActions(
           status: "success" | "error";
         };
       result = toolResult.result;
+      if (!result) {
+        result = toolResult.status;
+      }
       toolCallStatus = toolResult.status;
     } catch (e) {
       toolCallStatus = "error";
@@ -173,6 +181,25 @@ export async function takeReviewerActions(
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
   };
+
+  const maxReviewActions = config.configurable?.maxReviewActions ?? 30;
+  const maxActionsCount = maxReviewActions * 2;
+  // Exclude hidden messages, and messages that are not AI messages or tool messages.
+  const filteredMessages = filterHiddenMessages([
+    ...state.reviewerMessages,
+    ...(commandUpdate.reviewerMessages ?? []),
+  ]).filter((m) => isAIMessage(m) || isToolMessage(m));
+  // If we've reached the max allowed review actions, go to final review.
+  if (filteredMessages.length >= maxActionsCount) {
+    logger.info("Exceeded max actions count, going to final review.", {
+      maxActionsCount,
+      filteredMessages,
+    });
+    return new Command({
+      goto: "final-review",
+      update: commandUpdate,
+    });
+  }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
     ...state.reviewerMessages,

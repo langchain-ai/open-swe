@@ -1,4 +1,9 @@
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { v4 as uuidv4 } from "uuid";
+import {
+  isAIMessage,
+  isToolMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -25,6 +30,8 @@ import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
+import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -74,6 +81,7 @@ export async function takeActions(
     if (!tool) {
       logger.error(`Unknown tool: ${toolCall.name}`);
       const toolMessage = new ToolMessage({
+        id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
         tool_call_id: toolCall.id ?? "",
         content: `Unknown tool: ${toolCall.name}`,
         name: toolCall.name,
@@ -108,6 +116,10 @@ export async function takeActions(
         result = toolResult.result;
         toolCallStatus = toolResult.status;
       }
+
+      if (!result) {
+        result = toolCallStatus;
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -140,6 +152,7 @@ export async function takeActions(
         : truncateOutput(result);
 
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: truncatedOutput,
       name: toolCall.name,
@@ -183,17 +196,36 @@ ${tc.content}`,
     })),
   });
 
-  const shouldRouteDiagnoseNode = shouldDiagnoseError([
-    ...state.messages,
-    ...toolCallResults,
-  ]);
-
   const commandUpdate: PlannerGraphUpdate = {
     messages: toolCallResults,
     sandboxSessionId: sandbox.id,
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
   };
+
+  const maxContextActions = config.configurable?.maxContextActions ?? 75;
+  const maxActionsCount = maxContextActions * 2;
+  // Exclude hidden messages, and messages that are not AI messages or tool messages.
+  const filteredMessages = filterHiddenMessages([
+    ...state.messages,
+    ...(commandUpdate.messages ?? []),
+  ]).filter((m) => isAIMessage(m) || isToolMessage(m));
+  if (filteredMessages.length >= maxActionsCount) {
+    // If we've exceeded the max actions count, we should generate a plan.
+    logger.info("Exceeded max actions count, generating plan.", {
+      maxActionsCount,
+      filteredMessages,
+    });
+    return new Command({
+      goto: "generate-plan",
+      update: commandUpdate,
+    });
+  }
+
+  const shouldRouteDiagnoseNode = shouldDiagnoseError([
+    ...state.messages,
+    ...toolCallResults,
+  ]);
 
   return new Command({
     goto: shouldRouteDiagnoseNode

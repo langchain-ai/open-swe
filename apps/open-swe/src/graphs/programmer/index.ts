@@ -1,6 +1,7 @@
-import { END, Send, START, StateGraph } from "@langchain/langgraph";
+import { Command, END, Send, START, StateGraph } from "@langchain/langgraph";
 import {
   GraphAnnotation,
+  GraphConfig,
   GraphConfiguration,
   GraphState,
 } from "@open-swe/shared/open-swe/types";
@@ -39,12 +40,12 @@ function lastMessagesMissingToolCalls(
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"reviewer-subgraph" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
+ * @returns {"route-to-review-or-conclusion" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
  */
 function routeGeneratedAction(
   state: GraphState,
 ):
-  | "reviewer-subgraph"
+  | "route-to-review-or-conclusion"
   | "take-action"
   | "request-help"
   | "generate-action"
@@ -82,7 +83,7 @@ function routeGeneratedAction(
   }
 
   // No tool calls, route to reviewer subgraph
-  return "reviewer-subgraph";
+  return "route-to-review-or-conclusion";
 }
 
 /**
@@ -101,6 +102,22 @@ function routeGenerateActionsOrEnd(
   return "generate-action";
 }
 
+function routeToReviewOrConclusion(
+  state: GraphState,
+  config: GraphConfig,
+): Command {
+  const maxAllowedReviews = config.configurable?.maxReviewCount ?? 3;
+  if (state.reviewsCount >= maxAllowedReviews) {
+    return new Command({
+      goto: "generate-conclusion",
+    });
+  }
+
+  return new Command({
+    goto: "reviewer-subgraph",
+  });
+}
+
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
   .addNode("generate-action", generateAction)
@@ -109,11 +126,18 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   })
   .addNode("update-plan", updatePlan)
   .addNode("progress-plan-step", progressPlanStep, {
-    ends: ["summarize-history", "generate-action", "reviewer-subgraph"],
+    ends: [
+      "summarize-history",
+      "generate-action",
+      "route-to-review-or-conclusion",
+    ],
   })
   .addNode("generate-conclusion", generateConclusion)
   .addNode("request-help", requestHelp, {
     ends: ["generate-action", END],
+  })
+  .addNode("route-to-review-or-conclusion", routeToReviewOrConclusion, {
+    ends: ["generate-conclusion", "reviewer-subgraph"],
   })
   .addNode("reviewer-subgraph", reviewerGraph)
   .addNode("open-pr", openPullRequest)
@@ -124,7 +148,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",
-    "reviewer-subgraph",
+    "route-to-review-or-conclusion",
     "update-plan",
     "generate-action",
   ])

@@ -240,7 +240,7 @@ export async function rewritePlan(
     throw new Error("No plan change request found.");
   }
 
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const tasksToModify = await identifyTasksToModify(state, model);
   const updatedPlanTasks = await updatePlanTasks(state, tasksToModify, model);
 

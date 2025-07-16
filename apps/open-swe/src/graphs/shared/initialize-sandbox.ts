@@ -71,7 +71,7 @@ export async function initializeSandbox(
   const createEventsMessage = () => [
     new AIMessage({
       id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
-      content: "",
+      content: "Initialize sandbox",
       additional_kwargs: {
         hidden: true,
         customNodeEvents: events,

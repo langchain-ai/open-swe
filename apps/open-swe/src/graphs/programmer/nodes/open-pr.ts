@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   GraphConfig,
   GraphState,
@@ -88,7 +89,8 @@ export async function openPullRequest(
   }
 
   const openPrTool = createOpenPrToolFields();
-  const model = await loadModel(config, Task.SUMMARIZER);
+  // use the router model since this is a simple task that doesn't need an advanced model
+  const model = await loadModel(config, Task.ROUTER);
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,
     parallel_tool_calls: false,
@@ -139,6 +141,7 @@ export async function openPullRequest(
       },
     }),
     new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: pr
         ? `Created pull request: ${pr.html_url}`

@@ -17,12 +17,12 @@ import {
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
-import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createSearchTool } from "../../../../tools/search.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
+import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -50,7 +50,7 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const mcpTools = await getMcpTools(config);
 
   const tools = [
@@ -73,6 +73,15 @@ export async function generateAction(
     getMissingMessages(state, config),
     getPlansFromIssue(state, config),
   ]);
+
+  const inputMessages = filterMessagesWithoutContent([
+    ...state.messages,
+    ...missingMessages,
+  ]);
+  if (!inputMessages.length) {
+    throw new Error("No messages to process.");
+  }
+
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
@@ -83,8 +92,7 @@ export async function generateAction(
           taskPlan: latestTaskPlan ?? state.taskPlan,
         }),
       },
-      ...filterHiddenMessages(state.messages),
-      ...missingMessages,
+      ...inputMessages,
     ]);
 
   logger.info("Generated planning message", {

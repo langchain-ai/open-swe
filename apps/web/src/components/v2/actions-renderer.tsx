@@ -2,10 +2,7 @@ import { isAIMessageSDK, isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
 import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
-import {
-  ManagerGraphState,
-  ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { useCancelStream } from "@/hooks/useCancelStream";
 import {
   isCustomNodeEvent,
@@ -26,7 +23,6 @@ import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
-import { debounce } from "lodash";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -99,71 +95,6 @@ const getCustomNodeEventsFromMessages = (
     .flat();
 };
 
-function addMessagesToState(
-  existingMessages: Message[],
-  newMessages: Message[],
-): Message[] {
-  const existingIds = new Set(existingMessages.map((message) => message.id));
-
-  // First deduplicate within newMessages array itself
-  const seenNewIds = new Set<string>();
-  const uniqueNewMessages = newMessages.filter((message) => {
-    // Skip messages without IDs or those already in existingMessages
-    if (message.id && existingIds.has(message.id)) return false;
-
-    // Handle duplicates within newMessages
-    if (message.id) {
-      if (seenNewIds.has(message.id)) return false;
-      seenNewIds.add(message.id);
-    }
-
-    return true;
-  });
-
-  return [...existingMessages, ...uniqueNewMessages];
-}
-
-function isNodeEndMessagesUpdate(
-  data: unknown,
-): data is { output: { messages: Message[] } } {
-  return !!(
-    typeof data === "object" &&
-    data !== null &&
-    "output" in data &&
-    data.output &&
-    typeof data.output === "object" &&
-    "messages" in data.output &&
-    data.output.messages &&
-    Array.isArray(data.output.messages)
-  );
-}
-
-function isNodeEndCommandUpdate(data: unknown): data is {
-  output: { lg_name: string; goto: string; update: ManagerGraphUpdate };
-} {
-  return !!(
-    typeof data === "object" &&
-    data !== null &&
-    "output" in data &&
-    data.output &&
-    typeof data.output === "object" &&
-    "lg_name" in data.output &&
-    "goto" in data.output &&
-    "update" in data.output &&
-    typeof data.output.lg_name === "string" &&
-    (typeof data.output.goto === "string" || Array.isArray(data.output.goto)) &&
-    typeof data.output.update === "object"
-  );
-}
-
-const REVIEWER_NODE_IDS = [
-  "initialize-state",
-  "generate-review-actions",
-  "take-review-actions",
-  "diagnose-reviewer-error",
-  "final-review",
-];
-
 export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   graphId,
   threadId,
@@ -178,12 +109,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   );
   const joinedRunId = useRef<string | undefined>(undefined);
   const [streamLoading, setStreamLoading] = useState(false);
-  const [mergedMessages, setMergedMessages] = useState<Message[]>([]);
-  const debouncedSetMessages = useRef(
-    debounce((messages: Message[]) => {
-      setMergedMessages((prev) => addMessagesToState(prev, messages));
-    }, 100),
-  ).current;
 
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -193,23 +118,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     onCustomEvent: (event) => {
       if (isCustomNodeEvent(event)) {
         setCustomNodeEvents((prev) => [...prev, event]);
-      }
-    },
-    onLangChainEvent: (data) => {
-      if (
-        data.event === "on_chain_end" &&
-        data.metadata?.langgraph_node &&
-        REVIEWER_NODE_IDS.includes(data.metadata.langgraph_node as string) &&
-        data.data
-      ) {
-        if (isNodeEndCommandUpdate(data.data)) {
-          const outputMessages = data.data.output.update
-            .messages as unknown as Message[];
-          debouncedSetMessages(outputMessages);
-        } else if (isNodeEndMessagesUpdate(data.data)) {
-          const outputMessages = data.data.output.messages;
-          debouncedSetMessages(outputMessages);
-        }
       }
     },
     fetchStateHistory: false,
@@ -240,7 +148,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }
 
   useEffect(() => {
-    const allCustomEvents = getCustomNodeEventsFromMessages(mergedMessages);
+    const allCustomEvents = getCustomNodeEventsFromMessages(stream.messages);
     if (!allCustomEvents?.length) {
       return;
     }
@@ -263,18 +171,18 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
       return prev;
     });
-  }, [mergedMessages]);
+  }, [stream.messages]);
 
   // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
     const hasContent =
-      (mergedMessages && mergedMessages.length > 0) ||
+      (stream.messages && stream.messages.length > 0) ||
       customNodeEvents.length > 0;
 
     if (hasContent && streamLoading) {
       setStreamLoading(false);
     }
-  }, [mergedMessages, customNodeEvents, streamLoading]);
+  }, [stream.messages, customNodeEvents, streamLoading]);
 
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
@@ -300,15 +208,15 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
 
   // Filter out human & do not render messages
-  const filteredMessages = mergedMessages?.filter(
+  const filteredMessages = stream.messages?.filter(
     (m) =>
       !isHumanMessageSDK(m) &&
       !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
   );
   const isLastMessageHidden = !!(
-    mergedMessages?.length > 0 &&
-    mergedMessages[mergedMessages.length - 1].id &&
-    mergedMessages[mergedMessages.length - 1].id?.startsWith(
+    stream.messages?.length > 0 &&
+    stream.messages[stream.messages.length - 1].id &&
+    stream.messages[stream.messages.length - 1].id?.startsWith(
       DO_NOT_RENDER_ID_PREFIX,
     )
   );
@@ -335,13 +243,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
-  useEffect(() => {
-    debouncedSetMessages(stream.messages);
-    return () => {
-      debouncedSetMessages.cancel();
-    };
-  }, [stream.messages, debouncedSetMessages]);
-
   if (streamLoading) {
     return <LoadingActionsCardContent />;
   }
@@ -360,7 +261,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         <AssistantMessage
           key={m.id}
           thread={stream as UseStream<Record<string, unknown>>}
-          threadMessages={mergedMessages}
+          threadMessages={stream.messages}
           message={m}
           isLoading={false}
           handleRegenerate={() => {}}

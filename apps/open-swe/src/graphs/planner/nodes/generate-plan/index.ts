@@ -13,12 +13,12 @@ import {
   isFollowupRequest,
 } from "../../utils/followup.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
-import { filterHiddenMessages } from "../../../../utils/message/filter-hidden.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../../utils/get-notes.js";
 import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
@@ -49,7 +49,7 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {
     tool_choice: sessionPlanTool.name,
@@ -61,10 +61,19 @@ export async function generatePlan(
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.[0]) {
     const lastMessageToolCall = lastMessage.tool_calls?.[0];
     optionalToolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: lastMessageToolCall.id ?? "",
       name: lastMessageToolCall.name,
       content: "Tool call not executed. Max actions reached.",
     });
+  }
+
+  const inputMessages = filterMessagesWithoutContent([
+    ...state.messages,
+    ...(optionalToolMessage ? [optionalToolMessage] : []),
+  ]);
+  if (!inputMessages.length) {
+    throw new Error("No messages to process.");
   }
 
   const response = await modelWithTools
@@ -74,8 +83,7 @@ export async function generatePlan(
         role: "system",
         content: formatSystemPrompt(state),
       },
-      ...filterHiddenMessages(state.messages),
-      ...(optionalToolMessage ? [optionalToolMessage] : []),
+      ...inputMessages,
     ]);
 
   const toolCall = response.tool_calls?.[0];

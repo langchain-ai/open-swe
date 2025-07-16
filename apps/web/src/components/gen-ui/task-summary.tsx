@@ -45,9 +45,9 @@ export function TaskSummary({
   const getStatusText = () => {
     switch (status) {
       case "loading":
-        return "Preparing task summary...";
+        return "Preparing action reflection...";
       case "generating":
-        return "Generating summary...";
+        return "Generating action reflection...";
       case "done":
         if (completed === false) {
           return "Task not completed";
@@ -72,7 +72,7 @@ export function TaskSummary({
         </span>
       </div>
 
-      {summaryText && status === "done" && (
+      {summaryText && (
         <div
           className={cn(
             "border-t p-2",
@@ -91,7 +91,7 @@ export function TaskSummary({
             )}
           >
             <FileText className="h-3 w-3" />
-            {showSummary ? "Hide summary" : "Show summary"}
+            {showSummary ? "Hide reflection" : "Show reflection"}
           </button>
           {showSummary && (
             <BasicMarkdownText

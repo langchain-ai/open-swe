@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import {
   GraphConfig,
@@ -71,6 +72,7 @@ export async function requestHelp(
       );
 
     const toolMessage = new ToolMessage({
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content: `Human response: ${interruptRes.args}`,
       status: "success",

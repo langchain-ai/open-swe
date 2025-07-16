@@ -3,8 +3,8 @@ import { createLogger, LogLevel } from "../logger.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
-import { ExecuteResponse } from "@daytonaio/sdk/dist/types/ExecuteResponse.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 
 class ExecuteCommandError extends Error {
   command: string;

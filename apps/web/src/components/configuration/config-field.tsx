@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import _ from "lodash";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 interface Option {
   label: string;
@@ -63,8 +64,6 @@ export function ConfigField({
   value: externalValue, // TODO: Rename to avoid conflict
   setValue: externalSetValue, // TODO: Rename to avoid conflict
 }: ConfigFieldProps) {
-  const [threadId] = useQueryState("threadId");
-  const configKey = threadId || DEFAULT_CONFIG_KEY;
   const store = useConfigStore();
   const [jsonError, setJsonError] = useState<string | null>(null);
 
@@ -73,14 +72,14 @@ export function ConfigField({
 
   const currentValue = isExternallyManaged
     ? externalValue
-    : store.configs[configKey]?.[id];
+    : store.configs[DEFAULT_CONFIG_KEY]?.[id];
 
   const handleChange = (newValue: any) => {
     setJsonError(null);
     if (isExternallyManaged && externalSetValue) {
       externalSetValue(newValue);
     } else {
-      store.updateConfig(configKey, id, newValue);
+      store.updateConfig(DEFAULT_CONFIG_KEY, id, newValue);
     }
   };
 
@@ -100,7 +99,7 @@ export function ConfigField({
       if (isExternallyManaged && externalSetValue) {
         externalSetValue(jsonString);
       } else {
-        store.updateConfig(configKey, id, jsonString);
+        store.updateConfig(DEFAULT_CONFIG_KEY, id, jsonString);
       }
       setJsonError("Invalid JSON format");
     }
@@ -121,7 +120,7 @@ export function ConfigField({
       <div className="flex items-center justify-between">
         <Label
           htmlFor={id}
-          className="text-sm font-medium"
+          className="text-foreground font-mono text-lg font-semibold"
         >
           {_.startCase(label)}
         </Label>
@@ -135,9 +134,9 @@ export function ConfigField({
       </div>
 
       {description && (
-        <p className="text-xs whitespace-pre-line text-gray-500">
+        <BasicMarkdownText className="text-xs whitespace-pre-line text-gray-500">
           {description}
-        </p>
+        </BasicMarkdownText>
       )}
 
       {type === "text" && (

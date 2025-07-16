@@ -34,6 +34,7 @@ import {
   formatCodeReviewPrompt,
   getCodeReviewFields,
 } from "../../../../utils/review.js";
+import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -87,7 +88,7 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const mcpTools = await getMcpTools(config);
 
   const tools = [
@@ -117,6 +118,14 @@ export async function generateAction(
     getPlansFromIssue(state, config),
   ]);
 
+  const inputMessages = filterMessagesWithoutContent([
+    ...state.internalMessages,
+    ...missingMessages,
+  ]);
+  if (!inputMessages.length) {
+    throw new Error("No messages to process.");
+  }
+
   const response = await modelWithTools.invoke([
     {
       role: "system",
@@ -125,8 +134,7 @@ export async function generateAction(
         taskPlan: latestTaskPlan ?? state.taskPlan,
       }),
     },
-    ...state.internalMessages,
-    ...missingMessages,
+    ...inputMessages,
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;

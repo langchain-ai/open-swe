@@ -12,7 +12,6 @@ import {
 } from "react";
 import { createClient } from "./client";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { useThreadPolling } from "@/hooks/useThreadPolling";
 
 interface ThreadContextType {
   threads: Thread<GraphState>[];
@@ -109,32 +108,6 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshThreads();
   }, [refreshThreads]);
-
-  const handlePollingUpdate = useCallback(
-    (updatedThreads: Thread<GraphState>[], changedThreadIds: string[]) => {
-      setThreads((currentThreads) => {
-        const updatedMap = new Map(updatedThreads.map((t) => [t.thread_id, t]));
-        return currentThreads.map(
-          (thread) => updatedMap.get(thread.thread_id) || thread,
-        );
-      });
-
-      setRecentlyUpdatedThreads(new Set(changedThreadIds));
-
-      setTimeout(() => {
-        setRecentlyUpdatedThreads(new Set());
-      }, 2000);
-    },
-    [],
-  );
-
-  // Initialize polling
-  useThreadPolling({
-    threads,
-    getThread,
-    onUpdate: handlePollingUpdate,
-    enabled: true,
-  });
 
   const handleThreadClick = useCallback(
     (

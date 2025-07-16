@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const clientId = process.env.GITHUB_APP_CLIENT_ID;
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID;
     const clientSecret = process.env.GITHUB_APP_CLIENT_SECRET;
     const redirectUri = process.env.GITHUB_APP_REDIRECT_URI;
 

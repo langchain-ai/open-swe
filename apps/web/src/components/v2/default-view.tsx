@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FilePlus2, Archive, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ThreadDisplayInfo } from "./types";
+import { ThreadMetadata } from "./types";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { cn } from "@/lib/utils";
@@ -19,15 +19,37 @@ import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { QuickActions } from "./quick-actions";
-import { useState } from "react";
 import { DraftsSection } from "./drafts-section";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { InstallationSelector } from "../github/installation-selector";
 
+import { useThreadsStatus } from "@/hooks/useThreadsStatus";
+import { Thread } from "@langchain/langgraph-sdk";
+import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { useState, useMemo } from "react";
+import { threadsToMetadata } from "@/lib/thread-utils";
+import { Settings } from "lucide-react";
+import NextLink from "next/link";
+
+function OpenSettingsButton() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <NextLink href="/settings">
+            <Settings className="size-4" />
+          </NextLink>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open Settings</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface DefaultViewProps {
-  threads: ThreadDisplayInfo[];
+  threads: Thread<ManagerGraphState>[];
   threadsLoading: boolean;
 }
 
@@ -47,6 +69,15 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
+
+  const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
+  const displayThreads = threadsMetadata.slice(0, 4);
+  const displayThreadIds = displayThreads.map((thread) => thread.id);
+
+  const { statusMap, isLoading: statusLoading } = useThreadsStatus(
+    displayThreadIds,
+    threads,
+  );
 
   const handleLoadDraft = (content: string) => {
     setDraftToLoad(content);
@@ -68,11 +99,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             </span>
           </div>
           <div className="flex items-center gap-4">
+            <InstallationSelector />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
-              <div className="bg-muted h-1 w-1 rounded-full"></div>
+              <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
-            <InstallationSelector />
+            <OpenSettingsButton />
             <ThemeToggle />
             <GitHubLogoutButton />
           </div>
@@ -180,10 +212,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     <ThreadCardLoading />
                   </>
                 )}
-                {threads.slice(0, 4).map((thread) => (
+                {displayThreads.map((thread) => (
                   <ThreadCard
                     key={thread.id}
                     thread={thread}
+                    status={statusMap[thread.id]}
+                    statusLoading={statusLoading}
                   />
                 ))}
               </div>

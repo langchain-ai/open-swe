@@ -73,7 +73,7 @@ export async function generateReviewActions(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const model = await loadModel(config, Task.ACTION_GENERATOR);
+  const model = await loadModel(config, Task.PROGRAMMER);
   const tools = [
     createSearchTool(state),
     createShellTool(state),

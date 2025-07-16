@@ -1,7 +1,7 @@
 import { SNAPSHOT_NAME } from "@open-swe/shared/constants";
-import { CreateSandboxParams } from "@daytonaio/sdk";
+import { CreateSandboxFromImageParams } from "@daytonaio/sdk";
 
-export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxParams = {
+export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromImageParams = {
   resources: {
     cpu: 2,
     memory: 4,
@@ -9,6 +9,7 @@ export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxParams = {
   },
   user: "daytona",
   image: SNAPSHOT_NAME,
+  autoDeleteInterval: 15, // delete after 15 minutes
 };
 
 export const LANGGRAPH_USER_PERMISSIONS = [

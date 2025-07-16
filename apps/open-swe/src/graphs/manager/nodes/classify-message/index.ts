@@ -87,7 +87,7 @@ export async function classifyMessage(
     description: "Respond to the user's message and determine how to route it.",
     schema,
   };
-  const model = await loadModel(config, Task.CLASSIFICATION);
+  const model = await loadModel(config, Task.ROUTER);
   const modelWithTools = model.bindTools([respondAndRouteTool], {
     tool_choice: respondAndRouteTool.name,
     parallel_tool_calls: false,
@@ -233,6 +233,7 @@ export async function classifyMessage(
           command: {
             resume: plannerResume,
           },
+          streamMode: ["values", "messages-tuple", "custom"],
         },
       );
       newPlannerId = newPlannerRun.run_id;

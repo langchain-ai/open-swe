@@ -33,11 +33,11 @@ export function daytonaClient(): Daytona {
 export async function stopSandbox(sandboxSessionId: string): Promise<string> {
   const sandbox = await daytonaClient().get(sandboxSessionId);
   if (
-    sandbox.instance.state == SandboxState.STOPPED ||
-    sandbox.instance.state == SandboxState.ARCHIVED
+    sandbox.state === SandboxState.STOPPED ||
+    sandbox.state === SandboxState.ARCHIVED
   ) {
     return sandboxSessionId;
-  } else if (sandbox.instance.state == "started") {
+  } else if (sandbox.state === "started") {
     await daytonaClient().stop(sandbox);
   }
 
@@ -85,8 +85,7 @@ export async function getSandboxWithErrorHandling(
     const sandbox = await daytonaClient().get(sandboxSessionId);
 
     // Check sandbox state
-    const sandboxInfo = await sandbox.info();
-    const state = sandboxInfo.state;
+    const state = sandbox.state;
 
     if (state === "started") {
       return {
