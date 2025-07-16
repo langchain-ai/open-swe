@@ -35,6 +35,8 @@ export function BranchSelector({
   streamTargetRepository,
 }: BranchSelectorProps) {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const {
     branches,
     branchesLoading,
@@ -45,6 +47,7 @@ export function BranchSelector({
     branchesHasMore,
     branchesLoadingMore,
     loadMoreBranches,
+    searchForBranch,
     defaultBranch,
   } = useGitHubAppProvider();
 
