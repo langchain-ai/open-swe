@@ -103,7 +103,7 @@ export async function prepareGraphState(
   const summaryMessage = state.contextGatheringNotes
     ? new AIMessage({
         id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
-        content: `Here is the notes you took while planning the previous task:\n${state.contextGatheringNotes}`,
+        content: `Here are the notes taken while planning for the previous task:\n${state.contextGatheringNotes}`,
         additional_kwargs: {
           summaryMessage: true,
         },

@@ -54,15 +54,12 @@ export function ThreadView({
     useState<ManagerGraphState["programmerSession"]>();
 
   useEffect(() => {
-    console.log("stream?.values", stream?.values);
-    console.log("plannerSession", plannerSession);
     if (
       stream?.values?.plannerSession &&
       plannerSession?.runId !== stream.values.plannerSession.runId
     ) {
-      // State shouldn't update before this, but still create a copy to avoid race conditions
+      // State shouldn't update before we use it below, but still create a copy to avoid race conditions
       const prevPlannerSession = plannerSession;
-
       setPlannerSession(stream.values.plannerSession);
 
       if (prevPlannerSession && selectedTab === "programmer") {

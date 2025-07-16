@@ -273,6 +273,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       ))}
       {acceptedPlanEvents.length > 0 &&
         isAcceptedPlanEvents(acceptedPlanEvents) &&
+        // Check the run ID so that the accepted plan component gets cleared if a followup run is started.
         acceptedPlanEvents[acceptedPlanEvents.length - 1].data.runId ===
           runId && (
           <AcceptedPlanStep
