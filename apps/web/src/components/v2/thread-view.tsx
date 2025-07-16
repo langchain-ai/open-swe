@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
-import { ThreadDisplayInfo } from "./types";
+import { ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
@@ -20,6 +20,9 @@ import {
   PROGRAMMER_GRAPH_ID,
   PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
+import { useThreadStatus } from "@/hooks/useThreadStatus";
+import { cn } from "@/lib/utils";
+
 import { StickToBottom } from "use-stick-to-bottom";
 import {
   StickyToBottomContent,
@@ -27,12 +30,11 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
-import { cn } from "@/lib/utils";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
-  displayThread: ThreadDisplayInfo;
-  allDisplayThreads: ThreadDisplayInfo[];
+  displayThread: ThreadMetadata;
+  allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
 }
 
@@ -50,6 +52,23 @@ export function ThreadView({
   const plannerRunId = stream.values?.plannerSession?.runId;
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+
+  const { status: realTimeStatus } = useThreadStatus(displayThread.id);
+
+  const getStatusDotColor = (status: string) => {
+    switch (status) {
+      case "running":
+        return "bg-blue-500 dark:bg-blue-400";
+      case "completed":
+        return "bg-green-500 dark:bg-green-400";
+      case "paused":
+        return "bg-yellow-500 dark:bg-yellow-400";
+      case "error":
+        return "bg-red-500 dark:bg-red-400";
+      default:
+        return "bg-gray-500 dark:bg-gray-400";
+    }
+  };
 
   const plannerCancelRef = useRef<(() => void) | null>(null);
   const programmerCancelRef = useRef<(() => void) | null>(null);
@@ -102,11 +121,7 @@ export function ThreadView({
             <div
               className={cn(
                 "size-2 flex-shrink-0 rounded-full",
-                displayThread.status === "running"
-                  ? "bg-blue-500"
-                  : displayThread.status === "completed"
-                    ? "bg-green-500"
-                    : "bg-red-500",
+                getStatusDotColor(realTimeStatus),
               )}
             ></div>
             <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
