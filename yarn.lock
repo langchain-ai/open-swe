@@ -3098,23 +3098,23 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/core@npm:^0.3.58":
-  version: 0.3.62
-  resolution: "@langchain/core@npm:0.3.62"
+"@langchain/core@npm:^0.3.64":
+  version: 0.3.64
+  resolution: "@langchain/core@npm:0.3.64"
   dependencies:
     "@cfworker/json-schema": ^4.0.2
     ansi-styles: ^5.0.0
     camelcase: 6
     decamelize: 1.2.0
     js-tiktoken: ^1.0.12
-    langsmith: ^0.3.33
+    langsmith: ^0.3.46
     mustache: ^4.2.0
     p-queue: ^6.6.2
     p-retry: 4
     uuid: ^10.0.0
     zod: ^3.25.32
     zod-to-json-schema: ^3.22.3
-  checksum: 7168404d80b8bcc1ff7fbdd91fbf64f172da6731a584e56e0add7ecc301fe002eba10eeb21415187c29ce5b7df96722d9b561a6cb5d54a20c66344def5f58d48
+  checksum: 0c24b92f9b68cf39e57f499b2b9ea5489c7f5449467ffc3fe2aad674776ab611fa451221ac4b5f94e956acb63d9c6e87b1a265aae99f3d0f467e77e5a501d41c
   languageName: node
   linkType: hard
 
@@ -13768,9 +13768,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"langsmith@npm:^0.3.29, langsmith@npm:^0.3.33":
-  version: 0.3.43
-  resolution: "langsmith@npm:0.3.43"
+"langsmith@npm:^0.3.46":
+  version: 0.3.46
+  resolution: "langsmith@npm:0.3.46"
   dependencies:
     "@types/uuid": ^10.0.0
     chalk: ^4.1.2
@@ -13793,7 +13793,7 @@ __metadata:
       optional: true
     openai:
       optional: true
-  checksum: 23a1234f82b9100a2f23d9aebae3556f9b296653313e9efff25aa676f008c6712c4014d825dd85e03d50e4a60f2c03b1832e8b5c0053d3dc434d5d91963e1280
+  checksum: b9388c3a5dc0179e2d85fdc430e965301c941428639f177748101e354436ffccafb4f89fc8006f88a73db0304fa473d780c87e33582bd27fc2a8ca5add5bc1f3
   languageName: node
   linkType: hard
 
