@@ -115,9 +115,9 @@ const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
     {
       type: "text",
       text: STATIC_SYSTEM_INSTRUCTIONS,
-      cache_control: { type: "ephemeral" }
+      cache_control: { type: "ephemeral" },
     },
-    
+
     // Cache Breakpoint 3: Dynamic Context
     {
       type: "text",
@@ -146,8 +146,8 @@ ${state.codebaseTree || "No codebase tree generated yet."}
 </codebase_structure>
 
 ${formatCustomRulesPrompt(state.customRules)}`,
-      cache_control: { type: "ephemeral" }
-    }
+      cache_control: { type: "ephemeral" },
+    },
   ];
 
   // Cache Breakpoint 4: Code Review Context (only add if present)
@@ -158,51 +158,61 @@ ${formatCustomRulesPrompt(state.customRules)}`,
         review: codeReview.review,
         newActions: codeReview.newActions,
       }),
-      cache_control: { type: "ephemeral" }
+      cache_control: { type: "ephemeral" },
     });
   }
 
-  return segments.filter(segment => segment.text.trim() !== "");
+  return segments.filter((segment) => segment.text.trim() !== "");
 };
 
 const calculateCostSavings = (metrics: CacheMetrics): number => {
-  const SONNET_4_BASE_RATE = 3.0 / 1_000_000;  // $3 per MTok
+  const SONNET_4_BASE_RATE = 3.0 / 1_000_000; // $3 per MTok
   const CACHE_WRITE_MULTIPLIER = 1.25;
   const CACHE_READ_MULTIPLIER = 0.1;
 
-  const cacheWriteCost = metrics.cache_creation_input_tokens * 
-                        SONNET_4_BASE_RATE * CACHE_WRITE_MULTIPLIER;
-  
-  const cacheReadCost = metrics.cache_read_input_tokens * 
-                       SONNET_4_BASE_RATE * CACHE_READ_MULTIPLIER;
-  
+  const cacheWriteCost =
+    metrics.cache_creation_input_tokens *
+    SONNET_4_BASE_RATE *
+    CACHE_WRITE_MULTIPLIER;
+
+  const cacheReadCost =
+    metrics.cache_read_input_tokens *
+    SONNET_4_BASE_RATE *
+    CACHE_READ_MULTIPLIER;
+
   const regularInputCost = metrics.input_tokens * SONNET_4_BASE_RATE;
-  
+
   // Cost without caching (all tokens at base rate)
-  const totalTokens = metrics.cache_creation_input_tokens + 
-                     metrics.cache_read_input_tokens + 
-                     metrics.input_tokens;
+  const totalTokens =
+    metrics.cache_creation_input_tokens +
+    metrics.cache_read_input_tokens +
+    metrics.input_tokens;
   const costWithoutCaching = totalTokens * SONNET_4_BASE_RATE;
-  
+
   // Actual cost with caching
   const actualCost = cacheWriteCost + cacheReadCost + regularInputCost;
-  
+
   return costWithoutCaching - actualCost;
 };
 
 const trackCachePerformance = (response: any) => {
   const metrics: CacheMetrics = {
-    cache_creation_input_tokens: response.usage?.cache_creation_input_tokens || 0,
+    cache_creation_input_tokens:
+      response.usage?.cache_creation_input_tokens || 0,
     cache_read_input_tokens: response.usage?.cache_read_input_tokens || 0,
     input_tokens: response.usage?.input_tokens || 0,
     output_tokens: response.usage?.output_tokens || 0,
   };
 
-  const totalInputTokens = metrics.cache_creation_input_tokens + 
-                          metrics.cache_read_input_tokens + 
-                          metrics.input_tokens;
-  
-  const cacheHitRate = totalInputTokens > 0 ? metrics.cache_read_input_tokens / totalInputTokens : 0;
+  const totalInputTokens =
+    metrics.cache_creation_input_tokens +
+    metrics.cache_read_input_tokens +
+    metrics.input_tokens;
+
+  const cacheHitRate =
+    totalInputTokens > 0
+      ? metrics.cache_read_input_tokens / totalInputTokens
+      : 0;
   const costSavings = calculateCostSavings(metrics);
 
   logger.info("Cache Performance", {
@@ -244,7 +254,7 @@ export async function generateAction(
   if (tools.length > 0) {
     tools[tools.length - 1] = {
       ...tools[tools.length - 1],
-      cache_control: { type: "ephemeral" }
+      cache_control: { type: "ephemeral" },
     };
   }
 
@@ -311,4 +321,3 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
-
