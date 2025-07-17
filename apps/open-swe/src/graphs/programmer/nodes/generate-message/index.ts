@@ -219,7 +219,7 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatPrompt({
+      content: formatCacheablePrompt({
         ...state,
         taskPlan: latestTaskPlan ?? state.taskPlan,
       }),
@@ -254,5 +254,6 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
 
 
