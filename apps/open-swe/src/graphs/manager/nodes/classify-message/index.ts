@@ -87,8 +87,9 @@ export async function classifyMessage(
     messages: state.messages,
     taskPlan,
     proposedPlan: issuePlans?.proposedPlan ?? undefined,
-    // requestSource: userMessage.additional_kwargs?.requestSource as RequestSource | undefined,
-    requestSource: RequestSource.GITHUB_ISSUE_WEBHOOK,
+    requestSource: userMessage.additional_kwargs?.requestSource as
+      | RequestSource
+      | undefined,
   });
   const respondAndRouteTool = {
     name: "respond_and_route",
