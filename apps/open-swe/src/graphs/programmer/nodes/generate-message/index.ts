@@ -186,6 +186,14 @@ export async function generateAction(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
   );
 
+  // Add cache control to the last tool (Cache Breakpoint 1)
+  if (tools.length > 0) {
+    tools[tools.length - 1] = {
+      ...tools[tools.length - 1],
+      cache_control: { type: "ephemeral" }
+    };
+  }
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     ...(modelSupportsParallelToolCallsParam
@@ -246,4 +254,5 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
 
