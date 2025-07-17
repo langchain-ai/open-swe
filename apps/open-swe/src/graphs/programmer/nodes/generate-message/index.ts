@@ -56,52 +56,6 @@ interface CacheMetrics {
   output_tokens: number;
 }
 
-const formatPrompt = (state: GraphState): string => {
-  const repoDirectory = getRepoAbsolutePath(state.targetRepository);
-  const activePlanItems = getActivePlanItems(state.taskPlan);
-  const currentPlanItem = activePlanItems
-    .filter((p) => !p.completed)
-    .sort((a, b) => a.index - b.index)[0];
-  const codeReview = getCodeReviewFields(state.internalMessages);
-  return SYSTEM_PROMPT.replaceAll(
-    "{PLAN_PROMPT_WITH_SUMMARIES}",
-    formatPlanPrompt(getActivePlanItems(state.taskPlan), {
-      includeSummaries: true,
-    }),
-  )
-    .replaceAll(
-      "{PLAN_PROMPT}",
-      formatPlanPrompt(getActivePlanItems(state.taskPlan)),
-    )
-    .replaceAll("{REPO_DIRECTORY}", repoDirectory)
-    .replaceAll(
-      "{PLAN_GENERATION_NOTES}",
-      `<plan-generation-notes>\n${state.contextGatheringNotes}\n</plan-generation-notes>`,
-    )
-    .replaceAll(
-      "{CODEBASE_TREE}",
-      state.codebaseTree || "No codebase tree generated yet.",
-    )
-    .replaceAll("{CURRENT_WORKING_DIRECTORY}", repoDirectory)
-    .replaceAll("{CURRENT_TASK_NUMBER}", currentPlanItem.index.toString())
-    .replaceAll(
-      "{INSTALL_DEPENDENCIES_TOOL_PROMPT}",
-      !state.dependenciesInstalled
-        ? INSTALL_DEPENDENCIES_TOOL_PROMPT
-        : DEPENDENCIES_INSTALLED_PROMPT,
-    )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
-    .replaceAll(
-      "{CODE_REVIEW_PROMPT}",
-      codeReview
-        ? formatCodeReviewPrompt(CODE_REVIEW_PROMPT, {
-            review: codeReview.review,
-            newActions: codeReview.newActions,
-          })
-        : "",
-    );
-};
-
 const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
   const activePlanItems = getActivePlanItems(state.taskPlan);
