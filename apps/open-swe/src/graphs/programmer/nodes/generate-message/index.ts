@@ -21,10 +21,7 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import {
-  CODE_REVIEW_PROMPT,
-  STATIC_SYSTEM_INSTRUCTIONS,
-} from "./prompt.js";
+import { CODE_REVIEW_PROMPT, STATIC_SYSTEM_INSTRUCTIONS } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
@@ -197,7 +194,6 @@ export async function generateAction(
   logger.info(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
   );
-
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
