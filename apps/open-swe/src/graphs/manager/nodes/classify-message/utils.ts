@@ -32,7 +32,6 @@ import {
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
 import { RequestSource } from "../../../../constants.js";
-import * as _ from "lodash";
 
 const THREAD_STATUS_READABLE_STRING_MAP = {
   not_started: "not started",
