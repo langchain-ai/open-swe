@@ -23,7 +23,6 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import {
   CODE_REVIEW_PROMPT,
-  SYSTEM_PROMPT,
   STATIC_SYSTEM_INSTRUCTIONS,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
