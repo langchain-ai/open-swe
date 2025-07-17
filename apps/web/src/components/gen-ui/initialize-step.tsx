@@ -7,37 +7,22 @@ import {
   GitBranch,
   ChevronDown,
 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Step } from "@open-swe/shared/open-swe/custom-node-events";
-import { Button } from "../ui/button";
 
 type InitializeStepProps = {
   status: "loading" | "generating" | "done";
   success?: boolean;
   steps?: Step[];
-  collapse?: boolean;
 };
 
 export function InitializeStep({
   status,
   success,
   steps,
-  collapse: collapseProp,
 }: InitializeStepProps) {
-  const [collapsed, setCollapsed] = useState(collapseProp ?? false);
-  const wasDone = useRef(false);
-
-  // Auto-collapse when status is 'done' and success is true
-  useEffect(() => {
-    if (status === "done" && success && !collapsed && !wasDone.current) {
-      setCollapsed(true);
-      wasDone.current = true;
-    }
-    if (status !== "done") {
-      wasDone.current = false;
-    }
-  }, [status, success, collapsed]);
+  const [collapsed, setCollapsed] = useState(false);
 
   const stepStatusIcon = {
     waiting: (
@@ -97,11 +82,10 @@ export function InitializeStep({
           {getStatusText()}
         </span>
         {getStatusIcon()}
-        <Button
+        <button
           aria-label={collapsed ? "Expand" : "Collapse"}
           onClick={() => setCollapsed((c) => !c)}
-          variant="ghost"
-          size="icon"
+          className="text-muted-foreground hover:text-foreground ml-2 cursor-pointer"
         >
           <ChevronDown
             className={cn(
@@ -109,7 +93,7 @@ export function InitializeStep({
               collapsed ? "rotate-0" : "rotate-180",
             )}
           />
-        </Button>
+        </button>
       </div>
       {/* Only render the rest if not collapsed */}
       {!collapsed && steps && steps.length > 0 && (

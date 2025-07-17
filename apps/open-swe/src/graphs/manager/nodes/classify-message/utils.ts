@@ -116,15 +116,14 @@ export function createClassificationPromptAndToolSchema(inputs: {
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
 
-  const routingOptions: [string, ...string[]] = [
-    "no_op",
+  const routingOptions = [
     ...(programmerRunning ? ["update_programmer"] : []),
-    ...((plannerNotStarted ?? plannerAndProgrammerIdle)
-      ? ["start_planner"]
-      : []),
+    ...(plannerNotStarted ? ["start_planner"] : []),
+    ...(plannerAndProgrammerIdle ? ["start_planner_for_followup"] : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
     ...(showCreateIssueOption ? ["create_new_issue"] : []),
+    "no_op",
   ];
 
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
@@ -169,7 +168,9 @@ export function createClassificationPromptAndToolSchema(inputs: {
       formattedConversationHistoryPrompt ?? "",
     );
 
-  const schema = createClassificationSchema(routingOptions);
+  const schema = createClassificationSchema(
+    routingOptions as [string, ...string[]],
+  );
 
   return {
     prompt,

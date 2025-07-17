@@ -8,7 +8,7 @@ import { loadModel, Task } from "../../../utils/load-model.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import {
   completeTask,
   getActivePlanItems,
@@ -40,11 +40,10 @@ export async function generateConclusion(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const userRequest = getUserRequest(state.internalMessages);
-  const userMessage = `The user's initial request is as follows:
-${userRequest || "No user message found"}
+  const userRequestPrompt = formatUserRequestPrompt(state.messages);
+  const userMessage = `${userRequestPrompt}
 
-The conversation history is as follows:
+The full conversation history is as follows:
 ${state.internalMessages.map(getMessageString).join("\n")}
 
 Given all of this, please respond with the concise conclusion. Do not include any additional text besides the conclusion.`;

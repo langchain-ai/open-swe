@@ -2,7 +2,7 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
-import { Command, END } from "@langchain/langgraph";
+import { Command } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";
 import { v4 as uuidv4 } from "uuid";
@@ -19,6 +19,7 @@ import {
   getUntrackedComments,
 } from "../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
@@ -86,28 +87,27 @@ export async function prepareGraphState(
     state.githubIssueId,
     comments ?? [],
   );
-  if (!untrackedComments?.length) {
-    // If there are already messages in the state, and no comments, we can assume the issue is already handled.
-    return new Command({
-      goto: END,
-    });
-  }
 
   // Remove all messages not marked as summaryMessage, hidden, and not human messages.
   const removedNonSummaryMessages = filterHiddenMessages(state.messages)
     .filter((m) => !m.additional_kwargs?.summaryMessage && !isHumanMessage(m))
     .map((m: BaseMessage) => new RemoveMessage({ id: m.id ?? "" }));
-  const summaryMessage = new AIMessage({
-    id: uuidv4(),
-    content: state.contextGatheringNotes,
-    additional_kwargs: {
-      summaryMessage: true,
-    },
-  });
+
+  // TODO: We should prob have a UI component for "Previous Task Notes" so we can surface this in the UI.
+  const summaryMessage = state.contextGatheringNotes
+    ? new AIMessage({
+        id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+        content: `Here are the notes taken while planning for the previous task:\n${state.contextGatheringNotes}`,
+        additional_kwargs: {
+          summaryMessage: true,
+        },
+      })
+    : undefined;
+
   const commandUpdate: PlannerGraphUpdate = {
     messages: [
       ...removedNonSummaryMessages,
-      summaryMessage,
+      ...(summaryMessage ? [summaryMessage] : []),
       ...untrackedComments,
     ],
     // Reset plan context summary as it's now included in the messages array.

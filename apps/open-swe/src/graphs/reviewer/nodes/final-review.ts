@@ -3,7 +3,7 @@ import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
 } from "@open-swe/shared/open-swe/reviewer/types";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import {
   getActivePlanItems,
@@ -41,8 +41,7 @@ If you determine that the task has not been fully completed, you may call the \`
 Here is the full list of actions you took during your review:
 {REVIEW_ACTIONS}
 
-Here is the user's original request:
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 
 And here are the tasks which were outlined in the plan, and completed by the Programmer Assistant:
 {PLANNED_TASKS}
@@ -60,14 +59,17 @@ const formatSystemPrompt = (state: ReviewerGraphState) => {
   const markCompletedToolName = createCodeReviewMarkTaskCompletedFields().name;
   const markNotCompleteToolName =
     createCodeReviewMarkTaskNotCompleteFields().name;
-  const userRequest = getUserRequest(state.messages);
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
   const messagesString = state.reviewerMessages
     .map(getMessageString)
     .join("\n");
+
   return SYSTEM_PROMPT.replaceAll("{REVIEW_ACTIONS}", messagesString)
-    .replaceAll("{USER_REQUEST}", userRequest)
+    .replaceAll(
+      "{USER_REQUEST_PROMPT}",
+      formatUserRequestPrompt(state.messages),
+    )
     .replaceAll("{PLANNED_TASKS}", tasksString)
     .replaceAll("{COMPLETE_TOOL_NAME}", markCompletedToolName)
     .replaceAll("{NOT_COMPLETE_TOOL_NAME}", markNotCompleteToolName);

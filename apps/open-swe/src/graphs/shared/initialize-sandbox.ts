@@ -62,6 +62,7 @@ export async function initializeSandbox(
         ...base.data,
         status,
         ...(error ? { error } : {}),
+        runId: config.configurable?.run_id ?? "",
       },
     };
     events.push(event);

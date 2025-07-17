@@ -18,8 +18,23 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { createConversationHistorySummaryToolFields } from "@open-swe/shared/open-swe/tools";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
+
+const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
+<user_request>
+{USER_REQUEST}
+</user_request>`;
+
+const USER_SENDING_FOLLOWUP_PROMPT = `Here is the user's initial request:
+<user_initial_request>
+{USER_REQUEST}
+</user_initial_request>
+
+And here is the user's followup request you're now processing:
+<user_followup_request>
+{USER_FOLLOWUP_REQUEST}
+</user_followup_request>`;
 
 const taskSummarySysPrompt = `You are operating as a terminal-based agentic coding assistant built by LangChain. It wraps LLM models to enable natural language interaction with a local codebase. You are expected to be precise, safe, and helpful.
 
@@ -37,10 +52,7 @@ This context will then overwrite the conversation history presented below. Becau
 To aid with this, you'll be provided with the user's request, as well as all of the tasks in the plan you generated to fulfil the user's request. Additionally, if a task has already been completed you'll be provided with the summary of the steps taken to complete it.
 </objective_information>
 
-Here is the user's request:
-<user_request>
-{USER_REQUEST}
-</user_request>
+{USER_REQUEST_PROMPT}
 
 Here is the full list of tasks in the plan you're in the middle of, as well as the summary of the completed tasks:
 <tasks_and_summaries>
@@ -70,7 +82,7 @@ Respond ONLY with the extracted context. Do not include any additional informati
 const logger = createLogger(LogLevel.INFO, "SummarizeConversationHistory");
 
 const formatPrompt = (inputs: {
-  userRequest: string;
+  messages: BaseMessage[];
   plan: PlanItem[];
   conversationHistoryToSummarize: BaseMessage[];
 }): string => {
@@ -82,7 +94,14 @@ const formatPrompt = (inputs: {
         includeSummaries: true,
       }),
     )
-    .replace("{USER_REQUEST}", inputs.userRequest)
+    .replace(
+      "{USER_REQUEST_PROMPT}",
+      formatUserRequestPrompt(
+        inputs.messages,
+        SINGLE_USER_REQUEST_PROMPT,
+        USER_SENDING_FOLLOWUP_PROMPT,
+      ),
+    )
     .replace(
       "{CONVERSATION_HISTORY}",
       inputs.conversationHistoryToSummarize.map(getMessageString).join("\n"),
@@ -129,7 +148,6 @@ export async function summarizeHistory(
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
 
-  const userRequest = getUserRequest(state.messages);
   const plan = getActivePlanItems(state.taskPlan);
   const conversationHistoryToSummarize = await getMessagesSinceLastSummary(
     state.internalMessages,
@@ -147,7 +165,7 @@ export async function summarizeHistory(
     {
       role: "user",
       content: formatPrompt({
-        userRequest,
+        messages: state.messages,
         plan,
         conversationHistoryToSummarize,
       }),

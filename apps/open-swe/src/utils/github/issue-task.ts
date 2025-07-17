@@ -15,8 +15,8 @@ export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
 export const PROPOSED_PLAN_OPEN_TAG = "<open-swe-do-not-edit-proposed-plan>";
 export const PROPOSED_PLAN_CLOSE_TAG = "</open-swe-do-not-edit-proposed-plan>";
 
-const DETAILS_OPEN_TAG = "<details>";
-const DETAILS_CLOSE_TAG = "</details>";
+export const DETAILS_OPEN_TAG = "<details>";
+export const DETAILS_CLOSE_TAG = "</details>";
 const AGENT_CONTEXT_DETAILS_SUMMARY = "<summary>Agent Context</summary>";
 
 function typeNarrowTaskPlan(taskPlan: unknown): taskPlan is TaskPlan {
