@@ -220,7 +220,6 @@ export async function configureGitUserInRepo(
     if (setRemoteOutput.exitCode !== 0) {
       logger.error(`Failed to set remote URL with token`, {
         exitCode: setRemoteOutput.exitCode,
-        // Note: Not logging full output to avoid potential token exposure
       });
     } else {
       logger.info("Git remote URL updated with token successfully.");
@@ -508,7 +507,9 @@ export async function cloneRepo(
             "Branch not found in upstream origin. Cloning default & checking out branch",
             {
               targetRepository,
-              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(cloneDefaultBranchCommand.join(" ")),
+              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(
+                cloneDefaultBranchCommand.join(" "),
+              ),
             },
           );
           const cloneDefaultBranchResult = await sandbox.process.executeCommand(
@@ -517,7 +518,9 @@ export async function cloneRepo(
           if (cloneDefaultBranchResult.exitCode !== 0) {
             logger.error("Failed to clone default branch", {
               targetRepository,
-              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(cloneDefaultBranchCommand.join(" ")),
+              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(
+                cloneDefaultBranchCommand.join(" "),
+              ),
             });
             throw new ExecuteCommandError(
               cloneDefaultBranchCommand.join(" "),
