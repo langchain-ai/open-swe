@@ -37,8 +37,39 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { createIssueComment } from "../../../utils/github/api.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
+
+/**
+ * Posts a comment to a GitHub issue using the installation token
+ */
+async function postGitHubIssueComment(input: {
+  githubIssueId: number;
+  targetRepository: { owner: string; repo: string };
+  commentBody: string;
+  config: GraphConfig;
+}): Promise<void> {
+  const { githubIssueId, targetRepository, commentBody, config } = input;
+
+  try {
+    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+
+    await createIssueComment({
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      issueNumber: githubIssueId,
+      body: commentBody,
+      githubToken: githubInstallationToken,
+    });
+
+    logger.info(`Posted comment to GitHub issue #${githubIssueId}`);
+  } catch (error) {
+    logger.error("Failed to post GitHub comment:", error);
+    // Don't throw - we don't want to fail the entire process if comment posting fails
+  }
+}
 
 function createAcceptedPlanMessage(input: {
   planTitle: string;
@@ -161,6 +192,15 @@ export async function interruptProposedPlan(
 
   if (state.autoAcceptPlan) {
     logger.info("Auto accepting plan.");
+
+    // Post comment to GitHub issue about auto-accepting the plan
+    await postGitHubIssueComment({
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+      commentBody: `🤖 **Plan Generated**\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nProceeding to implementation...`,
+      config,
+    });
+
     planItems = proposedPlan.map((p, index) => ({
       index,
       plan: p,
@@ -198,6 +238,14 @@ export async function interruptProposedPlan(
     config,
     proposedPlan,
   );
+
+  // Post comment to GitHub issue about plan being ready for approval
+  await postGitHubIssueComment({
+    githubIssueId: state.githubIssueId,
+    targetRepository: state.targetRepository,
+    commentBody: `🤖 **Plan Ready for Approval**\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
+    config,
+  });
 
   const interruptResponse = interrupt<
     HumanInterrupt,
