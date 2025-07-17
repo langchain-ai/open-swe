@@ -26,6 +26,7 @@ import {
   DEPENDENCIES_INSTALLED_PROMPT,
   INSTALL_DEPENDENCIES_TOOL_PROMPT,
   SYSTEM_PROMPT,
+  STATIC_SYSTEM_INSTRUCTIONS,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -41,6 +42,12 @@ import {
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
+
+interface CacheablePromptSegment {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
+}
 
 const formatPrompt = (state: GraphState): string => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
@@ -86,6 +93,69 @@ const formatPrompt = (state: GraphState): string => {
           })
         : "",
     );
+};
+
+const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
+  const repoDirectory = getRepoAbsolutePath(state.targetRepository);
+  const activePlanItems = getActivePlanItems(state.taskPlan);
+  const currentPlanItem = activePlanItems
+    .filter((p) => !p.completed)
+    .sort((a, b) => a.index - b.index)[0];
+  const codeReview = getCodeReviewFields(state.internalMessages);
+
+  const segments: CacheablePromptSegment[] = [
+    // Cache Breakpoint 2: Static Instructions
+    {
+      type: "text",
+      text: STATIC_SYSTEM_INSTRUCTIONS,
+      cache_control: { type: "ephemeral" }
+    },
+    
+    // Cache Breakpoint 3: Dynamic Context
+    {
+      type: "text",
+      text: `# Context
+
+<plan_information>
+## Generated Plan with Summaries
+${formatPlanPrompt(activePlanItems, { includeSummaries: true })}
+
+## Plan Generation Notes
+These are notes you took while gathering context for the plan:
+<plan-generation-notes>
+${state.contextGatheringNotes || "No context gathering notes available."}
+</plan-generation-notes>
+
+## Current Task Statuses
+${formatPlanPrompt(activePlanItems)}
+</plan_information>
+
+<codebase_structure>
+## Codebase Tree (3 levels deep, respecting .gitignore)
+Generated via: \`git ls-files | tree --fromfile -L 3\`
+Location: ${repoDirectory}
+
+${state.codebaseTree || "No codebase tree generated yet."}
+</codebase_structure>
+
+${formatCustomRulesPrompt(state.customRules)}`,
+      cache_control: { type: "ephemeral" }
+    }
+  ];
+
+  // Cache Breakpoint 4: Code Review Context (only add if present)
+  if (codeReview) {
+    segments.push({
+      type: "text",
+      text: formatCodeReviewPrompt(CODE_REVIEW_PROMPT, {
+        review: codeReview.review,
+        newActions: codeReview.newActions,
+      }),
+      cache_control: { type: "ephemeral" }
+    });
+  }
+
+  return segments.filter(segment => segment.text.trim() !== "");
 };
 
 export async function generateAction(
@@ -176,3 +246,4 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
