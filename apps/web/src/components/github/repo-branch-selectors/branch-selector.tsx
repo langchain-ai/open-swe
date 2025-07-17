@@ -124,7 +124,8 @@ export function BranchSelector({
     }
   };
 
-  const allowSearch = !!(
+  // Whether or not to allow explicitly searching for a branch, even when there are results.
+  const allowExplicitSearchReqWithResults = !!(
     searchQuery.trim() &&
     branches.some(
       (branch) => defaultFilter(branch.name, searchQuery.trim()) > 0,
@@ -308,7 +309,7 @@ export function BranchSelector({
             </CommandGroup>
             {/* Show this search button if there is a search query, and there are some results. this is for
             cases when some results do show, just not the exact result the user is looking for */}
-            {allowSearch && (
+            {allowExplicitSearchReqWithResults && (
               <div className="px-2 py-1">
                 <Button
                   variant="outline"
@@ -323,7 +324,7 @@ export function BranchSelector({
                 </Button>
               </div>
             )}
-            {branchesHasMore && !allowSearch && (
+            {branchesHasMore && !allowExplicitSearchReqWithResults && (
               <CommandGroup>
                 <CommandItem
                   onSelect={() => {
