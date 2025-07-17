@@ -37,6 +37,7 @@ import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
+import { RequestSource } from "../../../../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
@@ -86,6 +87,8 @@ export async function classifyMessage(
     messages: state.messages,
     taskPlan,
     proposedPlan: issuePlans?.proposedPlan ?? undefined,
+    // requestSource: userMessage.additional_kwargs?.requestSource as RequestSource | undefined,
+    requestSource: RequestSource.GITHUB_ISSUE_WEBHOOK,
   });
   const respondAndRouteTool = {
     name: "respond_and_route",

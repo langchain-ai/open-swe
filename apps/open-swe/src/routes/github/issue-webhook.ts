@@ -19,6 +19,7 @@ import {
   getOpenSWELabel,
 } from "../../utils/github/label.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { RequestSource } from "../../constants.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -149,6 +150,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
           additional_kwargs: {
             isOriginalIssue: true,
             githubIssueId: issueData.issueNumber,
+            requestSource: RequestSource.GITHUB_ISSUE_WEBHOOK,
           },
         }),
       ],

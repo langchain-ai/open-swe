@@ -31,6 +31,8 @@ import {
   START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION,
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
+import { RequestSource } from "../../../../constants.js";
+import * as _ from 'lodash';
 
 const THREAD_STATUS_READABLE_STRING_MAP = {
   not_started: "not started",
@@ -72,6 +74,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
   messages: BaseMessage[];
   taskPlan: TaskPlan;
   proposedPlan?: string[];
+  requestSource?: RequestSource;
 }): {
   prompt: string;
   schema: z.ZodTypeAny;
@@ -166,7 +169,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
       formattedConversationHistoryPrompt ?? "",
-    );
+    ).replaceAll("{REQUEST_SOURCE}", inputs.requestSource ?? "no source provided")
 
   const schema = createClassificationSchema(
     routingOptions as [string, ...string[]],
