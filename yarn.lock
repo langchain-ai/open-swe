@@ -3098,9 +3098,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/core@npm:^0.3.64":
-  version: 0.3.64
-  resolution: "@langchain/core@npm:0.3.64"
+"@langchain/core@npm:^0.3.65":
+  version: 0.3.65
+  resolution: "@langchain/core@npm:0.3.65"
   dependencies:
     "@cfworker/json-schema": ^4.0.2
     ansi-styles: ^5.0.0
@@ -3114,7 +3114,7 @@ __metadata:
     uuid: ^10.0.0
     zod: ^3.25.32
     zod-to-json-schema: ^3.22.3
-  checksum: 0c24b92f9b68cf39e57f499b2b9ea5489c7f5449467ffc3fe2aad674776ab611fa451221ac4b5f94e956acb63d9c6e87b1a265aae99f3d0f467e77e5a501d41c
+  checksum: f01f63ac59f555851d02953152fd92fb2c200502688a49c7caa2dd9549a4fe125c0c6525faaeeeb3e138c1434ccd72ee482eda5bef8e568b866a9d41c259bf08
   languageName: node
   linkType: hard
 
@@ -4083,7 +4083,7 @@ __metadata:
     "@jest/globals": ^29.7.0
     "@langchain/anthropic": ^0.3.20
     "@langchain/community": ^0.3.47
-    "@langchain/core": ^0.3.56
+    "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-cli": ^0.0.47
@@ -4135,7 +4135,7 @@ __metadata:
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
-    "@langchain/core": ^0.3.56
+    "@langchain/core": ^0.3.65
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
@@ -4160,7 +4160,7 @@ __metadata:
   resolution: "@open-swe/web@workspace:apps/web"
   dependencies:
     "@eslint/js": ^9.19.0
-    "@langchain/core": ^0.3.57
+    "@langchain/core": ^0.3.65
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/app": ^16.0.1
