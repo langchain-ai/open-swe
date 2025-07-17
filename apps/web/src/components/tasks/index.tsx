@@ -100,11 +100,13 @@ export function TasksSidebar({
   const getStateIcon = (state: string) => {
     switch (state) {
       case "completed":
-        return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+        return (
+          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+        );
       case "current":
-        return <Play className="h-4 w-4 text-blue-500" />;
+        return <Play className="h-4 w-4 text-blue-500 dark:text-blue-400" />;
       default:
-        return <Circle className="h-4 w-4 text-gray-400" />;
+        return <Circle className="h-4 w-4 text-gray-400 dark:text-gray-500" />;
     }
   };
 
@@ -137,7 +139,7 @@ export function TasksSidebar({
   return (
     <div
       className={cn(
-        "fixed top-0 right-0 z-10 h-screen border-l border-gray-200 bg-white shadow-lg transition-all duration-300",
+        "fixed top-0 right-0 z-10 h-screen border-l border-gray-200 bg-white shadow-lg transition-all duration-300 dark:border-gray-700 dark:bg-gray-900",
         isOpen ? "w-80 md:w-xl" : "w-0 overflow-hidden border-l-0",
       )}
     >
@@ -149,14 +151,16 @@ export function TasksSidebar({
         style={{ minWidth: isOpen ? "320px" : "0" }}
       >
         {/* Header */}
-        <div className="border-b border-gray-200 p-4">
+        <div className="border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Tasks</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              Tasks
+            </h2>
             <Button
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-8 w-8 p-0"
+              className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
             >
               <PanelLeftClose className="h-4 w-4" />
             </Button>
@@ -165,11 +169,11 @@ export function TasksSidebar({
           {/* Task selector */}
           {taskPlan.tasks.length > 1 && (
             <div className="mb-3">
-              <label className="mb-1 block text-xs font-medium text-gray-700">
+              <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
                 Task
               </label>
               <select
-                className="w-full rounded border border-gray-200 px-2 py-1 text-sm"
+                className="w-full rounded border border-gray-200 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
                 value={currentTask.id}
                 onChange={(e) => {
                   const newTaskIndex = taskPlan.tasks.findIndex(
@@ -196,25 +200,25 @@ export function TasksSidebar({
 
           {/* Plan revision navigation */}
           <div className="mb-3">
-            <label className="mb-1 block text-xs font-medium text-gray-700">
+            <label className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">
               Plan Revision
             </label>
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1">
+              <div className="flex flex-1 items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-600 dark:bg-gray-800">
                 <div className="flex items-center gap-1">
                   {currentRevision?.createdBy === "agent" ? (
                     <Bot className="h-3 w-3 text-blue-500" />
                   ) : (
                     <User className="h-3 w-3 text-green-500" />
                   )}
-                  <Clock className="h-3 w-3 text-gray-500" />
+                  <Clock className="h-3 w-3 text-gray-500 dark:text-gray-400" />
                 </div>
-                <span className="text-xs">
+                <span className="text-xs dark:text-gray-300">
                   Rev {currentRevision?.revisionIndex + 1} of{" "}
                   {currentTask.planRevisions.length}
                 </span>
                 {!isLatestRevision && (
-                  <span className="ml-1 rounded bg-orange-50 px-1 py-0.5 text-xs text-orange-600">
+                  <span className="ml-1 rounded bg-orange-50 px-1 py-0.5 text-xs text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
                     Historical
                   </span>
                 )}
@@ -264,7 +268,7 @@ export function TasksSidebar({
 
             {/* Revision info */}
             {currentRevision && (
-              <div className="mt-1 text-xs text-gray-500">
+              <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Created by {currentRevision.createdBy} on{" "}
                 {formatDate(currentRevision.createdAt)}
               </div>
@@ -273,10 +277,10 @@ export function TasksSidebar({
 
           {/* Filter controls */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1">
-              <Filter className="h-3 w-3 text-gray-500" />
+            <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-600 dark:bg-gray-800">
+              <Filter className="h-3 w-3 text-gray-500 dark:text-gray-400" />
               <select
-                className="border-none bg-transparent text-xs outline-none"
+                className="border-none bg-transparent text-xs outline-none dark:text-gray-300"
                 value={filter}
                 onChange={(e) => setFilter(e.target.value as FilterType)}
               >
@@ -293,7 +297,7 @@ export function TasksSidebar({
         <div className="flex-1 overflow-y-auto p-4">
           <div className="space-y-3">
             {filteredItems.length === 0 ? (
-              <div className="py-8 text-center text-sm text-gray-500">
+              <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 No plan items match the current filter
               </div>
             ) : (
@@ -306,9 +310,12 @@ export function TasksSidebar({
                     key={item.index}
                     className={cn(
                       "rounded-lg border p-3",
-                      state === "current" && "border-blue-200 bg-blue-50",
-                      state === "completed" && "border-green-200 bg-green-50",
-                      state === "remaining" && "border-gray-200 bg-white",
+                      state === "current" &&
+                        "border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20",
+                      state === "completed" &&
+                        "border-green-200 bg-green-50 dark:border-green-700 dark:bg-green-900/20",
+                      state === "remaining" &&
+                        "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800",
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -319,24 +326,24 @@ export function TasksSidebar({
                       <div className="min-w-0 flex-1">
                         <>
                           <div className="mb-1 flex items-start justify-between gap-2">
-                            <p className="text-sm leading-relaxed text-gray-900">
+                            <p className="text-sm leading-relaxed text-gray-900 dark:text-gray-100">
                               {item.plan}
                             </p>
                           </div>
 
                           <div className="flex items-center justify-between">
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
                               Plan Item #{item.index + 1}
                             </span>
                             <span
                               className={cn(
                                 "rounded-full px-2 py-1 text-xs",
                                 state === "completed" &&
-                                  "bg-green-100 text-green-700",
+                                  "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
                                 state === "current" &&
-                                  "bg-blue-100 text-blue-700",
+                                  "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
                                 state === "remaining" &&
-                                  "bg-gray-100 text-gray-700",
+                                  "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
                               )}
                             >
                               {state === "completed"
@@ -365,7 +372,7 @@ export function TasksSidebar({
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 p-0 text-xs text-green-700"
+                                  className="h-6 p-0 text-xs text-green-700 dark:text-green-400"
                                 >
                                   {isExpanded ? (
                                     <ChevronDown className="mr-1 h-3 w-3" />
@@ -376,7 +383,7 @@ export function TasksSidebar({
                                 </Button>
                               </CollapsibleTrigger>
                               <CollapsibleContent className="mt-2">
-                                <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800">
+                                <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400">
                                   {item.summary}
                                 </div>
                               </CollapsibleContent>
@@ -402,8 +409,8 @@ export function TaskPlanView({ taskPlan, onTaskChange }: TaskPlanViewProps) {
 
   if (taskPlan.tasks.length === 0) {
     return (
-      <div className="w-full rounded border border-gray-200 bg-gray-50 p-2">
-        <div className="text-center text-xs text-gray-500">
+      <div className="w-full rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+        <div className="text-center text-xs text-gray-500 dark:text-gray-400">
           No tasks available
         </div>
       </div>
