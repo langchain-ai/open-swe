@@ -2,7 +2,7 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
-import { Command, END } from "@langchain/langgraph";
+import { Command } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";
 import { v4 as uuidv4 } from "uuid";
@@ -87,12 +87,6 @@ export async function prepareGraphState(
     state.githubIssueId,
     comments ?? [],
   );
-  if (!untrackedComments?.length) {
-    // If there are already messages in the state, and no comments, we can assume the issue is already handled.
-    return new Command({
-      goto: END,
-    });
-  }
 
   // Remove all messages not marked as summaryMessage, hidden, and not human messages.
   const removedNonSummaryMessages = filterHiddenMessages(state.messages)
