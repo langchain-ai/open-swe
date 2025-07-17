@@ -20,6 +20,7 @@ import { GitBranch, Shield } from "lucide-react";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { Branch } from "@/utils/github";
 import { toast } from "sonner";
+import { defaultFilter } from "cmdk";
 
 interface BranchSelectorProps {
   disabled?: boolean;
@@ -122,6 +123,13 @@ export function BranchSelector({
       setIsSearching(false);
     }
   };
+
+  const allowSearch = !!(
+    searchQuery.trim() &&
+    branches.some(
+      (branch) => defaultFilter(branch.name, searchQuery.trim()) > 0,
+    )
+  );
 
   if (!selectedRepository) {
     return (
@@ -300,25 +308,22 @@ export function BranchSelector({
             </CommandGroup>
             {/* Show this search button if there is a search query, and there are some results. this is for
             cases when some results do show, just not the exact result the user is looking for */}
-            {searchQuery.trim() &&
-              branches.some((branch) =>
-                branch.name.toLowerCase().includes(searchQuery.toLowerCase()),
-              ) && (
-                <div className="px-2 py-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSearchForBranch}
-                    disabled={isSearching}
-                    className="w-full text-xs"
-                  >
-                    {isSearching
-                      ? "Searching..."
-                      : `Search for "${searchQuery.trim()}"`}
-                  </Button>
-                </div>
-              )}
-            {branchesHasMore && (
+            {allowSearch && (
+              <div className="px-2 py-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSearchForBranch}
+                  disabled={isSearching}
+                  className="w-full text-xs"
+                >
+                  {isSearching
+                    ? "Searching..."
+                    : `Search for "${searchQuery.trim()}"`}
+                </Button>
+              </div>
+            )}
+            {branchesHasMore && !allowSearch && (
               <CommandGroup>
                 <CommandItem
                   onSelect={() => {
