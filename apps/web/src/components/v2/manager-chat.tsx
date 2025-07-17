@@ -97,7 +97,7 @@ export function ManagerChat({
           initial={true}
         >
           <StickyToBottomContent
-            className="h-full scrollbar-pretty-auto"
+            className="scrollbar-pretty-auto h-full"
             contentClassName="space-y-4 p-4"
             content={
               <>
@@ -120,7 +120,7 @@ export function ManagerChat({
                           </div>
                         )}
                       </div>
-                      <div className="relative flex-1 space-y-1 min-w-0 overflow-x-hidden">
+                      <div className="relative min-w-0 flex-1 space-y-1 overflow-x-hidden">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human" ? "You" : "Agent"}
@@ -129,7 +129,7 @@ export function ManagerChat({
                             <MessageCopyButton content={messageContentString} />
                           </div>
                         </div>
-                        <BasicMarkdownText className="text-foreground text-sm overflow-x-hidden">
+                        <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
                           {messageContentString}
                         </BasicMarkdownText>
                       </div>

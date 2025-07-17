@@ -32,7 +32,7 @@ import {
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
 import { RequestSource } from "../../../../constants.js";
-import * as _ from 'lodash';
+import * as _ from "lodash";
 
 const THREAD_STATUS_READABLE_STRING_MAP = {
   not_started: "not started",
@@ -169,7 +169,11 @@ export function createClassificationPromptAndToolSchema(inputs: {
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
       formattedConversationHistoryPrompt ?? "",
-    ).replaceAll("{REQUEST_SOURCE}", inputs.requestSource ?? "no source provided")
+    )
+    .replaceAll(
+      "{REQUEST_SOURCE}",
+      inputs.requestSource ?? "no source provided",
+    );
 
   const schema = createClassificationSchema(
     routingOptions as [string, ...string[]],
