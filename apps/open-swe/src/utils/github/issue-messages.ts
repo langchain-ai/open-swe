@@ -92,8 +92,14 @@ export async function getMissingMessages(
       },
     });
   }
-  const untrackedCommentMessages = comments?.length
-    ? getUntrackedComments(input.messages, input.githubIssueId, comments)
+
+  // Filter comments from the open swe bot
+  const filteredComments = comments?.filter(
+    (c) => c.user?.login !== "open-swe",
+  );
+
+  const untrackedCommentMessages = filteredComments?.length
+    ? getUntrackedComments(input.messages, input.githubIssueId, filteredComments)
     : [];
 
   return [...(issueMessage ? [issueMessage] : []), ...untrackedCommentMessages];
