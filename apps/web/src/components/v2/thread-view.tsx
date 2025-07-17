@@ -52,6 +52,7 @@ export function ThreadView({
     useState<ManagerGraphState["plannerSession"]>();
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     if (
@@ -68,6 +69,18 @@ export function ThreadView({
       }
     }
   }, [stream?.values]);
+
+  useEffect(() => {
+    if (stream.error) {
+      const errorMessage =
+        typeof stream.error === "object" && "message" in stream.error
+          ? (stream.error.message as string)
+          : "An unknown error occurred in the manager";
+      setErrorMessage(errorMessage);
+    } else {
+      setErrorMessage("");
+    }
+  }, [stream.error]);
 
   const { status: realTimeStatus } = useThreadStatus(displayThread.id);
 
@@ -170,6 +183,7 @@ export function ThreadView({
           handleSendMessage={handleSendMessage}
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
+          errorMessage={errorMessage}
         />
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
