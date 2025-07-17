@@ -281,6 +281,9 @@ export async function generateAction(
     ...inputMessages,
   ]);
 
+  // Track cache performance metrics
+  trackCachePerformance(response);
+
   const hasToolCalls = !!response.tool_calls?.length;
   // No tool calls means the graph is going to end. Stop the sandbox.
   let newSandboxSessionId: string | undefined;
@@ -308,6 +311,7 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
 
 
 
