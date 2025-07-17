@@ -200,7 +200,7 @@ export async function generateAction(
     tools[tools.length - 1] = {
       ...tools[tools.length - 1],
       cache_control: { type: "ephemeral" },
-    };
+    } as any;
   }
 
   const modelWithTools = model.bindTools(tools, {
@@ -266,4 +266,5 @@ export async function generateAction(
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
   };
 }
+
 
