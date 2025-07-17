@@ -8,11 +8,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bot, Copy, CopyCheck, Send, User, Loader2 } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
-import { useStream } from "@langchain/langgraph-sdk/react";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { cn } from "@/lib/utils";
 import { isAIMessageSDK } from "@/lib/langchain-messages";
 import { BasicMarkdownText } from "../thread/markdown-text";
+
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -98,7 +97,7 @@ export function ManagerChat({
           initial={true}
         >
           <StickyToBottomContent
-            className="h-full overflow-y-auto"
+            className="scrollbar-pretty-auto h-full"
             contentClassName="space-y-4 p-4"
             content={
               <>
@@ -121,7 +120,7 @@ export function ManagerChat({
                           </div>
                         )}
                       </div>
-                      <div className="relative flex-1 space-y-1">
+                      <div className="relative min-w-0 flex-1 space-y-1 overflow-x-hidden">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human" ? "You" : "Agent"}
@@ -130,7 +129,7 @@ export function ManagerChat({
                             <MessageCopyButton content={messageContentString} />
                           </div>
                         </div>
-                        <BasicMarkdownText className="text-foreground text-sm">
+                        <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
                           {messageContentString}
                         </BasicMarkdownText>
                       </div>

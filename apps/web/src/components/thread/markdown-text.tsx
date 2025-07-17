@@ -196,7 +196,7 @@ const defaultComponents: any = {
   pre: ({ className, ...props }: { className?: string }) => (
     <pre
       className={cn(
-        "max-w-4xl overflow-x-auto rounded-lg bg-black text-white",
+        "w-full overflow-x-auto rounded-lg bg-black text-white",
         className,
       )}
       {...props}
@@ -217,7 +217,7 @@ const defaultComponents: any = {
       const code = String(children).replace(/\n$/, "");
 
       return (
-        <>
+        <div className="w-full overflow-hidden rounded-lg">
           <CodeHeader
             language={language}
             code={code}
@@ -228,7 +228,7 @@ const defaultComponents: any = {
           >
             {code}
           </SyntaxHighlighter>
-        </>
+        </div>
       );
     }
 

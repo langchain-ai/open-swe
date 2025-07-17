@@ -148,4 +148,25 @@
   .shadow-inner-left {
     box-shadow: inset 9px 0 6px -1px rgb(0 0 0 / 0.02);
   }
+
+  .scrollbar-pretty-auto {
+    overflow-y: auto;
+  }
+
+  .scrollbar-pretty-auto::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scrollbar-pretty-auto::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: rgb(209 213 219);
+  }
+
+  .scrollbar-pretty-auto::-webkit-scrollbar-track {
+    background-color: transparent;
+  }
+
+  .dark .scrollbar-pretty-auto::-webkit-scrollbar-thumb {
+    background-color: rgb(75 85 99);
+  }
 }
