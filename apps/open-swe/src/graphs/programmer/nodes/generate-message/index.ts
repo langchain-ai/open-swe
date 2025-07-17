@@ -59,9 +59,6 @@ interface CacheMetrics {
 const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
   const repoDirectory = getRepoAbsolutePath(state.targetRepository);
   const activePlanItems = getActivePlanItems(state.taskPlan);
-  const currentPlanItem = activePlanItems
-    .filter((p) => !p.completed)
-    .sort((a, b) => a.index - b.index)[0];
   const codeReview = getCodeReviewFields(state.internalMessages);
 
   const segments: CacheablePromptSegment[] = [
