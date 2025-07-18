@@ -18,4 +18,9 @@ export interface ThreadMetadata {
     number: number;
     url: string;
   };
+  pullRequest?: {
+    status: string;
+    url: string;
+  };
 }
+
