@@ -194,7 +194,7 @@ export function ThreadView({
           handleSendMessage={handleSendMessage}
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
-          errorMessage={errorMessage}
+          errorState={errorState}
         />
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">
@@ -318,6 +318,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
