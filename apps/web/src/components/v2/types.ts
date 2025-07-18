@@ -23,4 +23,3 @@ export interface ThreadMetadata {
     url: string;
   };
 }
-

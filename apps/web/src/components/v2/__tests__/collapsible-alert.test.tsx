@@ -12,7 +12,12 @@ jest.mock("framer-motion", () => ({
 }));
 
 describe("CollapsibleAlert", () => {
-  const mockIcon = <AlertCircle className="size-4" data-testid="alert-icon" />;
+  const mockIcon = (
+    <AlertCircle
+      className="size-4"
+      data-testid="alert-icon"
+    />
+  );
 
   describe("when ErrorState has no details", () => {
     const errorStateWithoutDetails: ErrorState = {
@@ -25,7 +30,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithoutDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       expect(screen.getByText("A simple error occurred")).toBeInTheDocument();
@@ -37,7 +42,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithoutDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       expect(screen.queryByText("Show details")).not.toBeInTheDocument();
@@ -50,7 +55,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithoutDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       expect(screen.getByTestId("alert-icon")).toBeInTheDocument();
@@ -59,8 +64,10 @@ describe("CollapsibleAlert", () => {
 
   describe("when ErrorState has details (overloaded_error case)", () => {
     const errorStateWithDetails: ErrorState = {
-      message: "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
-      details: "Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.",
+      message:
+        "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+      details:
+        "Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.",
     };
 
     it("renders the error message", () => {
@@ -69,10 +76,14 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
-      expect(screen.getByText("An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("shows the expand button initially", () => {
@@ -81,7 +92,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       expect(screen.getByText("Show details")).toBeInTheDocument();
@@ -94,10 +105,14 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
-      expect(screen.queryByText("Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          "Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.",
+        ),
+      ).not.toBeInTheDocument();
     });
 
     it("expands to show details when expand button is clicked", async () => {
@@ -106,7 +121,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       const expandButton = screen.getByText("Show details");
@@ -114,7 +129,11 @@ describe("CollapsibleAlert", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Hide details")).toBeInTheDocument();
-        expect(screen.getByText("Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.")).toBeInTheDocument();
+        expect(
+          screen.getByText(
+            "Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.",
+          ),
+        ).toBeInTheDocument();
       });
     });
 
@@ -124,7 +143,7 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       // First expand
@@ -141,7 +160,11 @@ describe("CollapsibleAlert", () => {
 
       await waitFor(() => {
         expect(screen.getByText("Show details")).toBeInTheDocument();
-        expect(screen.queryByText("Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText(
+            "Error: overloaded_error - The API is currently experiencing high traffic. Please try again later.",
+          ),
+        ).not.toBeInTheDocument();
       });
     });
 
@@ -151,11 +174,10 @@ describe("CollapsibleAlert", () => {
           variant="destructive"
           errorState={errorStateWithDetails}
           icon={mockIcon}
-        />
+        />,
       );
 
       expect(screen.getByTestId("alert-icon")).toBeInTheDocument();
     });
   });
 });
-
