@@ -1,8 +1,10 @@
-import { initChatModel } from "langchain/chat_models/universal";
+import {
+  ConfigurableModel,
+  initChatModel,
+} from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
 import { Task } from "./load-model.js";
-import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { isAllowedUser } from "./github/allowed-users.js";
 import { decryptSecret } from "@open-swe/shared/crypto";
 
@@ -195,14 +197,13 @@ export class ModelManager {
   public getModelConfigs(
     config: GraphConfig,
     task: Task,
-    selectedModel: BaseChatModel,
+    selectedModel: ConfigurableModel,
   ) {
     const configs: ModelLoadConfig[] = [];
     const baseConfig = this.getBaseConfigForTask(config, task);
 
     // Get selected model config
-    const modelInstance = selectedModel as any;
-    const defaultConfig = modelInstance._defaultConfig;
+    const defaultConfig = selectedModel._defaultConfig;
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
@@ -326,7 +327,7 @@ export class ModelManager {
       },
     };
 
-    const modelName = defaultModels[provider]?.[task];
+    const modelName = defaultModels[provider][task];
     if (!modelName) {
       return null;
     }

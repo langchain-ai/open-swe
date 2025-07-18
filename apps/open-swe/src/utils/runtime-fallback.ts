@@ -2,11 +2,16 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { Task } from "./load-model.js";
 import { ModelManager } from "./model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
-import { RunnableConfig } from "@langchain/core/runnables";
+import { Runnable, RunnableConfig } from "@langchain/core/runnables";
 import { StructuredToolInterface } from "@langchain/core/tools";
-import { ConfigurableModel } from "langchain/chat_models/universal";
-import { BaseMessage } from "@langchain/core/messages";
+import {
+  ConfigurableChatModelCallOptions,
+  ConfigurableModel,
+} from "langchain/chat_models/universal";
+import { AIMessageChunk, BaseMessage } from "@langchain/core/messages";
 import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
+import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
+import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -15,7 +20,11 @@ interface ExtractedTools {
   kwargs: Record<string, any>;
 }
 
-export class FallbackRunnable extends ConfigurableModel<any, any> {
+export class FallbackRunnable<
+  RunInput extends BaseLanguageModelInput = BaseLanguageModelInput,
+  CallOptions extends
+    ConfigurableChatModelCallOptions = ConfigurableChatModelCallOptions,
+> extends ConfigurableModel<RunInput, CallOptions> {
   private primaryRunnable: any;
   private config: GraphConfig;
   private task: Task;
@@ -39,9 +48,6 @@ export class FallbackRunnable extends ConfigurableModel<any, any> {
     this.modelManager = modelManager;
   }
 
-  lc_serializable = false;
-  lc_namespace = ["open-swe", "fallback"];
-
   async _generate(messages: BaseMessage[], options?: any): Promise<ChatResult> {
     const result = await this.invoke(messages as any, options);
     const generation: ChatGeneration = {
@@ -57,7 +63,10 @@ export class FallbackRunnable extends ConfigurableModel<any, any> {
     };
   }
 
-  async invoke(input: any, options?: Partial<RunnableConfig>): Promise<any> {
+  async invoke(
+    input: BaseLanguageModelInput,
+    options?: Partial<RunnableConfig>,
+  ): Promise<AIMessageChunk> {
     const modelConfigs = this.modelManager.getModelConfigs(
       this.config,
       this.task,
@@ -77,11 +86,15 @@ export class FallbackRunnable extends ConfigurableModel<any, any> {
 
       try {
         const model = await this.modelManager.initializeModel(modelConfig);
-        let runnableToUse = model as any;
+        let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
+          model;
 
         const tools = this.extractBoundTools();
-        if (tools) {
-          runnableToUse = runnableToUse.bindTools(tools.tools, tools.kwargs);
+        if (tools && "bindTools" in runnableToUse && runnableToUse.bindTools) {
+          runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
+            tools.tools,
+            tools.kwargs,
+          );
         }
 
         const config = this.extractConfig();
@@ -107,9 +120,9 @@ export class FallbackRunnable extends ConfigurableModel<any, any> {
   }
 
   bindTools(
-    tools: any[],
+    tools: BindToolsInput[],
     kwargs?: Record<string, any>,
-  ): ConfigurableModel<any, any> {
+  ): ConfigurableModel<RunInput, CallOptions> {
     const boundPrimary =
       this.primaryRunnable.bindTools?.(tools, kwargs) ?? this.primaryRunnable;
     return new FallbackRunnable(
@@ -131,8 +144,8 @@ export class FallbackRunnable extends ConfigurableModel<any, any> {
     );
   }
 
-  private getPrimaryModel(): any {
-    let current: any = this.primaryRunnable;
+  private getPrimaryModel(): ConfigurableModel {
+    let current = this.primaryRunnable;
 
     // Unwrap any LangChain bindings to get to the actual model
     while (current?.bound) {
