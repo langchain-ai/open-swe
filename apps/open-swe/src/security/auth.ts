@@ -5,6 +5,7 @@ import {
   verifyGithubUserId,
 } from "@open-swe/shared/github/verify-user";
 import {
+  API_KEY_REQUIRED_MESSAGE,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
@@ -16,6 +17,8 @@ import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
+import { isAllowedUser } from "../utils/github/allowed-users.js";
+import { validate } from "uuid";
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -29,6 +32,58 @@ interface AuthenticateReturn extends BaseAuthReturn {
   metadata: {
     installation_name: string;
   };
+}
+
+function apiKeysInRequestBody(
+  bodyStr: string | Record<string, unknown>,
+): boolean {
+  try {
+    const body = typeof bodyStr === "string" ? JSON.parse(bodyStr) : bodyStr;
+    if (
+      body.config?.configurable &&
+      ("anthropicApiKey" in body.config.configurable.apiKeys ||
+        "openaiApiKey" in body.config.configurable.apiKeys ||
+        "googleApiKey" in body.config.configurable.apiKeys)
+    ) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    // no-op
+    return false;
+  }
+}
+
+function isRunReq(reqUrl: string): boolean {
+  try {
+    const url = new URL(reqUrl);
+    const pathnameParts = url.pathname.split("/");
+    const isCreateAndWait = !!(
+      pathnameParts[1] === "threads" &&
+      validate(pathnameParts[2]) &&
+      pathnameParts[3] === "runs" &&
+      pathnameParts[4] === "wait" &&
+      pathnameParts.length === 5
+    );
+    const isCreateBackground = !!(
+      pathnameParts[1] === "threads" &&
+      validate(pathnameParts[2]) &&
+      pathnameParts[3] === "runs" &&
+      pathnameParts.length === 4
+    );
+    const isCreateStream = !!(
+      pathnameParts[1] === "threads" &&
+      validate(pathnameParts[2]) &&
+      pathnameParts[3] === "runs" &&
+      pathnameParts[4] === "stream" &&
+      pathnameParts.length === 5
+    );
+
+    return !!isCreateAndWait || !!isCreateBackground || !!isCreateStream;
+  } catch {
+    // no-op
+    return false;
+  }
 }
 
 export const auth = new Auth()
@@ -100,10 +155,18 @@ export const auth = new Auth()
       });
     }
 
+    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
+    const decryptedAccessToken = encryptedAccessToken
+      ? decryptSecret(encryptedAccessToken, encryptionKey)
+      : undefined;
+    const decryptedInstallationToken = decryptSecret(
+      encryptedInstallationToken,
+      encryptionKey,
+    );
+
     let user: GithubUser | undefined;
 
-    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
-    if (!encryptedAccessToken) {
+    if (!decryptedAccessToken) {
       // If there isn't a user access token, check to see if the user info is in headers.
       // This would indicate a bot created the request.
       const userIdHeader = request.headers.get(GITHUB_USER_ID_HEADER);
@@ -114,21 +177,31 @@ export const auth = new Auth()
         });
       }
       user = await verifyGithubUserId(
-        decryptSecret(encryptedInstallationToken, encryptionKey),
+        decryptedInstallationToken,
         Number(userIdHeader),
         userLoginHeader,
       );
     } else {
       // Ensure we decrypt the token before passing to the verification function.
-      user = await verifyGithubUser(
-        decryptSecret(encryptedAccessToken, encryptionKey),
-      );
+      user = await verifyGithubUser(decryptedAccessToken);
     }
 
     if (!user) {
       throw new HTTPException(401, {
         message: "User not found",
       });
+    }
+
+    const reqCopy = request.clone();
+    const reqBody = await reqCopy.text();
+    if (!isAllowedUser(user.login)) {
+      if (isRunReq(request.url)) {
+        if (!apiKeysInRequestBody(reqBody)) {
+          throw new HTTPException(401, {
+            message: API_KEY_REQUIRED_MESSAGE,
+          });
+        }
+      }
     }
 
     return {
