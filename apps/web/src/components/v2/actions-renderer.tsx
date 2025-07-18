@@ -32,6 +32,7 @@ import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "../ui/alert";
+import { ErrorState } from "./types";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -118,7 +119,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   );
   const joinedRunId = useRef<string | undefined>(undefined);
   const [streamLoading, setStreamLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   const stream = useStream<State>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
@@ -135,13 +136,23 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   useEffect(() => {
     if (stream.error) {
-      const errorMessage =
+      const rawErrorMessage =
         typeof stream.error === "object" && "message" in stream.error
           ? (stream.error.message as string)
           : "An unknown error occurred in the manager";
-      setErrorMessage(errorMessage);
+      
+      if (rawErrorMessage.includes("overloaded_error")) {
+        setErrorState({
+          message: "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+          details: rawErrorMessage,
+        });
+      } else {
+        setErrorState({
+          message: rawErrorMessage,
+        });
+      }
     } else {
-      setErrorMessage("");
+      setErrorState(null);
     }
   }, [stream.error]);
 
@@ -319,13 +330,14 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           thread={stream as UseStream<Record<string, unknown>>}
         />
       ) : null}
-      {errorMessage ? (
+      {errorState ? (
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertTitle>An error occurred:</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
+          <AlertDescription>{errorState.message}</AlertDescription>
         </Alert>
       ) : null}
     </div>
   );
 }
+
