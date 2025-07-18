@@ -4,7 +4,7 @@ export const ALLOWED_USERS = [
   "aliyanishfaq",
   "andrewnguonly",
   "angus-langchain",
-  // "bracesproul",
+  "bracesproul",
   "ArthurLangChain",
   "baskaryan",
   "bvs-langchain",
