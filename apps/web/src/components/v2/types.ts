@@ -2,6 +2,10 @@ export interface ErrorState {
   message: string;
   details?: string;
 }
+export interface ErrorState {
+  message: string;
+  details?: string;
+}
 
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
@@ -25,4 +29,5 @@ export interface ThreadMetadata {
     status: "draft" | "open" | "merged" | "closed";
   };
 }
+
 
