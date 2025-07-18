@@ -77,10 +77,11 @@ export function ThreadView({
         typeof stream.error === "object" && "message" in stream.error
           ? (stream.error.message as string)
           : "An unknown error occurred in the manager";
-      
+
       if (rawErrorMessage.includes("overloaded_error")) {
         setErrorState({
-          message: "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+          message:
+            "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
           details: rawErrorMessage,
         });
       } else {
@@ -318,7 +319,3 @@ export function ThreadView({
     </div>
   );
 }
-
-
-
-
