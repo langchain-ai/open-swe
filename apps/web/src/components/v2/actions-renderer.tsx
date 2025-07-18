@@ -31,8 +31,8 @@ import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
 import { AlertCircle } from "lucide-react";
-import { Alert, AlertTitle, AlertDescription } from "../ui/alert";
 import { ErrorState } from "./types";
+import { CollapsibleAlert } from "./collapsible-alert";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -332,12 +332,13 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
         />
       ) : null}
       {errorState ? (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertTitle>An error occurred:</AlertTitle>
-          <AlertDescription>{errorState.message}</AlertDescription>
-        </Alert>
+        <CollapsibleAlert
+          variant="destructive"
+          errorState={errorState}
+          icon={<AlertCircle className="size-4" />}
+        />
       ) : null}
     </div>
   );
 }
+
