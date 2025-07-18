@@ -21,7 +21,7 @@
   },
   "resolutions": {
     "@langchain/langgraph-sdk": "^0.0.95",
-    "@langchain/core": "^0.3.64",
+    "@langchain/core": "^0.3.65",
     "langsmith": "^0.3.46"
   },
   "packageManager": "yarn@3.5.1"

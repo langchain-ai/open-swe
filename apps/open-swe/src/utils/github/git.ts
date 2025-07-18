@@ -492,6 +492,9 @@ export async function cloneRepo(
 
     cloneResult = await sandbox.process.executeCommand(
       gitCloneCommand.join(" "),
+      undefined,
+      undefined,
+      TIMEOUT_SEC * 2, // two min timeout since large repos can take a while to clone
     );
 
     if (!targetRepository.baseCommit) {
@@ -514,6 +517,9 @@ export async function cloneRepo(
           );
           const cloneDefaultBranchResult = await sandbox.process.executeCommand(
             cloneDefaultBranchCommand.join(" "),
+            undefined,
+            undefined,
+            TIMEOUT_SEC * 2, // two min timeout since large repos can take a while to clone
           );
           if (cloneDefaultBranchResult.exitCode !== 0) {
             logger.error("Failed to clone default branch", {

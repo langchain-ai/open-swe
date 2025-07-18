@@ -20,6 +20,7 @@ import {
 } from "../../utils/github/label.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
+import { isAllowedUser } from "../../utils/github/allowed-users.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -128,6 +129,13 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       userId: payload.sender.id,
       userLogin: payload.sender.login,
     };
+
+    if (!isAllowedUser(issueData.userLogin)) {
+      logger.error("User is not a member of allowed orgs", {
+        username: issueData.userLogin,
+      });
+      return;
+    }
 
     const langGraphClient = createLangGraphClient({
       defaultHeaders: {
