@@ -1,3 +1,4 @@
+import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 
 export interface ErrorState {
@@ -13,13 +14,14 @@ export interface ThreadMetadata {
   repository: string;
   branch: string;
   taskPlan?: TaskPlan;
-  status: string;
+  status: ThreadUIStatus;
   githubIssue?: {
     number: number;
     url: string;
   };
   pullRequest?: {
-    status: string;
+    number: number;
     url: string;
+    status: "draft" | "open" | "merged" | "closed";
   };
 }
