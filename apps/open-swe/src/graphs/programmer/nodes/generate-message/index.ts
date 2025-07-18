@@ -21,7 +21,13 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { CODE_REVIEW_PROMPT, STATIC_SYSTEM_INSTRUCTIONS } from "./prompt.js";
+import {
+  CODE_REVIEW_PROMPT,
+  DEPENDENCIES_INSTALLED_PROMPT,
+  DEPENDENCIES_NOT_INSTALLED_PROMPT,
+  DYNAMIC_SYSTEM_PROMPT,
+  STATIC_SYSTEM_INSTRUCTIONS,
+} from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
@@ -50,47 +56,52 @@ interface CacheMetrics {
   output_tokens: number;
 }
 
+const formatDynamicContextPrompt = (state: GraphState) => {
+  return DYNAMIC_SYSTEM_PROMPT.replaceAll(
+    "{PLAN_PROMPT_WITH_SUMMARIES}",
+    formatPlanPrompt(getActivePlanItems(state.taskPlan), {
+      includeSummaries: true,
+    }),
+  )
+    .replaceAll(
+      "{PLAN_GENERATION_NOTES}",
+      state.contextGatheringNotes || "No context gathering notes available.",
+    )
+    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
+    .replaceAll(
+      "{DEPENDENCIES_INSTALLED_PROMPT}",
+      state.dependenciesInstalled
+        ? DEPENDENCIES_INSTALLED_PROMPT
+        : DEPENDENCIES_NOT_INSTALLED_PROMPT,
+    )
+    .replaceAll(
+      "{CODEBASE_TREE}",
+      state.codebaseTree || "No codebase tree generated yet.",
+    );
+};
+
+const formatStaticInstructionsPrompt = (state: GraphState) => {
+  return STATIC_SYSTEM_INSTRUCTIONS.replaceAll(
+    "{REPO_DIRECTORY}",
+    getRepoAbsolutePath(state.targetRepository),
+  ).replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+};
+
 const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
-  const repoDirectory = getRepoAbsolutePath(state.targetRepository);
-  const activePlanItems = getActivePlanItems(state.taskPlan);
   const codeReview = getCodeReviewFields(state.internalMessages);
 
   const segments: CacheablePromptSegment[] = [
     // Cache Breakpoint 2: Static Instructions
     {
       type: "text",
-      text: STATIC_SYSTEM_INSTRUCTIONS,
+      text: formatStaticInstructionsPrompt(state),
       cache_control: { type: "ephemeral" },
     },
 
     // Cache Breakpoint 3: Dynamic Context
     {
       type: "text",
-      text: `# Context
-
-<plan_information>
-## Generated Plan with Summaries
-${formatPlanPrompt(activePlanItems, { includeSummaries: true })}
-
-## Plan Generation Notes
-These are notes you took while gathering context for the plan:
-<plan-generation-notes>
-${state.contextGatheringNotes || "No context gathering notes available."}
-</plan-generation-notes>
-
-## Current Task Statuses
-${formatPlanPrompt(activePlanItems)}
-</plan_information>
-
-<codebase_structure>
-## Codebase Tree (3 levels deep, respecting .gitignore)
-Generated via: \`git ls-files | tree --fromfile -L 3\`
-Location: ${repoDirectory}
-
-${state.codebaseTree || "No codebase tree generated yet."}
-</codebase_structure>
-
-${formatCustomRulesPrompt(state.customRules)}`,
+      text: formatDynamicContextPrompt(state),
       cache_control: { type: "ephemeral" },
     },
   ];
@@ -185,11 +196,8 @@ export async function generateAction(
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
     createGetURLContentTool(),
+    createInstallDependenciesTool(state),
     ...mcpTools,
-    // Only provide the dependencies installed tool if they're not already installed.
-    ...(state.dependenciesInstalled
-      ? []
-      : [createInstallDependenciesTool(state)]),
   ];
   logger.info(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
