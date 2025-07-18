@@ -315,9 +315,9 @@ export class ModelManager {
         [Task.SUMMARIZER]: "claude-sonnet-4-0",
       },
       "google-genai": {
-        [Task.PROGRAMMER]: "gemini-2.5-pro-preview-05-06",
-        [Task.ROUTER]: "gemini-2.5-flash-preview-05-20",
-        [Task.SUMMARIZER]: "gemini-2.5-pro-preview-05-06",
+        [Task.PROGRAMMER]: "gemini-2.5-pro",
+        [Task.ROUTER]: "gemini-2.5-flash",
+        [Task.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
         [Task.PROGRAMMER]: "gpt-4o",
