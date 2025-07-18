@@ -67,7 +67,7 @@ LANGGRAPH_API_URL="http://localhost:2024"
 NEXT_PUBLIC_ASSISTANT_ID="open-swe"
 
 # For the GitHub OAuth flow
-GITHUB_APP_CLIENT_ID=""
+NEXT_PUBLIC_GITHUB_APP_ID=""
 GITHUB_APP_CLIENT_SECRET=""
 GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
 
@@ -105,7 +105,7 @@ Finally, under `Where can this GitHub App be installed?` ensure `Any account` is
 After creating the app, you will be taken to the app's settings page. Copy/generate the following fields for your environment variables:
 
 `App ID` - `GITHUB_APP_ID`
-`Client ID` - `GITHUB_APP_CLIENT_ID`
+`Client ID` - `NEXT_PUBLIC_GITHUB_APP_ID`
 `Client secrets` - Generate a new secret key, and set it under `GITHUB_APP_CLIENT_SECRET`
 Scroll down to `Private keys`, and generate a new private key. This will download a file. Set the contents of this file under `GITHUB_APP_PRIVATE_KEY`.
 Set `GITHUB_APP_REDIRECT_URI` to `http://localhost:3000/api/auth/github/callback` for local development.

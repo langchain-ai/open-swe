@@ -42,7 +42,25 @@ export async function formatInputs(
 
 <codebase-readme>
 {CODEBASE_README}
-</codebase-readme>`;
+</codebase-readme>
+
+IMPORTANT: We’ll run a LangGraph evaluation script on your code. Make sure to:
+
+1. Create a file at the project root named 'agent.py'.
+2. In 'agent.py', import and build your graph, e.g.:
+
+     from langgraph.graph import StateGraph, START, END
+     # … define nodes …
+     graph = graph_builder.compile()
+
+3. Export the compiled graph as:
+
+     compiled_graph = graph
+
+If agent.py is missing or doesn’t export compiled_graph, your submission will score 0.
+Don't add logger or unecessary print statements as they will be captured by the evaluation script,
+interferring with the evaluation.
+`;
 
   const userMessageContent = SIMPLE_PROMPT_TEMPLATE.replace(
     "{REPO}",
