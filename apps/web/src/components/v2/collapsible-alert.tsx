@@ -59,10 +59,10 @@ function CollapsibleAlert({
         <div className="line-clamp-1 min-h-4 font-medium tracking-tight">
           {title}
         </div>
-        <div className="text-muted-foreground text-sm [&_p]:leading-relaxed data-[variant=destructive]:text-destructive/90 dark:data-[variant=destructive]:text-red-200 data-[variant=warning]:text-yellow-800 dark:data-[variant=warning]:text-yellow-200 data-[variant=info]:text-blue-800 dark:data-[variant=info]:text-blue-200 data-[variant=success]:text-green-800 dark:data-[variant=success]:text-green-200">
+        <div className="text-muted-foreground data-[variant=destructive]:text-destructive/90 text-sm data-[variant=info]:text-blue-800 data-[variant=success]:text-green-800 data-[variant=warning]:text-yellow-800 dark:data-[variant=destructive]:text-red-200 dark:data-[variant=info]:text-blue-200 dark:data-[variant=success]:text-green-200 dark:data-[variant=warning]:text-yellow-200 [&_p]:leading-relaxed">
           {errorState.message}
         </div>
-        
+
         {hasDetails && (
           <>
             <AnimatePresence initial={false}>
@@ -75,16 +75,16 @@ function CollapsibleAlert({
                   transition={{ duration: 0.2, ease: "easeInOut" }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-2 rounded border border-current/20 bg-current/5 p-2 text-xs font-mono">
+                  <div className="mt-2 rounded border border-current/20 bg-current/5 p-2 font-mono text-xs">
                     {errorState.details}
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
-            
+
             <motion.button
               onClick={() => setIsExpanded(!isExpanded)}
-              className="flex items-center gap-1 text-xs text-current/70 hover:text-current transition-colors duration-200"
+              className="flex items-center gap-1 text-xs text-current/70 transition-colors duration-200 hover:text-current"
               initial={{ scale: 1 }}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -109,4 +109,3 @@ function CollapsibleAlert({
 }
 
 export { CollapsibleAlert };
-
