@@ -53,7 +53,7 @@ export function ThreadView({
     useState<ManagerGraphState["plannerSession"]>();
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   useEffect(() => {
     if (
@@ -308,4 +308,5 @@ export function ThreadView({
     </div>
   );
 }
+
 
