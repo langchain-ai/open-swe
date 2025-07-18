@@ -18,13 +18,8 @@ export function getCustomConfigurableFields(
         metadataValue.x_open_swe_ui_config.type !== "hidden" ||
         key === "apiKeys"
       ) {
-        if (key === "apiKeys") {
-          console.log("passing key", key);
-        }
         result[key as keyof GraphConfig["configurable"]] =
           config.configurable[key as keyof GraphConfig["configurable"]];
-      } else {
-        console.log("not passing key", key);
       }
     }
   }

@@ -48,7 +48,7 @@ function apiKeysInRequestBody(
       return true;
     }
     return false;
-  } catch (e) {
+  } catch {
     // no-op
     return false;
   }
