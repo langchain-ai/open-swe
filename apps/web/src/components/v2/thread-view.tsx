@@ -30,6 +30,7 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
+import { ErrorState } from "./types";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -307,3 +308,4 @@ export function ThreadView({
     </div>
   );
 }
+
