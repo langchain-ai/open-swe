@@ -2,6 +2,7 @@ import {
   GraphState,
   GraphConfig,
   GraphUpdate,
+  OpenSWETokenData,
 } from "@open-swe/shared/open-swe/types";
 import {
   loadModel,
@@ -40,6 +41,17 @@ import {
   getCodeReviewFields,
 } from "../../../../utils/review.js";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import {
+  AIMessage,
+  AIMessageChunk,
+  BaseMessage,
+  HumanMessage,
+  isAIMessage,
+  isHumanMessage,
+  isToolMessage,
+  MessageContent,
+  ToolMessage,
+} from "@langchain/core/messages";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -151,13 +163,14 @@ const calculateCostSavings = (metrics: CacheMetrics): number => {
   return costWithoutCaching - actualCost;
 };
 
-const trackCachePerformance = (response: any) => {
+const trackCachePerformance = (response: AIMessageChunk): OpenSWETokenData => {
   const metrics: CacheMetrics = {
     cache_creation_input_tokens:
-      response.usage?.cache_creation_input_tokens || 0,
-    cache_read_input_tokens: response.usage?.cache_read_input_tokens || 0,
-    input_tokens: response.usage?.input_tokens || 0,
-    output_tokens: response.usage?.output_tokens || 0,
+      response.usage_metadata?.input_token_details?.cache_creation || 0,
+    cache_read_input_tokens:
+      response.usage_metadata?.input_token_details?.cache_read || 0,
+    input_tokens: response.usage_metadata?.input_tokens || 0,
+    output_tokens: response.usage_metadata?.output_tokens || 0,
   };
 
   const totalInputTokens =
@@ -176,6 +189,65 @@ const trackCachePerformance = (response: any) => {
     costSavings: `$${costSavings.toFixed(4)}`,
     ...metrics,
   });
+
+  return {
+    totalInputTokens: metrics.input_tokens,
+    totalOutputTokens: metrics.output_tokens,
+    totalCacheWrites: metrics.cache_creation_input_tokens,
+    totalCacheHits: metrics.cache_read_input_tokens,
+  };
+};
+
+const addCacheControlToMessageContent = (
+  messageContent: MessageContent,
+): MessageContent => {
+  if (typeof messageContent === "string") {
+    return [
+      {
+        type: "text",
+        text: messageContent,
+        cache_control: { type: "ephemeral" },
+      },
+    ];
+  } else if (Array.isArray(messageContent)) {
+    if ("cache_control" in messageContent[messageContent.length - 1]) {
+      // Already set, no-op
+      return messageContent;
+    }
+
+    const newMessageContent = [...messageContent];
+    newMessageContent[newMessageContent.length - 1] = {
+      ...newMessageContent[newMessageContent.length - 1],
+      cache_control: { type: "ephemeral" },
+    };
+    return newMessageContent;
+  } else {
+    logger.warn("Unknown message content type", { messageContent });
+    return messageContent;
+  }
+};
+
+const convertToCacheControlMessage = (message: BaseMessage): BaseMessage => {
+  if (isAIMessage(message)) {
+    return new AIMessage({
+      ...message,
+      content: addCacheControlToMessageContent(message.content),
+    });
+  } else if (isHumanMessage(message)) {
+    return new HumanMessage({
+      ...message,
+      content: addCacheControlToMessageContent(message.content),
+    });
+  } else if (isToolMessage(message)) {
+    return new ToolMessage({
+      ...(message as ToolMessage),
+      content: addCacheControlToMessageContent(
+        (message as ToolMessage).content,
+      ),
+    });
+  } else {
+    return message;
+  }
 };
 
 export async function generateAction(
@@ -233,6 +305,14 @@ export async function generateAction(
     throw new Error("No messages to process.");
   }
 
+  const inputMessagesWithCache = [...inputMessages];
+  if (inputMessagesWithCache.length > 0) {
+    const lastIndex = inputMessagesWithCache.length - 1;
+    inputMessagesWithCache[lastIndex] = convertToCacheControlMessage(
+      inputMessagesWithCache[lastIndex],
+    );
+  }
+
   const response = await modelWithTools.invoke([
     {
       role: "system",
@@ -241,11 +321,11 @@ export async function generateAction(
         taskPlan: latestTaskPlan ?? state.taskPlan,
       }),
     },
-    ...inputMessages,
+    ...inputMessagesWithCache,
   ]);
 
   // Track cache performance metrics
-  trackCachePerformance(response);
+  const tokenData = trackCachePerformance(response);
 
   const hasToolCalls = !!response.tool_calls?.length;
   // No tool calls means the graph is going to end. Stop the sandbox.
@@ -272,5 +352,6 @@ export async function generateAction(
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    tokenData,
   };
 }

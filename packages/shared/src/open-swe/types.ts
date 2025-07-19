@@ -25,6 +25,26 @@ import {
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
+// TODO: FIX THIS TYPING AND NAMING
+export type OpenSWETokenData = {
+  /**
+   * The total number of input tokens passed to an LLM.
+   */
+  totalInputTokens: number;
+  /**
+   * The total number of generated tokens during the run.
+   */
+  totalOutputTokens: number;
+  /**
+   * The total number of tokens written to the cache.
+   */
+  totalCacheWrites: number;
+  /**
+   * The total number of tokens read from the cache.
+   */
+  totalCacheHits: number;
+};
+
 export type PlanItem = {
   /**
    * The index of the plan item. This is the order in which
@@ -249,6 +269,23 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => 0,
+  }),
+
+  tokenData: withLangGraph(z.custom<OpenSWETokenData>().optional(), {
+    reducer: {
+      schema: z.custom<OpenSWETokenData>().optional(),
+      fn: (state: OpenSWETokenData | undefined, update: OpenSWETokenData) => {
+        if (!state) {
+          return update;
+        }
+        return {
+          totalInputTokens: state.totalInputTokens + update.totalInputTokens,
+          totalOutputTokens: state.totalOutputTokens + update.totalOutputTokens,
+          totalCacheWrites: state.totalCacheWrites + update.totalCacheWrites,
+          totalCacheHits: state.totalCacheHits + update.totalCacheHits,
+        };
+      },
+    },
   }),
 
   // ---NOT USED---
