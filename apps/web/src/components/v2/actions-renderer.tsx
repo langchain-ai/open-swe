@@ -21,6 +21,7 @@ import {
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PLANNER_GRAPH_ID,
+  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
@@ -225,6 +226,12 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
       setStreamLoading(false);
     }
   }, [stream.messages, customNodeEvents, streamLoading]);
+
+  useEffect(() => {
+    if (graphId === PROGRAMMER_GRAPH_ID) {
+      console.log(stream.messages[stream.messages.length - 1]);
+    }
+  }, [stream.messages]);
 
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);

@@ -7,9 +7,7 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as os from "os";
+import { Sandbox } from "@daytonaio/sdk";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
 
@@ -21,18 +19,27 @@ const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
  * @returns Object with success status and output or error message
  */
 async function applyPatchWithGit(
-  sandbox: any,
+  sandbox: Sandbox,
   workDir: string,
   diffContent: string,
 ): Promise<{ success: boolean; output: string }> {
-  let tempDir = "";
-  try {
-    // Create a temporary file to store the diff
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "git-patch-"));
-    const tempPatchFile = path.join(tempDir, "patch.diff");
+  const tempPatchFile = `/tmp/patch_${Date.now()}_${Math.random().toString(36).substring(2)}.diff`;
 
-    // Write the diff to the temporary file
-    await fs.writeFile(tempPatchFile, diffContent, "utf8");
+  try {
+    // Create the patch file in the sandbox
+    const createFileResponse = await sandbox.process.executeCommand(
+      `cat > "${tempPatchFile}" << 'EOF'\n${diffContent}\nEOF`,
+      workDir,
+      {},
+      10, // 10 seconds timeout for file creation
+    );
+
+    if (createFileResponse.exitCode !== 0) {
+      return {
+        success: false,
+        output: `Failed to create patch file: ${createFileResponse.result || "Unknown error"}`,
+      };
+    }
 
     // Execute git apply with --verbose for detailed error messages
     const response = await sandbox.process.executeCommand(
@@ -61,20 +68,6 @@ async function applyPatchWithGit(
           ? error.message
           : "Unknown error applying patch with git",
     };
-  } finally {
-    // Clean up the temporary file after git apply has completed
-    if (tempDir) {
-      try {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        logger.warn(`Failed to clean up temporary directory: ${tempDir}`, {
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
-      }
-    }
   }
 }
 
