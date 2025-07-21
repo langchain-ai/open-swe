@@ -475,7 +475,7 @@ function ActionItem(props: ActionItemProps) {
       );
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
-      const hasOutput = props.output;
+      const hasOutput = !!props.output;
 
       return (
         <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
