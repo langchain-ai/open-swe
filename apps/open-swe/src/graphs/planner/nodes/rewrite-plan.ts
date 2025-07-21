@@ -10,7 +10,10 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@open-swe/shared/open-swe/planner/types";
-import { getUserRequest } from "../../../utils/user-request.js";
+import {
+  getInitialUserRequest,
+  getRecentUserRequest,
+} from "../../../utils/user-request.js";
 import {
   loadModel,
   supportsParallelToolCallsParam,
@@ -149,12 +152,16 @@ async function identifyTasksToModifyFunc(
     },
   );
 
-  const userRequest = getUserRequest(state.messages);
+  const userInitialRequest = getInitialUserRequest(state.messages);
+  const userFollowupRequest = getRecentUserRequest(state.messages);
+  const userRequest =
+    userFollowupRequest ?? userInitialRequest ?? "No user message found";
+
   const response = await modelWithIdentifyChangesTool.invoke([
     {
       role: "user",
       content: formatSysPromptIdentifyTasks(
-        userRequest || "No user message found",
+        userRequest,
         state.planChangeRequest,
         state.proposedPlan,
       ),
@@ -217,12 +224,16 @@ async function updatePlanTasksFunc(
       : {}),
   });
 
-  const userRequest = getUserRequest(state.messages);
+  const userInitialRequest = getInitialUserRequest(state.messages);
+  const userFollowupRequest = getRecentUserRequest(state.messages);
+  const userRequest =
+    userFollowupRequest ?? userInitialRequest ?? "No user message found";
+
   const response = await modelWithUpdatePlanTasksTool.invoke([
     {
       role: "user",
       content: formatSysPromptRewritePlan(
-        userRequest || "No user message found",
+        userRequest,
         state.planChangeRequest,
         state.proposedPlan,
         tasksToModify,

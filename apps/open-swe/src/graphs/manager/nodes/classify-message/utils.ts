@@ -31,6 +31,7 @@ import {
   START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION,
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
+import { RequestSource } from "../../../../constants.js";
 
 const THREAD_STATUS_READABLE_STRING_MAP = {
   not_started: "not started",
@@ -72,6 +73,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
   messages: BaseMessage[];
   taskPlan: TaskPlan;
   proposedPlan?: string[];
+  requestSource?: RequestSource;
 }): {
   prompt: string;
   schema: z.ZodTypeAny;
@@ -116,15 +118,14 @@ export function createClassificationPromptAndToolSchema(inputs: {
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
 
-  const routingOptions: [string, ...string[]] = [
-    "no_op",
+  const routingOptions = [
     ...(programmerRunning ? ["update_programmer"] : []),
-    ...((plannerNotStarted ?? plannerAndProgrammerIdle)
-      ? ["start_planner"]
-      : []),
+    ...(plannerNotStarted ? ["start_planner"] : []),
+    ...(plannerAndProgrammerIdle ? ["start_planner_for_followup"] : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
     ...(showCreateIssueOption ? ["create_new_issue"] : []),
+    "no_op",
   ];
 
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
@@ -167,9 +168,15 @@ export function createClassificationPromptAndToolSchema(inputs: {
     .replaceAll(
       "{CONVERSATION_HISTORY_PROMPT}",
       formattedConversationHistoryPrompt ?? "",
+    )
+    .replaceAll(
+      "{REQUEST_SOURCE}",
+      inputs.requestSource ?? "no source provided",
     );
 
-  const schema = createClassificationSchema(routingOptions);
+  const schema = createClassificationSchema(
+    routingOptions as [string, ...string[]],
+  );
 
   return {
     prompt,

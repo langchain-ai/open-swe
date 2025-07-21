@@ -27,6 +27,7 @@ import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
 import { getCustomRules } from "../../utils/custom-rules.js";
+import { withRetry } from "../../utils/retry.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -62,6 +63,7 @@ export async function initializeSandbox(
         ...base.data,
         status,
         ...(error ? { error } : {}),
+        runId: config.configurable?.run_id ?? "",
       },
     };
     events.push(event);
@@ -257,10 +259,18 @@ export async function initializeSandbox(
     },
   };
   emitStepEvent(baseCloneRepoAction, "pending");
-  const cloneRepoRes = await cloneRepo(sandbox, targetRepository, {
-    githubInstallationToken,
-    stateBranchName: branchName,
-  });
+
+  // Retry the clone command up to 3 times. Sometimes, it can timeout if the repo is large.
+  const cloneRepoRes = await withRetry(
+    async () => {
+      return await cloneRepo(sandbox, targetRepository, {
+        githubInstallationToken,
+        stateBranchName: branchName,
+      });
+    },
+    { retries: 3, delay: 0 },
+  );
+
   if (cloneRepoRes.exitCode !== 0) {
     emitStepEvent(
       baseCloneRepoAction,

@@ -11,7 +11,7 @@ import {
   Task,
 } from "../../../utils/load-model.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { getUserRequest } from "../../../utils/user-request.js";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { getPlannerNotes } from "../utils/get-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
@@ -47,9 +47,7 @@ You MUST adhere to the following criteria when generating your notes:
 - Carefully inspect the proposed plan. Your notes should be focused on context which will be most useful to you when you execute the plan. You may reference specific proposed plan items in your notes.
 {EXTRA_RULES}
 
-Here is the user's request
-## User request:
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 
 Here is the conversation history:
 ## Conversation history:
@@ -63,14 +61,12 @@ With all of this in mind, please carefully inspect the conversation history, and
 `;
 
 const formatPrompt = (state: PlannerGraphState): string => {
-  const userRequest =
-    getUserRequest(state.messages) || "No user request provided.";
   const plannerNotes = getPlannerNotes(state.messages)
     .map((n) => `  - ${n}`)
     .join("\n");
 
   return systemPrompt
-    .replace("{USER_REQUEST}", userRequest)
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replace(
       "{CONVERSATION_HISTORY}",
       state.messages.map(getMessageString).join("\n"),

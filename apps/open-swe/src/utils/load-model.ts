@@ -1,5 +1,7 @@
 import { initChatModel } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { isAllowedUser } from "./github/allowed-users.js";
+import { decryptSecret } from "@open-swe/shared/crypto";
 
 export enum Task {
   /**
@@ -35,6 +37,22 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
   },
 };
 
+const providerToApiKey = (
+  providerName: string,
+  apiKeys: Record<string, string>,
+): string => {
+  switch (providerName) {
+    case "openai":
+      return apiKeys.openaiApiKey;
+    case "anthropic":
+      return apiKeys.anthropicApiKey;
+    case "google-genai":
+      return apiKeys.googleApiKey;
+    default:
+      throw new Error(`Unknown provider: ${providerName}`);
+  }
+};
+
 export async function loadModel(config: GraphConfig, task: Task) {
   const modelStr =
     config.configurable?.[`${task}ModelName`] ??
@@ -66,9 +84,35 @@ export async function loadModel(config: GraphConfig, task: Task) {
     maxTokens = maxTokens > 8_192 ? 8_192 : maxTokens;
   }
 
+  // TODO: Fix types
+  const userLogin = (config.configurable as any)?.langgraph_auth_user
+    ?.display_name;
+  const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+  if (!secretsEncryptionKey) {
+    throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
+  }
+  if (!userLogin) {
+    throw new Error("User login not found in config");
+  }
+  const apiKeys = config.configurable?.apiKeys;
+  let apiKey: string | null = null;
+  if (!isAllowedUser(userLogin)) {
+    if (!apiKeys) {
+      throw new Error("API keys not found in config");
+    }
+    apiKey = decryptSecret(
+      providerToApiKey(modelProvider, apiKeys),
+      secretsEncryptionKey,
+    );
+    if (!apiKey) {
+      throw new Error("No API key found for provider: " + modelProvider);
+    }
+  }
+
   const model = await initChatModel(modelName, {
     modelProvider,
     temperature: thinkingModel ? undefined : temperature,
+    ...(apiKey ? { apiKey } : {}),
     ...(thinkingModel && modelProvider === "anthropic"
       ? {
           thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },

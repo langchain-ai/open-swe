@@ -11,6 +11,7 @@ import { getBranchName } from "../../../utils/github/git.js";
 import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getRecentUserRequest } from "../../../utils/user-request.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -27,6 +28,9 @@ export async function startPlanner(
   });
 
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
+  const followupMessage = getRecentUserRequest(state.messages, {
+    returnFullMessage: true,
+  });
   try {
     const runInput: PlannerGraphUpdate = {
       // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
@@ -36,6 +40,7 @@ export async function startPlanner(
       taskPlan: state.taskPlan,
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
+      ...(followupMessage && { messages: [followupMessage] }),
     };
     const run = await langGraphClient.runs.create(
       plannerThreadId,

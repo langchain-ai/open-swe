@@ -1,8 +1,10 @@
+import { RequestSource } from "../../../../constants.js";
+
 export const UPDATE_PROGRAMMER_ROUTING_OPTION = `- update_programmer: You should call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer's current session.\n`;
 
 export const START_PLANNER_ROUTING_OPTION = `- start_planner: You should call this route if the user's message is a complete request you can send to the planner, which it can use to generate a plan. This route may be called when the planner has not started yet.\n`;
 
-export const START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION = `- start_planner: You should call this route if the user's message is a complete followup request you can send to the planner, which it can use to generate a plan new plan to address the user's feedback/followup request. This route may be called when the planner and programmer are no longer running (e.g. after the user's initial request has been completed).\n`;
+export const START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION = `- start_planner_for_followup: You should call this route if the user's message is a followup request you can send to the planner, which it can use to generate a plan new plan to address the user's feedback/followup request. This route may be called when the planner and programmer are no longer running (e.g. after the user's initial request has been completed).\n`;
 
 export const UPDATE_PLANNER_ROUTING_OPTION = `- update_planner: You should call this route if the user sends a new message containing anything from a related request that the planner should plan for, additional context about their previous request/the codebase, or something which the planner should be aware of.\n`;
 
@@ -41,6 +43,9 @@ Ensure your response is clear, and concise.
 
 Although you're only supposed to classify & respond to the latest message, this does not mean you should look at it in isolation. You should consider the conversation history as a whole, and the current status of your two AI assistants (programmer and planner) to determine how to respond & route the user's new message.
 
+If the source is from a '${RequestSource.GITHUB_ISSUE_WEBHOOK}', you should ALWAYS classify it as a full request which should be routed to the planner.
+The instances where the source will be '${RequestSource.GITHUB_ISSUE_WEBHOOK}' are when the user labels a GitHub issue as a task to be completed by the AI coding agent system.
+
 # Context
 Although it's not shown here, you do have access to the full repository contents the user is referencing. Because of this, you should always assume you'll have access to any/all files or folders the user is referencing.
 
@@ -48,14 +53,17 @@ Although it's not shown here, you do have access to the full repository contents
 The planner's current status is: {PLANNER_STATUS}
 The programmer's current status is: {PROGRAMMER_STATUS}
 
+# Source
+The source of the request is: {REQUEST_SOURCE}
+
 {TASK_PLAN_PROMPT}
 {CONVERSATION_HISTORY_PROMPT}
 
 # Routing Options
 Based on all of the context provided above, generate a response to send to the user, including messaging about the route you'll select from the below options in your next step.
 Your routing options are:
-- no_op: This should be called when the user's message is not a new request, additional context, or a new issue to create. This should only be called when none of the routing options are appropriate.
 {UPDATE_PROGRAMMER_ROUTING_OPTION}{START_PLANNER_ROUTING_OPTION}{UPDATE_PLANNER_ROUTING_OPTION}{RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION}{CREATE_NEW_ISSUE_ROUTING_OPTION}{START_PLANNER_FOR_FOLLOWUP_ROUTING_OPTION}
+- no_op: This should be called when the user's message is not a new request, additional context, or a new issue to create. This should only be called when none of the routing options are appropriate.
 
 # Response
 Your response should be clear, concise and straight to the point. Do NOT include any additional context, such as an idea for how to implement their request.

@@ -18,8 +18,8 @@ import {
   Task,
 } from "../../../utils/load-model.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
-import { getUserRequest } from "../../../utils/user-request.js";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { formatUserRequestPrompt } from "../../../utils/user-request.js";
+import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import {
   deleteSandbox,
   getSandboxWithErrorHandling,
@@ -38,16 +38,18 @@ You have just completed all of your tasks, and are now ready to open a pull requ
 Here are all of the tasks you completed:
 {COMPLETED_TASKS}
 
-And here is the user's original request:
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 
 With all of this in mind, please use the \`open_pr\` tool to open a pull request.`;
 
-const formatPrompt = (taskPlan: PlanItem[], userRequest: string): string => {
+const formatPrompt = (
+  taskPlan: PlanItem[],
+  messages: BaseMessage[],
+): string => {
   const completedTasks = taskPlan.filter((task) => task.completed);
   return openPrSysPrompt
     .replace("{COMPLETED_TASKS}", formatPlanPromptWithSummaries(completedTasks))
-    .replace("{USER_REQUEST}", userRequest);
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(messages));
 };
 
 export async function openPullRequest(
@@ -108,11 +110,13 @@ export async function openPullRequest(
       : {}),
   });
 
-  const userRequest = getUserRequest(state.internalMessages);
   const response = await modelWithTool.invoke([
     {
       role: "user",
-      content: formatPrompt(getActivePlanItems(state.taskPlan), userRequest),
+      content: formatPrompt(
+        getActivePlanItems(state.taskPlan),
+        state.internalMessages,
+      ),
     },
   ]);
 

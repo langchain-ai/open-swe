@@ -14,7 +14,10 @@ import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import {
+  API_KEY_REQUIRED_MESSAGE,
+  MANAGER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 
@@ -113,7 +116,31 @@ export function TerminalInput({
         setContentBlocks([]);
         setAutoAcceptPlan(false);
       } catch (e) {
-        console.error(e);
+        if (
+          typeof e === "object" &&
+          e !== null &&
+          "message" in e &&
+          e.message !== null &&
+          typeof e.message === "string" &&
+          e.message.includes(API_KEY_REQUIRED_MESSAGE)
+        ) {
+          toast.error(
+            <p>
+              {API_KEY_REQUIRED_MESSAGE} Please add your API key(s) in{" "}
+              <a
+                className="text-blue-500 underline underline-offset-1 dark:text-blue-400"
+                href="/settings?tab=api-keys"
+              >
+                settings
+              </a>
+            </p>,
+            {
+              richColors: true,
+              duration: 30_000,
+              closeButton: true,
+            },
+          );
+        }
       } finally {
         setLoading(false);
       }

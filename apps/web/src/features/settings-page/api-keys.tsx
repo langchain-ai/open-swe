@@ -12,10 +12,12 @@ import { Eye, EyeOff, Key, Trash2 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 
 interface ApiKey {
   id: string;
   name: string;
+  description?: string;
   value: string;
   isVisible: boolean;
   lastUsed?: string;
@@ -26,71 +28,81 @@ interface ApiKeySection {
   keys: ApiKey[];
 }
 
+const API_KEY_SECTIONS: Record<string, Omit<ApiKeySection, "keys">> = {
+  llms: {
+    title: "LLMs",
+  },
+  infrastructure: {
+    title: "Infrastructure",
+  },
+};
+
+const API_KEY_DEFINITIONS = {
+  llms: [
+    { id: "anthropicApiKey", name: "Anthropic" },
+    { id: "openaiApiKey", name: "OpenAI" },
+    { id: "googleApiKey", name: "Google Gen AI" },
+  ],
+  infrastructure: [
+    {
+      id: "daytonaApiKey",
+      name: "Daytona",
+      description: "Users not required to set this if using the demo",
+    },
+  ],
+};
+
 export function APIKeysTab() {
-  const [apiKeySections, setApiKeySections] = useState<
-    Record<string, ApiKeySection>
-  >({
-    llms: {
-      title: "LLMs",
-      keys: [
-        {
-          id: "anthropicApiKey",
-          name: "Anthropic",
-          value: "",
-          isVisible: false,
-        },
-        { id: "openaiApiKey", name: "OpenAI", value: "", isVisible: false },
-        {
-          id: "googleApiKey",
-          name: "Google Gen AI",
-          value: "",
-          isVisible: false,
-        },
-      ],
-    },
-    infrastructure: {
-      title: "Infrastructure",
-      keys: [
-        { id: "daytonaApiKey", name: "Daytona", value: "", isVisible: false },
-      ],
-    },
-  });
+  const { getConfig, updateConfig } = useConfigStore();
+  const config = getConfig(DEFAULT_CONFIG_KEY);
 
-  const toggleKeyVisibility = (sectionKey: string, keyId: string) => {
-    setApiKeySections((prev) => ({
+  const [visibilityState, setVisibilityState] = useState<
+    Record<string, boolean>
+  >({});
+
+  const toggleKeyVisibility = (keyId: string) => {
+    setVisibilityState((prev) => ({
       ...prev,
-      [sectionKey]: {
-        ...prev[sectionKey],
-        keys: prev[sectionKey].keys.map((key) =>
-          key.id === keyId ? { ...key, isVisible: !key.isVisible } : key,
-        ),
-      },
+      [keyId]: !prev[keyId],
     }));
   };
 
-  const updateApiKey = (sectionKey: string, keyId: string, value: string) => {
-    setApiKeySections((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        ...prev[sectionKey],
-        keys: prev[sectionKey].keys.map((key) =>
-          key.id === keyId ? { ...key, value } : key,
-        ),
-      },
-    }));
+  const updateApiKey = (keyId: string, value: string) => {
+    const currentApiKeys = config.apiKeys || {};
+    updateConfig(DEFAULT_CONFIG_KEY, "apiKeys", {
+      ...currentApiKeys,
+      [keyId]: value,
+    });
   };
 
-  const deleteApiKey = (sectionKey: string, keyId: string) => {
-    setApiKeySections((prev) => ({
-      ...prev,
-      [sectionKey]: {
-        ...prev[sectionKey],
-        keys: prev[sectionKey].keys.map((key) =>
-          key.id === keyId ? { ...key, value: "" } : key,
-        ),
-      },
-    }));
+  const deleteApiKey = (keyId: string) => {
+    const currentApiKeys = config.apiKeys || {};
+    const updatedApiKeys = { ...currentApiKeys };
+    delete updatedApiKeys[keyId];
+    updateConfig(DEFAULT_CONFIG_KEY, "apiKeys", updatedApiKeys);
   };
+
+  const getApiKeySections = (): Record<string, ApiKeySection> => {
+    const sections: Record<string, ApiKeySection> = {};
+    const apiKeys = config.apiKeys || {};
+
+    Object.entries(API_KEY_SECTIONS).forEach(([sectionKey, sectionInfo]) => {
+      sections[sectionKey] = {
+        ...sectionInfo,
+        keys: API_KEY_DEFINITIONS[
+          sectionKey as keyof typeof API_KEY_DEFINITIONS
+        ].map((keyDef) => ({
+          ...keyDef,
+          value: apiKeys[keyDef.id] || "",
+          isVisible: visibilityState[keyDef.id] || false,
+        })),
+      };
+    });
+
+    return sections;
+  };
+
+  const apiKeySections = getApiKeySections();
 
   return (
     <div className="space-y-8">
@@ -148,13 +160,18 @@ export function APIKeysTab() {
                       >
                         API Key
                       </Label>
+                      {apiKey.description && (
+                        <p className="text-muted-foreground text-xs">
+                          {apiKey.description}
+                        </p>
+                      )}
                       <div className="mt-1 flex items-center gap-2">
                         <Input
                           id={`${apiKey.id}-key`}
                           type={apiKey.isVisible ? "text" : "password"}
                           value={apiKey.value}
                           onChange={(e) =>
-                            updateApiKey(sectionKey, apiKey.id, e.target.value)
+                            updateApiKey(apiKey.id, e.target.value)
                           }
                           placeholder={`Enter your ${apiKey.name} API key`}
                           className="font-mono text-sm"
@@ -162,9 +179,7 @@ export function APIKeysTab() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() =>
-                            toggleKeyVisibility(sectionKey, apiKey.id)
-                          }
+                          onClick={() => toggleKeyVisibility(apiKey.id)}
                           className="px-2"
                         >
                           {apiKey.isVisible ? (
@@ -177,7 +192,7 @@ export function APIKeysTab() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => deleteApiKey(sectionKey, apiKey.id)}
+                            onClick={() => deleteApiKey(apiKey.id)}
                             className={cn(
                               "px-2",
                               "text-destructive hover:bg-destructive/10 hover:text-destructive",
@@ -192,16 +207,8 @@ export function APIKeysTab() {
 
                   <div className="flex items-center justify-between">
                     <p className="text-muted-foreground text-xs">
-                      Your API key is stored securely and encrypted
+                      Your API key is stored
                     </p>
-                    {apiKey.value && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                      >
-                        Test Connection
-                      </Button>
-                    )}
                   </div>
                 </div>
               </div>

@@ -117,6 +117,5 @@ Generated via: \`git diff {BASE_BRANCH_NAME} --name-only\`
 {PREVIOUS_REVIEW_PROMPT}
 
 <task_context>
-The user's request is as follows (it's also included in the conversation history below).
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 </task_context>`;

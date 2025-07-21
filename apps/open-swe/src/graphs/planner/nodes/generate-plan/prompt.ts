@@ -15,7 +15,7 @@ Generate an execution plan to address the user's request. Your plan will guide t
 It should contain enough information to not require many additional context gathering steps to execute.
 
 <user_request>
-{USER_REQUEST}
+{USER_REQUEST_PROMPT}
 </user_request>
 </task>
 

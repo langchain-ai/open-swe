@@ -14,7 +14,10 @@ import {
 } from "@langchain/langgraph/prebuilt";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
-import { getUserRequest } from "../../../utils/user-request.js";
+import {
+  getInitialUserRequest,
+  getRecentUserRequest,
+} from "../../../utils/user-request.js";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
@@ -41,8 +44,9 @@ function createAcceptedPlanMessage(input: {
   planTitle: string;
   planItems: PlanItem[];
   interruptType: HumanResponse["type"];
+  runId: string;
 }) {
-  const { planTitle, planItems, interruptType } = input;
+  const { planTitle, planItems, interruptType, runId } = input;
   const acceptedPlanEvent: CustomNodeEvent = {
     nodeId: ACCEPTED_PLAN_NODE_ID,
     actionId: uuidv4(),
@@ -53,6 +57,7 @@ function createAcceptedPlanMessage(input: {
       planTitle,
       planItems,
       interruptType,
+      runId,
     },
   };
 
@@ -143,7 +148,9 @@ export async function interruptProposedPlan(
   }
 
   let planItems: PlanItem[];
-  const userRequest = getUserRequest(state.messages);
+  const userRequest = getInitialUserRequest(state.messages);
+  const userFollowupRequest = getRecentUserRequest(state.messages);
+  const userTaskRequest = userFollowupRequest || userRequest;
   const runInput: GraphUpdate = {
     contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
@@ -160,7 +167,7 @@ export async function interruptProposedPlan(
       completed: false,
     }));
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },
@@ -177,6 +184,7 @@ export async function interruptProposedPlan(
           planTitle: state.proposedPlanTitle,
           planItems,
           interruptType: "accept",
+          runId: config.configurable?.run_id ?? "",
         }),
       ],
     });
@@ -238,7 +246,7 @@ export async function interruptProposedPlan(
     }));
 
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },
@@ -255,7 +263,7 @@ export async function interruptProposedPlan(
     }));
 
     runInput.taskPlan = createNewTask(
-      userRequest,
+      userTaskRequest,
       state.proposedPlanTitle,
       planItems,
       { existingTaskPlan: state.taskPlan },
@@ -275,6 +283,7 @@ export async function interruptProposedPlan(
         planTitle: state.proposedPlanTitle,
         planItems,
         interruptType: humanResponse.type,
+        runId: config.configurable?.run_id ?? "",
       }),
     ],
   });
