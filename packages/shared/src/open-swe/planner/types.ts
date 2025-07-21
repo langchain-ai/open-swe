@@ -3,6 +3,7 @@ import { z } from "zod";
 import { MessagesZodState } from "@langchain/langgraph";
 import {
   AgentSession,
+  CacheMetrics,
   CustomRules,
   TargetRepository,
   TaskPlan,
@@ -89,6 +90,24 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     reducer: {
       schema: z.custom<boolean>().optional(),
       fn: (_state, update) => update,
+    },
+  }),
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+    reducer: {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: (state: CacheMetrics | undefined, update: CacheMetrics) => {
+        if (!state) {
+          return update;
+        }
+        return {
+          cacheCreationInputTokens:
+            state.cacheCreationInputTokens + update.cacheCreationInputTokens,
+          cacheReadInputTokens:
+            state.cacheReadInputTokens + update.cacheReadInputTokens,
+          inputTokens: state.inputTokens + update.inputTokens,
+          outputTokens: state.outputTokens + update.outputTokens,
+        };
+      },
     },
   }),
 });
