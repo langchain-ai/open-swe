@@ -53,7 +53,7 @@ export class FallbackRunnable<
     messages: BaseMessage[],
     options?: Record<string, any>,
   ): Promise<ChatResult> {
-    const result = await this.invoke(messages as any, options);
+    const result = await this.invoke(messages, options);
     const generation: ChatGeneration = {
       message: result,
       text: result?.content ? getMessageContentString(result.content) : "",
@@ -131,10 +131,13 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
-    );
+    ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
-  withConfig(config?: RunnableConfig): any {
+  // @ts-expect-error - types are hard man :/
+  withConfig(
+    config?: RunnableConfig,
+  ): ConfigurableModel<RunInput, CallOptions> {
     const configuredPrimary =
       this.primaryRunnable.withConfig?.(config) ?? this.primaryRunnable;
     return new FallbackRunnable(
@@ -142,7 +145,7 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
-    );
+    ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
   private getPrimaryModel(): ConfigurableModel {
