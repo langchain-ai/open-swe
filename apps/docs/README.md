@@ -1,16 +1,14 @@
-# Open SWE Docs
+# Open SWE Documentation
 
-The Open SWE docs are built with Mintlify. To preview the docs locally, run the following command:
+The documentation site for Open SWE, built with Mintlify to provide comprehensive guides and API references.
 
-```bash
-npx mintlify dev
-```
+## Documentation
 
-Or install mint globally:
+For the complete documentation, visit [docs.langchain.com/labs/swe/](https://docs.langchain.com/labs/swe/).
 
-```bash
-npm i -g mintlify
-mintlify dev
-```
+## Development
 
-This will start a local development server at http://localhost:3000. You can now view and edit your docs in real-time.
+1. Install dependencies: `yarn install` (from repository root)
+2. Start the development server: `yarn dev` (from apps/docs directory)
+
+This will start a local development server at http://localhost:3000 where you can preview the documentation.
