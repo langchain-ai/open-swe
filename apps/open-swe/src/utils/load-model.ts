@@ -43,12 +43,7 @@ export async function loadModel(config: GraphConfig, task: Task) {
   if (!model) {
     throw new Error(`Model loading returned undefined for task: ${task}`);
   }
-  const fallbackModel = new FallbackRunnable(
-    model,
-    config,
-    task,
-    modelManager,
-  );
+  const fallbackModel = new FallbackRunnable(model, config, task, modelManager);
   return fallbackModel;
 }
 
