@@ -90,6 +90,7 @@ export async function openPullRequest(
       sandbox,
       {
         branchName,
+        githubInstallationToken,
       },
     );
   }

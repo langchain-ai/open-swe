@@ -27,6 +27,7 @@ import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
+import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -140,12 +141,14 @@ export async function takeReviewerActions(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
+    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
     branchName = await checkoutBranchAndCommit(
       config,
       state.targetRepository,
       sandbox,
       {
         branchName,
+        githubInstallationToken,
       },
     );
   }

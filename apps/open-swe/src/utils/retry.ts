@@ -12,10 +12,10 @@ interface RetryOptions {
 export async function withRetry<T>(
   fn: () => Promise<T>,
   options: RetryOptions = {},
-): Promise<T> {
+): Promise<T | Error | undefined> {
   const { retries = 3, delay = 0 } = options;
 
-  let lastError: Error;
+  let lastError: Error | undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -24,7 +24,7 @@ export async function withRetry<T>(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt === retries) {
-        throw lastError;
+        return lastError;
       }
 
       if (delay > 0) {
@@ -33,7 +33,7 @@ export async function withRetry<T>(
     }
   }
 
-  throw lastError!;
+  return lastError;
 }
 
 /**
@@ -45,6 +45,6 @@ export async function withRetry<T>(
 export function createRetryWrapper<T extends any[], R>(
   fn: (...args: T) => Promise<R>,
   options: RetryOptions = {},
-): (...args: T) => Promise<R> {
+): (...args: T) => Promise<R | Error | undefined> {
   return (...args: T) => withRetry(() => fn(...args), options);
 }
