@@ -11,4 +11,3 @@ For detailed setup and usage information, see the [development setup documentati
 1. Copy the environment file: `cp .env.example .env` and fill in the required values
 2. Install dependencies: `yarn install` (from repository root)
 3. Start the development server: `yarn dev` (from repository root)
-

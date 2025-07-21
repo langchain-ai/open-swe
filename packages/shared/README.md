@@ -12,4 +12,3 @@ For information about the monorepo structure and shared packages, see the [monor
 2. Build the shared package: `yarn build` (from repository root)
 
 The shared package must be built before other packages can import from it.
-

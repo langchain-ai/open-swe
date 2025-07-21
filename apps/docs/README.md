@@ -12,4 +12,3 @@ For the complete documentation, visit [docs.langchain.com/labs/swe/](https://doc
 2. Start the development server: `yarn dev` (from apps/docs directory)
 
 This will start a local development server at http://localhost:3000 where you can preview the documentation.
-
