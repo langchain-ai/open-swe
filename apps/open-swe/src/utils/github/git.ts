@@ -46,39 +46,6 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
   return `open-swe/${threadId}`;
 }
 
-async function commitAll(
-  absoluteRepoDir: string,
-  message: string,
-  sandbox: Sandbox,
-): Promise<ExecuteResponse | false> {
-  try {
-    const gitAddOutput = await sandbox.process.executeCommand(
-      `git add -A && git commit -m "${message}"`,
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
-
-    if (gitAddOutput.exitCode !== 0) {
-      logger.error(`Failed to commit all changes to git repository`, {
-        gitAddOutput,
-      });
-    }
-    return gitAddOutput;
-  } catch (e) {
-    const errorFields = getSandboxErrorFields(e);
-    logger.error(`Failed to commit all changes to git repository`, {
-      ...(errorFields && { errorFields }),
-      ...(e instanceof Error && {
-        name: e.name,
-        message: e.message,
-        stack: e.stack,
-      }),
-    });
-    return false;
-  }
-}
-
 export async function getChangedFilesStatus(
   absoluteRepoDir: string,
   sandbox: Sandbox,
@@ -149,7 +116,7 @@ export async function checkoutBranchAndCommit(
 
   logger.info(`Committing changes to branch ${branchName}`);
   // Commit the changes. We can use the sandbox executeCommand API for this since it doesn't require a token.
-  await sandbox.git.add(absoluteRepoDir, ["-A"]);
+  await sandbox.git.add(absoluteRepoDir, ["."]);
 
   const botAppName = process.env.GITHUB_APP_NAME;
   if (!botAppName) {
@@ -265,7 +232,7 @@ async function performClone(
   await sandbox.git.clone(
     cloneUrl,
     absoluteRepoDir,
-    branchName,
+    undefined,
     targetRepository.baseCommit,
     "git",
     githubInstallationToken,
@@ -276,15 +243,17 @@ async function performClone(
     baseCommit: targetRepository.baseCommit,
   });
 
-  if (branchName) {
-    return branchName;
+  if (targetRepository.baseCommit) {
+    return targetRepository.baseCommit;
   }
 
-  // No branch name, checkout or create one
-  if (!args.threadId) {
-    throw new Error("Can not create new branch without thread ID");
+  const newBranchName =
+    branchName || (args.threadId ? getBranchName(args.threadId) : undefined);
+  if (!newBranchName) {
+    throw new Error(
+      "Can not create new branch without thread ID or branch name",
+    );
   }
-  const newBranchName = getBranchName(args.threadId);
 
   try {
     // No branch name, create one

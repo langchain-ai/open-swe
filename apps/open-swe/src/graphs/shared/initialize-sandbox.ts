@@ -296,7 +296,6 @@ export async function initializeSandbox(
       repo: repoName,
     },
   };
-  emitStepEvent(baseCheckoutBranchAction, "pending");
   emitStepEvent(baseCheckoutBranchAction, "success");
 
   // Generating codebase tree
