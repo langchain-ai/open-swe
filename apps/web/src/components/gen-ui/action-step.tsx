@@ -145,47 +145,16 @@ function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
   );
 }
 
-function MatchWholeWordIcon({ matchWholeWord }: { matchWholeWord: boolean }) {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          className={cn(
-            "rounded-sm border border-gray-300 px-1 py-[2px] text-xs dark:border-gray-600",
-            matchWholeWord
-              ? "border-blue-500 bg-blue-500/80 text-white"
-              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
-          )}
-        >
-          <span className="relative inline-block px-0.5">
-            <p className="relative z-10 m-0 text-center font-mono">ab</p>
-            <div
-              className={cn(
-                "absolute bottom-0 left-0 h-1/5 w-[1px]",
-                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
-              )}
-            ></div>
-            <div
-              className={cn(
-                "absolute right-0 bottom-0 left-0 h-[1px] w-full",
-                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
-              )}
-            ></div>
-            <div
-              className={cn(
-                "absolute right-0 bottom-0 h-1/5 w-[1px]",
-                matchWholeWord ? "bg-white" : "bg-gray-600 dark:bg-gray-300",
-              )}
-            ></div>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>
-          Match whole word {matchWholeWord ? "on" : "off"}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
+const coerceStringToArray = (str: string | string[]) => {
+  if (Array.isArray(str)) {
+    return str;
+  }
+  try {
+    return JSON.parse(str);
+  } catch {
+    return [str];
+  }
+};
 
 function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
@@ -379,7 +348,10 @@ function ActionItem(props: ActionItemProps) {
                 <span>Max results: {castProps.max_results}</span>
               )}
             {castProps.file_types && castProps.file_types.length > 0 && (
-              <span>File types: {castProps.file_types.join(", ")}</span>
+              <span>
+                File types:{" "}
+                {coerceStringToArray(castProps.file_types).join(", ")}
+              </span>
             )}
             {castProps.follow_symlinks && <span>Follow symlinks</span>}
           </div>

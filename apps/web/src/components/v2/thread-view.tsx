@@ -33,6 +33,7 @@ import { CancelStreamButton } from "./cancel-stream-button";
 import { ProgressBar } from "@/components/tasks/progress-bar";
 import { TasksSidebar } from "@/components/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { ErrorState } from "./types";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -84,6 +85,7 @@ export function ThreadView({
       currentTaskPlan: !!currentTaskPlan,
     });
   }
+  const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   useEffect(() => {
     if (
@@ -100,6 +102,29 @@ export function ThreadView({
       }
     }
   }, [stream?.values]);
+
+  useEffect(() => {
+    if (stream.error) {
+      const rawErrorMessage =
+        typeof stream.error === "object" && "message" in stream.error
+          ? (stream.error.message as string)
+          : "An unknown error occurred in the manager";
+
+      if (rawErrorMessage.includes("overloaded_error")) {
+        setErrorState({
+          message:
+            "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+          details: rawErrorMessage,
+        });
+      } else {
+        setErrorState({
+          message: rawErrorMessage,
+        });
+      }
+    } else {
+      setErrorState(null);
+    }
+  }, [stream.error]);
 
   const { status: realTimeStatus } = useThreadStatus(displayThread.id);
 
@@ -202,6 +227,7 @@ export function ThreadView({
           handleSendMessage={handleSendMessage}
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
+          errorState={errorState}
         />
         {/* Right Side - Actions & Plan */}
         <div className="flex h-full flex-1 flex-col">

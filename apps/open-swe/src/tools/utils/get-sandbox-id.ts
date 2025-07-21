@@ -19,9 +19,7 @@ export async function getSandboxSessionOrThrow(
   }
 
   if (!sandboxSessionId) {
-    logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided", {
-      input,
-    });
+    logger.error("FAILED TO RUN COMMAND: No sandbox session ID provided");
     throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
   }
 

@@ -38,3 +38,6 @@ export const DEFAULT_MCP_SERVERS = {
     stderr: "inherit" as const,
   },
 };
+
+export const API_KEY_REQUIRED_MESSAGE =
+  "Unknown users must provide API keys to use the Open SWE demo application";
