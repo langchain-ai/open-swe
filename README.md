@@ -1,5 +1,3 @@
-# Open SWE
-
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
