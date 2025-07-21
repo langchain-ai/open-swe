@@ -8,7 +8,7 @@ For information about the monorepo structure and shared packages, see the [monor
 
 ## Development
 
-1. Install dependencies: `yarn install` (from repository root)
-2. Build the shared package: `yarn build` (from repository root)
+1. Install dependencies: `yarn install`
+2. Build the shared package: `yarn build`
 
 The shared package must be built before other packages can import from it.
