@@ -36,12 +36,10 @@ export function useThreadStatus(
     useTaskPlanConfig = false,
   } = options;
 
-  // Choose config based on use case
   const swrConfig = useTaskPlanConfig
     ? TASK_PLAN_SWR_CONFIG
     : THREAD_STATUS_SWR_CONFIG;
 
-  // Override refresh interval if specified
   const finalConfig = refreshInterval
     ? { ...swrConfig, refreshInterval }
     : swrConfig;

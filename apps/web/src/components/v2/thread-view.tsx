@@ -66,26 +66,13 @@ export function ThreadView({
   );
 
   // Use the most current task plan available in priority order:
-  // 1. Programmer task plan (from programmer stream with real-time progress) - highest priority for real-time updates
-  // 2. Status task plan (from useThreadStatus with high-frequency 3s polling) - accurate fallback with fast updates
-  // 3. Planner task plan (from planner when user accepts) - shows plan immediately
-  // 4. Manager task plan (fallback) - initial state
+  // Programmer, status task plan, planner task plan, manager task plan
   const currentTaskPlan =
     programmerTaskPlan ||
     statusTaskPlan ||
     plannerTaskPlan ||
     stream.values?.taskPlan;
 
-  // Debug logging for development
-  if (process.env.NODE_ENV === "development") {
-    console.log("Task plan sources:", {
-      programmerTaskPlan: !!programmerTaskPlan,
-      statusTaskPlan: !!statusTaskPlan, // Now using useThreadStatus with 3s polling
-      plannerTaskPlan: !!plannerTaskPlan,
-      managerTaskPlan: !!stream.values?.taskPlan,
-      currentTaskPlan: !!currentTaskPlan,
-    });
-  }
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   useEffect(() => {
@@ -93,12 +80,10 @@ export function ThreadView({
       stream?.values?.plannerSession &&
       plannerSession?.runId !== stream.values.plannerSession.runId
     ) {
-      // State shouldn't update before we use it below, but still create a copy to avoid race conditions
       const prevPlannerSession = plannerSession;
       setPlannerSession(stream.values.plannerSession);
 
       if (prevPlannerSession && selectedTab === "programmer") {
-        // If we already has a planner session, and the user is currently on the programmer tab, bring them back to the planner tab
         setSelectedTab("planner");
       }
     }

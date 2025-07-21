@@ -20,7 +20,7 @@ export const THREAD_SWR_CONFIG = {
 export const THREAD_STATUS_SWR_CONFIG = {
   ...THREAD_SWR_CONFIG,
   revalidateOnFocus: true,
-  dedupingInterval: 2000, // Reduced for more responsive updates
+  dedupingInterval: 2000,
 } as const;
 
 /**
@@ -28,12 +28,12 @@ export const THREAD_STATUS_SWR_CONFIG = {
  * Used when actively viewing a thread for real-time progress updates
  */
 export const TASK_PLAN_SWR_CONFIG = {
-  refreshInterval: 3000, // 3s for real-time task progress
+  refreshInterval: 3000,
   revalidateOnFocus: true,
   revalidateOnReconnect: true,
   errorRetryCount: 3,
-  errorRetryInterval: 2000, // Faster retry for active monitoring
-  dedupingInterval: 1000, // Lower deduping for responsive updates
+  errorRetryInterval: 2000,
+  dedupingInterval: 1000,
 } as const;
 
 /**
