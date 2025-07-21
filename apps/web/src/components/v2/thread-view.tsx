@@ -126,8 +126,6 @@ export function ThreadView({
     }
   }, [stream.error]);
 
-  const { status: realTimeStatus } = useThreadStatus(displayThread.id);
-
   const getStatusDotColor = (status: string) => {
     switch (status) {
       case "running":
