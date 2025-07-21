@@ -149,14 +149,27 @@ export async function checkoutBranchAndCommit(
 
   logger.info(`Committing changes to branch ${branchName}`);
   // Commit the changes. We can use the sandbox executeCommand API for this since it doesn't require a token.
-  await commitAll(absoluteRepoDir, "Apply patch", sandbox);
+  await sandbox.git.add(absoluteRepoDir, ["-A"]);
+
+  const botAppName = process.env.GITHUB_APP_NAME;
+  if (!botAppName) {
+    logger.error("GITHUB_APP_NAME environment variable is not set.");
+    throw new Error("GITHUB_APP_NAME environment variable is not set.");
+  }
+  const userName = `${botAppName}[bot]`;
+  const userEmail = `${botAppName}@users.noreply.github.com`;
+  await sandbox.git.commit(absoluteRepoDir, "Apply patch", userName, userEmail);
+
   // Push the changes using the git API so it handles authentication for us.
   await sandbox.git.push(
     absoluteRepoDir,
     "git",
     options.githubInstallationToken,
   );
-  logger.info("Successfully checked out & committed changes.");
+
+  logger.info("Successfully checked out & committed changes.", {
+    commitAuthor: userName,
+  });
 
   return branchName;
 }
