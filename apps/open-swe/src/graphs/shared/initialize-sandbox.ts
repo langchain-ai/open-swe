@@ -8,12 +8,7 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { daytonaClient } from "../../utils/sandbox.js";
-import {
-  checkoutBranch,
-  cloneRepo,
-  configureGitUserInRepo,
-  pullLatestChanges,
-} from "../../utils/github/git.js";
+import { cloneRepo, pullLatestChanges } from "../../utils/github/git.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
@@ -153,8 +148,11 @@ export async function initializeSandbox(
       const pullChangesRes = await pullLatestChanges(
         absoluteRepoDir,
         existingSandbox,
+        {
+          githubInstallationToken,
+        },
       );
-      if (!pullChangesRes || pullChangesRes.exitCode !== 0) {
+      if (!pullChangesRes) {
         emitStepEvent(basePullLatestChangesAction, "skipped");
         throw new Error("Failed to pull latest changes.");
       }
@@ -271,7 +269,7 @@ export async function initializeSandbox(
     { retries: 3, delay: 0 },
   );
 
-  if (cloneRepoRes.exitCode !== 0) {
+  if (cloneRepoRes instanceof Error) {
     emitStepEvent(
       baseCloneRepoAction,
       "error",
@@ -279,30 +277,9 @@ export async function initializeSandbox(
     );
     throw new Error("Failed to clone repository.");
   }
+  const newBranchName =
+    typeof cloneRepoRes === "string" ? cloneRepoRes : branchName;
   emitStepEvent(baseCloneRepoAction, "success");
-
-  // Configuring git user
-  const configureGitUserActionId = uuidv4();
-  const baseConfigureGitUserAction: CustomNodeEvent = {
-    nodeId: INITIALIZE_NODE_ID,
-    createdAt: new Date().toISOString(),
-    actionId: configureGitUserActionId,
-    action: "Configuring git user",
-    data: {
-      status: "pending",
-      sandboxSessionId: sandbox.id,
-      branch: branchName,
-      repo: repoName,
-    },
-  };
-  emitStepEvent(baseConfigureGitUserAction, "pending");
-
-  await configureGitUserInRepo(absoluteRepoDir, sandbox, {
-    githubInstallationToken,
-    owner: targetRepository.owner,
-    repo: targetRepository.repo,
-  });
-  emitStepEvent(baseConfigureGitUserAction, "success");
 
   // Checking out branch
   const checkoutBranchActionId = uuidv4();
@@ -314,24 +291,10 @@ export async function initializeSandbox(
     data: {
       status: "pending",
       sandboxSessionId: sandbox.id,
-      branch: branchName,
+      branch: newBranchName,
       repo: repoName,
     },
   };
-  emitStepEvent(baseCheckoutBranchAction, "pending");
-  const checkoutBranchRes = await checkoutBranch(
-    absoluteRepoDir,
-    branchName,
-    sandbox,
-  );
-  if (!checkoutBranchRes) {
-    emitStepEvent(
-      baseCheckoutBranchAction,
-      "error",
-      "Failed to checkout branch. Please check your branch name.",
-    );
-    throw new Error("Failed to checkout branch.");
-  }
   emitStepEvent(baseCheckoutBranchAction, "success");
 
   // Generating codebase tree
@@ -344,7 +307,7 @@ export async function initializeSandbox(
     data: {
       status: "pending",
       sandboxSessionId: sandbox.id,
-      branch: branchName,
+      branch: newBranchName,
       repo: repoName,
     },
   };
@@ -368,5 +331,6 @@ export async function initializeSandbox(
     messages: createEventsMessage(),
     dependenciesInstalled: false,
     customRules: await getCustomRules(sandbox, absoluteRepoDir),
+    branchName: newBranchName,
   };
 }
