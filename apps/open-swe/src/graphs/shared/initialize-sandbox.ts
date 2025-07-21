@@ -153,6 +153,9 @@ export async function initializeSandbox(
       const pullChangesRes = await pullLatestChanges(
         absoluteRepoDir,
         existingSandbox,
+        {
+          githubInstallationToken,
+        },
       );
       if (!pullChangesRes || pullChangesRes.exitCode !== 0) {
         emitStepEvent(basePullLatestChangesAction, "skipped");
@@ -266,6 +269,7 @@ export async function initializeSandbox(
       return await cloneRepo(sandbox, targetRepository, {
         githubInstallationToken,
         stateBranchName: branchName,
+        threadId: config.configurable?.thread_id,
       });
     },
     { retries: 3, delay: 0 },

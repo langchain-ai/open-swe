@@ -34,8 +34,11 @@ class ExecuteCommandError extends Error {
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
-export function getBranchName(config: GraphConfig): string {
-  const threadId = config.configurable?.thread_id;
+export function getBranchName(configOrThreadId: GraphConfig | string): string {
+  const threadId =
+    typeof configOrThreadId === "string"
+      ? configOrThreadId
+      : configOrThreadId.configurable?.thread_id;
   if (!threadId) {
     throw new Error("No thread ID provided");
   }
@@ -277,7 +280,7 @@ export async function configureGitUserInRepo(
   }
 }
 
-export async function commitAll(
+async function commitAll(
   absoluteRepoDir: string,
   message: string,
   sandbox: Sandbox,
@@ -310,7 +313,7 @@ export async function commitAll(
   }
 }
 
-export async function commitAllAndPush(
+async function commitAllAndPush(
   absoluteRepoDir: string,
   message: string,
   sandbox: Sandbox,
@@ -420,11 +423,8 @@ export async function checkoutBranchAndCommit(
     branchName?: string;
   },
 ): Promise<string> {
-  logger.info("Checking out branch and committing changes...");
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options?.branchName || getBranchName(config);
-
-  await checkoutBranch(absoluteRepoDir, branchName, sandbox);
 
   logger.info(`Committing changes to branch ${branchName}`);
   await commitAllAndPush(absoluteRepoDir, "Apply patch", sandbox);
@@ -436,8 +436,17 @@ export async function checkoutBranchAndCommit(
 export async function pullLatestChanges(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  args: {
+    githubInstallationToken: string;
+  },
 ): Promise<ExecuteResponse | false> {
+  let credentialHelperSet = false;
+  const gitEnv = { GITHUB_TOKEN: args.githubInstallationToken };
+
   try {
+    await setupTemporaryCredentialHelper(sandbox, absoluteRepoDir, gitEnv);
+    credentialHelperSet = true;
+
     const gitPullOutput = await sandbox.process.executeCommand(
       "git pull",
       absoluteRepoDir,
@@ -456,158 +465,294 @@ export async function pullLatestChanges(
       }),
     });
     return false;
+  } finally {
+    if (credentialHelperSet) {
+      await cleanupCredentialHelper(sandbox, absoluteRepoDir);
+    }
   }
 }
 
+/**
+ * Securely clones a GitHub repository using temporary credential helper.
+ * The GitHub installation token is never persisted in the Git configuration or remote URLs.
+ */
 export async function cloneRepo(
   sandbox: Sandbox,
   targetRepository: TargetRepository,
   args: {
     githubInstallationToken: string;
     stateBranchName?: string;
+    threadId?: string;
   },
 ) {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-  let cloneResult: ExecuteResponse | null = null;
-
-  try {
-    const gitCloneCommand = ["git", "clone"];
-
-    // Use x-access-token format for better GitHub authentication
-    const repoUrlWithToken = `https://x-access-token:${args.githubInstallationToken}@github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
-
-    const branchName = args.stateBranchName || targetRepository.branch;
-    if (branchName) {
-      gitCloneCommand.push("-b", branchName, repoUrlWithToken);
-    } else {
-      gitCloneCommand.push(repoUrlWithToken);
-    }
-
-    logger.info("Cloning repository", {
-      repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
-      branch: branchName,
-      baseCommit: targetRepository.baseCommit,
-      cloneCommand: ExecuteCommandError.cleanCommand(gitCloneCommand.join(" ")),
-    });
-
-    cloneResult = await sandbox.process.executeCommand(
-      gitCloneCommand.join(" "),
-      undefined,
-      undefined,
-      TIMEOUT_SEC * 2, // two min timeout since large repos can take a while to clone
-    );
-
-    if (!targetRepository.baseCommit) {
-      if (cloneResult.exitCode !== 0) {
-        if (!cloneResult.result.includes("not found in upstream origin")) {
-          logger.error("Failed to clone repository", {
-            targetRepository,
-          });
-          throw new ExecuteCommandError(gitCloneCommand.join(" "), cloneResult);
-        } else {
-          const cloneDefaultBranchCommand = ["git", "clone", repoUrlWithToken];
-          logger.info(
-            "Branch not found in upstream origin. Cloning default & checking out branch",
-            {
-              targetRepository,
-              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(
-                cloneDefaultBranchCommand.join(" "),
-              ),
-            },
-          );
-          const cloneDefaultBranchResult = await sandbox.process.executeCommand(
-            cloneDefaultBranchCommand.join(" "),
-            undefined,
-            undefined,
-            TIMEOUT_SEC * 2, // two min timeout since large repos can take a while to clone
-          );
-          if (cloneDefaultBranchResult.exitCode !== 0) {
-            logger.error("Failed to clone default branch", {
-              targetRepository,
-              cloneDefaultBranchCommand: ExecuteCommandError.cleanCommand(
-                cloneDefaultBranchCommand.join(" "),
-              ),
-            });
-            throw new ExecuteCommandError(
-              cloneDefaultBranchCommand.join(" "),
-              cloneDefaultBranchResult,
-            );
-          }
-
-          cloneResult = cloneDefaultBranchResult;
-
-          // Now checkout the branch. We're creating a new branch here since the above error indicated the branch doesn't exist.
-          const checkoutBranchCommand = ["git", "checkout", "-b", branchName];
-          const checkoutBranchResult = await sandbox.process.executeCommand(
-            checkoutBranchCommand.join(" "),
-            absoluteRepoDir,
-            undefined,
-            TIMEOUT_SEC,
-          );
-          if (checkoutBranchResult.exitCode !== 0) {
-            logger.error("Failed to checkout branch", {
-              targetRepository,
-              checkoutBranchCommand: checkoutBranchCommand.join(" "),
-            });
-            throw new ExecuteCommandError(
-              checkoutBranchCommand.join(" "),
-              checkoutBranchResult,
-            );
-          }
-
-          logger.info("Successfully checked out branch", {
-            targetRepository,
-            checkoutBranchCommand: checkoutBranchCommand.join(" "),
-          });
-        }
-      }
-      return cloneResult;
-    }
-  } catch (e) {
-    const errorFields = getSandboxErrorFields(e);
-    logger.error("Clone repo failed\n", errorFields ?? e);
-    throw e;
+  const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+  const branchName =
+    args.stateBranchName ||
+    targetRepository.branch ||
+    (args.threadId ? getBranchName(args.threadId) : undefined);
+  if (!branchName) {
+    throw new Error("No branch name provided");
   }
 
+  const gitEnv = { GITHUB_TOKEN: args.githubInstallationToken };
+  let cloneResult: ExecuteResponse | null = null;
+  let credentialHelperSet = false;
+
   try {
-    // If a baseCommit is specified, checkout that commit after cloning
-    logger.info("Checking out base commit", {
-      baseCommit: targetRepository.baseCommit,
-      repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
+    // Set up temporary credential helper that provides token without persisting it
+    await setupTemporaryCredentialHelper(sandbox, absoluteRepoDir, gitEnv);
+    credentialHelperSet = true;
+
+    // Create environment with token for all Git operations
+
+    // Attempt to clone the repository
+    cloneResult = await performClone(sandbox, cloneUrl, {
+      branchName,
+      targetRepository,
+      absoluteRepoDir,
     });
 
-    const checkoutCommitCommand = [
-      "git",
-      "checkout",
-      targetRepository.baseCommit,
-    ];
-    const checkoutResult = await sandbox.process.executeCommand(
-      checkoutCommitCommand.join(" "),
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
-
-    if (checkoutResult.exitCode !== 0) {
-      logger.error("Failed to checkout base commit", {
-        baseCommit: targetRepository.baseCommit,
-        checkoutCommitCommand: checkoutCommitCommand.join(" "),
-      });
-      throw new ExecuteCommandError(
-        checkoutCommitCommand.join(" "),
-        checkoutResult,
-      );
+    // If baseCommit is specified, checkout that commit
+    if (targetRepository.baseCommit) {
+      await checkoutBaseCommit(sandbox, targetRepository, absoluteRepoDir);
     }
 
-    logger.info("Successfully checked out base commit", {
-      baseCommit: targetRepository.baseCommit,
-      checkoutCommitCommand: checkoutCommitCommand.join(" "),
-    });
-  } catch (e) {
-    const errorFields = getSandboxErrorFields(e);
-    logger.error("Clone repo failed\n", errorFields ?? e);
-    throw e;
+    return cloneResult;
+  } catch (error) {
+    const errorFields = getSandboxErrorFields(error);
+    logger.error("Clone repo failed", errorFields ?? error);
+    throw error;
+  } finally {
+    // Always clean up credential helper, even if an error occurred
+    if (credentialHelperSet) {
+      await cleanupCredentialHelper(sandbox, absoluteRepoDir);
+    }
+  }
+}
+
+/**
+ * Sets up a temporary Git credential helper using environment variables.
+ * This is more secure as the token never appears in command line arguments.
+ */
+async function setupTemporaryCredentialHelper(
+  sandbox: Sandbox,
+  workingDir: string,
+  gitEnv: Record<string, string>,
+): Promise<void> {
+  // Create a credential helper script that reads from environment variables
+  // This avoids exposing the token in command line arguments
+  const credentialHelper = `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`;
+
+  const result = await sandbox.process.executeCommand(
+    `git config --global credential.helper '${credentialHelper}'`,
+    workingDir,
+    gitEnv,
+  );
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to set up credential helper: Exit code: ${result.exitCode}\nResult: ${result.result}`);
+  }
+
+  logger.debug(
+    "Temporary credential helper configured with environment variable",
+  );
+}
+
+/**
+ * Performs the actual Git clone operation, handling branch-specific logic.
+ */
+async function performClone(
+  sandbox: Sandbox,
+  cloneUrl: string,
+  args: {
+    branchName: string | undefined;
+    targetRepository: TargetRepository;
+    absoluteRepoDir: string;
+  },
+): Promise<ExecuteResponse> {
+  const { branchName, targetRepository, absoluteRepoDir } = args;
+  const gitCloneCommand = ["git", "clone"];
+
+  if (branchName) {
+    gitCloneCommand.push("-b", branchName, cloneUrl);
+  } else {
+    gitCloneCommand.push(cloneUrl);
+  }
+
+  logger.info("Cloning repository", {
+    repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
+    branch: branchName,
+    baseCommit: targetRepository.baseCommit,
+    cloneCommand: ExecuteCommandError.cleanCommand(gitCloneCommand.join(" ")),
+  });
+
+  const cloneResult = await sandbox.process.executeCommand(
+    gitCloneCommand.join(" "),
+    undefined,
+    undefined,
+    TIMEOUT_SEC * 2, // Two minute timeout for large repositories
+  );
+
+  // Handle branch not found scenario
+  if (cloneResult.exitCode !== 0 && branchName) {
+    if (cloneResult.result.includes("not found in upstream origin")) {
+      return await handleBranchNotFound(sandbox, cloneUrl, {
+        branchName,
+        targetRepository,
+        absoluteRepoDir,
+      });
+    }
+
+    logger.error("Failed to clone repository", { targetRepository });
+    throw new ExecuteCommandError(gitCloneCommand.join(" "), cloneResult);
+  }
+
+  if (cloneResult.exitCode !== 0) {
+    logger.error("Failed to clone repository", { targetRepository });
+    throw new ExecuteCommandError(gitCloneCommand.join(" "), cloneResult);
   }
 
   return cloneResult;
+}
+
+/**
+ * Handles the case where the specified branch doesn't exist by cloning default branch
+ * and creating the new branch.
+ */
+async function handleBranchNotFound(
+  sandbox: Sandbox,
+  cloneUrl: string,
+  args: {
+    branchName: string;
+    targetRepository: TargetRepository;
+    absoluteRepoDir: string;
+  },
+): Promise<ExecuteResponse> {
+  const { branchName, targetRepository, absoluteRepoDir } = args;
+  const cloneDefaultCommand = ["git", "clone", cloneUrl];
+
+  logger.info(
+    "Branch not found in upstream origin. Cloning default & checking out branch",
+    {
+      targetRepository,
+      cloneDefaultCommand: ExecuteCommandError.cleanCommand(
+        cloneDefaultCommand.join(" "),
+      ),
+    },
+  );
+
+  const cloneDefaultResult = await sandbox.process.executeCommand(
+    cloneDefaultCommand.join(" "),
+    undefined,
+    undefined,
+    TIMEOUT_SEC * 2,
+  );
+
+  if (cloneDefaultResult.exitCode !== 0) {
+    logger.error("Failed to clone default branch", {
+      targetRepository,
+      cloneDefaultCommand: ExecuteCommandError.cleanCommand(
+        cloneDefaultCommand.join(" "),
+      ),
+    });
+    throw new ExecuteCommandError(
+      cloneDefaultCommand.join(" "),
+      cloneDefaultResult,
+    );
+  }
+
+  // Create and checkout the new branch
+  const checkoutCommand = ["git", "checkout", "-b", branchName];
+  const checkoutResult = await sandbox.process.executeCommand(
+    checkoutCommand.join(" "),
+    absoluteRepoDir,
+    undefined,
+    TIMEOUT_SEC,
+  );
+
+  if (checkoutResult.exitCode !== 0) {
+    logger.error("Failed to checkout branch", {
+      targetRepository,
+      checkoutCommand: checkoutCommand.join(" "),
+    });
+    throw new ExecuteCommandError(checkoutCommand.join(" "), checkoutResult);
+  }
+
+  logger.info("Successfully checked out branch", {
+    targetRepository,
+    checkoutCommand: checkoutCommand.join(" "),
+  });
+
+  return cloneDefaultResult;
+}
+
+/**
+ * Checks out a specific base commit if specified.
+ */
+async function checkoutBaseCommit(
+  sandbox: Sandbox,
+  targetRepository: TargetRepository,
+  absoluteRepoDir: string,
+): Promise<void> {
+  logger.info("Checking out base commit", {
+    baseCommit: targetRepository.baseCommit,
+    repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
+  });
+
+  const checkoutCommand = ["git", "checkout", targetRepository.baseCommit!];
+  const checkoutResult = await sandbox.process.executeCommand(
+    checkoutCommand.join(" "),
+    absoluteRepoDir,
+    undefined,
+    TIMEOUT_SEC,
+  );
+
+  if (checkoutResult.exitCode !== 0) {
+    logger.error("Failed to checkout base commit", {
+      baseCommit: targetRepository.baseCommit,
+      checkoutCommand: checkoutCommand.join(" "),
+    });
+    throw new ExecuteCommandError(checkoutCommand.join(" "), checkoutResult);
+  }
+
+  logger.info("Successfully checked out base commit", {
+    baseCommit: targetRepository.baseCommit,
+    checkoutCommand: checkoutCommand.join(" "),
+  });
+}
+
+/**
+ * Removes the temporary credential helper from Git configuration.
+ */
+async function cleanupCredentialHelper(
+  sandbox: Sandbox,
+  workingDir: string,
+): Promise<void> {
+  try {
+    const result = await sandbox.process.executeCommand(
+      `git config --global --unset credential.helper`,
+      workingDir,
+    );
+
+    // Note: --unset returns exit code 5 if the key doesn't exist, which is fine
+    if (result.exitCode !== 0 && result.exitCode !== 5) {
+      logger.warn("Failed to clean up credential helper", {
+        exitCode: result.exitCode,
+        output: ExecuteCommandError.cleanCommand(result.result),
+      });
+      throw new Error("Failed to clean up credential helper");
+    } else {
+      logger.debug("Credential helper cleaned up successfully");
+    }
+  } catch (error) {
+    const errorFields = getSandboxErrorFields(error);
+    logger.warn("Error during credential helper cleanup", {
+      ...(errorFields ? { errorFields } : {}),
+      ...(error instanceof Error
+        ? { name: error.name, message: error.message, stack: error.stack }
+        : {}),
+    });
+    throw new Error("Failed to clean up credential helper");
+  }
 }
