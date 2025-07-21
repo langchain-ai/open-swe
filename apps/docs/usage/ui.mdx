@@ -1,6 +1,6 @@
 ---
-title: 'From the UI'
-description: 'How to use Open SWE from the UI'
+title: "From the UI"
+description: "How to use Open SWE from the UI"
 ---
 
 Open SWE provides a powerful web interface that allows you to interact with the coding agent through a chat-like experience. The UI supports both automated and manual workflows, giving you control over how the agent processes your requests.
@@ -10,12 +10,14 @@ Open SWE provides a powerful web interface that allows you to interact with the 
 The UI offers two distinct modes for handling your coding requests:
 
 <Note>
-You can toggle between auto and manual mode using the lightning bolt (⚡) icon in the main input area.
+  You can toggle between auto and manual mode using the lightning bolt (⚡) icon
+  in the main input area.
 </Note>
 
 ### Auto Mode
 
 When **Auto Mode** is enabled (lightning bolt icon is highlighted):
+
 - Plans are automatically accepted and executed without user intervention
 - The agent proceeds directly from planning to implementation
 - Ideal for straightforward requests where you trust the agent's planning
@@ -23,12 +25,14 @@ When **Auto Mode** is enabled (lightning bolt icon is highlighted):
 ### Manual Mode
 
 When **Manual Mode** is active (lightning bolt icon is not highlighted):
+
 - You must manually review and accept proposed plans before execution
 - Provides opportunity to edit, modify, or reject plans
 - Allows for more control over the implementation approach
 
 <Tip>
-Start with manual mode for important changes to review the agent's approach before execution.
+  Start with manual mode for important changes to review the agent's approach
+  before execution.
 </Tip>
 
 ## Manager Agent Capabilities
@@ -39,29 +43,45 @@ The Manager agent acts as the central orchestrator, intelligently routing your m
 
 <Steps>
   <Step title="Respond to User Messages">
-    Provides contextual responses and status updates about ongoing operations. You can ask the manager what it can do, what the status of different agents is, etc.
+    Provides contextual responses and status updates about ongoing operations.
+    You can ask the manager what it can do, what the status of different agents
+    is, etc.
   </Step>
   <Step title="Create New Planning Runs">
-    Initiates new planning sessions when you submit coding requests. If your message contains a coding request, the manager will create a new planning session & corresponding GitHub issue.
+    Initiates new planning sessions when you submit coding requests. If your
+    message contains a coding request, the manager will create a new planning
+    session & corresponding GitHub issue.
   </Step>
   <Step title="Send Messages to Active Planning Runs">
-    Forwards additional context or requirements to running planner sessions. If you send a message while the planner is running, the manager can forward that message to the planner, without interrupting its flow.
+    Forwards additional context or requirements to running planner sessions. If
+    you send a message while the planner is running, the manager can forward
+    that message to the planner, without interrupting its flow.
   </Step>
   <Step title="Resume Interrupted Planners">
-    Resumes planner sessions that were paused for the user to accept or reject plans. If the planner has paused for plan acceptance, you can message the manager with feedback about the plan. This will be forwarded to the planner, and it will continue its flow based on your feedback.
+    Resumes planner sessions that were paused for the user to accept or reject
+    plans. If the planner has paused for plan acceptance, you can message the
+    manager with feedback about the plan. This will be forwarded to the planner,
+    and it will continue its flow based on your feedback.
   </Step>
   <Step title="Send Messages to Active Programmer Runs">
-    Provides additional context or instructions to running implementation sessions. If you send a message while the programmer is running, the manager can forward that message to the programmer, without interrupting its flow.
+    Provides additional context or instructions to running implementation
+    sessions. If you send a message while the programmer is running, the manager
+    can forward that message to the programmer, without interrupting its flow.
   </Step>
   <Step title="Create new tasks">
-    Creates new tasks, independent of the current request. If you send a message to the manager with a request for a task that is unrelated to the current request, or can be implemented in parallel via a different session, the manager will create a new GitHub issue, and initiate a new planning session for that issue.
+    Creates new tasks, independent of the current request. If you send a message
+    to the manager with a request for a task that is unrelated to the current
+    request, or can be implemented in parallel via a different session, the
+    manager will create a new GitHub issue, and initiate a new planning session
+    for that issue.
   </Step>
 </Steps>
 
 ### What the Manager _cannot_ Do
 
 <Note>
-The Manager has several important limitations to ensure proper workflow control:
+  The Manager has several important limitations to ensure proper workflow
+  control:
 </Note>
 
 - **Cannot create new Programmer runs** - This only happens after plan acceptance or in auto mode.
@@ -77,6 +97,7 @@ The Manager intelligently classifies your messages and routes them to the approp
 ### Message Classification
 
 When you send a message, the Manager analyzes:
+
 - Current status of Planner and Programmer graphs
 - Content and intent of your message
 - Existing conversation context
@@ -101,19 +122,22 @@ Planning runs are handled by the Planner graph, which creates detailed execution
 
 <Steps>
   <Step title="Context Gathering">
-    The Planner analyzes your repository and gathers relevant context about the codebase
+    The Planner analyzes your repository and gathers relevant context about the
+    codebase
   </Step>
   <Step title="Plan Generation">
     Creates a structured plan with specific, actionable steps
   </Step>
   <Step title="Plan Presentation">
-    Presents the proposed plan for review (in manual mode) or automatic acceptance (in auto mode)
+    Presents the proposed plan for review (in manual mode) or automatic
+    acceptance (in auto mode)
   </Step>
 </Steps>
 
 ### Plan Interruption
 
 Plans are presented as interruptions that require user response:
+
 - **Manual Mode**: You must explicitly accept or reject the plan
 - **Auto Mode**: Plans are automatically accepted and execution begins
 - **Plan Editing**: You can modify proposed plans before acceptance
@@ -145,7 +169,8 @@ Once a plan is accepted, the Programmer graph executes the implementation.
 </Steps>
 
 <Note>
-The Programmer automatically commits changes after each step, ensuring your work is preserved even if the session is interrupted.
+  The Programmer automatically commits changes after each step, ensuring your
+  work is preserved even if the session is interrupted.
 </Note>
 
 ## Getting Started
@@ -163,11 +188,13 @@ To begin using the Open SWE UI:
     Type your coding request in the terminal input and press Cmd+Enter to send
   </Step>
   <Step title="Monitor Progress">
-    Watch as the Manager routes your request and coordinates the planning and implementation
+    Watch as the Manager routes your request and coordinates the planning and
+    implementation
   </Step>
 </Steps>
 
 <Note>
-Make sure you have properly configured your GitHub App and authentication before using the UI. See the [Development Setup](/setup/development) guide for details.
+  Make sure you have properly configured your GitHub App and authentication
+  before using the UI. See the [Development Setup](/setup/development) guide for
+  details.
 </Note>
-

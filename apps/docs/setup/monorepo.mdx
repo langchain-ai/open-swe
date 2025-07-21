@@ -1,6 +1,6 @@
 ---
-title: 'Monorepo'
-description: 'How the Open SWE monorepo is configured'
+title: "Monorepo"
+description: "How the Open SWE monorepo is configured"
 ---
 
 Open SWE is organized as a Yarn workspace monorepo with Turbo build orchestration, designed to efficiently manage multiple applications and shared code. This structure enables code reuse, consistent tooling, and streamlined development workflows.
@@ -12,17 +12,20 @@ The monorepo is organized into two main directories:
 ### Applications (`apps/`)
 
 **`apps/open-swe`** - LangGraph Agent Application
+
 - Contains the core LangGraph agent implementation with TypeScript
 - Includes three specialized graphs: manager, planner, and programmer
 - Handles GitHub webhook integration and LLM interactions
 
-**`apps/web`** - Next.js Web Interface  
+**`apps/web`** - Next.js Web Interface
+
 - React frontend with Next.js framework
 - Uses Shadcn UI components (Radix UI) with Tailwind CSS
 - Provides the user interface for interacting with the LangGraph agent
 - Includes authentication and proxy routes for secure communication
 
 **`apps/docs`** - Mintlify Documentation
+
 - Contains this documentation site built with Mintlify
 - Provides comprehensive setup and usage guides
 - Includes API documentation and development resources
@@ -30,13 +33,16 @@ The monorepo is organized into two main directories:
 ### Packages (`packages/`)
 
 **`packages/shared`** - Common Utilities Package
+
 - Centralized location for shared types, constants, and utilities
 - Used by both the agent and web applications
 - Exports modules via `@open-swe/shared` namespace
 - Contains crypto utilities, GraphState types, and Open SWE specific modules
 
 <Note>
-The shared package must be built before other packages can import from it. Any code used by both the agent and web app should be placed here to avoid duplication.
+  The shared package must be built before other packages can import from it. Any
+  code used by both the agent and web app should be placed here to avoid
+  duplication.
 </Note>
 
 ## Turbo Orchestration
@@ -119,7 +125,10 @@ The `apps/open-swe` package includes a critical `postinstall` hook:
 ```
 
 <Note>
-This postinstall hook is **required** for LangGraph Platform deployment. Since Open SWE is a monorepo and the agent requires access to built files from the shared package, we must run the build process before starting the LangGraph server.
+  This postinstall hook is **required** for LangGraph Platform deployment. Since
+  Open SWE is a monorepo and the agent requires access to built files from the
+  shared package, we must run the build process before starting the LangGraph
+  server.
 </Note>
 
 ### Why This Matters
@@ -129,7 +138,9 @@ This postinstall hook is **required** for LangGraph Platform deployment. Since O
 3. **Build Order**: Ensures the shared package is built before the agent attempts to use it
 
 <Tip>
-If you encounter import errors related to the shared package during development, run `yarn build` from the root to ensure all packages are properly built and linked.
+  If you encounter import errors related to the shared package during
+  development, run `yarn build` from the root to ensure all packages are
+  properly built and linked.
 </Tip>
 
 ## Workspace Configuration

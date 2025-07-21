@@ -4,9 +4,12 @@
   "repository": "https://github.com/langchain-ai/open-swe",
   "private": true,
   "scripts": {
-    "dev": "mint dev"
+    "dev": "mint dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "mint": "^4.2.12"
+    "mint": "^4.2.12",
+    "prettier": "^3.5.2"
   }
 }

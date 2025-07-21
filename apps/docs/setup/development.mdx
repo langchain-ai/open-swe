@@ -1,17 +1,19 @@
 ---
-title: 'Development Setup'
-description: 'How to set up Open SWE for development'
+title: "Development Setup"
+description: "How to set up Open SWE for development"
 ---
 
 This guide will walk you through setting up Open SWE for local development. You'll need to clone the repository, install dependencies, configure environment variables, create a GitHub App, and start the development servers.
 
 <Note>
-This setup is for development purposes. For production deployment, you'll need to adjust URLs and create separate GitHub Apps for production use.
+  This setup is for development purposes. For production deployment, you'll need
+  to adjust URLs and create separate GitHub Apps for production use.
 </Note>
 
 ## Prerequisites
 
 Before starting, ensure you have the following installed:
+
 - Node.js (version 18 or higher)
 - Yarn (version 3.5.1 or higher)
 - Git
@@ -28,6 +30,7 @@ Before starting, ensure you have the following installed:
     ```bash
     cd open-swe
     ```
+
   </Step>
 
   <Step title="Install Dependencies">
@@ -38,6 +41,7 @@ Before starting, ensure you have the following installed:
     ```
 
     This will install dependencies for all packages in the monorepo workspace.
+
   </Step>
 
   <Step title="Set Up Environment Files">
@@ -61,10 +65,10 @@ Before starting, ensure you have the following installed:
     NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=""
     GITHUB_APP_CLIENT_SECRET=""
     GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
-    
+
     # Encryption key for secrets (generate with: openssl rand -hex 32)
     SECRETS_ENCRYPTION_KEY=""
-    
+
     # GitHub App details (will be filled after creating GitHub App)
     GITHUB_APP_NAME="open-swe-dev"
     GITHUB_APP_ID=""
@@ -72,7 +76,7 @@ Before starting, ensure you have the following installed:
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
-    
+
     # API URLs for development
     NEXT_PUBLIC_API_URL="http://localhost:3000/api"
     LANGGRAPH_API_URL="http://localhost:2024"
@@ -88,18 +92,18 @@ Before starting, ensure you have the following installed:
     LANGCHAIN_API_KEY="lsv2_pt_..."  # Get from LangSmith
     LANGCHAIN_TRACING_V2="true"
     LANGCHAIN_TEST_TRACKING="false"
-    
+
     # LLM Provider Keys (at least one required)
     ANTHROPIC_API_KEY=""  # Recommended - default provider
     OPENAI_API_KEY=""     # Optional
     GOOGLE_API_KEY=""     # Optional
-    
+
     # Infrastructure
     DAYTONA_API_KEY=""    # Required. For cloud sandboxes
-    
+
     # Tools
     FIRECRAWL_API_KEY=""  # For URL content extraction
-    
+
     # GitHub App settings (same as web app)
     GITHUB_APP_NAME="open-swe-dev"
     GITHUB_APP_ID=""
@@ -108,7 +112,7 @@ Before starting, ensure you have the following installed:
     -----END RSA PRIVATE KEY-----
     "
     GITHUB_WEBHOOK_SECRET=""  # Will be generated in next step
-    
+
     # Server configuration
     PORT="2024"
     OPEN_SWE_APP_URL="http://localhost:3000"
@@ -118,6 +122,7 @@ Before starting, ensure you have the following installed:
     <Tip>
     Generate the `SECRETS_ENCRYPTION_KEY` using: `openssl rand -hex 32`. This key must be identical in both environment files.
     </Tip>
+
   </Step>
 
   <Step title="Create GitHub App">
@@ -150,7 +155,7 @@ Before starting, ensure you have the following installed:
        ngrok http 2024
        ```
        Use the ngrok URL + `/webhook/github` (e.g., `https://abc123.ngrok.io/webhook/github`)
-    
+
     3. **Webhook secret**: Generate and save this value:
        ```bash
        openssl rand -hex 32
@@ -161,12 +166,12 @@ Before starting, ensure you have the following installed:
 
     **Repository permissions:**
     - **Contents**: Read & Write
-    - **Issues**: Read & Write  
+    - **Issues**: Read & Write
     - **Pull requests**: Read & Write
     - **Metadata**: Read only (automatically enabled)
 
     **Organization permissions:** None
-    
+
     **Account permissions:** None
 
     ### Subscribe to Events
@@ -175,7 +180,7 @@ Before starting, ensure you have the following installed:
 
     ### Installation Settings
 
-    - **Where can this GitHub App be installed?**: 
+    - **Where can this GitHub App be installed?**:
       - Choose "Any account" for broader testing
       - Or "Only on this account" to limit to your repositories
 
@@ -190,12 +195,12 @@ Before starting, ensure you have the following installed:
     - **GITHUB_APP_NAME**: The name you chose
     - **GITHUB_APP_ID**: Found in the "About" section (e.g., `12345678`)
     - **NEXT_PUBLIC_GITHUB_APP_CLIENT_ID**: Found in the "About" section
-    - **GITHUB_APP_CLIENT_SECRET**: 
+    - **GITHUB_APP_CLIENT_SECRET**:
       1. Scroll to "Client secrets" section
       2. Click "Generate new client secret"
       3. Copy the generated value
     - **GITHUB_APP_PRIVATE_KEY**:
-      1. Scroll to "Private keys" section  
+      1. Scroll to "Private keys" section
       2. Click "Generate a private key"
       3. Download the `.pem` file and copy its contents
       4. Format as a single line with `\\n` for line breaks, or use the multiline format shown in the example
@@ -203,6 +208,7 @@ Before starting, ensure you have the following installed:
     <Tip>
     Keep your GitHub App credentials secure and never commit them to version control. The `.env` files are already included in `.gitignore`.
     </Tip>
+
   </Step>
 
   <Step title="Start Development Servers">
@@ -225,6 +231,7 @@ Before starting, ensure you have the following installed:
     <Note>
     Both servers need to be running simultaneously for full functionality. The web app communicates with the LangGraph agent through API calls.
     </Note>
+
   </Step>
 </Steps>
 
@@ -236,7 +243,9 @@ Once both servers are running:
 2. **Test GitHub authentication**: Try logging in with your GitHub account
 
 <Tip>
-If you encounter issues, check the console logs in both terminal windows for error messages. Common issues include missing environment variables or incorrect GitHub App configuration.
+  If you encounter issues, check the console logs in both terminal windows for
+  error messages. Common issues include missing environment variables or
+  incorrect GitHub App configuration.
 </Tip>
 
 ## Next Steps

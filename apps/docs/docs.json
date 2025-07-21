@@ -15,17 +15,11 @@
         "groups": [
           {
             "group": "Get Started",
-            "pages": [
-              "index"
-            ]
+            "pages": ["index"]
           },
           {
             "group": "Usage",
-            "pages": [
-              "usage/intro",
-              "usage/ui",
-              "usage/github"
-            ]
+            "pages": ["usage/intro", "usage/ui", "usage/github"]
           },
           {
             "group": "Development Setup",
