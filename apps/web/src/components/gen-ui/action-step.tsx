@@ -191,10 +191,7 @@ function ActionItem(props: ActionItemProps) {
     }
 
     if (props.status === "generating") {
-      if (props.actionType === "mcp") {
-        return `Running ${props.toolName}...`;
-      } else {
-        return ACTION_GENERATING_TEXT_MAP[props.actionType];
+      return ACTION_GENERATING_TEXT_MAP[props.actionType];
       }
     }
 
