@@ -8,6 +8,8 @@
 >
 > **Note: you're required to set your own LLM API keys to use the demo.**
 
+![UI Screenshot](./static/ui-screenshot.png)
+
 Open SWE is an open-source cloud based coding agent. It's built with [LangGraph](https://langchain-ai.github.io/langgraphjs/), and is designed to autonomously understand, plan, and execute code changes across entire repositories.
 
 Think of Open SWE as your own personal engineer who can handle complex tasks end to end, from planning to execution, to opening a pull request.
