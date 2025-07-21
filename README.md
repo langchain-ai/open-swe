@@ -5,6 +5,7 @@
 
 > [!TIP]
 > Try out Open SWE yourself using our [public demo](https://swe.langchain.com)!
+>
 > Note: you're required to set your own LLM API keys to use the demo.
 
 Open SWE is an open-source cloud based coding agent. It's built with [LangGraph](https://langchain-ai.github.io/langgraphjs/), and is designed to autonomously understand, plan, and execute code changes across entire repositories.
