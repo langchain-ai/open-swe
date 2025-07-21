@@ -62,11 +62,12 @@ export function ThreadView({
 
   const { status: realTimeStatus, taskPlan: statusTaskPlan } = useThreadStatus(
     displayThread.id,
+    { useTaskPlanConfig: true },
   );
 
   // Use the most current task plan available in priority order:
   // 1. Programmer task plan (from programmer stream with real-time progress) - highest priority for real-time updates
-  // 2. Status task plan (from thread status service with 15s polling) - fallback for accuracy
+  // 2. Status task plan (from useThreadStatus with high-frequency 3s polling) - accurate fallback with fast updates
   // 3. Planner task plan (from planner when user accepts) - shows plan immediately
   // 4. Manager task plan (fallback) - initial state
   const currentTaskPlan =
@@ -79,7 +80,7 @@ export function ThreadView({
   if (process.env.NODE_ENV === "development") {
     console.log("Task plan sources:", {
       programmerTaskPlan: !!programmerTaskPlan,
-      statusTaskPlan: !!statusTaskPlan,
+      statusTaskPlan: !!statusTaskPlan, // Now using useThreadStatus with 3s polling
       plannerTaskPlan: !!plannerTaskPlan,
       managerTaskPlan: !!stream.values?.taskPlan,
       currentTaskPlan: !!currentTaskPlan,

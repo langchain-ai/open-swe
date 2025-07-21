@@ -1,5 +1,8 @@
 import useSWR from "swr";
-import { THREAD_STATUS_SWR_CONFIG } from "@/lib/swr-config";
+import {
+  THREAD_STATUS_SWR_CONFIG,
+  TASK_PLAN_SWR_CONFIG,
+} from "@/lib/swr-config";
 import { ThreadUIStatus, ThreadStatusData } from "@/lib/schemas/thread-status";
 import { fetchThreadStatus } from "@/services/thread-status.service";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
@@ -7,6 +10,7 @@ import { TaskPlan } from "@open-swe/shared/open-swe/types";
 interface UseThreadStatusOptions {
   enabled?: boolean;
   refreshInterval?: number;
+  useTaskPlanConfig?: boolean;
 }
 
 interface ThreadStatusResult {
@@ -20,6 +24,7 @@ interface ThreadStatusResult {
 /**
  * Thread status hook using SWR for real-time status updates
  * Uses SWR caching directly instead of manual Zustand cache
+ * Can use high-frequency task plan config for real-time progress updates
  */
 export function useThreadStatus(
   threadId: string,
@@ -27,18 +32,26 @@ export function useThreadStatus(
 ): ThreadStatusResult {
   const {
     enabled = true,
-    refreshInterval = THREAD_STATUS_SWR_CONFIG.refreshInterval,
+    refreshInterval,
+    useTaskPlanConfig = false,
   } = options;
+
+  // Choose config based on use case
+  const swrConfig = useTaskPlanConfig
+    ? TASK_PLAN_SWR_CONFIG
+    : THREAD_STATUS_SWR_CONFIG;
+
+  // Override refresh interval if specified
+  const finalConfig = refreshInterval
+    ? { ...swrConfig, refreshInterval }
+    : swrConfig;
 
   const swrKey = enabled ? `thread-status-${threadId}` : null;
 
   const { data, error, isLoading, mutate } = useSWR<ThreadStatusData>(
     swrKey,
     () => fetchThreadStatus(threadId),
-    {
-      ...THREAD_STATUS_SWR_CONFIG,
-      refreshInterval,
-    },
+    finalConfig,
   );
 
   return {
