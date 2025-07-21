@@ -88,9 +88,9 @@ function isRunReq(reqUrl: string): boolean {
 
 export const auth = new Auth()
   .authenticate<AuthenticateReturn>(async (request: Request) => {
-    const isProdEnv = process.env.NODE_ENV === "production";
+    const isProd = process.env.NODE_ENV === "production";
     // Disable all requests to the server in prod for now.
-    if (!isProdEnv) {
+    if (isProd) {
       return new HTTPException(504, {
         message: "Open SWE temporarily disabled.",
       }) as any;
@@ -107,8 +107,6 @@ export const auth = new Auth()
         },
       };
     }
-
-    const isProd = process.env.NODE_ENV === "production";
 
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
