@@ -3,8 +3,7 @@ import { createLogger, LogLevel } from "./logger.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
-import { cloneRepo, configureGitUserInRepo } from "./github/git.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { cloneRepo } from "./github/git.js";
 import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
@@ -154,14 +153,6 @@ export async function getSandboxWithErrorHandling(
       githubInstallationToken,
       stateBranchName: branchName,
       threadId: config.configurable?.thread_id,
-    });
-
-    // Configure git user
-    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-    await configureGitUserInRepo(absoluteRepoDir, sandbox, {
-      githubInstallationToken,
-      owner: targetRepository.owner,
-      repo: targetRepository.repo,
     });
 
     // Get codebase tree
