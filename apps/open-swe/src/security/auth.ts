@@ -89,7 +89,7 @@ interface AuthenticateReturn extends BaseAuthReturn {
 export const auth = new Auth()
   .authenticate<AuthenticateReturn>(async (_request: Request) => {
     return new HTTPException(504, {
-      message: "Open SWE temporarily disabled."
+      message: "Open SWE temporarily disabled.",
     }) as any;
 
     // if (request.method === "OPTIONS") {
