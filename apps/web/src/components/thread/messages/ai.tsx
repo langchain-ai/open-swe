@@ -115,7 +115,7 @@ function isMcpTool(toolName: string): boolean {
     openPrTool.name,
     diagnoseErrorTool.name,
   ];
-  return !knownToolNames.includes(toolName);
+  return !knownToolNames.some((t) => t === toolName);
 }
 
 function CustomComponent({
