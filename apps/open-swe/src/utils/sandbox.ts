@@ -152,7 +152,6 @@ export async function getSandboxWithErrorHandling(
     await cloneRepo(sandbox, targetRepository, {
       githubInstallationToken,
       stateBranchName: branchName,
-      threadId: config.configurable?.thread_id,
     });
 
     // Get codebase tree

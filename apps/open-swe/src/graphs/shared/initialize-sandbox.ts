@@ -264,7 +264,6 @@ export async function initializeSandbox(
       return await cloneRepo(sandbox, targetRepository, {
         githubInstallationToken,
         stateBranchName: branchName,
-        threadId: config.configurable?.thread_id,
       });
     },
     { retries: 3, delay: 0 },

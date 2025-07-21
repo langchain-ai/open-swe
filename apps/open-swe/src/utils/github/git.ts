@@ -6,32 +6,6 @@ import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 
-class ExecuteCommandError extends Error {
-  command: string;
-  result: string;
-  exitCode: number;
-  constructor(command: string, error: ExecuteResponse) {
-    super("Failed to execute command");
-    this.name = "ExecuteCommandError";
-    this.command = ExecuteCommandError.cleanCommand(command);
-    this.result = error.result;
-    this.exitCode = error.exitCode;
-  }
-
-  static cleanCommand(command: string): string {
-    if (
-      command.includes("x-access-token:") &&
-      command.includes("@github.com/")
-    ) {
-      return command.replace(
-        /(x-access-token:)([^@]+)(@github\.com\/)/,
-        "$1ACCESS_TOKEN_REDACTED$3",
-      );
-    }
-    return command;
-  }
-}
-
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
 export function getBranchName(configOrThreadId: GraphConfig | string): string {
@@ -179,7 +153,6 @@ export async function cloneRepo(
   args: {
     githubInstallationToken: string;
     stateBranchName?: string;
-    threadId?: string;
   },
 ): Promise<string> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
@@ -193,7 +166,6 @@ export async function cloneRepo(
       targetRepository,
       absoluteRepoDir,
       githubInstallationToken: args.githubInstallationToken,
-      threadId: args.threadId,
     });
   } catch (error) {
     const errorFields = getSandboxErrorFields(error);
@@ -214,7 +186,6 @@ async function performClone(
     targetRepository: TargetRepository;
     absoluteRepoDir: string;
     githubInstallationToken: string;
-    threadId?: string;
   },
 ): Promise<string> {
   const {
@@ -247,102 +218,27 @@ async function performClone(
     return targetRepository.baseCommit;
   }
 
-  const newBranchName =
-    branchName || (args.threadId ? getBranchName(args.threadId) : undefined);
-  if (!newBranchName) {
+  if (!branchName) {
     throw new Error(
-      "Can not create new branch without thread ID or branch name",
+      "Can not create new branch or checkout existing branch without branch name",
     );
   }
 
   try {
-    // No branch name, create one
-    await sandbox.git.createBranch(absoluteRepoDir, newBranchName);
+    await sandbox.git.createBranch(absoluteRepoDir, branchName);
     logger.info("Created branch", {
-      branch: newBranchName,
+      branch: branchName,
     });
-    return newBranchName;
+    return branchName;
   } catch {
-    // create failed, attempt to checkout branch
     logger.info("Failed to create branch, checking out branch", {
-      branch: newBranchName,
+      branch: branchName,
     });
   }
 
-  await sandbox.git.checkoutBranch(absoluteRepoDir, newBranchName);
+  await sandbox.git.checkoutBranch(absoluteRepoDir, branchName);
   logger.info("Checked out branch", {
-    branch: newBranchName,
+    branch: branchName,
   });
-  return newBranchName;
-}
-
-/**
- * Handles the case where the specified branch doesn't exist by cloning default branch
- * and creating the new branch.
- */
-export async function handleBranchNotFound(
-  sandbox: Sandbox,
-  cloneUrl: string,
-  args: {
-    branchName: string;
-    targetRepository: TargetRepository;
-    absoluteRepoDir: string;
-  },
-): Promise<ExecuteResponse> {
-  const { branchName, targetRepository, absoluteRepoDir } = args;
-  const cloneDefaultCommand = ["git", "clone", cloneUrl];
-
-  logger.info(
-    "Branch not found in upstream origin. Cloning default & checking out branch",
-    {
-      targetRepository,
-      cloneDefaultCommand: ExecuteCommandError.cleanCommand(
-        cloneDefaultCommand.join(" "),
-      ),
-    },
-  );
-
-  const cloneDefaultResult = await sandbox.process.executeCommand(
-    cloneDefaultCommand.join(" "),
-    undefined,
-    undefined,
-    TIMEOUT_SEC * 2,
-  );
-
-  if (cloneDefaultResult.exitCode !== 0) {
-    logger.error("Failed to clone default branch", {
-      targetRepository,
-      cloneDefaultCommand: ExecuteCommandError.cleanCommand(
-        cloneDefaultCommand.join(" "),
-      ),
-    });
-    throw new ExecuteCommandError(
-      cloneDefaultCommand.join(" "),
-      cloneDefaultResult,
-    );
-  }
-
-  // Create and checkout the new branch
-  const checkoutCommand = ["git", "checkout", "-b", branchName];
-  const checkoutResult = await sandbox.process.executeCommand(
-    checkoutCommand.join(" "),
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
-  );
-
-  if (checkoutResult.exitCode !== 0) {
-    logger.error("Failed to checkout branch", {
-      targetRepository,
-      checkoutCommand: checkoutCommand.join(" "),
-    });
-    throw new ExecuteCommandError(checkoutCommand.join(" "), checkoutResult);
-  }
-
-  logger.info("Successfully checked out branch", {
-    targetRepository,
-    checkoutCommand: checkoutCommand.join(" "),
-  });
-
-  return cloneDefaultResult;
+  return branchName;
 }
