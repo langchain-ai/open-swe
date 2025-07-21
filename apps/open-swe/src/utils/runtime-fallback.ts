@@ -12,6 +12,7 @@ import { AIMessageChunk, BaseMessage } from "@langchain/core/messages";
 import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -48,14 +49,14 @@ export class FallbackRunnable<
     this.modelManager = modelManager;
   }
 
-  async _generate(messages: BaseMessage[], options?: any): Promise<ChatResult> {
+  async _generate(
+    messages: BaseMessage[],
+    options?: Record<string, any>,
+  ): Promise<ChatResult> {
     const result = await this.invoke(messages as any, options);
     const generation: ChatGeneration = {
       message: result,
-      text:
-        typeof result?.content === "string"
-          ? result.content
-          : JSON.stringify(result?.content) || "",
+      text: result?.content ? getMessageContentString(result.content) : "",
     };
     return {
       generations: [generation],
@@ -65,7 +66,7 @@ export class FallbackRunnable<
 
   async invoke(
     input: BaseLanguageModelInput,
-    options?: Partial<RunnableConfig>,
+    options?: Record<string, any>,
   ): Promise<AIMessageChunk> {
     const modelConfigs = this.modelManager.getModelConfigs(
       this.config,

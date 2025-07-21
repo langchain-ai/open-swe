@@ -10,6 +10,8 @@ import { decryptSecret } from "@open-swe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
+type InitChatModelArgs = Parameters<typeof initChatModel>[1];
+
 export interface CircuitBreakerState {
   state: CircuitState;
   failureCount: number;
@@ -27,8 +29,14 @@ interface ModelLoadConfig {
 }
 
 export enum CircuitState {
-  CLOSED = "CLOSED", // Normal operation
-  OPEN = "OPEN", // Failing, use fallback
+  /*
+   * CLOSED: Normal operation
+   */
+  CLOSED = "CLOSED",
+  /*
+   * OPEN: Failing, use fallback
+   */
+  OPEN = "OPEN",
 }
 
 export const PROVIDER_FALLBACK_ORDER = [
@@ -39,14 +47,20 @@ export const PROVIDER_FALLBACK_ORDER = [
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
 export interface ModelManagerConfig {
-  circuitBreakerFailureThreshold: number; // Failures before opening circuit
-  circuitBreakerTimeoutMs: number; // Time to wait before trying again (ms)
+  /*
+   * Failures before opening circuit
+   */
+  circuitBreakerFailureThreshold: number;
+  /*
+   * Time to wait before trying again (ms)
+   */
+  circuitBreakerTimeoutMs: number;
   fallbackOrder: Provider[];
 }
 
 export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
-  circuitBreakerFailureThreshold: 3, // Open after 3 failures
-  circuitBreakerTimeoutMs: 300000, // 5 minutes timeout
+  circuitBreakerFailureThreshold: 2, // TBD, need to test
+  circuitBreakerTimeoutMs: 180000, // 3 minutes timeout
   fallbackOrder: [...PROVIDER_FALLBACK_ORDER],
 };
 
@@ -76,7 +90,7 @@ export class ModelManager {
   constructor(config: Partial<ModelManagerConfig> = {}) {
     this.config = { ...DEFAULT_MODEL_MANAGER_CONFIG, ...config };
 
-    logger.info("ModelManager initialized", {
+    logger.info("Initialized", {
       config: this.config,
       fallbackOrder: this.config.fallbackOrder,
     });
@@ -87,40 +101,12 @@ export class ModelManager {
    */
   async loadModel(graphConfig: GraphConfig, task: Task) {
     const baseConfig = this.getBaseConfigForTask(graphConfig, task);
-
-    if (baseConfig.modelName) {
-      try {
-        const model = await this.initializeModel(
-          {
-            ...baseConfig,
-            temperature: baseConfig.temperature,
-            maxTokens: baseConfig.maxTokens,
-            thinkingModel: baseConfig.thinkingModel,
-            thinkingBudgetTokens: baseConfig.thinkingBudgetTokens,
-          },
-          graphConfig,
-        );
-
-        return model;
-      } catch (error) {
-        logger.error("Model initialization failed", {
-          task,
-          provider: baseConfig.provider,
-          modelName: baseConfig.modelName,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
-      }
-    }
-
-    const errorMsg = `No model available for task ${task}`;
-    logger.error(errorMsg, { task });
-    throw new Error(errorMsg);
+    const model = await this.initializeModel(baseConfig, graphConfig);
+    return model;
   }
   /**
    * Initialize the model instance
    */
-  // should be set to return configurable chat model
   public async initializeModel(
     config: ModelLoadConfig,
     graphConfig?: GraphConfig,
@@ -143,7 +129,6 @@ export class ModelManager {
       finalMaxTokens = finalMaxTokens > 8_192 ? 8_192 : finalMaxTokens;
     }
 
-    // Handle user authentication and API keys
     let apiKey: string | null = null;
     if (graphConfig) {
       const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
@@ -172,7 +157,7 @@ export class ModelManager {
       }
     }
 
-    const modelOptions: any = {
+    const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
       temperature: thinkingModel ? undefined : temperature,
       max_retries: MAX_RETRIES,
@@ -188,7 +173,6 @@ export class ModelManager {
     logger.debug("Initializing model", {
       provider,
       modelName,
-      options: modelOptions,
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -202,7 +186,6 @@ export class ModelManager {
     const configs: ModelLoadConfig[] = [];
     const baseConfig = this.getBaseConfigForTask(config, task);
 
-    // Get selected model config
     const defaultConfig = selectedModel._defaultConfig;
     let selectedModelConfig: ModelLoadConfig | null = null;
 
@@ -211,20 +194,24 @@ export class ModelManager {
       const modelName = defaultConfig.model;
 
       if (provider && modelName) {
+        const isThinkingModel = baseConfig.thinkingModel;
         selectedModelConfig = {
           provider,
           modelName,
           temperature: defaultConfig.temperature ?? baseConfig.temperature,
           maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
-          thinkingModel:
-            baseConfig.thinkingModel && this.supportsThinking(provider),
-          thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+          ...(isThinkingModel
+            ? {
+                thinkingModel: true,
+                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+              }
+            : {}),
         };
         configs.push(selectedModelConfig);
       }
     }
 
-    // Add fallback models (excluding the selected one)
+    // Add fallback models
     for (const provider of this.config.fallbackOrder) {
       const fallbackModel = this.getDefaultModelForProvider(provider, task);
       if (
@@ -236,9 +223,6 @@ export class ModelManager {
           ...fallbackModel,
           temperature: baseConfig.temperature,
           maxTokens: baseConfig.maxTokens,
-          thinkingModel:
-            baseConfig.thinkingModel && this.supportsThinking(provider),
-          thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
         };
         configs.push(fallbackConfig);
       }
@@ -258,7 +242,7 @@ export class ModelManager {
       [Task.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-sonnet-4-0",
+          "google-genai:gemini-2.5-pro",
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
       [Task.ROUTER]: {
@@ -280,8 +264,6 @@ export class ModelManager {
     const [modelProvider, ...modelNameParts] = modelStr.split(":");
 
     let thinkingModel = false;
-    const thinkingBudgetTokens = THINKING_BUDGET_TOKENS;
-
     if (modelNameParts[0] === "extended-thinking") {
       thinkingModel = true;
       modelNameParts.shift();
@@ -291,6 +273,8 @@ export class ModelManager {
     if (modelProvider === "openai" && modelName.startsWith("o")) {
       thinkingModel = true;
     }
+
+    const thinkingBudgetTokens = THINKING_BUDGET_TOKENS;
 
     return {
       modelName,
@@ -331,13 +315,7 @@ export class ModelManager {
     if (!modelName) {
       return null;
     }
-
-    return {
-      provider,
-      modelName,
-      thinkingModel: provider === "openai" && modelName.startsWith("o"),
-      thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
-    };
+    return { provider, modelName };
   }
 
   /**
@@ -357,10 +335,12 @@ export class ModelManager {
         state.failureCount = 0;
         delete state.openedAt;
 
-        logger.info(`Circuit breaker automatically recovered: OPEN → CLOSED`, {
-          modelKey,
-          timeElapsed: (timeElapsed / 1000).toFixed(1) + "s",
-        });
+        logger.info(
+          `${modelKey}: Circuit breaker automatically recovered: OPEN → CLOSED`,
+          {
+            timeElapsed: (timeElapsed / 1000).toFixed(1) + "s",
+          },
+        );
         return true;
       }
     }
@@ -386,12 +366,7 @@ export class ModelManager {
     circuitState.failureCount = 0;
     delete circuitState.openedAt;
 
-    logger.debug(
-      `${modelKey}: Circuit breaker reset after successful request`,
-      {
-        modelKey,
-      },
-    );
+    logger.debug(`${modelKey}: Circuit breaker reset after successful request`);
   }
 
   public recordFailure(modelKey: string): void {
@@ -410,7 +385,6 @@ export class ModelManager {
       logger.warn(
         `${modelKey}: Circuit breaker opened after ${circuitState.failureCount} failures`,
         {
-          modelKey,
           timeoutMs: this.config.circuitBreakerTimeoutMs,
           willRetryAt: new Date(
             now + this.config.circuitBreakerTimeoutMs,
@@ -418,10 +392,6 @@ export class ModelManager {
         },
       );
     }
-  }
-
-  private supportsThinking(provider: Provider): boolean {
-    return provider === "anthropic" || provider === "openai";
   }
 
   /**
@@ -436,7 +406,7 @@ export class ModelManager {
    */
   public shutdown(): void {
     this.circuitBreakers.clear();
-    logger.info("ModelManager shutdown complete");
+    logger.info("Shutdown complete");
   }
 }
 
