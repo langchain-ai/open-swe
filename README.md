@@ -1,7 +1,11 @@
 # Open SWE
 
-<div>
-<img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" >
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
+    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo">
+  </picture>
 </div>
 
 > [!WARNING]
