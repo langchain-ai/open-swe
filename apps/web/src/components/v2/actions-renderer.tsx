@@ -227,12 +227,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.messages, customNodeEvents, streamLoading]);
 
-  useEffect(() => {
-    if (graphId === PROGRAMMER_GRAPH_ID) {
-      console.log(stream.messages[stream.messages.length - 1]);
-    }
-  }, [stream.messages]);
-
   // TODO: If the SDK changes go in, use this instead:
   // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
   useEffect(() => {

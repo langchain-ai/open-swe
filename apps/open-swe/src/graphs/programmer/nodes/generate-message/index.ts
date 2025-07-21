@@ -2,7 +2,6 @@ import {
   GraphState,
   GraphConfig,
   GraphUpdate,
-  OpenSWETokenData,
 } from "@open-swe/shared/open-swe/types";
 import {
   loadModel,
@@ -42,31 +41,12 @@ import {
 } from "../../../../utils/review.js";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import {
-  AIMessage,
-  AIMessageChunk,
-  BaseMessage,
-  HumanMessage,
-  isAIMessage,
-  isHumanMessage,
-  isToolMessage,
-  MessageContent,
-  ToolMessage,
-} from "@langchain/core/messages";
+  CacheablePromptSegment,
+  convertToCacheControlMessage,
+  trackCachePerformance,
+} from "../../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
-
-interface CacheablePromptSegment {
-  type: "text";
-  text: string;
-  cache_control?: { type: "ephemeral" };
-}
-
-interface CacheMetrics {
-  cache_creation_input_tokens: number;
-  cache_read_input_tokens: number;
-  input_tokens: number;
-  output_tokens: number;
-}
 
 const formatDynamicContextPrompt = (state: GraphState) => {
   return DYNAMIC_SYSTEM_PROMPT.replaceAll(
@@ -131,123 +111,6 @@ const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
   }
 
   return segments.filter((segment) => segment.text.trim() !== "");
-};
-
-const calculateCostSavings = (metrics: CacheMetrics): number => {
-  const SONNET_4_BASE_RATE = 3.0 / 1_000_000; // $3 per MTok
-  const CACHE_WRITE_MULTIPLIER = 1.25;
-  const CACHE_READ_MULTIPLIER = 0.1;
-
-  const cacheWriteCost =
-    metrics.cache_creation_input_tokens *
-    SONNET_4_BASE_RATE *
-    CACHE_WRITE_MULTIPLIER;
-
-  const cacheReadCost =
-    metrics.cache_read_input_tokens *
-    SONNET_4_BASE_RATE *
-    CACHE_READ_MULTIPLIER;
-
-  const regularInputCost = metrics.input_tokens * SONNET_4_BASE_RATE;
-
-  // Cost without caching (all tokens at base rate)
-  const totalTokens =
-    metrics.cache_creation_input_tokens +
-    metrics.cache_read_input_tokens +
-    metrics.input_tokens;
-  const costWithoutCaching = totalTokens * SONNET_4_BASE_RATE;
-
-  // Actual cost with caching
-  const actualCost = cacheWriteCost + cacheReadCost + regularInputCost;
-
-  return costWithoutCaching - actualCost;
-};
-
-const trackCachePerformance = (response: AIMessageChunk): OpenSWETokenData => {
-  const metrics: CacheMetrics = {
-    cache_creation_input_tokens:
-      response.usage_metadata?.input_token_details?.cache_creation || 0,
-    cache_read_input_tokens:
-      response.usage_metadata?.input_token_details?.cache_read || 0,
-    input_tokens: response.usage_metadata?.input_tokens || 0,
-    output_tokens: response.usage_metadata?.output_tokens || 0,
-  };
-
-  const totalInputTokens =
-    metrics.cache_creation_input_tokens +
-    metrics.cache_read_input_tokens +
-    metrics.input_tokens;
-
-  const cacheHitRate =
-    totalInputTokens > 0
-      ? metrics.cache_read_input_tokens / totalInputTokens
-      : 0;
-  const costSavings = calculateCostSavings(metrics);
-
-  logger.info("Cache Performance", {
-    cacheHitRate: `${(cacheHitRate * 100).toFixed(2)}%`,
-    costSavings: `$${costSavings.toFixed(4)}`,
-    ...metrics,
-  });
-
-  return {
-    totalInputTokens: metrics.input_tokens,
-    totalOutputTokens: metrics.output_tokens,
-    totalCacheWrites: metrics.cache_creation_input_tokens,
-    totalCacheHits: metrics.cache_read_input_tokens,
-  };
-};
-
-const addCacheControlToMessageContent = (
-  messageContent: MessageContent,
-): MessageContent => {
-  if (typeof messageContent === "string") {
-    return [
-      {
-        type: "text",
-        text: messageContent,
-        cache_control: { type: "ephemeral" },
-      },
-    ];
-  } else if (Array.isArray(messageContent)) {
-    if ("cache_control" in messageContent[messageContent.length - 1]) {
-      // Already set, no-op
-      return messageContent;
-    }
-
-    const newMessageContent = [...messageContent];
-    newMessageContent[newMessageContent.length - 1] = {
-      ...newMessageContent[newMessageContent.length - 1],
-      cache_control: { type: "ephemeral" },
-    };
-    return newMessageContent;
-  } else {
-    logger.warn("Unknown message content type", { messageContent });
-    return messageContent;
-  }
-};
-
-const convertToCacheControlMessage = (message: BaseMessage): BaseMessage => {
-  if (isAIMessage(message)) {
-    return new AIMessage({
-      ...message,
-      content: addCacheControlToMessageContent(message.content),
-    });
-  } else if (isHumanMessage(message)) {
-    return new HumanMessage({
-      ...message,
-      content: addCacheControlToMessageContent(message.content),
-    });
-  } else if (isToolMessage(message)) {
-    return new ToolMessage({
-      ...(message as ToolMessage),
-      content: addCacheControlToMessageContent(
-        (message as ToolMessage).content,
-      ),
-    });
-  } else {
-    return message;
-  }
 };
 
 export async function generateAction(
@@ -324,9 +187,6 @@ export async function generateAction(
     ...inputMessagesWithCache,
   ]);
 
-  // Track cache performance metrics
-  const tokenData = trackCachePerformance(response);
-
   const hasToolCalls = !!response.tool_calls?.length;
   // No tool calls means the graph is going to end. Stop the sandbox.
   let newSandboxSessionId: string | undefined;
@@ -352,6 +212,6 @@ export async function generateAction(
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
-    tokenData,
+    tokenData: trackCachePerformance(response),
   };
 }

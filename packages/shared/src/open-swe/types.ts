@@ -25,25 +25,12 @@ import {
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 
-// TODO: FIX THIS TYPING AND NAMING
-export type OpenSWETokenData = {
-  /**
-   * The total number of input tokens passed to an LLM.
-   */
-  totalInputTokens: number;
-  /**
-   * The total number of generated tokens during the run.
-   */
-  totalOutputTokens: number;
-  /**
-   * The total number of tokens written to the cache.
-   */
-  totalCacheWrites: number;
-  /**
-   * The total number of tokens read from the cache.
-   */
-  totalCacheHits: number;
-};
+export interface CacheMetrics {
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
 
 export type PlanItem = {
   /**
@@ -271,18 +258,20 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
-  tokenData: withLangGraph(z.custom<OpenSWETokenData>().optional(), {
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
     reducer: {
-      schema: z.custom<OpenSWETokenData>().optional(),
-      fn: (state: OpenSWETokenData | undefined, update: OpenSWETokenData) => {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: (state: CacheMetrics | undefined, update: CacheMetrics) => {
         if (!state) {
           return update;
         }
         return {
-          totalInputTokens: state.totalInputTokens + update.totalInputTokens,
-          totalOutputTokens: state.totalOutputTokens + update.totalOutputTokens,
-          totalCacheWrites: state.totalCacheWrites + update.totalCacheWrites,
-          totalCacheHits: state.totalCacheHits + update.totalCacheHits,
+          cacheCreationInputTokens:
+            state.cacheCreationInputTokens + update.cacheCreationInputTokens,
+          cacheReadInputTokens:
+            state.cacheReadInputTokens + update.cacheReadInputTokens,
+          inputTokens: state.inputTokens + update.inputTokens,
+          outputTokens: state.outputTokens + update.outputTokens,
         };
       },
     },
