@@ -19,7 +19,8 @@ import { Button } from "../ui/button";
 import { cn } from "@/lib/utils";
 import { isAIMessageSDK } from "@/lib/langchain-messages";
 import { BasicMarkdownText } from "../thread/markdown-text";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { ErrorState } from "./types";
+import { CollapsibleAlert } from "./collapsible-alert";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -75,7 +76,7 @@ interface ManagerChatProps {
   handleSendMessage: () => void;
   isLoading: boolean;
   cancelRun: () => void;
-  errorMessage?: string;
+  errorState?: ErrorState | null;
 }
 
 function extractResponseFromMessage(message: Message): string {
@@ -98,7 +99,7 @@ export function ManagerChat({
   handleSendMessage,
   isLoading,
   cancelRun,
-  errorMessage,
+  errorState,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
@@ -147,12 +148,12 @@ export function ManagerChat({
                     </div>
                   );
                 })}
-                {errorMessage ? (
-                  <Alert variant="destructive">
-                    <AlertCircle className="size-4" />
-                    <AlertTitle>An error occurred:</AlertTitle>
-                    <AlertDescription>{errorMessage}</AlertDescription>
-                  </Alert>
+                {errorState ? (
+                  <CollapsibleAlert
+                    variant="destructive"
+                    errorState={errorState}
+                    icon={<AlertCircle className="size-4" />}
+                  />
                 ) : null}
               </>
             }
