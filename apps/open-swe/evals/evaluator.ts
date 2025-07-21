@@ -177,45 +177,23 @@ export async function evaluator(inputs: {
   }
 
   const daytonaInstance = new Daytona();
+  const solutionBranch = output.branchName;
   logger.info("Creating sandbox...", {
     repo: openSWEInputs.repo,
     originalBranch: openSWEInputs.branch,
-    solutionBranch: output.branchName,
+    solutionBranch,
     user_input: openSWEInputs.user_input.substring(0, 100) + "...",
   });
 
   const sandbox = await daytonaInstance.create(DEFAULT_SANDBOX_CREATE_PARAMS);
 
   try {
-    const res = await cloneRepo(sandbox, output.targetRepository, {
+    await cloneRepo(sandbox, output.targetRepository, {
       githubInstallationToken: githubToken,
+      stateBranchName: solutionBranch,
     });
-    if (res.exitCode !== 0) {
-      logger.error("Failed to clone repository", {
-        targetRepository: output.targetRepository,
-        cloneResult: res,
-      });
-      throw new Error("Failed to clone repository");
-    }
 
     const absoluteRepoDir = getRepoAbsolutePath(output.targetRepository);
-
-    const solutionBranch = output.branchName;
-    logger.info(`Checking out agent's solution branch: ${solutionBranch}`);
-
-    const checkoutBranchRes = await sandbox.process.executeCommand(
-      `git checkout ${solutionBranch}`,
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
-    if (checkoutBranchRes.exitCode !== 0) {
-      logger.error("Failed to checkout solution branch", {
-        solutionBranch,
-        checkoutResult: checkoutBranchRes,
-      });
-      throw new Error(`Failed to checkout solution branch: ${solutionBranch}`);
-    }
 
     const envSetupSuccess = await setupEnv(sandbox, absoluteRepoDir);
     if (!envSetupSuccess) {
@@ -238,7 +216,7 @@ export async function evaluator(inputs: {
       mypyScore: analysisResult.mypyScore,
       repo: openSWEInputs.repo,
       originalBranch: openSWEInputs.branch,
-      solutionBranch: output.branchName,
+      solutionBranch,
     });
 
     return [

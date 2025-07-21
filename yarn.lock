@@ -4140,6 +4140,7 @@ __metadata:
   resolution: "@open-swe/docs@workspace:apps/docs"
   dependencies:
     mint: ^4.2.12
+    prettier: ^3.5.2
   languageName: unknown
   linkType: soft
 
