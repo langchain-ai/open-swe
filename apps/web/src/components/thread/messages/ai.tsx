@@ -261,9 +261,7 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
-  }
-  // Handle MCP tools
-  if (toolCall && isMcpTool(toolCall.name)) {
+  } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
       actionType: "mcp",
       status,

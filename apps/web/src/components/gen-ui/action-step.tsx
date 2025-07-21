@@ -192,7 +192,6 @@ function ActionItem(props: ActionItemProps) {
 
     if (props.status === "generating") {
       return ACTION_GENERATING_TEXT_MAP[props.actionType];
-      }
     }
 
     if (props.status === "done") {
@@ -416,28 +415,11 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     } else if (props.actionType === "mcp") {
-      // Show key arguments in header for better context
-      const keyArgs = Object.entries(props.args || {}).slice(0, 2);
       return (
-        <div className="flex flex-col">
+        <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
             {props.toolName}
           </span>
-          {keyArgs.length > 0 && (
-            <div className="text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              {keyArgs.map(([key, value]) => {
-                const displayValue =
-                  typeof value === "string" && value.length > 50
-                    ? value.slice(0, 50) + "..."
-                    : String(value);
-                return (
-                  <span key={key}>
-                    <span className="font-medium">{key}:</span> {displayValue}
-                  </span>
-                );
-              })}
-            </div>
-          )}
         </div>
       );
     } else {
@@ -477,6 +459,10 @@ function ActionItem(props: ActionItemProps) {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
 
+      if (!hasArgs && !hasOutput) {
+        return null;
+      }
+
       return (
         <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
           {hasArgs && (
@@ -511,14 +497,14 @@ function ActionItem(props: ActionItemProps) {
           )}
 
           {hasOutput && (
-            <div>
+            <>
               <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
                 Output
               </div>
               <pre className="text-foreground/90 text-xs font-normal whitespace-pre-wrap">
                 {props.output}
               </pre>
-            </div>
+            </>
           )}
         </div>
       );
