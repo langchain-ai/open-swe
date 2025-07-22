@@ -34,7 +34,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 mb-4 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "mt-2 mb-4 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >

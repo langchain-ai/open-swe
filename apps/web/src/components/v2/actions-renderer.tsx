@@ -83,7 +83,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
-  onStreamReady?: (cancelFn: (() => void) | undefined) => void;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
   onProgrammerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
 }
 
