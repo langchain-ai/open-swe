@@ -64,9 +64,10 @@ export function ThreadView({
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
 
-  const { status: realTimeStatus } = useThreadStatus(displayThread.id, {
-    useTaskPlanConfig: true,
-  });
+  const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
+    useThreadStatus(displayThread.id, {
+      useTaskPlanConfig: true,
+    });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
@@ -187,7 +188,15 @@ export function ThreadView({
     }
   }, [plannerStream.values, selectedTab]);
 
-  const { status: realTimeStatus } = useThreadStatus(displayThread.id);
+  // Extract task plan from programmer stream
+  useEffect(() => {
+    if (programmerStream.values?.taskPlan) {
+      setProgrammerTaskPlan(programmerStream.values.taskPlan);
+    } else if (realTimeTaskPlan) {
+      // Fallback to real-time task plan if stream doesn't have it
+      setProgrammerTaskPlan(realTimeTaskPlan);
+    }
+  }, [programmerStream.values, realTimeTaskPlan]);
 
   const getStatusDotColor = (status: string) => {
     switch (status) {
@@ -336,6 +345,15 @@ export function ThreadView({
                   />
                 </div>
               </div>
+
+              {/* Task Progress Bar */}
+              {programmerTaskPlan && (
+                <ProgressBar
+                  taskPlan={programmerTaskPlan}
+                  onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                  className="mb-4"
+                />
+              )}
 
               <TabsContent
                 value="planner"
