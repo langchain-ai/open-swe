@@ -247,12 +247,12 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }, [runId, stream]);
 
   useEffect(() => {
-    if (threadId && runId) {
+    if (stream.isLoading) {
       onStreamReady?.(cancelRun);
     } else {
       onStreamReady?.(undefined);
     }
-  }, [onStreamReady, threadId, runId, cancelRun]);
+  }, [onStreamReady, runId]);
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
