@@ -54,12 +54,8 @@ export function ThreadCard({
     );
 
     // Find the current task (lowest index among uncompleted tasks)
-    const currentTaskIndex = planItems
-      .filter((item) => !item.completed)
-      .reduce(
-        (min, item) => (item.index < min ? item.index : min),
-        Number.POSITIVE_INFINITY,
-      );
+    const currentTask = planItems
+      .filter((item) => !item.completed)?.[0]
 
     const displayCurrentIndex =
       currentTaskIndex === Number.POSITIVE_INFINITY
