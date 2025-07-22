@@ -11,7 +11,7 @@ import { ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, CacheMetrics } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import { HumanMessage } from "@langchain/core/messages";
@@ -23,7 +23,6 @@ import {
 import { useThreadStatus } from "@/hooks/useThreadStatus";
 import { cn } from "@/lib/utils";
 
-import { StickToBottom } from "use-stick-to-bottom";
 import {
   StickyToBottomContent,
   ScrollToBottom,
@@ -35,7 +34,8 @@ import {
   CustomNodeEvent,
   isCustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
-import { useCancelStream } from "@/hooks/useCancelStream";
+import { StickToBottom } from "use-stick-to-bottom";
+import { TokenUsage } from "./token-usage";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -269,7 +269,7 @@ export function ThreadView({
       </div>
 
       {/* Main Content - Split Layout */}
-      <div className="flex h-full w-full pt-12">
+      <div className="flex w-full pt-12">
         <ManagerChat
           messages={filteredMessages}
           chatInput={chatInput}
@@ -280,108 +280,146 @@ export function ThreadView({
           errorState={errorState}
         />
         {/* Right Side - Actions & Plan */}
-        <div className="flex h-full flex-1 flex-col">
-          <div className="relative flex-1">
-            <StickToBottom
-              className="absolute inset-0"
-              initial={true}
+        <div
+          className="flex flex-1 flex-col px-4 pt-4"
+          style={{ height: "calc(100vh - 3rem)" }}
+        >
+          <div className="min-h-0 flex-1">
+            <Tabs
+              defaultValue="planner"
+              className="flex h-full w-full flex-col"
+              value={selectedTab}
+              onValueChange={(value) =>
+                setSelectedTab(value as "planner" | "programmer")
+              }
             >
-              <StickyToBottomContent
-                className="h-full overflow-y-auto"
-                contentClassName="space-y-4 p-4"
-                content={
-                  <Tabs
-                    defaultValue="planner"
-                    className="w-full"
-                    value={selectedTab}
-                    onValueChange={(value) =>
-                      setSelectedTab(value as "planner" | "programmer")
+              <div className="flex flex-shrink-0 items-center justify-between">
+                <TabsList className="bg-muted/70 dark:bg-gray-800">
+                  <TabsTrigger value="planner">Planner</TabsTrigger>
+                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                </TabsList>
+
+                <div className="flex items-center justify-center gap-2">
+                  {selectedTab === "planner" && plannerStream.isLoading && (
+                    <CancelStreamButton
+                      stream={plannerStream}
+                      threadId={plannerSession?.threadId}
+                      runId={plannerSession?.runId}
+                      streamName="Planner"
+                    />
+                  )}
+
+                  {selectedTab === "programmer" &&
+                    programmerStream.isLoading && (
+                      <CancelStreamButton
+                        stream={programmerStream}
+                        threadId={programmerSession?.threadId}
+                        runId={programmerSession?.runId}
+                        streamName="Programmer"
+                      />
+                    )}
+                  <TokenUsage
+                    tokenData={
+                      [
+                        plannerStream.values.tokenData,
+                        programmerStream.values.tokenData,
+                      ].filter(Boolean) as CacheMetrics[]
                     }
-                  >
-                    <div className="flex items-center justify-between">
-                      <TabsList className="bg-muted/70 dark:bg-gray-800">
-                        <TabsTrigger value="planner">Planner</TabsTrigger>
-                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                      </TabsList>
+                  />
+                </div>
+              </div>
 
-                      <div className="flex gap-2">
-                        {selectedTab === "planner" &&
-                          plannerStream.isLoading && (
-                            <CancelStreamButton
-                              stream={plannerStream}
-                              threadId={plannerSession?.threadId}
-                              runId={plannerSession?.runId}
-                              streamName="Planner"
-                            />
-                          )}
-
-                        {selectedTab === "programmer" &&
-                          programmerStream.isLoading && (
-                            <CancelStreamButton
-                              stream={programmerStream}
-                              threadId={programmerSession?.threadId}
-                              runId={programmerSession?.runId}
-                              streamName="Programmer"
-                            />
-                          )}
-                      </div>
-                    </div>
-
-                    <TabsContent value="planner">
-                      <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
-                        <CardContent className="space-y-2 p-3 pt-0">
-                          {plannerSession && (
-                            <ActionsRenderer<PlannerGraphState>
-                              runId={plannerSession.runId}
-                              customNodeEvents={customPlannerNodeEvents}
-                              setCustomNodeEvents={setCustomPlannerNodeEvents}
-                              stream={plannerStream}
-                            />
-                          )}
-                          {!plannerSession && (
-                            <div className="flex items-center justify-center gap-2 py-8">
-                              <Clock className="text-muted-foreground size-4" />
-                              <span className="text-muted-foreground text-sm">
-                                No planner session
-                              </span>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                    <TabsContent value="programmer">
-                      <Card className="border-border bg-card px-0 py-4 dark:bg-gray-950">
-                        <CardContent className="space-y-2 p-3 pt-0">
-                          {programmerSession && (
-                            <ActionsRenderer<GraphState>
-                              runId={programmerSession.runId}
-                              customNodeEvents={customProgrammerNodeEvents}
-                              setCustomNodeEvents={
-                                setCustomProgrammerNodeEvents
-                              }
-                              stream={programmerStream}
-                            />
-                          )}
-                          {!programmerSession && (
-                            <div className="flex items-center justify-center gap-2 py-8">
-                              <Terminal className="text-muted-foreground size-4" />
-                              <span className="text-muted-foreground text-sm">
-                                No programmer session
-                              </span>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  </Tabs>
-                }
-                footer={
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                    <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
-                  </div>
-                }
-              />
-            </StickToBottom>
+              <TabsContent
+                value="planner"
+                className="mb-10"
+              >
+                <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
+                  <CardContent className="h-full p-0">
+                    <StickToBottom
+                      className="absolute inset-0 h-full"
+                      initial={true}
+                    >
+                      <StickyToBottomContent
+                        className="scrollbar-pretty-auto h-full"
+                        content={
+                          <>
+                            {plannerSession ? (
+                              <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                                <ActionsRenderer<PlannerGraphState>
+                                  runId={plannerSession.runId}
+                                  customNodeEvents={customPlannerNodeEvents}
+                                  setCustomNodeEvents={
+                                    setCustomPlannerNodeEvents
+                                  }
+                                  stream={plannerStream}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2 py-8">
+                                <Clock className="text-muted-foreground size-4" />
+                                <span className="text-muted-foreground text-sm">
+                                  No planner session
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        }
+                        footer={
+                          <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                            <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                          </div>
+                        }
+                      />
+                    </StickToBottom>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent
+                value="programmer"
+                className="mb-10"
+              >
+                <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
+                  <CardContent className="h-full p-0">
+                    <StickToBottom
+                      className="absolute inset-0 h-full"
+                      initial={true}
+                    >
+                      <StickyToBottomContent
+                        className="scrollbar-pretty-auto h-full"
+                        content={
+                          <>
+                            {programmerSession ? (
+                              <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                                <ActionsRenderer<GraphState>
+                                  runId={programmerSession.runId}
+                                  customNodeEvents={customProgrammerNodeEvents}
+                                  setCustomNodeEvents={
+                                    setCustomProgrammerNodeEvents
+                                  }
+                                  stream={programmerStream}
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2 py-8">
+                                <Clock className="text-muted-foreground size-4" />
+                                <span className="text-muted-foreground text-sm">
+                                  No programmer session
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        }
+                        footer={
+                          <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                            <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                          </div>
+                        }
+                      />
+                    </StickToBottom>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </div>

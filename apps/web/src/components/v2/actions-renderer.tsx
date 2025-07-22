@@ -1,27 +1,14 @@
 import { isAIMessageSDK, isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import {
-  Dispatch,
-  SetStateAction,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { useCancelStream } from "@/hooks/useCancelStream";
-import {
-  isCustomNodeEvent,
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
   ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
-import {
-  DO_NOT_RENDER_ID_PREFIX,
-  PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
@@ -33,7 +20,6 @@ import { Interrupt } from "../thread/messages/interrupt";
 import { AlertCircle } from "lucide-react";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
-import { TokenUsage } from "./token-usage";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -217,7 +203,7 @@ export function ActionsRenderer<
   }
 
   return (
-    <div className="flex w-full flex-col gap-2">
+    <div className="flex h-full w-full flex-col gap-2 overflow-y-auto py-4">
       {initializeEvents.length > 0 && steps.length > 0 && (
         <InitializeStep
           status={initStatus}
@@ -265,7 +251,6 @@ export function ActionsRenderer<
           icon={<AlertCircle className="size-4" />}
         />
       ) : null}
-      <TokenUsage tokenData={stream.values.tokenData} />
     </div>
   );
 }
