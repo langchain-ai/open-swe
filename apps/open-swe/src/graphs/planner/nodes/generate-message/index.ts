@@ -30,7 +30,7 @@ import { filterMessagesWithoutContent } from "../../../../utils/message/content.
 import { getPlannerNotes } from "../../utils/get-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
-  convertToCacheControlMessage,
+  convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 
@@ -115,14 +115,8 @@ export async function generateAction(
     throw new Error("No messages to process.");
   }
 
-  const inputMessagesWithCache = [...inputMessages];
-  if (inputMessagesWithCache.length > 0) {
-    const lastIndex = inputMessagesWithCache.length - 1;
-    inputMessagesWithCache[lastIndex] = convertToCacheControlMessage(
-      inputMessagesWithCache[lastIndex],
-    );
-  }
-
+  const inputMessagesWithCache =
+    convertMessagesToCacheControlledMessages(inputMessages);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([

@@ -29,7 +29,7 @@ import { BaseMessage } from "@langchain/core/messages";
 import { getMessageString } from "../../../../utils/message/content.js";
 import {
   CacheablePromptSegment,
-  convertToCacheControlMessage,
+  convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 
@@ -129,14 +129,9 @@ export async function generateReviewActions(
       : {}),
   });
 
-  const reviewerMessagesWithCache = [...state.reviewerMessages];
-  if (reviewerMessagesWithCache.length > 0) {
-    const lastIndex = reviewerMessagesWithCache.length - 1;
-    reviewerMessagesWithCache[lastIndex] = convertToCacheControlMessage(
-      reviewerMessagesWithCache[lastIndex],
-    );
-  }
-
+  const reviewerMessagesWithCache = convertMessagesToCacheControlledMessages(
+    state.reviewerMessages,
+  );
   const response = await modelWithTools.invoke([
     {
       role: "system",

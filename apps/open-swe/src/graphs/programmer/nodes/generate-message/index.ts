@@ -42,7 +42,7 @@ import {
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import {
   CacheablePromptSegment,
-  convertToCacheControlMessage,
+  convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 
@@ -168,14 +168,8 @@ export async function generateAction(
     throw new Error("No messages to process.");
   }
 
-  const inputMessagesWithCache = [...inputMessages];
-  if (inputMessagesWithCache.length > 0) {
-    const lastIndex = inputMessagesWithCache.length - 1;
-    inputMessagesWithCache[lastIndex] = convertToCacheControlMessage(
-      inputMessagesWithCache[lastIndex],
-    );
-  }
-
+  const inputMessagesWithCache =
+    convertMessagesToCacheControlledMessages(inputMessages);
   const response = await modelWithTools.invoke([
     {
       role: "system",

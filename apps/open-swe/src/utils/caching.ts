@@ -78,9 +78,7 @@ function addCacheControlToMessageContent(
   }
 }
 
-export function convertToCacheControlMessage(
-  message: BaseMessage,
-): BaseMessage {
+function convertToCacheControlMessage(message: BaseMessage): BaseMessage {
   if (isAIMessage(message)) {
     return new AIMessage({
       ...message,
@@ -101,4 +99,17 @@ export function convertToCacheControlMessage(
   } else {
     return message;
   }
+}
+
+export function convertMessagesToCacheControlledMessages(
+  messages: BaseMessage[],
+) {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  const newMessages = [...messages];
+  const lastIndex = newMessages.length - 1;
+  newMessages[lastIndex] = convertToCacheControlMessage(newMessages[lastIndex]);
+  return newMessages;
 }
