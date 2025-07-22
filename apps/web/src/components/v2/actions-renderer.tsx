@@ -83,7 +83,7 @@ interface ActionsRendererProps {
   ) => void;
   programmerSession?: ManagerGraphState["programmerSession"];
   setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
-  onStreamReady: (cancelFn: (() => void) | undefined) => void;
+  onStreamReady?: (cancelFn: (() => void) | undefined) => void;
   onProgrammerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
 }
 
@@ -247,12 +247,12 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   }, [runId, stream]);
 
   useEffect(() => {
-    if (stream.isLoading) {
+    if (threadId && runId) {
       onStreamReady?.(cancelRun);
     } else {
       onStreamReady?.(undefined);
     }
-  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
+  }, [onStreamReady, threadId, runId, cancelRun]);
 
   // Filter out human & do not render messages
   const filteredMessages = stream.messages?.filter(
