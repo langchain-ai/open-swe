@@ -57,10 +57,7 @@ export function ThreadCard({
     const currentTask = planItems
       .filter((item) => !item.completed)?.[0]
 
-    const displayCurrentIndex =
-      currentTaskIndex === Number.POSITIVE_INFINITY
-        ? planItems.length // All tasks completed
-        : currentTaskIndex; // +1 for 1-based display
+    const displayCurrentIndex = currentTask ? currentTask.index : planItems.length;
 
     return {
       currentTaskIndex: displayCurrentIndex,
