@@ -327,7 +327,7 @@ export function createOpenPrToolFields() {
     title: z
       .string()
       .describe(
-        "The title of the pull request. Ensure this is a concise and thoughtful title. You should follow conventional commit title format (e.g. prefixing with '[open-swe] fix:', '[open-swe] feat:', '[open-swe] chore:', etc.). Remember to include the '[open-swe]' prefix in the title.",
+        "The title of the pull request. Ensure this is a concise and thoughtful title. You should follow conventional commit title format (e.g. 'fix:', 'feat:', 'chore:', etc.).",
       ),
     body: z
       .string()

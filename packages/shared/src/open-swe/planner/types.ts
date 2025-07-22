@@ -3,11 +3,13 @@ import { z } from "zod";
 import { MessagesZodState } from "@langchain/langgraph";
 import {
   AgentSession,
+  CacheMetrics,
   CustomRules,
   TargetRepository,
   TaskPlan,
 } from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
+import { tokenDataReducer } from "../../caching.js";
 
 export const PlannerGraphStateObj = MessagesZodState.extend({
   sandboxSessionId: withLangGraph(z.string(), {
@@ -89,6 +91,12 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     reducer: {
       schema: z.custom<boolean>().optional(),
       fn: (_state, update) => update,
+    },
+  }),
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+    reducer: {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: tokenDataReducer,
     },
   }),
 });

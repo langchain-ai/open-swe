@@ -24,6 +24,14 @@ import {
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
+import { tokenDataReducer } from "../caching.js";
+
+export interface CacheMetrics {
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
 
 export type PlanItem = {
   /**
@@ -251,6 +259,13 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+    reducer: {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: tokenDataReducer,
+    },
+  }),
+
   // ---NOT USED---
   ui: z
     .custom<UIMessage[]>()
@@ -370,6 +385,11 @@ export const GraphConfigurationMetadata: {
       default: JSON.stringify(DEFAULT_MCP_SERVERS, null, 2),
       description:
         "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+    },
+  },
+  apiKeys: {
+    x_open_swe_ui_config: {
+      type: "hidden",
     },
   },
   [GITHUB_TOKEN_COOKIE]: {
@@ -495,6 +515,12 @@ export const GraphConfiguration = z.object({
    */
   maxTokens: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.maxTokens,
+  }),
+  /**
+   * User defined API keys to use
+   */
+  apiKeys: withLangGraph(z.record(z.string(), z.string()).optional(), {
+    metadata: GraphConfigurationMetadata.apiKeys,
   }),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.

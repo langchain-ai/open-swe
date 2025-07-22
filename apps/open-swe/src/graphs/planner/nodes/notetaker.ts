@@ -17,6 +17,7 @@ import { getPlannerNotes } from "../utils/get-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
@@ -145,5 +146,6 @@ ${state.messages.map(getMessageString).join("\n")}`;
     contextGatheringNotes: (
       toolCall.args as z.infer<typeof condenseContextTool.schema>
     ).notes,
+    tokenData: trackCachePerformance(response),
   };
 }

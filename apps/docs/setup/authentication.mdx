@@ -1,6 +1,6 @@
 ---
-title: 'Authentication'
-description: 'How authentication works in Open SWE'
+title: "Authentication"
+description: "How authentication works in Open SWE"
 ---
 
 Open SWE implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow involves GitHub OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
@@ -16,7 +16,9 @@ Open SWE uses GitHub OAuth for client-side authentication, providing secure acce
 - **Settings management** is available at `/settings` for updating GitHub authentication
 
 <Note>
-GitHub OAuth provides the foundation for all user interactions, enabling Open SWE to access repositories and perform actions on behalf of authenticated users.
+  GitHub OAuth provides the foundation for all user interactions, enabling Open
+  SWE to access repositories and perform actions on behalf of authenticated
+  users.
 </Note>
 
 ## LangGraph Server Authentication
@@ -28,7 +30,9 @@ All requests to the LangGraph server are authenticated through a sophisticated p
 The Next.js application includes a proxy route (`apps/web/src/app/api/[..._path]/route.ts`) that acts as an intermediary for all LangGraph server requests. This proxy uses the [`langgraph-nextjs-api-passthrough`](https://www.npmjs.com/package/langgraph-nextjs-api-passthrough) package to handle request forwarding with enhanced security.
 
 <Tip>
-The proxy route ensures that sensitive authentication tokens never reach the client directly, maintaining security while enabling seamless communication with the LangGraph server.
+  The proxy route ensures that sensitive authentication tokens never reach the
+  client directly, maintaining security while enabling seamless communication
+  with the LangGraph server.
 </Tip>
 
 ### Header Injection System
@@ -42,23 +46,28 @@ The proxy route automatically injects the following encrypted headers into each 
 - **`x-github-installation-name`** - Installation name (username or organization name)
 
 <Note>
-All headers are prefixed with `x-` to ensure they're included in LangGraph run configurations, making them accessible during execution while maintaining security through encryption.
+  All headers are prefixed with `x-` to ensure they're included in LangGraph run
+  configurations, making them accessible during execution while maintaining
+  security through encryption.
 </Note>
 
 ### Token Encryption
 
 Open SWE implements AES-256-GCM encryption for all secrets passed to the LangGraph server to prevent exposure in:
+
 - LangSmith trace metadata
 - Run configurations
 - Potential unauthorized access scenarios
 
 The encryption process uses the `SECRETS_ENCRYPTION_KEY` environment variable and includes:
+
 - **Initialization Vector (IV)** for unique encryption per token
 - **Authentication Tag** for data integrity verification
 - **Base64 encoding** for safe transport
 
 <Tip>
-The same encryption key must be configured in both the web application and LangGraph agent for proper token decryption.
+  The same encryption key must be configured in both the web application and
+  LangGraph agent for proper token decryption.
 </Tip>
 
 ## Authentication Middleware
@@ -74,7 +83,8 @@ The middleware first checks for GitHub webhook requests by detecting the `X-Hub-
 3. **Separate user verification** in subsequent run creation requests
 
 <Note>
-Webhook authentication is handled separately from user authentication to enable automated GitHub issue processing while maintaining security.
+  Webhook authentication is handled separately from user authentication to
+  enable automated GitHub issue processing while maintaining security.
 </Note>
 
 ### Standard Request Authentication
@@ -82,6 +92,7 @@ Webhook authentication is handled separately from user authentication to enable 
 For non-webhook requests, the middleware validates:
 
 #### Required Headers
+
 - **Installation name** (`x-github-installation-name`)
 - **Installation token** (`x-github-installation-token`)
 
@@ -92,11 +103,13 @@ Missing either header results in a 401 Unauthorized error.
 The middleware supports two authentication paths:
 
 **Web Application Requests:**
+
 - Uses encrypted GitHub access token (`x-github-access-token`)
 - Verifies user identity through GitHub API
 - Extracts user ID and login from token
 
 **Webhook-Generated Requests:**
+
 - Uses explicit user headers (`x-github-user-id`, `x-github-user-login`)
 - Validates user ID and login against installation token
 - Ensures webhook-created runs are properly attributed
@@ -104,13 +117,15 @@ The middleware supports two authentication paths:
 ### Identity and Permissions
 
 Upon successful authentication, the middleware returns an identity object containing:
+
 - **User ID** for resource ownership verification
 - **Display name** (GitHub login)
 - **Installation name** for repository context
 - **Comprehensive permissions** for LangGraph operations
 
 <Tip>
-The user ID serves as the primary identifier for resource access control, ensuring users can only access their own threads, runs, and assistants.
+  The user ID serves as the primary identifier for resource access control,
+  ensuring users can only access their own threads, runs, and assistants.
 </Tip>
 
 ## Resource Access Control
@@ -118,6 +133,7 @@ The user ID serves as the primary identifier for resource access control, ensuri
 Open SWE implements fine-grained access control for all LangGraph resources:
 
 ### Metadata-Based Ownership
+
 - **Create operations** automatically add user ID to resource metadata
 - **Read/Update/Delete operations** verify user ID matches resource owner
 - **Search operations** filter results by user ownership
@@ -131,9 +147,11 @@ During LangGraph run execution, encrypted tokens are accessible through the run'
 3. **Action execution** (creating issues, making commits, etc.)
 
 <Note>
-This design ensures tokens remain encrypted in storage and traces while being available for necessary GitHub operations during run execution.
+  This design ensures tokens remain encrypted in storage and traces while being
+  available for necessary GitHub operations during run execution.
 </Note>
 
 <Tip>
-Always ensure the `SECRETS_ENCRYPTION_KEY` environment variable is identical between your web application and LangGraph agent deployments.
+  Always ensure the `SECRETS_ENCRYPTION_KEY` environment variable is identical
+  between your web application and LangGraph agent deployments.
 </Tip>
