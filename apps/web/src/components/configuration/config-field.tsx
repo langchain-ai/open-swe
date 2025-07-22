@@ -258,16 +258,13 @@ export function ConfigField({
                 "border-red-500 focus:border-red-500 focus-visible:ring-red-500",
             )}
           />
-          <div className="flex w-full items-start justify-between gap-2 pt-1">
-            {" "}
+          <div className="flex w-full items-center justify-between gap-2 pt-1">
             {/* Use items-start */}
             <Button
               variant="outline"
               size="sm"
               onClick={() => handleFormatJson(currentValue ?? "")}
-              disabled={
-                !currentValue || typeof currentValue !== "string" || !!jsonError
-              }
+              disabled={!currentValue || typeof currentValue !== "string"}
               className="mt-1"
             >
               Format
@@ -275,15 +272,10 @@ export function ConfigField({
             {jsonError && (
               <Alert
                 variant="destructive"
-                className="flex-grow px-3 py-1"
+                className="flex items-center gap-2 rounded-md py-1"
               >
-                <div className="flex items-center gap-2">
-                  {" "}
-                  <AlertCircle className="h-4 w-4 flex-shrink-0" />{" "}
-                  <AlertDescription className="text-xs">
-                    {jsonError}
-                  </AlertDescription>
-                </div>
+                <AlertCircle className="mb-1" />
+                <AlertDescription>{jsonError}</AlertDescription>
               </Alert>
             )}
           </div>
