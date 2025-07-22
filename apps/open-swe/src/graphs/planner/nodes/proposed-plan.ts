@@ -38,9 +38,27 @@ import {
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { createIssueComment } from "../../../utils/github/api.js";
+import { createIssueComment, getIssueComments, updateIssueComment } from "../../../utils/github/api.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
+
+const PLAN_MESSAGE_OPEN_TAG = "<open-swe-plan-message>";
+const PLAN_MESSAGE_CLOSE_TAG = "</open-swe-plan-message>";
+
+function formatBodyWithPlanMessage(body: string, message: string): string {
+  if (body.includes(PLAN_MESSAGE_OPEN_TAG) && body.includes(PLAN_MESSAGE_CLOSE_TAG)) {
+    const bodyBeforeTag = body.split(PLAN_MESSAGE_OPEN_TAG)[0];
+    const bodyAfterTag = body.split(PLAN_MESSAGE_CLOSE_TAG)[1];
+    const newInnerContents = `\n${PLAN_MESSAGE_OPEN_TAG}\n\n${message}\n\n${PLAN_MESSAGE_CLOSE_TAG}\n`
+    return `${bodyBeforeTag}${newInnerContents}${bodyAfterTag}`
+  }
+
+  return `${body}\n${PLAN_MESSAGE_OPEN_TAG}\n\n${message}\n\n${PLAN_MESSAGE_CLOSE_TAG}`;
+}
+
+function cleanTaskItems(taskItem: string): string {
+  return "```\n" + taskItem.replace("```", "\\```") + "\n```";
+}
 
 /**
  * Posts a comment to a GitHub issue using the installation token
@@ -52,19 +70,46 @@ async function postGitHubIssueComment(input: {
   config: GraphConfig;
 }): Promise<void> {
   const { githubIssueId, targetRepository, commentBody, config } = input;
+  const githubAppName = process.env.GITHUB_APP_NAME;
+  if (!githubAppName) {
+    throw new Error("GITHUB_APP_NAME not set");
+  }
 
   try {
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-
-    await createIssueComment({
+    const existingComments = await getIssueComments({
       owner: targetRepository.owner,
       repo: targetRepository.repo,
       issueNumber: githubIssueId,
-      body: commentBody,
-      githubToken: githubInstallationToken,
+      githubInstallationToken,
     });
+    
+    const existingOpenSWEComment = existingComments?.findLast((c) => c.user?.login?.startsWith(githubAppName));
 
-    logger.info(`Posted comment to GitHub issue #${githubIssueId}`);
+    if (!existingOpenSWEComment) {
+      await createIssueComment({
+        owner: targetRepository.owner,
+        repo: targetRepository.repo,
+        issueNumber: githubIssueId,
+        body: commentBody,
+        githubToken: githubInstallationToken,
+      });
+  
+      logger.info(`Posted comment to GitHub issue #${githubIssueId}`);
+      return;
+    }
+
+    // Update the comment
+    const newCommentBody = formatBodyWithPlanMessage(existingOpenSWEComment.body ?? "", commentBody);
+    await updateIssueComment({
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      commentId: existingOpenSWEComment.id,
+      body: newCommentBody,
+      githubInstallationToken,
+    });
+    
+    logger.info(`Updated comment to GitHub issue #${githubIssueId}`);
   } catch (error) {
     logger.error("Failed to post GitHub comment:", error);
     // Don't throw - we don't want to fail the entire process if comment posting fails
@@ -197,7 +242,7 @@ export async function interruptProposedPlan(
     await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,
       targetRepository: state.targetRepository,
-      commentBody: `🤖 **Plan Generated**\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nProceeding to implementation...`,
+      commentBody: `### 🤖 Plan Generated\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `Task #${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nProceeding to implementation...`,
       config,
     });
 
@@ -243,7 +288,7 @@ export async function interruptProposedPlan(
   await postGitHubIssueComment({
     githubIssueId: state.githubIssueId,
     targetRepository: state.targetRepository,
-    commentBody: `🤖 **Plan Ready for Approval**\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `${index + 1}. ${step}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
+    commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `Task #${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
     config,
   });
 
@@ -299,6 +344,14 @@ export async function interruptProposedPlan(
       planItems,
       { existingTaskPlan: state.taskPlan },
     );
+
+    // Update the comment to notify the user that the plan was accepted
+    await postGitHubIssueComment({
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+      commentBody: `### ✅ Plan Accepted ✅\n\nThe proposed plan was accepted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `Task #${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+      config,
+    });
   } else if (humanResponse.type === "edit") {
     const editedPlan = (humanResponse.args as ActionRequest).args.plan
       .split(PLAN_INTERRUPT_DELIMITER)
@@ -316,6 +369,13 @@ export async function interruptProposedPlan(
       planItems,
       { existingTaskPlan: state.taskPlan },
     );
+
+    await postGitHubIssueComment({
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+      commentBody: `### ✅ Plan Edited & Submitted ✅\n\nThe proposed plan was edited and submitted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `Task #${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+      config,
+    });
   } else {
     throw new Error("Unknown interrupt type." + humanResponse.type);
   }
