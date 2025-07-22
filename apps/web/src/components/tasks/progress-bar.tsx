@@ -12,6 +12,10 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
 import {
+  getActivePlanItems,
+  getActiveTask,
+} from "@open-swe/shared/open-swe/tasks";
+import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
@@ -34,7 +38,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "mt-2 mb-4 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >
@@ -47,8 +51,24 @@ export function ProgressBar({
     );
   }
 
-  const currentTask = taskPlan.tasks[taskPlan.activeTaskIndex];
-  if (!currentTask || !currentTask.planRevisions.length) {
+  let currentTask;
+  let planItems;
+  let sortedPlanItems;
+  let currentTaskIndex;
+
+  try {
+    currentTask = getActiveTask(taskPlan);
+    planItems = getActivePlanItems(taskPlan);
+    sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
+
+    // Find the current task (lowest index among uncompleted tasks)
+    currentTaskIndex = sortedPlanItems
+      .filter((item) => !item.completed)
+      .reduce(
+        (min, item) => (item.index < min ? item.index : min),
+        Number.POSITIVE_INFINITY,
+      );
+  } catch (error) {
     return (
       <div
         className={cn(
@@ -65,18 +85,6 @@ export function ProgressBar({
     );
   }
 
-  const activeRevision =
-    currentTask.planRevisions[currentTask.activeRevisionIndex];
-  const planItems = [...activeRevision.plans].sort((a, b) => a.index - b.index);
-
-  // Find the current task (lowest index among uncompleted tasks)
-  const currentTaskIndex = planItems
-    .filter((item) => !item.completed)
-    .reduce(
-      (min, item) => (item.index < min ? item.index : min),
-      Number.POSITIVE_INFINITY,
-    );
-
   const getItemState = (
     item: PlanItem,
   ): "completed" | "current" | "remaining" => {
@@ -85,9 +93,13 @@ export function ProgressBar({
     return "remaining";
   };
 
-  const completedCount = planItems.filter((item) => item.completed).length;
+  const completedCount = sortedPlanItems.filter(
+    (item) => item.completed,
+  ).length;
   const progressPercentage =
-    planItems.length > 0 ? (completedCount / planItems.length) * 100 : 0;
+    sortedPlanItems.length > 0
+      ? (completedCount / sortedPlanItems.length) * 100
+      : 0;
 
   const getSegmentColor = (state: string) => {
     switch (state) {
@@ -187,7 +199,7 @@ export function ProgressBar({
         {/* Progress Stats */}
         <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-gray-600 sm:text-sm dark:text-gray-300">
-            {completedCount} of {planItems.length} tasks completed
+            {completedCount} of {sortedPlanItems.length} tasks completed
           </span>
           <span className="text-xs text-gray-500 sm:text-sm dark:text-gray-400">
             Task #{currentTask.taskIndex + 1}
@@ -202,9 +214,9 @@ export function ProgressBar({
             aria-label="Click to view all tasks"
             title="Click to view all tasks"
           >
-            {planItems.map((item) => {
+            {sortedPlanItems.map((item) => {
               const state = getItemState(item);
-              const segmentWidth = `${100 / planItems.length}%`;
+              const segmentWidth = `${100 / sortedPlanItems.length}%`;
 
               return (
                 <HoverCard key={item.index}>
