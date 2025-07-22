@@ -242,7 +242,7 @@ export class ModelManager {
       [Task.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "google-genai:gemini-2.5-pro",
+          "anthropic:claude-sonnet-4-0",
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
       [Task.ROUTER]: {
