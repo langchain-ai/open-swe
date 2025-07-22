@@ -6,6 +6,8 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { ReviewerGraphState } from "@open-swe/shared/open-swe/reviewer/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
+import { useMemo } from "react";
+import type { Installation } from "./useGitHubInstallations";
 
 /**
  * Union type representing all possible graph states in the Open SWE system
@@ -21,6 +23,7 @@ interface UseThreadsSWROptions {
   refreshInterval?: number;
   revalidateOnFocus?: boolean;
   revalidateOnReconnect?: boolean;
+  currentInstallation?: Installation | null;
 }
 
 /**
@@ -39,6 +42,7 @@ export function useThreadsSWR<
     refreshInterval = THREAD_SWR_CONFIG.refreshInterval,
     revalidateOnFocus = THREAD_SWR_CONFIG.revalidateOnFocus,
     revalidateOnReconnect = THREAD_SWR_CONFIG.revalidateOnReconnect,
+    currentInstallation,
   } = options;
 
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -76,11 +80,23 @@ export function useThreadsSWR<
     },
   );
 
+  const threads = useMemo(() => {
+    const allThreads = data ?? [];
+    if (!currentInstallation) {
+      return allThreads;
+    }
+    
+    return allThreads.filter((thread) => {
+      const targetRepo = thread.values?.targetRepository;
+      return targetRepo?.owner === currentInstallation.accountName;
+    });
+  }, [data, currentInstallation]);
+
   return {
-    threads: data ?? [],
+    threads,
     error,
     isLoading,
     isValidating,
-    mutate, // For manual revalidation
+    mutate,
   };
 }

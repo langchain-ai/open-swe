@@ -11,7 +11,7 @@ import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { InstallationSelector } from "@/components/github/installation-selector";
-import { GitHubAppProvider } from "@/providers/GitHubApp";
+import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
@@ -29,8 +29,10 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
+  const { currentInstallation } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
+    currentInstallation,
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
@@ -81,7 +83,6 @@ function AllThreadsPageContent() {
   };
 
   return (
-    <GitHubAppProvider>
       <div className="bg-background flex h-screen flex-col">
         {/* Header */}
         <div className="border-border bg-card border-b px-4 py-3">
@@ -252,14 +253,15 @@ function AllThreadsPageContent() {
           </div>
         </div>
       </div>
-    </GitHubAppProvider>
   );
 }
 
 export default function AllThreadsPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <AllThreadsPageContent />
+      <GitHubAppProvider>
+        <AllThreadsPageContent />
+      </GitHubAppProvider>
     </Suspense>
   );
 }
