@@ -18,6 +18,7 @@ import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -39,34 +40,36 @@ export function ThreadCard({
 
   const getTaskProgress = () => {
     if (!taskPlan || !taskPlan.tasks.length) {
-      return { currentTaskIndex: 0, totalTasks: 0, hasActivePlan: false };
+      return { currentTaskIndex: 0, totalTasks: 0 };
     }
 
-    const currentTask = taskPlan.tasks[taskPlan.activeTaskIndex];
-    if (!currentTask || !currentTask.planRevisions.length) {
-      return { currentTaskIndex: 0, totalTasks: 0, hasActivePlan: false };
+    try {
+      const planItems = getActivePlanItems(taskPlan);
+      const sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
+
+      // Find the current task (lowest index among uncompleted tasks)
+      const currentTaskIndex = sortedPlanItems
+        .filter((item) => !item.completed)
+        .reduce(
+          (min, item) => (item.index < min ? item.index : min),
+          Number.POSITIVE_INFINITY,
+        );
+
+      const displayCurrentIndex =
+        currentTaskIndex === Number.POSITIVE_INFINITY
+          ? sortedPlanItems.length // All tasks completed
+          : currentTaskIndex; // +1 for 1-based display
+
+      return {
+        currentTaskIndex: displayCurrentIndex,
+        totalTasks: sortedPlanItems.length,
+      };
+    } catch (error) {
+      return { currentTaskIndex: 0, totalTasks: 0 };
     }
-
-    const activeRevision =
-      currentTask.planRevisions[currentTask.activeRevisionIndex];
-    const planItems = [...activeRevision.plans].sort(
-      (a, b) => a.index - b.index,
-    );
-
-    // Find the current task (lowest index among uncompleted tasks)
-    const currentTask = planItems
-      .filter((item) => !item.completed)?.[0]
-
-    const displayCurrentIndex = currentTask ? currentTask.index : planItems.length;
-
-    return {
-      currentTaskIndex: displayCurrentIndex,
-      totalTasks: planItems.length,
-      hasActivePlan: true,
-    };
   };
 
-  const { currentTaskIndex, totalTasks, hasActivePlan } = getTaskProgress();
+  const { currentTaskIndex, totalTasks } = getTaskProgress();
 
   const getStatusColor = (status: ThreadUIStatus) => {
     switch (status) {

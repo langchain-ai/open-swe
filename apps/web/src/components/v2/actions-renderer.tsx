@@ -248,9 +248,9 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
 
   useEffect(() => {
     if (stream.isLoading) {
-      onStreamReady?.(cancelRun);
+      onStreamReady(cancelRun);
     } else {
-      onStreamReady?.(undefined);
+      onStreamReady(undefined);
     }
   }, [onStreamReady, runId]);
 
