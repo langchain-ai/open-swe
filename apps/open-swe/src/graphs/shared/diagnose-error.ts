@@ -7,7 +7,7 @@ import {
 import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 
 import { z } from "zod";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
@@ -16,6 +16,7 @@ import {
   supportsParallelToolCallsParam,
   Task,
 } from "../../utils/load-model.js";
+import { trackCachePerformance } from "../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
@@ -75,6 +76,7 @@ const formatUserPrompt = (messages: BaseMessage[]): string => {
 interface DiagnoseErrorInputs {
   messages: BaseMessage[];
   codebaseTree: string;
+  tokenData?: CacheMetrics;
 }
 
 type DiagnoseErrorUpdate = Partial<DiagnoseErrorInputs>;
@@ -140,5 +142,6 @@ export async function diagnoseError(
 
   return {
     messages: [response, toolMessage],
+    tokenData: trackCachePerformance(response),
   };
 }

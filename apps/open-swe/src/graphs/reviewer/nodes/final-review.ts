@@ -24,6 +24,7 @@ import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { ToolMessage } from "@langchain/core/messages";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -172,5 +173,6 @@ export async function finalReview(
     messages: messagesUpdate,
     internalMessages: messagesUpdate,
     reviewsCount: (state.reviewsCount || 0) + 1,
+    tokenData: trackCachePerformance(response),
   };
 }

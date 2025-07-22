@@ -15,6 +15,7 @@ import {
   getActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -82,5 +83,6 @@ Given all of this, please respond with the concise conclusion. Do not include an
     messages: [response],
     internalMessages: [response],
     taskPlan: updatedTaskPlan,
+    tokenData: trackCachePerformance(response),
   };
 }

@@ -21,7 +21,6 @@ import {
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PLANNER_GRAPH_ID,
-  PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
@@ -34,6 +33,7 @@ import { Interrupt } from "../thread/messages/interrupt";
 import { AlertCircle } from "lucide-react";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
+import { TokenUsage } from "./token-usage";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -339,6 +339,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           icon={<AlertCircle className="size-4" />}
         />
       ) : null}
+      <TokenUsage tokenData={stream.values.tokenData} />
     </div>
   );
 }
