@@ -38,7 +38,11 @@ import {
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { createIssueComment, getIssueComments, updateIssueComment } from "../../../utils/github/api.js";
+import {
+  createIssueComment,
+  getIssueComments,
+  updateIssueComment,
+} from "../../../utils/github/api.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -46,11 +50,14 @@ const PLAN_MESSAGE_OPEN_TAG = "<open-swe-plan-message>";
 const PLAN_MESSAGE_CLOSE_TAG = "</open-swe-plan-message>";
 
 function formatBodyWithPlanMessage(body: string, message: string): string {
-  if (body.includes(PLAN_MESSAGE_OPEN_TAG) && body.includes(PLAN_MESSAGE_CLOSE_TAG)) {
+  if (
+    body.includes(PLAN_MESSAGE_OPEN_TAG) &&
+    body.includes(PLAN_MESSAGE_CLOSE_TAG)
+  ) {
     const bodyBeforeTag = body.split(PLAN_MESSAGE_OPEN_TAG)[0];
     const bodyAfterTag = body.split(PLAN_MESSAGE_CLOSE_TAG)[1];
-    const newInnerContents = `\n${PLAN_MESSAGE_OPEN_TAG}\n\n${message}\n\n${PLAN_MESSAGE_CLOSE_TAG}\n`
-    return `${bodyBeforeTag}${newInnerContents}${bodyAfterTag}`
+    const newInnerContents = `\n${PLAN_MESSAGE_OPEN_TAG}\n\n${message}\n\n${PLAN_MESSAGE_CLOSE_TAG}\n`;
+    return `${bodyBeforeTag}${newInnerContents}${bodyAfterTag}`;
   }
 
   return `${body}\n${PLAN_MESSAGE_OPEN_TAG}\n\n${message}\n\n${PLAN_MESSAGE_CLOSE_TAG}`;
@@ -83,8 +90,10 @@ async function postGitHubIssueComment(input: {
       issueNumber: githubIssueId,
       githubInstallationToken,
     });
-    
-    const existingOpenSWEComment = existingComments?.findLast((c) => c.user?.login?.startsWith(githubAppName));
+
+    const existingOpenSWEComment = existingComments?.findLast((c) =>
+      c.user?.login?.startsWith(githubAppName),
+    );
 
     if (!existingOpenSWEComment) {
       await createIssueComment({
@@ -94,13 +103,16 @@ async function postGitHubIssueComment(input: {
         body: commentBody,
         githubToken: githubInstallationToken,
       });
-  
+
       logger.info(`Posted comment to GitHub issue #${githubIssueId}`);
       return;
     }
 
     // Update the comment
-    const newCommentBody = formatBodyWithPlanMessage(existingOpenSWEComment.body ?? "", commentBody);
+    const newCommentBody = formatBodyWithPlanMessage(
+      existingOpenSWEComment.body ?? "",
+      commentBody,
+    );
     await updateIssueComment({
       owner: targetRepository.owner,
       repo: targetRepository.repo,
@@ -108,7 +120,7 @@ async function postGitHubIssueComment(input: {
       body: newCommentBody,
       githubInstallationToken,
     });
-    
+
     logger.info(`Updated comment to GitHub issue #${githubIssueId}`);
   } catch (error) {
     logger.error("Failed to post GitHub comment:", error);
