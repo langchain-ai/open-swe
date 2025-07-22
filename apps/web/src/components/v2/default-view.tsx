@@ -32,7 +32,6 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings } from "lucide-react";
 import NextLink from "next/link";
-import { useTaskPlanContext } from "@/providers/TaskPlanProvider";
 
 function OpenSettingsButton() {
   return (
@@ -71,16 +70,15 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
 
-  const { getTaskPlan } = useTaskPlanContext();
-
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const displayThreads = threadsMetadata.slice(0, 4);
   const displayThreadIds = displayThreads.map((thread) => thread.id);
 
-  const { statusMap, isLoading: statusLoading } = useThreadsStatus(
-    displayThreadIds,
-    threads,
-  );
+  const {
+    statusMap,
+    taskPlanMap,
+    isLoading: statusLoading,
+  } = useThreadsStatus(displayThreadIds, threads);
 
   const handleLoadDraft = (content: string) => {
     setDraftToLoad(content);
@@ -221,7 +219,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     thread={thread}
                     status={statusMap[thread.id]}
                     statusLoading={statusLoading}
-                    taskPlan={getTaskPlan(thread.id)}
+                    taskPlan={taskPlanMap[thread.id]}
                   />
                 ))}
               </div>

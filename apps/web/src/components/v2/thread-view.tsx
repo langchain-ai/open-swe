@@ -34,7 +34,6 @@ import { ProgressBar } from "@/components/tasks/progress-bar";
 import { TasksSidebar } from "@/components/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { ErrorState } from "./types";
-import { useTaskPlanContext } from "@/providers/TaskPlanProvider";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -60,18 +59,11 @@ export function ThreadView({
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
 
-  const { setTaskPlan } = useTaskPlanContext();
-
   const { status: realTimeStatus } = useThreadStatus(displayThread.id, {
     useTaskPlanConfig: true,
   });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
-
-  // Save taskPlan to context whenever it's updated
-  useEffect(() => {
-    setTaskPlan(displayThread.id, programmerTaskPlan);
-  }, [programmerTaskPlan, displayThread.id, setTaskPlan]);
 
   useEffect(() => {
     if (

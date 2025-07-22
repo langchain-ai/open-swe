@@ -6,7 +6,7 @@ import { useMemo, useRef } from "react";
 import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
 
 export interface SessionCacheData {
   plannerData?: { thread: Thread<PlannerGraphState> };
@@ -18,6 +18,10 @@ export type SessionCache = Map<string, SessionCacheData>;
 
 interface ThreadStatusMap {
   [threadId: string]: ThreadUIStatus;
+}
+
+interface TaskPlanMap {
+  [threadId: string]: TaskPlan;
 }
 
 interface ThreadStatusCounts {
@@ -43,6 +47,7 @@ interface GroupedThreadIds {
 
 interface UseThreadsStatusResult {
   statusMap: ThreadStatusMap;
+  taskPlanMap: TaskPlanMap;
   statusCounts: ThreadStatusCounts;
   groupedThreads: GroupedThreadIds;
   isLoading: boolean;
@@ -63,6 +68,7 @@ async function fetchAllThreadStatuses(
   managerThreads?: Thread<ManagerGraphState>[],
 ): Promise<{
   statusMap: ThreadStatusMap;
+  taskPlanMap: TaskPlanMap;
   updatedStates: Map<string, ThreadStatusData>;
 }> {
   const statusPromises = threadIds.map(async (threadId) => {
@@ -92,16 +98,20 @@ async function fetchAllThreadStatuses(
 
   const results = await Promise.all(statusPromises);
   const statusMap: ThreadStatusMap = {};
+  const taskPlanMap: TaskPlanMap = {};
   const updatedStates = new Map<string, ThreadStatusData>();
 
   results.forEach(({ threadId, status, statusData }) => {
     statusMap[threadId] = status;
     if (statusData) {
       updatedStates.set(threadId, statusData);
+      if (statusData.taskPlan) {
+        taskPlanMap[threadId] = statusData.taskPlan;
+      }
     }
   });
 
-  return { statusMap, updatedStates };
+  return { statusMap, taskPlanMap, updatedStates };
 }
 
 /**
@@ -150,6 +160,7 @@ export function useThreadsStatus(
   );
 
   const statusMap = fetchResult?.statusMap || {};
+  const taskPlanMap = fetchResult?.taskPlanMap || {};
 
   return useMemo(() => {
     const groupedThreads: GroupedThreadIds = {
@@ -183,10 +194,11 @@ export function useThreadsStatus(
 
     return {
       statusMap: statusMap || {},
+      taskPlanMap: taskPlanMap || {},
       statusCounts,
       groupedThreads,
       isLoading,
       hasErrors: !!error,
     };
-  }, [statusMap, threadIds, threadIdsKey, isLoading, error]);
+  }, [statusMap, taskPlanMap, threadIds, threadIdsKey, isLoading, error]);
 }

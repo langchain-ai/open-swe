@@ -4,7 +4,6 @@ import { Inter } from "next/font/google";
 import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "@/components/theme-provider";
-import { TaskPlanProvider } from "@/providers/TaskPlanProvider";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -37,9 +36,7 @@ export default function RootLayout({
           defaultTheme="system"
           storageKey="theme"
         >
-          <TaskPlanProvider>
-            <NuqsAdapter>{children}</NuqsAdapter>
-          </TaskPlanProvider>
+          <NuqsAdapter>{children}</NuqsAdapter>
         </ThemeProvider>
       </body>
     </html>
