@@ -120,6 +120,11 @@ export async function generateReviewActions(
     createShellTool(state),
     createInstallDependenciesTool(state),
   ];
+  tools[tools.length - 1] = {
+    ...tools[tools.length - 1],
+    cache_control: { type: "ephemeral" },
+  } as any;
+
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
     ...(modelSupportsParallelToolCallsParam
