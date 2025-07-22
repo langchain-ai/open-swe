@@ -222,21 +222,25 @@ export function ThreadView({
                       setSelectedTab(value as "planner" | "programmer")
                     }
                   >
-                    <div className="flex items-center justify-between">
-                      <TabsList className="bg-muted/70 dark:bg-gray-800">
-                        <TabsTrigger value="planner">Planner</TabsTrigger>
-                        <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                      </TabsList>
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <div className="flex justify-start">
+                        <TabsList className="bg-muted/70 dark:bg-gray-800">
+                          <TabsTrigger value="planner">Planner</TabsTrigger>
+                          <TabsTrigger value="programmer">
+                            Programmer
+                          </TabsTrigger>
+                        </TabsList>
+                      </div>
 
-                      <div className="flex flex-1 items-center justify-center px-4">
+                      <div className="flex justify-center">
                         <ProgressBar
                           taskPlan={programmerTaskPlan}
-                          className="max-w-md"
+                          className="w-full max-w-md"
                           onOpenSidebar={() => setIsTaskSidebarOpen(true)}
                         />
                       </div>
 
-                      <div className="flex gap-2">
+                      <div className="flex justify-end gap-2">
                         {selectedTab === "planner" &&
                           plannerCancelRef.current && (
                             <CancelStreamButton
