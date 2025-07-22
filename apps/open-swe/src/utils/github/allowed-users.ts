@@ -53,6 +53,7 @@ export const ALLOWED_USERS = [
   "victorm-lc",
   "xornivore",
   "xuro-langchain",
+  "Palashio",
 ];
 
 // HACK: Until we setup proper support for API credits, we will only allow users to self host Open SWE

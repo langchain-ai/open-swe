@@ -16,6 +16,7 @@ import { isHumanMessage } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -154,6 +155,7 @@ export async function determineNeedsContext(
 
   const commandUpdate: PlannerGraphUpdate = {
     messages: missingMessages,
+    tokenData: trackCachePerformance(response),
   };
 
   const shouldGatherContext =

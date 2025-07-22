@@ -24,6 +24,14 @@ import {
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
+import { tokenDataReducer } from "../caching.js";
+
+export interface CacheMetrics {
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
 
 export type PlanItem = {
   /**
@@ -249,6 +257,13 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => 0,
+  }),
+
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+    reducer: {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: tokenDataReducer,
+    },
   }),
 
   // ---NOT USED---

@@ -104,6 +104,20 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+// Helper function to detect MCP tools by checking if tool name is NOT in known tools
+function isMcpTool(toolName: string): boolean {
+  const knownToolNames = [
+    shellTool.name,
+    applyPatchTool.name,
+    installDependenciesTool.name,
+    plannerNotesTool.name,
+    getURLContentTool.name,
+    openPrTool.name,
+    diagnoseErrorTool.name,
+  ];
+  return !knownToolNames.some((t) => t === toolName);
+}
+
 function CustomComponent({
   message,
   thread,
@@ -247,6 +261,16 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
+  } else if (toolCall && isMcpTool(toolCall.name)) {
+    return {
+      actionType: "mcp",
+      status,
+      success,
+      toolName: toolCall.name,
+      args: toolCall.args as Record<string, any>,
+      output: getContentString(message.content),
+      reasoningText,
+    };
   }
   return {
     status: "loading",
@@ -314,7 +338,8 @@ export function AssistantMessage({
           tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
-          tc.name === getURLContentTool.name,
+          tc.name === getURLContentTool.name ||
+          isMcpTool(tc.name),
       )
     : [];
 
@@ -613,7 +638,14 @@ export function AssistantMessage({
           output: "",
         } as ActionItemProps;
       } else {
-        if (isShellTool) {
+        if (isMcpTool(toolCall.name)) {
+          return {
+            actionType: "mcp",
+            status: "generating",
+            toolName: toolCall.name,
+            args: toolCall.args as Record<string, any>,
+          } as ActionItemProps;
+        } else if (isShellTool) {
           const args = toolCall.args as ShellToolArgs;
           return {
             actionType: "shell",

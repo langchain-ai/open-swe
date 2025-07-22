@@ -26,6 +26,7 @@ import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -203,5 +204,6 @@ export async function updatePlan(
     messages: [toolMessage],
     internalMessages: [toolMessage],
     taskPlan: newTaskPlan,
+    tokenData: trackCachePerformance(response),
   };
 }

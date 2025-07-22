@@ -203,11 +203,12 @@ async function performClone(
   await sandbox.git.clone(
     cloneUrl,
     absoluteRepoDir,
-    undefined,
+    targetRepository.branch,
     targetRepository.baseCommit,
     "git",
     githubInstallationToken,
   );
+
   logger.info("Successfully cloned repository", {
     repoPath: `${targetRepository.owner}/${targetRepository.repo}`,
     branch: branchName,

@@ -4,7 +4,6 @@
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
-import { ConfigurableModel } from "langchain/chat_models/universal";
 import { traceable } from "langsmith/traceable";
 import {
   PlannerGraphState,
@@ -19,6 +18,7 @@ import {
   supportsParallelToolCallsParam,
   Task,
 } from "../../../utils/load-model.js";
+import { FallbackRunnable } from "../../../utils/runtime-fallback.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
 
@@ -97,7 +97,7 @@ const formatSysPromptRewritePlan = (
 
 async function identifyTasksToModifyFunc(
   state: PlannerGraphState,
-  model: ConfigurableModel,
+  model: FallbackRunnable,
   supportsParallelToolCallsParam: boolean,
 ): Promise<PlanItem[]> {
   if (!state.planChangeRequest) {
@@ -188,7 +188,7 @@ const identifyTasksToModify = traceable(identifyTasksToModifyFunc, {
 async function updatePlanTasksFunc(
   state: PlannerGraphState,
   tasksToModify: PlanItem[],
-  model: ConfigurableModel,
+  model: FallbackRunnable,
   supportsParallelToolCallsParam: boolean,
 ): Promise<string[]> {
   if (!state.planChangeRequest) {

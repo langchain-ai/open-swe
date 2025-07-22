@@ -35,6 +35,7 @@ import { AgentSession, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { AlertCircle } from "lucide-react";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
+import { TokenUsage } from "./token-usage";
 
 interface AcceptedPlanEventData {
   planTitle: string;
@@ -361,6 +362,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           icon={<AlertCircle className="size-4" />}
         />
       ) : null}
+      <TokenUsage tokenData={stream.values.tokenData} />
     </div>
   );
 }

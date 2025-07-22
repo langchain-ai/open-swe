@@ -27,13 +27,17 @@ import {
 } from "../../../../utils/review.js";
 import { BaseMessage } from "@langchain/core/messages";
 import { getMessageString } from "../../../../utils/message/content.js";
+import {
+  CacheablePromptSegment,
+  convertMessagesToCacheControlledMessages,
+  trackCachePerformance,
+} from "../../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
 function formatSystemPrompt(state: ReviewerGraphState): string {
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
-  const codeReview = getCodeReviewFields(state.internalMessages);
 
   return SYSTEM_PROMPT.replaceAll(
     "{CODEBASE_TREE}",
@@ -54,25 +58,52 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
     .replaceAll(
       "{USER_REQUEST_PROMPT}",
       formatUserRequestPrompt(state.messages),
-    )
-    .replaceAll(
-      "{PREVIOUS_REVIEW_PROMPT}",
-      codeReview
-        ? formatCodeReviewPrompt(PREVIOUS_REVIEW_PROMPT, {
-            review: codeReview.review,
-            newActions: codeReview.newActions,
-          })
-        : "",
     );
 }
 
-function formatUserConversationHistoryMessage(messages: BaseMessage[]): string {
-  return `Here is the full conversation history of the programmer. This includes all of the actions taken by the programmer, as well as any user input.
+const formatCacheablePrompt = (
+  state: ReviewerGraphState,
+): CacheablePromptSegment[] => {
+  const codeReview = getCodeReviewFields(state.internalMessages);
+
+  const segments: CacheablePromptSegment[] = [
+    {
+      type: "text",
+      text: formatSystemPrompt(state),
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+
+  // Cache Breakpoint 4: Code Review Context (only add if present)
+  if (codeReview) {
+    segments.push({
+      type: "text",
+      text: formatCodeReviewPrompt(PREVIOUS_REVIEW_PROMPT, {
+        review: codeReview.review,
+        newActions: codeReview.newActions,
+      }),
+      cache_control: { type: "ephemeral" },
+    });
+  }
+
+  return segments.filter((segment) => segment.text.trim() !== "");
+};
+
+function formatUserConversationHistoryMessage(
+  messages: BaseMessage[],
+): CacheablePromptSegment[] {
+  return [
+    {
+      type: "text",
+      text: `Here is the full conversation history of the programmer. This includes all of the actions taken by the programmer, as well as any user input.
 If the history has been truncated, it is because the conversation was too long. In this case, you should only consider the most recent messages.
 
 <conversation_history>
 ${messages.map(getMessageString).join("\n")}
-</conversation_history>`;
+</conversation_history>`,
+      cache_control: { type: "ephemeral" },
+    },
+  ];
 }
 
 export async function generateReviewActions(
@@ -98,16 +129,19 @@ export async function generateReviewActions(
       : {}),
   });
 
+  const reviewerMessagesWithCache = convertMessagesToCacheControlledMessages(
+    state.reviewerMessages,
+  );
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatSystemPrompt(state),
+      content: formatCacheablePrompt(state),
     },
     {
       role: "user",
       content: formatUserConversationHistoryMessage(state.internalMessages),
     },
-    ...state.reviewerMessages,
+    ...reviewerMessagesWithCache,
   ]);
 
   logger.info("Generated review actions", {
@@ -123,5 +157,6 @@ export async function generateReviewActions(
   return {
     messages: [response],
     reviewerMessages: [response],
+    tokenData: trackCachePerformance(response),
   };
 }

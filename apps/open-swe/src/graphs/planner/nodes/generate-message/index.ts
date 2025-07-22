@@ -27,27 +27,41 @@ import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { getPlannerNotes } from "../../utils/get-notes.js";
+import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
+import {
+  convertMessagesToCacheControlledMessages,
+  trackCachePerformance,
+} from "../../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
+  const plannerNotes = getPlannerNotes(state.messages)
+    .map((n) => `- ${n}`)
+    .join("\n");
   return SYSTEM_PROMPT.replace(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
-      ? formatFollowupMessagePrompt(state.taskPlan, state.proposedPlan)
+      ? formatFollowupMessagePrompt(
+          state.taskPlan,
+          state.proposedPlan,
+          plannerNotes,
+        )
       : "",
   )
-    .replaceAll(
-      "{CODEBASE_TREE}",
-      state.codebaseTree || "No codebase tree generated yet.",
-    )
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
       getRepoAbsolutePath(state.targetRepository),
     )
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll(
+      "{CODEBASE_TREE}",
+      state.codebaseTree || "No codebase tree generated yet.",
+    )
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages));
 }
 
 export async function generateAction(
@@ -71,6 +85,13 @@ export async function generateAction(
   logger.info(
     `MCP tools added to Planner: ${mcpTools.map((t) => t.name).join(", ")}`,
   );
+  // Cache Breakpoint 1: Add cache_control marker to the last tool for tools definition caching
+  if (tools.length > 0) {
+    tools[tools.length - 1] = {
+      ...tools[tools.length - 1],
+      cache_control: { type: "ephemeral" },
+    } as any;
+  }
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
@@ -94,6 +115,8 @@ export async function generateAction(
     throw new Error("No messages to process.");
   }
 
+  const inputMessagesWithCache =
+    convertMessagesToCacheControlledMessages(inputMessages);
   const response = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
@@ -104,7 +127,7 @@ export async function generateAction(
           taskPlan: latestTaskPlan ?? state.taskPlan,
         }),
       },
-      ...inputMessages,
+      ...inputMessagesWithCache,
     ]);
 
   logger.info("Generated planning message", {
@@ -120,5 +143,6 @@ export async function generateAction(
   return {
     messages: [...missingMessages, response],
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    tokenData: trackCachePerformance(response),
   };
 }

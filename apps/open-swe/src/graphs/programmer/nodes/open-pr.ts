@@ -28,6 +28,7 @@ import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -180,5 +181,6 @@ export async function openPullRequest(
     }),
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
+    tokenData: trackCachePerformance(response),
   };
 }

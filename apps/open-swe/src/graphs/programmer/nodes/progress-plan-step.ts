@@ -36,6 +36,7 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
+import { trackCachePerformance } from "../../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "ProgressPlanStep");
 
@@ -149,6 +150,7 @@ Once you've determined the status of the current task, call either the \`mark_ta
     const commandUpdate: GraphUpdate = {
       messages: newMessages,
       internalMessages: newMessages,
+      tokenData: trackCachePerformance(response),
     };
 
     // Check if we have any messages to summarize, and if we're at or above the max token limit.
@@ -204,6 +206,7 @@ Once you've determined the status of the current task, call either the \`mark_ta
       internalMessages: newMessages,
       // Even though there are no remaining tasks, still mark as completed so the UI reflects that the task is completed.
       taskPlan: updatedPlanTasks,
+      tokenData: trackCachePerformance(response),
     };
     return new Command({
       goto: "route-to-review-or-conclusion",
@@ -222,6 +225,7 @@ Once you've determined the status of the current task, call either the \`mark_ta
     messages: newMessages,
     internalMessages: newMessages,
     taskPlan: updatedPlanTasks,
+    tokenData: trackCachePerformance(response),
   };
 
   if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
