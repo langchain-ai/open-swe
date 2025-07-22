@@ -24,6 +24,7 @@ import {
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
+import { tokenDataReducer } from "../caching.js";
 
 export interface CacheMetrics {
   cacheCreationInputTokens: number;
@@ -261,19 +262,7 @@ export const GraphAnnotation = MessagesZodState.extend({
   tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
     reducer: {
       schema: z.custom<CacheMetrics>().optional(),
-      fn: (state: CacheMetrics | undefined, update: CacheMetrics) => {
-        if (!state) {
-          return update;
-        }
-        return {
-          cacheCreationInputTokens:
-            state.cacheCreationInputTokens + update.cacheCreationInputTokens,
-          cacheReadInputTokens:
-            state.cacheReadInputTokens + update.cacheReadInputTokens,
-          inputTokens: state.inputTokens + update.inputTokens,
-          outputTokens: state.outputTokens + update.outputTokens,
-        };
-      },
+      fn: tokenDataReducer,
     },
   }),
 

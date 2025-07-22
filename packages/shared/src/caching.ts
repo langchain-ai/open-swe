@@ -46,3 +46,20 @@ export function calculateCostSavings(metrics: CacheMetrics): {
     totalOutputTokensCost,
   };
 }
+
+export function tokenDataReducer(
+  state: CacheMetrics | undefined,
+  update: CacheMetrics,
+): CacheMetrics {
+  if (!state) {
+    return update;
+  }
+  return {
+    cacheCreationInputTokens:
+      state.cacheCreationInputTokens + update.cacheCreationInputTokens,
+    cacheReadInputTokens:
+      state.cacheReadInputTokens + update.cacheReadInputTokens,
+    inputTokens: state.inputTokens + update.inputTokens,
+    outputTokens: state.outputTokens + update.outputTokens,
+  };
+}
