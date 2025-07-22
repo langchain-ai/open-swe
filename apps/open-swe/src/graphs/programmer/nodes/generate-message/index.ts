@@ -45,6 +45,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -132,6 +133,7 @@ export async function generateAction(
     createUpdatePlanToolFields(),
     createGetURLContentTool(),
     createInstallDependenciesTool(state),
+    createMarkTaskCompletedToolFields(),
     ...mcpTools,
   ];
   logger.info(
