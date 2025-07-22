@@ -10,7 +10,7 @@ import {
 import { List, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { PlanItem, Task, TaskPlan } from "@open-swe/shared/open-swe/types";
 import {
   getActivePlanItems,
   getActiveTask,
@@ -38,7 +38,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >
@@ -51,10 +51,10 @@ export function ProgressBar({
     );
   }
 
-  let currentTask;
-  let planItems;
-  let sortedPlanItems;
-  let currentTaskIndex;
+  let currentTask: Task | null = null;
+  let planItems: PlanItem[] = [];
+  let sortedPlanItems: PlanItem[] = [];
+  let currentTaskIndex: number | null = null;
 
   try {
     currentTask = getActiveTask(taskPlan);
@@ -72,7 +72,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "mt-2 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
           className,
         )}
       >
@@ -115,44 +115,47 @@ export function ProgressBar({
   return (
     <div
       className={cn(
-        "w-full rounded-md border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900",
+        "bg-muted/70 w-full overflow-hidden rounded-lg px-1 py-1.5 sm:px-3 dark:bg-gray-800",
         className,
       )}
     >
-      {/* Compact header */}
-      <div className="overflow-hidden px-1 py-1.5 sm:px-2">
-        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-gray-700 sm:text-sm dark:text-gray-200">
-              Plan Progress
-            </span>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-4 w-4 p-0 sm:h-5 sm:w-5"
-                    onClick={() => setShowLegend(!showLegend)}
-                  >
-                    <HelpCircle className="h-3 w-3 text-gray-500 dark:text-gray-400" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="top"
-                  className="max-w-xs p-2 text-xs"
+      {/* Progress Stats */}
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-gray-700 sm:text-sm dark:text-gray-200">
+            Plan Progress
+          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-4 w-4 p-0 sm:h-5 sm:w-5"
+                  onClick={() => setShowLegend(!showLegend)}
                 >
-                  <div className="space-y-1">
-                    <p className="font-medium">Plan Progress</p>
-                    <p>
-                      Shows the current progress of the AI agent's plan
-                      execution.
-                    </p>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+                  <HelpCircle className="h-3 w-3 text-gray-500 dark:text-gray-400" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="top"
+                className="max-w-xs p-2 text-xs"
+              >
+                <div className="space-y-1">
+                  <p className="font-medium">Plan Progress</p>
+                  <p>
+                    Shows the current progress of the AI agent's plan execution.
+                  </p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <span className="text-xs text-gray-600 sm:text-sm dark:text-gray-300">
+            {completedCount} of {sortedPlanItems.length} tasks completed
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 sm:text-sm dark:text-gray-400">
               {Math.round(progressPercentage)}%
@@ -169,91 +172,80 @@ export function ProgressBar({
             </Button>
           </div>
         </div>
+      </div>
 
-        {/* Legend - conditionally shown */}
-        {showLegend && (
-          <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs sm:gap-3 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 rounded-full bg-green-400 dark:bg-green-500"></div>
-              <span>Completed</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400 dark:bg-blue-500"></div>
-              <span>Current</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="h-2 w-2 rounded-full bg-gray-200 dark:bg-gray-600"></div>
-              <span>Pending</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-4 touch-manipulation p-0 text-xs"
-              onClick={() => setShowLegend(false)}
-            >
-              ×
-            </Button>
+      {showLegend && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs sm:gap-3 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 rounded-full bg-green-400 dark:bg-green-500"></div>
+            <span>Completed</span>
           </div>
-        )}
-
-        {/* Progress Stats */}
-        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-gray-600 sm:text-sm dark:text-gray-300">
-            {completedCount} of {sortedPlanItems.length} tasks completed
-          </span>
-          <span className="text-xs text-gray-500 sm:text-sm dark:text-gray-400">
-            Task #{currentTask.taskIndex + 1}
-          </span>
-        </div>
-
-        {/* Progress Bar */}
-        <div className="space-y-2">
-          <div
-            className="flex h-3 cursor-pointer touch-manipulation gap-[1px] overflow-hidden rounded-sm bg-gray-100 transition-all sm:h-2 dark:bg-gray-700"
-            onClick={onOpenSidebar}
-            aria-label="Click to view all tasks"
-            title="Click to view all tasks"
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400 dark:bg-blue-500"></div>
+            <span>Current</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="h-2 w-2 rounded-full bg-gray-200 dark:bg-gray-600"></div>
+            <span>Pending</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-4 touch-manipulation p-0 text-xs"
+            onClick={() => setShowLegend(false)}
           >
-            {sortedPlanItems.map((item) => {
-              const state = getItemState(item);
-              const segmentWidth = `${100 / sortedPlanItems.length}%`;
+            ×
+          </Button>
+        </div>
+      )}
 
-              return (
-                <HoverCard key={item.index}>
-                  <HoverCardTrigger asChild>
-                    <div
-                      className={cn(
-                        "transition-all hover:opacity-80",
-                        getSegmentColor(state),
-                        state === "current" && "animate-pulse",
-                      )}
-                      style={{ width: segmentWidth }}
-                    />
-                  </HoverCardTrigger>
-                  <HoverCardContent
-                    side="bottom"
-                    className="min-w-xs p-2 text-xs sm:max-w-sm md:max-w-lg"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-1">
-                        <span className="font-medium">
-                          Task #{item.index + 1}
-                        </span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
-                          {state === "completed"
-                            ? "Completed"
-                            : state === "current"
-                              ? "Current"
-                              : "Pending"}
-                        </span>
-                      </div>
-                      <p className="text-xs break-words">{item.plan}</p>
+      {/* Progress Bar */}
+      <div className="space-y-2">
+        <div
+          className="flex h-3 cursor-pointer touch-manipulation gap-[1px] overflow-hidden rounded-sm bg-gray-100 transition-all sm:h-2 dark:bg-gray-700"
+          onClick={onOpenSidebar}
+          aria-label="Click to view all tasks"
+          title="Click to view all tasks"
+        >
+          {sortedPlanItems.map((item) => {
+            const state = getItemState(item);
+            const segmentWidth = `${100 / sortedPlanItems.length}%`;
+
+            return (
+              <HoverCard key={item.index}>
+                <HoverCardTrigger asChild>
+                  <div
+                    className={cn(
+                      "transition-all hover:opacity-80",
+                      getSegmentColor(state),
+                      state === "current" && "animate-pulse",
+                    )}
+                    style={{ width: segmentWidth }}
+                  />
+                </HoverCardTrigger>
+                <HoverCardContent
+                  side="bottom"
+                  className="min-w-xs p-2 text-xs sm:max-w-sm md:max-w-lg"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-1">
+                      <span className="font-medium">
+                        Task #{item.index + 1}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        {state === "completed"
+                          ? "Completed"
+                          : state === "current"
+                            ? "Current"
+                            : "Pending"}
+                      </span>
                     </div>
-                  </HoverCardContent>
-                </HoverCard>
-              );
-            })}
-          </div>
+                    <p className="text-xs break-words">{item.plan}</p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
+            );
+          })}
         </div>
       </div>
     </div>

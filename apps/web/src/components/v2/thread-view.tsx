@@ -310,11 +310,28 @@ export function ThreadView({
                 setSelectedTab(value as "planner" | "programmer")
               }
             >
-              <div className="flex flex-shrink-0 items-center justify-between">
-                <TabsList className="bg-muted/70 dark:bg-gray-800">
-                  <TabsTrigger value="planner">Planner</TabsTrigger>
-                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
+              <div className="flex flex-shrink-0 items-center gap-3">
+                <TabsList className="bg-muted/70 h-13 px-2 dark:bg-gray-800">
+                  <TabsTrigger
+                    className="h-8"
+                    value="planner"
+                  >
+                    Planner
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-8"
+                    value="programmer"
+                  >
+                    Programmer
+                  </TabsTrigger>
                 </TabsList>
+
+                {programmerTaskPlan && (
+                  <ProgressBar
+                    taskPlan={programmerTaskPlan}
+                    onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                  />
+                )}
 
                 <div className="flex items-center justify-center gap-2">
                   {selectedTab === "planner" && plannerStream.isLoading && (
@@ -345,15 +362,6 @@ export function ThreadView({
                   />
                 </div>
               </div>
-
-              {/* Task Progress Bar */}
-              {programmerTaskPlan && (
-                <ProgressBar
-                  taskPlan={programmerTaskPlan}
-                  onOpenSidebar={() => setIsTaskSidebarOpen(true)}
-                  className="mb-4"
-                />
-              )}
 
               <TabsContent
                 value="planner"

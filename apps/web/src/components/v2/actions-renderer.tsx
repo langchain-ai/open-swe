@@ -17,7 +17,6 @@ import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
-import { AgentSession, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { AlertCircle } from "lucide-react";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
