@@ -333,7 +333,7 @@ export function ThreadView({
                   />
                 )}
 
-                <div className="flex items-center justify-center gap-2">
+                <div className="ml-auto flex items-center justify-center gap-2">
                   {selectedTab === "planner" && plannerStream.isLoading && (
                     <CancelStreamButton
                       stream={plannerStream}

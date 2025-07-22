@@ -1,6 +1,6 @@
 export * from "./generate-message/index.js";
 export * from "./take-action.js";
-export * from "./progress-plan-step.js";
+export * from "./handle-completed-task.js";
 export * from "./generate-conclusion.js";
 export * from "./open-pr.js";
 export * from "./diagnose-error.js";

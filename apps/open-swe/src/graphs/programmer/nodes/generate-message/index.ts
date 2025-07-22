@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from "uuid";
 import {
   GraphState,
   GraphConfig,
@@ -46,16 +47,16 @@ import {
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { HumanMessage } from "@langchain/core/messages";
+import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
 const formatDynamicContextPrompt = (state: GraphState) => {
-  return DYNAMIC_SYSTEM_PROMPT.replaceAll(
-    "{PLAN_PROMPT_WITH_SUMMARIES}",
-    formatPlanPrompt(getActivePlanItems(state.taskPlan), {
-      includeSummaries: true,
-    }),
-  )
+  const planString = getActivePlanItems(state.taskPlan)
+    .map((i) => `<plan-item index="${i.index}">\n${i.plan}\n</plan-item>`)
+    .join("\n");
+  return DYNAMIC_SYSTEM_PROMPT.replaceAll("{PLAN_PROMPT}", planString)
     .replaceAll(
       "{PLAN_GENERATION_NOTES}",
       state.contextGatheringNotes || "No context gathering notes available.",
@@ -114,10 +115,31 @@ const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
   return segments.filter((segment) => segment.text.trim() !== "");
 };
 
+const planSpecificPrompt = `<detailed_plan_information>
+Here is the task execution plan for the request you're working on.
+Ensure you carefully read through all of the instructions, messages, and context provided above.
+Once you have a clear understanding of the current state of the task, analyze the plan provided below, and take an action based on it.
+You're provided with the full list of tasks, including the completed, current and remaining tasks.
+
+You are in the process of executing the current task:
+
+{PLAN_PROMPT}
+</detailed_plan_information>`;
+
+const formatSpecificPlanPrompt = (state: GraphState): HumanMessage => {
+  return new HumanMessage({
+    id: uuidv4(),
+    content: planSpecificPrompt.replace(
+      "{PLAN_PROMPT}",
+      formatPlanPrompt(getActivePlanItems(state.taskPlan)),
+    ),
+  });
+};
+
 export async function generateAction(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const model = await loadModel(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
@@ -178,6 +200,7 @@ export async function generateAction(
       }),
     },
     ...inputMessagesWithCache,
+    formatSpecificPlanPrompt(state),
   ]);
 
   const hasToolCalls = !!response.tool_calls?.length;
@@ -186,6 +209,24 @@ export async function generateAction(
   if (!hasToolCalls && state.sandboxSessionId) {
     logger.info("No tool calls found. Stopping sandbox...");
     newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
+  }
+
+  if (
+    response.tool_calls?.length &&
+    response.tool_calls?.length > 1 &&
+    response.tool_calls.some(
+      (t) => t.name === createMarkTaskCompletedToolFields().name,
+    )
+  ) {
+    logger.error(
+      "Multiple tool calls found, including mark_task_completed. This should never happen.",
+      {
+        toolCalls: JSON.stringify(response.tool_calls, null, 2),
+      },
+    );
+    throw new Error(
+      "Multiple tool calls found, including mark_task_completed. This should never happen.",
+    );
   }
 
   logger.info("Generated action", {
@@ -200,11 +241,27 @@ export async function generateAction(
   });
 
   const newMessagesList = [...missingMessages, response];
-  return {
+  const commandUpdate: GraphUpdate = {
     messages: newMessagesList,
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
     tokenData: trackCachePerformance(response),
   };
+
+  const taskMarkedCompleted =
+    response.tool_calls?.some(
+      (t) => t.name === createMarkTaskCompletedToolFields().name,
+    ) ?? false;
+  if (taskMarkedCompleted) {
+    return new Command({
+      goto: "handle-completed-task",
+      update: commandUpdate,
+    });
+  }
+
+  return new Command({
+    goto: "take-action",
+    update: commandUpdate,
+  });
 }

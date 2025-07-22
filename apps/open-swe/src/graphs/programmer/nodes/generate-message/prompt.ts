@@ -122,8 +122,10 @@ export const CODE_REVIEW_PROMPT = `<code_review>
 export const DYNAMIC_SYSTEM_PROMPT = `<context>
 
 <plan_information>
-- Current plan with summaries
-{PLAN_PROMPT_WITH_SUMMARIES}
+- Task execution plan
+<execution_plan>
+    {PLAN_PROMPT}
+</execution_plan>
 
 - Plan generation notes
 These are notes you took while gathering context for the plan:

@@ -8,13 +8,13 @@ import {
 import {
   generateAction,
   takeAction,
-  progressPlanStep,
   generateConclusion,
   openPullRequest,
   diagnoseError,
   requestHelp,
   updatePlan,
   summarizeHistory,
+  handleCompletedTask,
 } from "./nodes/index.js";
 import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -120,12 +120,14 @@ function routeToReviewOrConclusion(
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
-  .addNode("generate-action", generateAction)
+  .addNode("generate-action", generateAction, {
+    ends: ["take-action", "handle-completed-task"],
+  })
   .addNode("take-action", takeAction, {
-    ends: ["progress-plan-step", "diagnose-error"],
+    ends: ["generate-action", "diagnose-error"],
   })
   .addNode("update-plan", updatePlan)
-  .addNode("progress-plan-step", progressPlanStep, {
+  .addNode("handle-completed-task", handleCompletedTask, {
     ends: [
       "summarize-history",
       "generate-action",
