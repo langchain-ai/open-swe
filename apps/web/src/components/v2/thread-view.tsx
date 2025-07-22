@@ -124,7 +124,7 @@ export function ThreadView({
       programmerSession.runId !== joinedProgrammerRunId.current
     ) {
       joinedProgrammerRunId.current = programmerSession.runId;
-      plannerStream.joinStream(programmerSession.runId).catch(console.error);
+      programmerStream.joinStream(programmerSession.runId).catch(console.error);
     } else if (!programmerSession?.runId) {
       joinedProgrammerRunId.current = undefined;
     }

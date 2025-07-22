@@ -21,6 +21,7 @@ import { initializeSandbox } from "../shared/initialize-sandbox.js";
 import { graph as reviewerGraph } from "../reviewer/index.js";
 import { getRemainingPlanItems } from "../../utils/current-task.js";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 
 function lastMessagesMissingToolCalls(
   messages: BaseMessage[],
@@ -40,7 +41,7 @@ function lastMessagesMissingToolCalls(
  * Otherwise, it ends the process.
  *
  * @param {GraphState} state - The current graph state.
- * @returns {"route-to-review-or-conclusion" | "take-action" | "request-help" | "generate-action" | Send} The next node to execute, or END if the process should stop.
+ * @returns {"route-to-review-or-conclusion" | "take-action" | "request-help" | "generate-action" | "handle-completed-task" | Send} The next node to execute, or END if the process should stop.
  */
 function routeGeneratedAction(
   state: GraphState,
@@ -49,6 +50,7 @@ function routeGeneratedAction(
   | "take-action"
   | "request-help"
   | "generate-action"
+  | "handle-completed-task"
   | Send {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
@@ -69,6 +71,12 @@ function routeGeneratedAction(
       return new Send("update-plan", {
         planChangeRequest: toolCall.args?.update_plan_reasoning,
       });
+    }
+
+    const taskMarkedCompleted =
+      toolCall.name === createMarkTaskCompletedToolFields().name;
+    if (taskMarkedCompleted) {
+      return "handle-completed-task";
     }
 
     return "take-action";
@@ -120,9 +128,7 @@ function routeToReviewOrConclusion(
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
-  .addNode("generate-action", generateAction, {
-    ends: ["take-action", "handle-completed-task"],
-  })
+  .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction, {
     ends: ["generate-action", "diagnose-error"],
   })
@@ -153,6 +159,7 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     "route-to-review-or-conclusion",
     "update-plan",
     "generate-action",
+    "handle-completed-task",
   ])
   .addEdge("update-plan", "generate-action")
   .addEdge("diagnose-error", "generate-action")

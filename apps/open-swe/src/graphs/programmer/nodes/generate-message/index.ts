@@ -48,7 +48,6 @@ import {
 } from "../../../../utils/caching.js";
 import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 import { HumanMessage } from "@langchain/core/messages";
-import { Command } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -139,7 +138,7 @@ const formatSpecificPlanPrompt = (state: GraphState): HumanMessage => {
 export async function generateAction(
   state: GraphState,
   config: GraphConfig,
-): Promise<Command> {
+): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
@@ -241,27 +240,11 @@ export async function generateAction(
   });
 
   const newMessagesList = [...missingMessages, response];
-  const commandUpdate: GraphUpdate = {
+  return {
     messages: newMessagesList,
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
     tokenData: trackCachePerformance(response),
   };
-
-  const taskMarkedCompleted =
-    response.tool_calls?.some(
-      (t) => t.name === createMarkTaskCompletedToolFields().name,
-    ) ?? false;
-  if (taskMarkedCompleted) {
-    return new Command({
-      goto: "handle-completed-task",
-      update: commandUpdate,
-    });
-  }
-
-  return new Command({
-    goto: "take-action",
-    update: commandUpdate,
-  });
 }
