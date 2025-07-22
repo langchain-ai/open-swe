@@ -31,6 +31,11 @@ import {
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
 import { ErrorState } from "./types";
+import {
+  CustomNodeEvent,
+  isCustomNodeEvent,
+} from "@open-swe/shared/open-swe/custom-node-events";
+import { useCancelStream } from "@/hooks/useCancelStream";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -54,6 +59,65 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
+
+  const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
+    CustomNodeEvent[]
+  >([]);
+  const [customProgrammerNodeEvents, setCustomProgrammerNodeEvents] = useState<
+    CustomNodeEvent[]
+  >([]);
+
+  const plannerStream = useStream<PlannerGraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PLANNER_GRAPH_ID,
+    reconnectOnMount: true,
+    threadId: plannerSession?.threadId,
+    onCustomEvent: (event) => {
+      if (isCustomNodeEvent(event)) {
+        setCustomPlannerNodeEvents((prev) => [...prev, event]);
+      }
+    },
+    fetchStateHistory: false,
+  });
+
+  const joinedPlannerRunId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (
+      plannerSession?.runId &&
+      plannerSession.runId !== joinedPlannerRunId.current
+    ) {
+      joinedPlannerRunId.current = plannerSession.runId;
+      plannerStream.joinStream(plannerSession.runId).catch(console.error);
+    } else if (!plannerSession?.runId) {
+      joinedPlannerRunId.current = undefined;
+    }
+  }, [plannerSession]);
+
+  const programmerStream = useStream<GraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PROGRAMMER_GRAPH_ID,
+    reconnectOnMount: true,
+    threadId: programmerSession?.threadId,
+    onCustomEvent: (event) => {
+      if (isCustomNodeEvent(event)) {
+        setCustomProgrammerNodeEvents((prev) => [...prev, event]);
+      }
+    },
+    fetchStateHistory: false,
+  });
+
+  const joinedProgrammerRunId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (
+      programmerSession?.runId &&
+      programmerSession.runId !== joinedProgrammerRunId.current
+    ) {
+      joinedProgrammerRunId.current = programmerSession.runId;
+      plannerStream.joinStream(programmerSession.runId).catch(console.error);
+    } else if (!programmerSession?.runId) {
+      joinedProgrammerRunId.current = undefined;
+    }
+  }, [programmerSession]);
 
   useEffect(() => {
     if (
@@ -94,6 +158,27 @@ export function ThreadView({
     }
   }, [stream.error]);
 
+  useEffect(() => {
+    if (
+      plannerStream.values.programmerSession &&
+      (plannerStream.values.programmerSession.runId !==
+        programmerSession?.runId ||
+        plannerStream.values.programmerSession.threadId !==
+          programmerSession?.threadId)
+    ) {
+      setProgrammerSession?.(plannerStream.values.programmerSession);
+
+      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
+      // This allows the accepted plan step to be visible before switching
+      if (selectedTab === PLANNER_GRAPH_ID) {
+        // Add a small delay to allow the accepted plan step to render first
+        setTimeout(() => {
+          setSelectedTab?.("programmer");
+        }, 2000);
+      }
+    }
+  }, [plannerStream.values, selectedTab]);
+
   const { status: realTimeStatus } = useThreadStatus(displayThread.id);
 
   const getStatusDotColor = (status: string) => {
@@ -110,9 +195,6 @@ export function ThreadView({
         return "bg-gray-500 dark:bg-gray-400";
     }
   };
-
-  const plannerCancelRef = useRef<(() => void) | null>(null);
-  const programmerCancelRef = useRef<(() => void) | null>(null);
 
   const cancelRun = () => {
     // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
@@ -224,9 +306,9 @@ export function ThreadView({
 
                       <div className="flex gap-2">
                         {selectedTab === "planner" &&
-                          plannerCancelRef.current && (
+                          plannerStream.isLoading && (
                             <CancelStreamButton
-                              stream={stream}
+                              stream={plannerStream}
                               threadId={plannerSession?.threadId}
                               runId={plannerSession?.runId}
                               streamName="Planner"
@@ -234,9 +316,9 @@ export function ThreadView({
                           )}
 
                         {selectedTab === "programmer" &&
-                          programmerCancelRef.current && (
+                          programmerStream.isLoading && (
                             <CancelStreamButton
-                              stream={stream}
+                              stream={programmerStream}
                               threadId={programmerSession?.threadId}
                               runId={programmerSession?.runId}
                               streamName="Programmer"
@@ -250,19 +332,10 @@ export function ThreadView({
                         <CardContent className="space-y-2 p-3 pt-0">
                           {plannerSession && (
                             <ActionsRenderer<PlannerGraphState>
-                              graphId={PLANNER_GRAPH_ID}
-                              threadId={plannerSession.threadId}
                               runId={plannerSession.runId}
-                              setProgrammerSession={setProgrammerSession}
-                              programmerSession={programmerSession}
-                              setSelectedTab={setSelectedTab}
-                              onStreamReady={(cancelFn) => {
-                                if (cancelFn) {
-                                  plannerCancelRef.current = cancelFn;
-                                } else {
-                                  plannerCancelRef.current = null;
-                                }
-                              }}
+                              customNodeEvents={customPlannerNodeEvents}
+                              setCustomNodeEvents={setCustomPlannerNodeEvents}
+                              stream={plannerStream}
                             />
                           )}
                           {!plannerSession && (
@@ -281,16 +354,12 @@ export function ThreadView({
                         <CardContent className="space-y-2 p-3 pt-0">
                           {programmerSession && (
                             <ActionsRenderer<GraphState>
-                              graphId={PROGRAMMER_GRAPH_ID}
-                              threadId={programmerSession.threadId}
                               runId={programmerSession.runId}
-                              onStreamReady={(cancelFn) => {
-                                if (cancelFn) {
-                                  programmerCancelRef.current = cancelFn;
-                                } else {
-                                  programmerCancelRef.current = null;
-                                }
-                              }}
+                              customNodeEvents={customProgrammerNodeEvents}
+                              setCustomNodeEvents={
+                                setCustomProgrammerNodeEvents
+                              }
+                              stream={programmerStream}
                             />
                           )}
                           {!programmerSession && (
