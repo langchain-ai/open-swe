@@ -137,14 +137,11 @@ export async function generateAction(
   logger.info(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
   );
-
   // Cache Breakpoint 1: Add cache_control marker to the last tool for tools definition caching
-  if (tools.length > 0) {
-    tools[tools.length - 1] = {
-      ...tools[tools.length - 1],
-      cache_control: { type: "ephemeral" },
-    } as any;
-  }
+  tools[tools.length - 1] = {
+    ...tools[tools.length - 1],
+    cache_control: { type: "ephemeral" },
+  } as any;
 
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "auto",
