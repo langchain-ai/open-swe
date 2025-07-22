@@ -29,6 +29,9 @@ import {
 } from "../../utils/scroll-utils";
 import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
+import { ProgressBar } from "@/components/tasks/progress-bar";
+import { TasksSidebar } from "@/components/tasks";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { ErrorState } from "./types";
 import {
   CustomNodeEvent,
@@ -58,6 +61,14 @@ export function ThreadView({
     useState<ManagerGraphState["plannerSession"]>();
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
+  const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
+  const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
+
+  const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
+    useThreadStatus(displayThread.id, {
+      useTaskPlanConfig: true,
+    });
+
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
@@ -124,12 +135,10 @@ export function ThreadView({
       stream?.values?.plannerSession &&
       plannerSession?.runId !== stream.values.plannerSession.runId
     ) {
-      // State shouldn't update before we use it below, but still create a copy to avoid race conditions
       const prevPlannerSession = plannerSession;
       setPlannerSession(stream.values.plannerSession);
 
       if (prevPlannerSession && selectedTab === "programmer") {
-        // If we already has a planner session, and the user is currently on the programmer tab, bring them back to the planner tab
         setSelectedTab("planner");
       }
     }
@@ -179,7 +188,15 @@ export function ThreadView({
     }
   }, [plannerStream.values, selectedTab]);
 
-  const { status: realTimeStatus } = useThreadStatus(displayThread.id);
+  // Extract task plan from programmer stream
+  useEffect(() => {
+    if (programmerStream.values?.taskPlan) {
+      setProgrammerTaskPlan(programmerStream.values.taskPlan);
+    } else if (realTimeTaskPlan) {
+      // Fallback to real-time task plan if stream doesn't have it
+      setProgrammerTaskPlan(realTimeTaskPlan);
+    }
+  }, [programmerStream.values, realTimeTaskPlan]);
 
   const getStatusDotColor = (status: string) => {
     switch (status) {
@@ -293,11 +310,28 @@ export function ThreadView({
                 setSelectedTab(value as "planner" | "programmer")
               }
             >
-              <div className="flex flex-shrink-0 items-center justify-between">
-                <TabsList className="bg-muted/70 dark:bg-gray-800">
-                  <TabsTrigger value="planner">Planner</TabsTrigger>
-                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
+              <div className="flex flex-shrink-0 items-center gap-3">
+                <TabsList className="bg-muted/70 h-13 px-2 dark:bg-gray-800">
+                  <TabsTrigger
+                    className="h-8"
+                    value="planner"
+                  >
+                    Planner
+                  </TabsTrigger>
+                  <TabsTrigger
+                    className="h-8"
+                    value="programmer"
+                  >
+                    Programmer
+                  </TabsTrigger>
                 </TabsList>
+
+                {programmerTaskPlan && (
+                  <ProgressBar
+                    taskPlan={programmerTaskPlan}
+                    onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                  />
+                )}
 
                 <div className="flex items-center justify-center gap-2">
                   {selectedTab === "planner" && plannerStream.isLoading && (
@@ -423,6 +457,15 @@ export function ThreadView({
           </div>
         </div>
       </div>
+
+      {/* Task Sidebar */}
+      {programmerTaskPlan && (
+        <TasksSidebar
+          isOpen={isTaskSidebarOpen}
+          onClose={() => setIsTaskSidebarOpen(false)}
+          taskPlan={programmerTaskPlan}
+        />
+      )}
     </div>
   );
 }

@@ -5,12 +5,12 @@
  * across all thread data fetching in the application.
  */
 export const THREAD_SWR_CONFIG = {
-  refreshInterval: 15000,
+  refreshInterval: 15000, // 15s for general thread data
   revalidateOnFocus: false,
   revalidateOnReconnect: true,
   errorRetryCount: 3,
   errorRetryInterval: 5000,
-  dedupingInterval: 2000,
+  dedupingInterval: 5000,
 } as const;
 
 /**
@@ -20,7 +20,20 @@ export const THREAD_SWR_CONFIG = {
 export const THREAD_STATUS_SWR_CONFIG = {
   ...THREAD_SWR_CONFIG,
   revalidateOnFocus: true,
-  dedupingInterval: 5000,
+  dedupingInterval: 2000,
+} as const;
+
+/**
+ * SWR configuration for high-frequency task plan polling
+ * Used when actively viewing a thread for real-time progress updates
+ */
+export const TASK_PLAN_SWR_CONFIG = {
+  refreshInterval: 3000,
+  revalidateOnFocus: true,
+  revalidateOnReconnect: true,
+  errorRetryCount: 3,
+  errorRetryInterval: 2000,
+  dedupingInterval: 1000,
 } as const;
 
 /**

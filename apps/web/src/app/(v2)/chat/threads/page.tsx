@@ -41,6 +41,7 @@ function AllThreadsPageContent() {
 
   const {
     statusMap,
+    taskPlanMap,
     statusCounts,
     isLoading: statusLoading,
   } = useThreadsStatus(threadIds, threads);
@@ -197,6 +198,7 @@ function AllThreadsPageContent() {
                             thread={thread}
                             status={statusMap[thread.id]}
                             statusLoading={statusLoading}
+                            taskPlan={taskPlanMap[thread.id]}
                           />
                         ))}
                       </div>
@@ -212,6 +214,7 @@ function AllThreadsPageContent() {
                     thread={thread}
                     status={statusMap[thread.id]}
                     statusLoading={statusLoading}
+                    taskPlan={taskPlanMap[thread.id]}
                   />
                 ))}
               </div>

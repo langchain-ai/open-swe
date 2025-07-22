@@ -74,10 +74,11 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const displayThreads = threadsMetadata.slice(0, 4);
   const displayThreadIds = displayThreads.map((thread) => thread.id);
 
-  const { statusMap, isLoading: statusLoading } = useThreadsStatus(
-    displayThreadIds,
-    threads,
-  );
+  const {
+    statusMap,
+    taskPlanMap,
+    isLoading: statusLoading,
+  } = useThreadsStatus(displayThreadIds, threads);
 
   const handleLoadDraft = (content: string) => {
     setDraftToLoad(content);
@@ -218,6 +219,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     thread={thread}
                     status={statusMap[thread.id]}
                     statusLoading={statusLoading}
+                    taskPlan={taskPlanMap[thread.id]}
                   />
                 ))}
               </div>
