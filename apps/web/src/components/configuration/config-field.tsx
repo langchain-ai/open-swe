@@ -91,9 +91,9 @@ export function ConfigField({
         return;
       }
 
-      const parsedJson = JSON.parse(jsonString);
+      JSON.parse(jsonString);
 
-      handleChange(parsedJson);
+      handleChange(jsonString);
       setJsonError(null);
     } catch {
       if (isExternallyManaged && externalSetValue) {
@@ -108,7 +108,8 @@ export function ConfigField({
   const handleFormatJson = (jsonString: string) => {
     try {
       const parsed = JSON.parse(jsonString);
-      handleChange(parsed);
+      const formattedJson = JSON.stringify(parsed, null, 2);
+      handleChange(formattedJson);
       setJsonError(null);
     } catch {
       setJsonError("Invalid JSON format");
