@@ -350,11 +350,7 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           icon={<AlertCircle className="size-4" />}
         />
       ) : null}
-      <TokenUsage
-        tokenData={
-          "tokenData" in stream.values ? stream.values.tokenData : undefined
-        }
-      />
+      <TokenUsage tokenData={stream.values.tokenData} />
     </div>
   );
 }
