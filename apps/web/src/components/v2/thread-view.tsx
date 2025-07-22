@@ -57,21 +57,11 @@ export function ThreadView({
   const [programmerSession, setProgrammerSession] =
     useState<ManagerGraphState["programmerSession"]>();
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
-  const [plannerTaskPlan, setPlannerTaskPlan] = useState<TaskPlan>();
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
 
-  const { status: realTimeStatus, taskPlan: statusTaskPlan } = useThreadStatus(
-    displayThread.id,
-    { useTaskPlanConfig: true },
-  );
-
-  // Use the most current task plan available in priority order:
-  // Programmer, status task plan, planner task plan, manager task plan
-  const currentTaskPlan =
-    programmerTaskPlan ||
-    statusTaskPlan ||
-    plannerTaskPlan ||
-    stream.values?.taskPlan;
+  const { status: realTimeStatus } = useThreadStatus(displayThread.id, {
+    useTaskPlanConfig: true,
+  });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
@@ -240,7 +230,7 @@ export function ThreadView({
 
                       <div className="flex flex-1 items-center justify-center px-4">
                         <ProgressBar
-                          taskPlan={currentTaskPlan}
+                          taskPlan={programmerTaskPlan}
                           className="max-w-md"
                           onOpenSidebar={() => setIsTaskSidebarOpen(true)}
                         />
@@ -287,7 +277,6 @@ export function ThreadView({
                                   plannerCancelRef.current = null;
                                 }
                               }}
-                              onPlannerTaskPlan={setPlannerTaskPlan}
                             />
                           )}
                           {!plannerSession && (
@@ -344,11 +333,11 @@ export function ThreadView({
       </div>
 
       {/* Task Sidebar */}
-      {currentTaskPlan && (
+      {programmerTaskPlan && (
         <TasksSidebar
           isOpen={isTaskSidebarOpen}
           onClose={() => setIsTaskSidebarOpen(false)}
-          taskPlan={currentTaskPlan}
+          taskPlan={programmerTaskPlan}
         />
       )}
     </div>

@@ -75,14 +75,15 @@ function isAcceptedPlanEvents(
 }
 
 interface ActionsRendererProps {
-  graphId: "planner" | "programmer";
-  threadId?: string;
+  graphId: string;
+  threadId: string;
   runId?: string;
-  setProgrammerSession?: (session: AgentSession) => void;
-  programmerSession?: AgentSession;
-  setSelectedTab?: (tab: "planner" | "programmer") => void;
-  onStreamReady?: (cancelFn?: (() => void) | undefined) => void;
-  onPlannerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
+  setProgrammerSession?: (
+    session: ManagerGraphState["programmerSession"],
+  ) => void;
+  programmerSession?: ManagerGraphState["programmerSession"];
+  setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
+  onStreamReady: (cancelFn: (() => void) | undefined) => void;
   onProgrammerTaskPlan?: (taskPlan: TaskPlan | undefined) => void;
 }
 
@@ -116,7 +117,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   programmerSession,
   setSelectedTab,
   onStreamReady,
-  onPlannerTaskPlan,
   onProgrammerTaskPlan,
 }: ActionsRendererProps) {
   const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
@@ -290,18 +290,6 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
     }
   }, [stream.values, graphId]);
 
-  useEffect(() => {
-    console.log(stream.messages);
-  }, [stream.messages]);
-
-  // Pass planner task plan to parent component when available
-  useEffect(() => {
-    if (graphId === PLANNER_GRAPH_ID && onPlannerTaskPlan) {
-      const plannerTaskPlan = (stream.values as PlannerGraphState)?.taskPlan;
-      onPlannerTaskPlan(plannerTaskPlan);
-    }
-  }, [graphId, onPlannerTaskPlan, stream.values]);
-
   // Pass programmer task plan to parent component when available
   useEffect(() => {
     if (graphId === PROGRAMMER_GRAPH_ID && onProgrammerTaskPlan) {
@@ -362,7 +350,11 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
           icon={<AlertCircle className="size-4" />}
         />
       ) : null}
-      <TokenUsage tokenData={stream.values.tokenData} />
+      <TokenUsage
+        tokenData={
+          "tokenData" in stream.values ? stream.values.tokenData : undefined
+        }
+      />
     </div>
   );
 }
