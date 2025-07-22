@@ -37,7 +37,6 @@ export function ThreadCard({
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);
 
-  // Calculate task progress using the same logic as ProgressBar
   const getTaskProgress = () => {
     if (!taskPlan || !taskPlan.tasks.length) {
       return { currentTaskIndex: 0, totalTasks: 0, hasActivePlan: false };
