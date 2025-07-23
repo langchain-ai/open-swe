@@ -444,6 +444,14 @@ function ActionItem(props: ActionItemProps) {
       return (
         <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
+            Help requested from human
+          </span>
+        </div>
+      );
+    } else if (props.actionType === "request_human_help") {
+      return (
+        <div className="flex items-center">
+          <span className="text-foreground/80 text-xs font-normal">
             {props.toolName}
           </span>
         </div>
