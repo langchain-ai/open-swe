@@ -184,7 +184,6 @@ export function ConfigManager() {
                       step={config.step}
                       value={configs[DEFAULT_CONFIG_KEY]?.[config.label]}
                       setValue={(value) => {
-                        console.log("setting value!", value);
                         updateConfig(DEFAULT_CONFIG_KEY, config.label, value);
                       }}
                     />
