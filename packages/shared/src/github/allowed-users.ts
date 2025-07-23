@@ -63,3 +63,4 @@ export function isAllowedUser(username: string): boolean {
   if (!restrictToLangChainAuth) {
     return true;
   }
+  return ALLOWED_USERS.some((u) => u === username);
