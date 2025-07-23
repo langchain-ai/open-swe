@@ -20,7 +20,7 @@ import {
 } from "../../utils/github/label.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
-import { isAllowedUser } from "../../utils/github/allowed-users.js";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -237,3 +237,4 @@ export async function issueWebhookHandler(
     return c.json({ error: "Webhook processing failed" }, { status: 400 });
   }
 }
+
