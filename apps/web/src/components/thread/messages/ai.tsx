@@ -275,6 +275,12 @@ export function mapToolMessageToActionStepProps(
       success,
       help_request: args.help_request || "",
       reasoningText,
+      onSubmitResponse: (response: string) => {
+        // This will be implemented at the component level where thread context is available
+        console.log("Request human help response:", response);
+        // The actual submission logic will be passed down from the AssistantMessage component
+        // where the thread context is available
+      },
     };
   } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
@@ -796,5 +802,6 @@ export function AssistantMessageLoading() {
     </div>
   );
 }
+
 
 
