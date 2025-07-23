@@ -8,7 +8,7 @@ export function computeThreadTitle(
   fallbackTitle: string,
 ): string {
   if (taskPlan?.tasks && taskPlan.tasks.length > 0) {
-    const firstTaskTitle = taskPlan.tasks[0]?.title;
+    const firstTaskTitle = getActiveTask(taskPlan).title;
     if (firstTaskTitle && firstTaskTitle.trim()) {
       return firstTaskTitle;
     }
