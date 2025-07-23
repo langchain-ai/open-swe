@@ -218,13 +218,13 @@ export async function generateAction(
     )
   ) {
     logger.error(
-      "Multiple tool calls found, including mark_task_completed. This should never happen.",
+      "Multiple tool calls found, including mark_task_completed. Removing the mark_task_completed call.",
       {
         toolCalls: JSON.stringify(response.tool_calls, null, 2),
       },
     );
-    throw new Error(
-      "Multiple tool calls found, including mark_task_completed. This should never happen.",
+    response.tool_calls = response.tool_calls.filter(
+      (t) => t.name !== createMarkTaskCompletedToolFields().name,
     );
   }
 
