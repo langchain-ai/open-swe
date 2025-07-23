@@ -5,7 +5,7 @@ import {
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
 import { Task } from "./load-model.js";
-import { isAllowedUser } from "./github/allowed-users.js";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
@@ -427,3 +427,4 @@ export function resetModelManager(): void {
     globalModelManager = null;
   }
 }
+
