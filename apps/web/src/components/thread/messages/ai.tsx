@@ -315,6 +315,19 @@ export function AssistantMessage({
   threadMessages: Message[];
 }) {
   const content = message?.content ?? [];
+  
+  // Handler for request_human_help submission
+  const handleHumanHelpResponse = (response: string) => {
+    const humanResponse: HumanResponse[] = [
+      {
+        type: "response",
+        args: response,
+      },
+    ];
+    
+    // Submit the response using the thread's submit method
+    thread.submit({}, { command: { resume: humanResponse } });
+  };
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
