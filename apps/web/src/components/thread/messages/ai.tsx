@@ -44,6 +44,7 @@ import {
   createGetURLContentToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
+  createRequestHumanHelpToolFields,
   createReviewStartedToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
@@ -104,6 +105,9 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+const requestHumanHelpTool = createRequestHumanHelpToolFields();
+type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
+
 // Helper function to detect MCP tools by checking if tool name is NOT in known tools
 function isMcpTool(toolName: string): boolean {
   const knownToolNames = [
@@ -114,6 +118,7 @@ function isMcpTool(toolName: string): boolean {
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
+    requestHumanHelpTool.name,
   ];
   return !knownToolNames.some((t) => t === toolName);
 }
