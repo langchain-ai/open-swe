@@ -224,6 +224,8 @@ function ActionItem(props: ActionItemProps) {
           : "Failed to fetch URL content";
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
+      } else if (props.actionType === "request_human_help") {
+        return props.status === "done" ? "Help request sent" : "Requesting help";
       } else if (props.actionType === "mcp") {
         return props.success
           ? `${props.toolName} completed`
