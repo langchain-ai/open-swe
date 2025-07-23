@@ -626,6 +626,7 @@ export function AssistantMessage({
         return mapToolMessageToActionStepProps(
           correspondingToolResult,
           threadMessages,
+          handleHumanHelpResponse,
         );
       } else if (isSearchTool) {
         const args = toolCall.args as SearchToolArgs;
