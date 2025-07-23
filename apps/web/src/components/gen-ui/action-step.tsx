@@ -24,6 +24,7 @@ import {
   createTakePlannerNotesFields,
   createGetURLContentToolFields,
   createSearchToolFields,
+  createRequestHumanHelpToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import {
@@ -51,6 +52,8 @@ const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 const searchTool = createSearchToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
+const requestHumanHelpTool = createRequestHumanHelpToolFields();
+type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -109,6 +112,12 @@ type McpActionProps = BaseActionProps & {
   output?: string;
 };
 
+type RequestHumanHelpActionProps = BaseActionProps &
+  Partial<RequestHumanHelpToolArgs> & {
+    actionType: "request_human_help";
+    onSubmitResponse?: (response: string) => void;
+  };
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
@@ -117,7 +126,8 @@ export type ActionItemProps =
   | PlannerNotesActionProps
   | GetURLContentActionProps
   | McpActionProps
-  | SearchActionProps;
+  | SearchActionProps
+  | RequestHumanHelpActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
