@@ -18,7 +18,7 @@ import {
   safeSchemaToString,
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+
 import { createSearchTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
@@ -32,6 +32,7 @@ import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -51,6 +52,8 @@ export async function takeActions(
   const plannerNotesTool = createPlannerNotesTool();
   const getURLContentTool = createGetURLContentTool();
   const mcpTools = await getMcpTools(config);
+
+  const mcpToolNames = mcpTools.map((t) => t.name);
 
   const allTools = [
     shellTool,
@@ -142,22 +145,19 @@ export async function takeActions(
       }
     }
 
-    const truncatedOutput =
-      toolCall.name === getURLContentTool.name
-        ? // Allow for more context to be included from URL contents.
-          truncateOutput(result, {
-            numStartCharacters: 10000,
-            numEndCharacters: 10000,
-          })
-        : truncateOutput(result);
+    const content = await processToolCallContent(toolCall, result, config, {
+      mcpToolNames,
+      urlContentToolName: getURLContentTool.name,
+    });
 
     const toolMessage = new ToolMessage({
-      id: uuidv4(),
+      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
       tool_call_id: toolCall.id ?? "",
-      content: truncatedOutput,
+      content,
       name: toolCall.name,
       status: toolCallStatus,
     });
+
     return toolMessage;
   });
 

@@ -20,7 +20,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
@@ -32,6 +32,7 @@ import { createSearchTool } from "../../../tools/search.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -52,6 +53,8 @@ export async function takeAction(
   const getURLContentTool = createGetURLContentTool();
 
   const mcpTools = await getMcpTools(config);
+
+  const mcpToolNames = mcpTools.map((t) => t.name);
 
   const allTools = [
     shellTool,
@@ -136,10 +139,15 @@ export async function takeAction(
       }
     }
 
+    const content = await processToolCallContent(toolCall, result, config, {
+      mcpToolNames,
+      urlContentToolName: getURLContentTool.name,
+    });
+
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content,
       name: toolCall.name,
       status: toolCallStatus,
     });

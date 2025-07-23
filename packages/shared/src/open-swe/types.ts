@@ -369,6 +369,25 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
+  tocGenerationModelName: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "google-genai:gemini-2.5-pro",
+      description:
+        "The model to use for table of contents generation tasks. This model should be good at analyzing and structuring technical documentation.",
+      options: MODEL_OPTIONS_NO_THINKING,
+    },
+  },
+  tocGenerationTemperature: {
+    x_open_swe_ui_config: {
+      type: "slider",
+      default: 0,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
   maxTokens: {
     x_open_swe_ui_config: {
       type: "number",
@@ -508,6 +527,20 @@ export const GraphConfiguration = z.object({
    */
   summarizerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.actionGeneratorTemperature,
+  }),
+  /**
+   * The model ID to use for table of contents generation tasks.
+   * @default "google-genai:gemini-2.5-pro"
+   */
+  tocGenerationModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.tocGenerationModelName,
+  }),
+  /**
+   * The temperature to use for table of contents generation tasks.
+   * @default 0
+   */
+  tocGenerationTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.tocGenerationTemperature,
   }),
   /**
    * The maximum number of tokens to generate in an individual generation.
