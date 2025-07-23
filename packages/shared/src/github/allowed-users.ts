@@ -64,3 +64,4 @@ export function isAllowedUser(username: string): boolean {
     return true;
   }
   return ALLOWED_USERS.some((u) => u === username);
+}
