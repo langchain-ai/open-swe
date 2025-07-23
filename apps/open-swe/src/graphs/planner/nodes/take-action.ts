@@ -51,11 +51,15 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const plannerNotesTool = createPlannerNotesTool();
-  const getURLContentTool = createGetURLContentTool();
-  const searchDocumentForTool = createSearchDocumentForTool(config);
+  const getURLContentTool = createGetURLContentTool(state);
+  const searchDocumentForTool = createSearchDocumentForTool(config, state);
   const mcpTools = await getMcpTools(config);
 
-  const mcpToolNames = mcpTools.map((t) => t.name);
+  const higherContextLimitToolNames = [
+    ...mcpTools.map((t) => t.name),
+    getURLContentTool.name,
+    searchDocumentForTool.name,
+  ];
 
   const allTools = [
     shellTool,
@@ -149,8 +153,8 @@ export async function takeActions(
     }
 
     const content = await processToolCallContent(toolCall, result, config, {
-      mcpToolNames,
-      urlContentToolName: getURLContentTool.name,
+      higherContextLimitToolNames,
+      state,
     });
 
     const toolMessage = new ToolMessage({

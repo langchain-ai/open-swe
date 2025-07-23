@@ -154,10 +154,10 @@ export async function generateAction(
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
-    createGetURLContentTool(),
+    createGetURLContentTool(state),
     createInstallDependenciesTool(state),
     markTaskCompletedTool,
-    createSearchDocumentForTool(config),
+    createSearchDocumentForTool(config, state),
     ...mcpTools,
   ];
   logger.info(

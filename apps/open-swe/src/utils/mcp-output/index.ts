@@ -29,7 +29,7 @@ export async function handleMcpDocumentationOutput(
   });
 
   try {
-    const model = await loadModel(config, Task.TOC_GENERATION);
+    const model = await loadModel(config, Task.SUMMARIZER);
 
     const systemPrompt = DOCUMENT_TOC_GENERATION_PROMPT.replace(
       "{DOCUMENT_PAGE_CONTENT}",

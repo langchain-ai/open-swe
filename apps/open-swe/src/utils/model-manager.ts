@@ -254,12 +254,6 @@ export class ModelManager {
       [Task.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-sonnet-4-0",
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-      [Task.TOC_GENERATION]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
           "google-genai:gemini-2.5-pro",
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
@@ -304,19 +298,16 @@ export class ModelManager {
         [Task.PROGRAMMER]: "claude-sonnet-4-0",
         [Task.ROUTER]: "claude-3-5-haiku-latest",
         [Task.SUMMARIZER]: "claude-sonnet-4-0",
-        [Task.TOC_GENERATION]: "claude-sonnet-4-0",
       },
       "google-genai": {
         [Task.PROGRAMMER]: "gemini-2.5-pro",
         [Task.ROUTER]: "gemini-2.5-flash",
         [Task.SUMMARIZER]: "gemini-2.5-pro",
-        [Task.TOC_GENERATION]: "gemini-2.5-pro",
       },
       openai: {
         [Task.PROGRAMMER]: "gpt-4o",
         [Task.ROUTER]: "gpt-4o-mini",
         [Task.SUMMARIZER]: "gpt-4o",
-        [Task.TOC_GENERATION]: "gpt-4o",
       },
     };
 

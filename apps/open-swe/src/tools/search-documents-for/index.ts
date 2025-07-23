@@ -1,11 +1,12 @@
 import { tool } from "@langchain/core/tools";
-import { createLogger, LogLevel } from "../utils/logger.js";
+import { createLogger, LogLevel } from "../../utils/logger.js";
 import { createSearchDocumentForToolFields } from "@open-swe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
-import { loadModel, Task } from "../utils/load-model.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { loadModel, Task } from "../../utils/load-model.js";
+import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { DOCUMENT_SEARCH_PROMPT } from "../constants.js";
+import { DOCUMENT_SEARCH_PROMPT } from "./prompt.js";
+import { parseUrl } from "../../utils/url-parser.js";
 import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "SearchDocumentForTool");
@@ -14,36 +15,47 @@ type SearchDocumentForInput = z.infer<
   ReturnType<typeof createSearchDocumentForToolFields>["schema"]
 >;
 
-export function createSearchDocumentForTool(config: GraphConfig) {
+export function createSearchDocumentForTool(
+  config: GraphConfig,
+  state: Pick<GraphState, "documentCache">,
+) {
   const searchDocumentForTool = tool(
     async (
       input: SearchDocumentForInput,
     ): Promise<{ result: string; status: "success" | "error" }> => {
       const { url, query } = input;
 
-      let parsedUrl: URL | null = null;
-      try {
-        parsedUrl = new URL(url);
-      } catch (e) {
-        const errorString = e instanceof Error ? e.message : String(e);
-        logger.error("Failed to parse URL", { url, error: errorString });
-        return {
-          result: `Failed to parse URL: ${url}\nError:\n${errorString}\nPlease ensure the URL provided is properly formatted.`,
-          status: "error",
-        };
+      const urlParseResult = parseUrl(url);
+      if (!urlParseResult.success) {
+        return { result: urlParseResult.errorMessage, status: "error" };
       }
+      const parsedUrl = urlParseResult.url;
 
       try {
-        const loader = new FireCrawlLoader({
-          url: parsedUrl.href,
-          mode: "scrape",
-          params: {
-            formats: ["markdown"],
-          },
-        });
+        let documentContent = state.documentCache[url];
 
-        const docs = await loader.load();
-        const documentContent = docs.map((doc) => doc.pageContent).join("\n\n");
+        if (!documentContent) {
+          logger.info("Document not cached, fetching via FireCrawl", { url });
+          const loader = new FireCrawlLoader({
+            url: parsedUrl.href,
+            mode: "scrape",
+            params: {
+              formats: ["markdown"],
+            },
+          });
+
+          const docs = await loader.load();
+          documentContent = docs.map((doc) => doc.pageContent).join("\n\n");
+
+          if (state.documentCache) {
+            state.documentCache[url] = documentContent;
+          }
+        } else {
+          logger.info("Using cached document content", {
+            url,
+            contentLength: documentContent.length,
+          });
+        }
 
         if (!documentContent.trim()) {
           return {
@@ -52,7 +64,7 @@ export function createSearchDocumentForTool(config: GraphConfig) {
           };
         }
 
-        const model = await loadModel(config, Task.TOC_GENERATION);
+        const model = await loadModel(config, Task.SUMMARIZER);
 
         const searchPrompt = DOCUMENT_SEARCH_PROMPT.replace(
           "{DOCUMENT_PAGE_CONTENT}",

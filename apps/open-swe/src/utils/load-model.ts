@@ -19,11 +19,6 @@ export enum Task {
    * a task execution, etc. Should be a slightly advanced model.
    */
   SUMMARIZER = "summarizer",
-  /**
-   * Used for table of contents generation. This includes: generating
-   * a table of contents for a given documentation page.
-   */
-  TOC_GENERATION = "tocGeneration",
 }
 
 const TASK_TO_CONFIG_DEFAULTS_MAP = {
@@ -36,10 +31,6 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
     temperature: 0,
   },
   [Task.SUMMARIZER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
-    temperature: 0,
-  },
-  [Task.TOC_GENERATION]: {
     modelName: "google-genai:gemini-2.5-pro",
     temperature: 0,
   },

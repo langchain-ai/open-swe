@@ -401,14 +401,15 @@ export function createSearchDocumentForToolFields() {
     query: z
       .string()
       .describe(
-        "The natural language query to search for within the document content. Be specific about what information you're looking for.",
+        "The natural language query to search for within the document content. This query will be passed to an LLM which will use it to extract relevant content from the document. Be specific about what information you're looking for.",
       ),
   });
 
   return {
     name: "search_document_for",
     description:
-      "Search for specific information within a previously fetched document using natural language queries. This tool is particularly useful when working with large documents that have been summarized with a table of contents.",
+      "Search for specific information within a previously fetched document using natural language queries. This tool is particularly useful when working with large documents that have been summarized with a table of contents. " +
+      "This tool should only be called after a documentation or a web page has been read and summarized as a table of contents and you need to search for specific information within the document.",
     schema: searchDocumentForSchema,
   };
 }
