@@ -21,6 +21,7 @@
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
     "@octokit/rest": "^22.0.0",
+    "jsonwebtoken": "^9.0.2",
     "zod": "^3.25.32"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import { getInstallationToken } from "@/utils/github";
+import { getInstallationToken } from "@open-swe/shared/github/auth";
 import { App } from "@octokit/app";
 import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
 import { encryptSecret } from "@open-swe/shared/crypto";

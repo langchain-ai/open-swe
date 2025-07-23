@@ -6,6 +6,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   GITHUB_INSTALLATION_NAME,
   GITHUB_PAT,
+  GITHUB_INSTALLATION_ID,
 } from "@open-swe/shared/constants";
 
 export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
@@ -22,8 +23,13 @@ export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
     config.configurable?.[GITHUB_INSTALLATION_TOKEN_COOKIE];
   const githubInstallationName =
     config.configurable?.[GITHUB_INSTALLATION_NAME];
+  const githubInstallationId = config.configurable?.[GITHUB_INSTALLATION_ID];
 
-  if (!githubInstallationTokenCookie || !githubInstallationName) {
+  if (
+    !githubInstallationTokenCookie ||
+    !githubInstallationName ||
+    !githubInstallationId
+  ) {
     throw new Error("Missing required headers");
   }
 
@@ -36,6 +42,7 @@ export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
     // Required headers
     [GITHUB_INSTALLATION_TOKEN_COOKIE]: githubInstallationTokenCookie,
     [GITHUB_INSTALLATION_NAME]: githubInstallationName,
+    [GITHUB_INSTALLATION_ID]: githubInstallationId,
 
     // Optional headers
     [GITHUB_TOKEN_COOKIE]: githubTokenCookie,
