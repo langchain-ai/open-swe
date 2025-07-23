@@ -45,6 +45,9 @@ function CollapsibleAlert({
 }: CollapsibleAlertProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasDetails = Boolean(errorState.details);
+  if (!errorState.message && !hasDetails) {
+    return null;
+  }
 
   return (
     <div

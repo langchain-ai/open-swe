@@ -120,9 +120,9 @@ export function PullRequestOpened({
           <h3 className="mb-1 text-xs font-normal text-gray-500 dark:text-gray-400">
             Description
           </h3>
-          <div className="text-xs font-normal whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+          <pre className="text-xs font-normal whitespace-pre-wrap text-gray-800 dark:text-gray-200">
             {description}
-          </div>
+          </pre>
         </div>
       )}
     </div>

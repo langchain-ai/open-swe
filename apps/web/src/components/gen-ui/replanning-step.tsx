@@ -61,9 +61,9 @@ export function ReplanningStep({
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800">
+            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800">
               {reasoningText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}

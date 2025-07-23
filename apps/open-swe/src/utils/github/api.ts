@@ -341,3 +341,37 @@ export async function createIssueComment({
     return null;
   }
 }
+
+export async function updateIssueComment({
+  owner,
+  repo,
+  commentId,
+  body,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  commentId: number;
+  body: string;
+  githubInstallationToken: string;
+}): Promise<GitHubIssueComment | null> {
+  const octokit = new Octokit({
+    auth: githubInstallationToken,
+  });
+
+  try {
+    const { data: comment } = await octokit.issues.updateComment({
+      owner,
+      repo,
+      comment_id: commentId,
+      body,
+    });
+
+    return comment;
+  } catch (error) {
+    logger.error(`Failed to update issue comment`, {
+      error,
+    });
+    return null;
+  }
+}

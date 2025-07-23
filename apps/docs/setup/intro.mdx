@@ -1,6 +1,6 @@
 ---
-title: 'Introduction'
-description: 'How to set up Open SWE for development'
+title: "Introduction"
+description: "How to set up Open SWE for development"
 ---
 
 # Development Setup Overview
@@ -12,19 +12,13 @@ Welcome to the Open SWE development setup guide. This section will walk you thro
 The setup process is organized into focused sections to help you get up and running efficiently:
 
 <CardGroup cols={2}>
-  <Card
-    title="Development Setup"
-    icon="code"
-    href="/setup/development"
-  >
-    Complete guide to cloning the repository, installing dependencies, configuring environment variables, and starting the development servers.
+  <Card title="Development Setup" icon="code" href="/setup/development">
+    Complete guide to cloning the repository, installing dependencies,
+    configuring environment variables, and starting the development servers.
   </Card>
-  <Card
-    title="Authentication"
-    icon="shield-check"
-    href="/setup/authentication"
-  >
-    Understanding the authentication flow, GitHub App configuration, and security mechanisms used throughout Open SWE.
+  <Card title="Authentication" icon="shield-check" href="/setup/authentication">
+    Understanding the authentication flow, GitHub App configuration, and
+    security mechanisms used throughout Open SWE.
   </Card>
 </CardGroup>
 
@@ -59,13 +53,13 @@ Open SWE is built with modern technologies designed for scalability and develope
 ## Monorepo Structure
 
 <Note>
-Open SWE uses a Yarn workspace monorepo with three main applications and a shared package for common utilities and types.
+  Open SWE uses a Yarn workspace monorepo with three main applications and a
+  shared package for common utilities and types.
 </Note>
 
 - **`apps/open-swe`** - LangGraph agent application
-- **`apps/web`** - Next.js web interface  
+- **`apps/web`** - Next.js web interface
 - **`apps/docs`** - Mintlify documentation site
 - **`packages/shared`** - Shared utilities, types, and constants
 
 The monorepo is orchestrated by Turbo, which handles build dependencies and parallel task execution across packages.
-

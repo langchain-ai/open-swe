@@ -12,6 +12,7 @@ import {
   XCircle,
   Loader2,
   Globe,
+  Zap,
   FileCode,
   CloudDownload,
 } from "lucide-react";
@@ -101,6 +102,13 @@ type SearchActionProps = BaseActionProps &
     errorCode?: number;
   };
 
+type McpActionProps = BaseActionProps & {
+  actionType: "mcp";
+  toolName: string;
+  args: Record<string, any>;
+  output?: string;
+};
+
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
@@ -108,6 +116,7 @@ export type ActionItemProps =
   | InstallDependenciesActionProps
   | PlannerNotesActionProps
   | GetURLContentActionProps
+  | McpActionProps
   | SearchActionProps;
 
 export type ActionStepProps = {
@@ -200,6 +209,10 @@ function ActionItem(props: ActionItemProps) {
           : "Failed to fetch URL content";
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
+      } else if (props.actionType === "mcp") {
+        return props.success
+          ? `${props.toolName} completed`
+          : `${props.toolName} failed`;
       }
     }
 
@@ -221,6 +234,10 @@ function ActionItem(props: ActionItemProps) {
       return !!props.diff;
     } else if (props.actionType === "planner_notes") {
       return !!(props.notes && props.notes.length > 0);
+    } else if (props.actionType === "mcp") {
+      const hasArgs = props.args && Object.keys(props.args).length > 0;
+      const hasOutput = !!props.output;
+      return hasArgs || hasOutput;
     }
 
     return false;
@@ -265,6 +282,13 @@ function ActionItem(props: ActionItemProps) {
         <ToolIconWithTooltip
           toolNamePretty="Get URL Contents"
           icon={<Globe className={cn(defaultIconStyling)} />}
+        />
+      );
+    } else if (props.actionType === "mcp") {
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty={props.toolName}
+          icon={<Zap className={cn(defaultIconStyling)} />}
         />
       );
     } else if (props.actionType === "search") {
@@ -390,6 +414,14 @@ function ActionItem(props: ActionItemProps) {
           </code>
         </div>
       );
+    } else if (props.actionType === "mcp") {
+      return (
+        <div className="flex items-center">
+          <span className="text-foreground/80 text-xs font-normal">
+            {props.toolName}
+          </span>
+        </div>
+      );
     } else {
       return (
         <code className="text-foreground/80 flex items-center text-xs font-normal">
@@ -420,6 +452,59 @@ function ActionItem(props: ActionItemProps) {
             <div className="mt-1 text-xs text-red-500 dark:text-red-400">
               Exit code: {props.errorCode}
             </div>
+          )}
+        </div>
+      );
+    } else if (props.actionType === "mcp") {
+      const hasArgs = props.args && Object.keys(props.args).length > 0;
+      const hasOutput = !!props.output;
+
+      if (!hasArgs && !hasOutput) {
+        return null;
+      }
+
+      return (
+        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
+          {hasArgs && (
+            <div className="mb-3">
+              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
+                Arguments
+              </div>
+              <div className="bg-muted-foreground/5 rounded border p-3">
+                {Object.entries(props.args).map(([key, value]) => (
+                  <div
+                    key={key}
+                    className="mb-2 last:mb-0"
+                  >
+                    <div className="text-foreground mb-1 text-xs font-medium">
+                      {key}
+                    </div>
+                    <div className="text-foreground/80 text-xs">
+                      {typeof value === "object" ? (
+                        <code className="bg-muted rounded px-2 py-1 font-mono text-xs break-all">
+                          {JSON.stringify(value, null, 2)}
+                        </code>
+                      ) : (
+                        <code className="bg-muted rounded px-2 py-1 font-mono text-xs break-all">
+                          {String(value)}
+                        </code>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasOutput && (
+            <>
+              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
+                Output
+              </div>
+              <pre className="text-foreground/90 text-xs font-normal whitespace-pre-wrap">
+                {props.output}
+              </pre>
+            </>
           )}
         </div>
       );
@@ -537,9 +622,9 @@ export function ActionStep(props: ActionStepProps) {
           {showReasoning ? "Hide reasoning" : "Show reasoning"}
         </button>
         {showReasoning && (
-          <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
+          <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
             {reasoningText || "No reasoning provided."}
-          </p>
+          </BasicMarkdownText>
         )}
       </div>
 

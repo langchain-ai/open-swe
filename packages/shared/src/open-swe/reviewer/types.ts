@@ -5,9 +5,15 @@ import {
   messagesStateReducer,
   MessagesZodState,
 } from "@langchain/langgraph";
-import { CustomRules, TargetRepository, TaskPlan } from "../types.js";
+import {
+  CacheMetrics,
+  CustomRules,
+  TargetRepository,
+  TaskPlan,
+} from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
+import { tokenDataReducer } from "../../caching.js";
 
 export const ReviewerGraphStateObj = MessagesZodState.extend({
   /**
@@ -109,6 +115,12 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
     default: () => 0,
+  }),
+  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+    reducer: {
+      schema: z.custom<CacheMetrics>().optional(),
+      fn: tokenDataReducer,
+    },
   }),
 });
 

@@ -17,18 +17,60 @@ import { Skeleton } from "../ui/skeleton";
 import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
+import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { InlineMarkdownText } from "../thread/markdown-text";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
   status?: ThreadUIStatus;
   statusLoading?: boolean;
+  taskPlan?: TaskPlan;
 }
 
-export function ThreadCard({ thread, status, statusLoading }: ThreadCardProps) {
+export function ThreadCard({
+  thread,
+  status,
+  statusLoading,
+  taskPlan,
+}: ThreadCardProps) {
   const router = useRouter();
 
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);
+
+  const getTaskProgress = () => {
+    if (!taskPlan || !taskPlan.tasks.length) {
+      return { currentTaskIndex: 0, totalTasks: 0 };
+    }
+
+    try {
+      const planItems = getActivePlanItems(taskPlan);
+      const sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
+
+      // Find the current task (lowest index among uncompleted tasks)
+      const currentTaskIndex = sortedPlanItems
+        .filter((item) => !item.completed)
+        .reduce(
+          (min, item) => (item.index < min ? item.index : min),
+          Number.POSITIVE_INFINITY,
+        );
+
+      const displayCurrentIndex =
+        currentTaskIndex === Number.POSITIVE_INFINITY
+          ? sortedPlanItems.length // All tasks completed
+          : currentTaskIndex; // +1 for 1-based display
+
+      return {
+        currentTaskIndex: displayCurrentIndex,
+        totalTasks: sortedPlanItems.length,
+      };
+    } catch (error) {
+      return { currentTaskIndex: 0, totalTasks: 0 };
+    }
+  };
+
+  const { currentTaskIndex, totalTasks } = getTaskProgress();
 
   const getStatusColor = (status: ThreadUIStatus) => {
     switch (status) {
@@ -92,10 +134,10 @@ export function ThreadCard({ thread, status, statusLoading }: ThreadCardProps) {
       }}
     >
       <CardHeader>
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-foreground truncate text-sm font-medium">
-              {thread.title}
+            <CardTitle className="text-foreground truncate text-sm">
+              <InlineMarkdownText>{thread.title}</InlineMarkdownText>
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">
               <GitBranch className="text-muted-foreground h-2 w-2" />
@@ -130,9 +172,9 @@ export function ThreadCard({ thread, status, statusLoading }: ThreadCardProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs">
-              {thread.taskCount === 0
-                ? "No tasks"
-                : `${thread.taskCount} tasks`}
+              {!taskPlan || !taskPlan.tasks.length
+                ? "No active plan"
+                : `${currentTaskIndex}/${totalTasks} tasks`}
             </span>
             <span className="text-muted-foreground text-xs">•</span>
             <span className="text-muted-foreground text-xs">

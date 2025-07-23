@@ -1,27 +1,14 @@
 import { isAIMessageSDK, isHumanMessageSDK } from "@/lib/langchain-messages";
 import { UseStream, useStream } from "@langchain/langgraph-sdk/react";
 import { AssistantMessage } from "../thread/messages/ai";
+import { Dispatch, SetStateAction, useEffect, useMemo, useState } from "react";
 import {
-  Dispatch,
-  SetStateAction,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { useCancelStream } from "@/hooks/useCancelStream";
-import {
-  isCustomNodeEvent,
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
   ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
 } from "@open-swe/shared/open-swe/custom-node-events";
-import {
-  DO_NOT_RENDER_ID_PREFIX,
-  PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
@@ -71,16 +58,13 @@ function isAcceptedPlanEvents(
   return events.every(isAcceptedPlanEvent);
 }
 
-interface ActionsRendererProps {
-  graphId: string;
-  threadId: string;
+interface ActionsRendererProps<
+  StateType extends PlannerGraphState | GraphState,
+> {
   runId?: string;
-  setProgrammerSession?: (
-    session: ManagerGraphState["programmerSession"],
-  ) => void;
-  programmerSession?: ManagerGraphState["programmerSession"];
-  setSelectedTab?: Dispatch<SetStateAction<"planner" | "programmer">>;
-  onStreamReady: (cancelFn: (() => void) | undefined) => void;
+  customNodeEvents: CustomNodeEvent[];
+  setCustomNodeEvents: Dispatch<SetStateAction<CustomNodeEvent[]>>;
+  stream: ReturnType<typeof useStream<StateType>>;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -105,64 +89,16 @@ const getCustomNodeEventsFromMessages = (
     .flat();
 };
 
-export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
-  graphId,
-  threadId,
+export function ActionsRenderer<
+  StateType extends PlannerGraphState | GraphState,
+>({
   runId,
-  setProgrammerSession,
-  programmerSession,
-  setSelectedTab,
-  onStreamReady,
-}: ActionsRendererProps) {
-  const [customNodeEvents, setCustomNodeEvents] = useState<CustomNodeEvent[]>(
-    [],
-  );
-  const joinedRunId = useRef<string | undefined>(undefined);
-  const [streamLoading, setStreamLoading] = useState(false);
+  customNodeEvents,
+  setCustomNodeEvents,
+  stream,
+}: ActionsRendererProps<StateType>) {
+  const [streamLoading, setStreamLoading] = useState(stream.isLoading);
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
-
-  const stream = useStream<State>({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: graphId,
-    reconnectOnMount: true,
-    threadId,
-    onCustomEvent: (event) => {
-      if (isCustomNodeEvent(event)) {
-        setCustomNodeEvents((prev) => [...prev, event]);
-      }
-    },
-    fetchStateHistory: false,
-  });
-
-  useEffect(() => {
-    if (stream.error) {
-      const rawErrorMessage =
-        typeof stream.error === "object" && "message" in stream.error
-          ? (stream.error.message as string)
-          : "An unknown error occurred in the manager";
-
-      if (rawErrorMessage.includes("overloaded_error")) {
-        setErrorState({
-          message:
-            "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
-          details: rawErrorMessage,
-        });
-      } else {
-        setErrorState({
-          message: rawErrorMessage,
-        });
-      }
-    } else {
-      setErrorState(null);
-    }
-  }, [stream.error]);
-
-  const { cancelRun } = useCancelStream<State>({
-    stream,
-    threadId,
-    runId,
-    streamName: graphId === "planner" ? "Planner" : "Programmer",
-  });
 
   const initializeEvents = useMemo(
     () =>
@@ -188,6 +124,20 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   if (allSuccess) {
     initStatus = "done";
   }
+
+  // Filter out human & do not render messages
+  const filteredMessages = stream.messages?.filter(
+    (m) =>
+      !isHumanMessageSDK(m) &&
+      !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
+  );
+  const isLastMessageHidden = !!(
+    stream.messages?.length > 0 &&
+    stream.messages[stream.messages.length - 1].id &&
+    stream.messages[stream.messages.length - 1].id?.startsWith(
+      DO_NOT_RENDER_ID_PREFIX,
+    )
+  );
 
   useEffect(() => {
     const allCustomEvents = getCustomNodeEventsFromMessages(stream.messages);
@@ -218,79 +168,42 @@ export function ActionsRenderer<State extends PlannerGraphState | GraphState>({
   // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
     const hasContent =
-      (stream.messages && stream.messages.length > 0) ||
-      customNodeEvents.length > 0;
+      filteredMessages.length > 0 || customNodeEvents.length > 0;
 
     if (hasContent && streamLoading) {
       setStreamLoading(false);
     }
   }, [stream.messages, customNodeEvents, streamLoading]);
 
-  // TODO: If the SDK changes go in, use this instead:
-  // stream.joinStream(runId, undefined, { streamMode: ["values", "messages", "custom"]}).catch(console.error);
   useEffect(() => {
-    if (runId && runId !== joinedRunId.current) {
-      joinedRunId.current = runId;
-      setStreamLoading(true);
-      stream
-        .joinStream(runId)
-        .catch(console.error)
-        .finally(() => setStreamLoading(false));
-    } else if (!runId) {
-      joinedRunId.current = undefined;
-    }
-  }, [runId, stream]);
+    if (stream.error) {
+      const rawErrorMessage =
+        typeof stream.error === "object" && "message" in stream.error
+          ? (stream.error.message as string)
+          : "An unknown error occurred in the manager";
 
-  useEffect(() => {
-    if (stream.isLoading) {
-      onStreamReady(cancelRun);
-    } else {
-      onStreamReady(undefined);
-    }
-  }, [onStreamReady, runId]); // Depend on runId instead of cancelRun to avoid infinite loops
-
-  // Filter out human & do not render messages
-  const filteredMessages = stream.messages?.filter(
-    (m) =>
-      !isHumanMessageSDK(m) &&
-      !(m.id && m.id.startsWith(DO_NOT_RENDER_ID_PREFIX)),
-  );
-  const isLastMessageHidden = !!(
-    stream.messages?.length > 0 &&
-    stream.messages[stream.messages.length - 1].id &&
-    stream.messages[stream.messages.length - 1].id?.startsWith(
-      DO_NOT_RENDER_ID_PREFIX,
-    )
-  );
-
-  // TODO: Need a better way to handle this. Not great like this...
-  useEffect(() => {
-    if (
-      "programmerSession" in stream.values &&
-      stream.values.programmerSession &&
-      (stream.values.programmerSession.runId !== programmerSession?.runId ||
-        stream.values.programmerSession.threadId !==
-          programmerSession?.threadId)
-    ) {
-      setProgrammerSession?.(stream.values.programmerSession);
-
-      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
-      // This allows the accepted plan step to be visible before switching
-      if (graphId === PLANNER_GRAPH_ID) {
-        // Add a small delay to allow the accepted plan step to render first
-        setTimeout(() => {
-          setSelectedTab?.("programmer");
-        }, 2000);
+      if (rawErrorMessage.includes("overloaded_error")) {
+        setErrorState({
+          message:
+            "An Anthropic overloaded error occurred. This error occurs when Anthropic APIs experience high traffic across all users.",
+          details: rawErrorMessage,
+        });
+      } else {
+        setErrorState({
+          message: rawErrorMessage,
+        });
       }
+    } else {
+      setErrorState(null);
     }
-  }, [stream.values, graphId]);
+  }, [stream.error]);
 
-  if (streamLoading) {
+  if (streamLoading && !errorState) {
     return <LoadingActionsCardContent />;
   }
 
   return (
-    <div className="flex w-full flex-col gap-2">
+    <div className="flex h-full w-full flex-col gap-2 overflow-y-auto py-4">
       {initializeEvents.length > 0 && steps.length > 0 && (
         <InitializeStep
           status={initStatus}

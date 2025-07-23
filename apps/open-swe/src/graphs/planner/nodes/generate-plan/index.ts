@@ -23,6 +23,7 @@ import { getPlannerNotes } from "../../utils/get-notes.js";
 import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { trackCachePerformance } from "../../../../utils/caching.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
@@ -124,5 +125,6 @@ export async function generatePlan(
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
+    tokenData: trackCachePerformance(response),
   };
 }

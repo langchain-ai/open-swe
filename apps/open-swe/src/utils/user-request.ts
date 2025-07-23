@@ -89,10 +89,10 @@ export function formatUserRequestPrompt(
   const userFollowupRequest = getRecentUserRequest(messages);
 
   if (userFollowupRequest) {
-    return singleRequestPrompt
+    return followupRequestPrompt
       .replace("{USER_REQUEST}", userRequest)
       .replace("{USER_FOLLOWUP_REQUEST}", userFollowupRequest);
   }
 
-  return followupRequestPrompt.replace("{USER_REQUEST}", userRequest);
+  return singleRequestPrompt.replace("{USER_REQUEST}", userRequest);
 }

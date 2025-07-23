@@ -18,6 +18,7 @@ import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
+import { ApiKeyBanner } from "../api-key-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
 import { GitHubLogoutButton } from "../github/github-oauth-button";
@@ -74,10 +75,11 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const displayThreads = threadsMetadata.slice(0, 4);
   const displayThreadIds = displayThreads.map((thread) => thread.id);
 
-  const { statusMap, isLoading: statusLoading } = useThreadsStatus(
-    displayThreadIds,
-    threads,
-  );
+  const {
+    statusMap,
+    taskPlanMap,
+    isLoading: statusLoading,
+  } = useThreadsStatus(displayThreadIds, threads);
 
   const handleLoadDraft = (content: string) => {
     setDraftToLoad(content);
@@ -115,6 +117,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           <GitHubInstallationBanner />
+          <ApiKeyBanner />
           {/* Terminal Chat Input */}
           <Card
             className={cn(
@@ -218,6 +221,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     thread={thread}
                     status={statusMap[thread.id]}
                     statusLoading={statusLoading}
+                    taskPlan={taskPlanMap[thread.id]}
                   />
                 ))}
               </div>
