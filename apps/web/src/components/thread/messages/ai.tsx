@@ -52,6 +52,7 @@ import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -795,4 +796,5 @@ export function AssistantMessageLoading() {
     </div>
   );
 }
+
 
