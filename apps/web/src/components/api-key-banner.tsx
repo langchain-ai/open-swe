@@ -60,7 +60,7 @@ export function ApiKeyBanner() {
     <div
       className={cn(
         "rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/20",
-        "flex items-center justify-between",
+        "flex items-center justify-between gap-6",
       )}
     >
       <div className="flex items-center gap-3">
