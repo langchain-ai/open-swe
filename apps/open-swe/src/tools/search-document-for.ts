@@ -10,13 +10,17 @@ import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "SearchDocumentForTool");
 
-type SearchDocumentForInput = z.infer<ReturnType<typeof createSearchDocumentForToolFields>["schema"]>;
+type SearchDocumentForInput = z.infer<
+  ReturnType<typeof createSearchDocumentForToolFields>["schema"]
+>;
 
 export function createSearchDocumentForTool(config: GraphConfig) {
   const searchDocumentForTool = tool(
-    async (input: SearchDocumentForInput): Promise<{ result: string; status: "success" | "error" }> => {
+    async (
+      input: SearchDocumentForInput,
+    ): Promise<{ result: string; status: "success" | "error" }> => {
       const { url, query } = input;
-      
+
       let parsedUrl: URL | null = null;
       try {
         parsedUrl = new URL(url);
@@ -49,10 +53,11 @@ export function createSearchDocumentForTool(config: GraphConfig) {
         }
 
         const model = await loadModel(config, Task.TOC_GENERATION);
-        
-        const searchPrompt = DOCUMENT_SEARCH_PROMPT
-          .replace("{DOCUMENT_PAGE_CONTENT}", documentContent)
-          .replace("{NATURAL_LANGUAGE_QUERY}", query);
+
+        const searchPrompt = DOCUMENT_SEARCH_PROMPT.replace(
+          "{DOCUMENT_PAGE_CONTENT}",
+          documentContent,
+        ).replace("{NATURAL_LANGUAGE_QUERY}", query);
 
         const response = await model
           .withConfig({ tags: ["nostream"], runName: "document-search" })
@@ -77,7 +82,11 @@ export function createSearchDocumentForTool(config: GraphConfig) {
         };
       } catch (e) {
         const errorString = e instanceof Error ? e.message : String(e);
-        logger.error("Failed to search document", { url, query, error: errorString });
+        logger.error("Failed to search document", {
+          url,
+          query,
+          error: errorString,
+        });
         return {
           result: `Failed to search document at ${url}\nError:\n${errorString}`,
           status: "error",
@@ -86,6 +95,6 @@ export function createSearchDocumentForTool(config: GraphConfig) {
     },
     createSearchDocumentForToolFields(),
   );
-  
+
   return searchDocumentForTool;
-} 
+}
