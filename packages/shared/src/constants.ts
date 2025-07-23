@@ -35,7 +35,7 @@ export const DEFAULT_MCP_SERVERS = {
       "--transport",
       "stdio",
     ],
-    stderr: "inherit",
+    stderr: "inherit" as const,
   },
 };
 
