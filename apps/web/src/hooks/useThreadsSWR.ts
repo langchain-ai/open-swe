@@ -83,12 +83,12 @@ export function useThreadsSWR<
   const threads = useMemo(() => {
     const allThreads = data ?? [];
     if (!currentInstallation) {
-      return allThreads;
+      return [];
     }
-    
+
     return allThreads.filter((thread) => {
       const targetRepo = thread.values?.targetRepository;
-      return targetRepo?.owner === currentInstallation.accountName;
+      return targetRepo && targetRepo.owner === currentInstallation.accountName;
     });
   }, [data, currentInstallation]);
 
