@@ -489,6 +489,54 @@ function ActionItem(props: ActionItemProps) {
           )}
         </div>
       );
+    } else if (props.actionType === "request_human_help") {
+      const [userResponse, setUserResponse] = useState("");
+      const textareaRef = useRef<HTMLTextAreaElement>(null);
+      
+      const handleSubmit = () => {
+        if (userResponse.trim() && props.onSubmitResponse) {
+          props.onSubmitResponse(userResponse.trim());
+          setUserResponse("");
+        }
+      };
+
+      const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          handleSubmit();
+        }
+      };
+
+      return (
+        <div className="bg-muted p-3 dark:bg-gray-900">
+          {props.help_request && (
+            <div className="mb-3">
+              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
+                Help Request
+              </div>
+              <div className="bg-muted-foreground/5 rounded border p-3">
+                <BasicMarkdownText className="text-xs">
+                  {props.help_request}
+                </BasicMarkdownText>
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Textarea
+              ref={textareaRef}
+              value={userResponse}
+              onChange={(e) => setUserResponse(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your response here... (Ctrl+Enter to submit)"
+              className="min-h-[80px] text-xs"
+            />
+            <Button onClick={handleSubmit} disabled={!userResponse.trim()} size="sm" className="w-full">
+              <Send className="mr-2 h-3 w-3" />
+              Submit Response
+            </Button>
+          </div>
+        </div>
+      );
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
@@ -706,4 +754,5 @@ function formatDiff(diff: string) {
     })
     .join("\n");
 }
+
 
