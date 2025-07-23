@@ -496,8 +496,6 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     } else if (props.actionType === "request_human_help") {
-      const [userResponse, setUserResponse] = useState("");
-      const textareaRef = useRef<HTMLTextAreaElement>(null);
 
       const handleSubmit = () => {
         if (userResponse.trim() && props.onSubmitResponse) {
