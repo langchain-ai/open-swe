@@ -158,7 +158,7 @@ export async function takeActions(
     });
 
     const toolMessage = new ToolMessage({
-      id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+      id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
       content,
       name: toolCall.name,
