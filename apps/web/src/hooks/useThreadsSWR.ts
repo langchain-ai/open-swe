@@ -87,8 +87,11 @@ export function useThreadsSWR<
     }
 
     return allThreads.filter((thread) => {
-      const targetRepo = thread.values?.targetRepository;
-      return targetRepo && targetRepo.owner === currentInstallation.accountName;
+      const threadInstallationName = thread.metadata?.installation_name;
+      return (
+        typeof threadInstallationName === "string" &&
+        threadInstallationName === currentInstallation.accountName
+      );
     });
   }, [data, currentInstallation]);
 
