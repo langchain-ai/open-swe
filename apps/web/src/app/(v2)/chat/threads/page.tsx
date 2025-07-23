@@ -32,6 +32,7 @@ function AllThreadsPageContent() {
   const { currentInstallation } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
+    currentInstallation,
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");

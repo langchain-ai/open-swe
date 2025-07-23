@@ -6,6 +6,7 @@ import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { useRouter } from "next/navigation";
@@ -24,6 +25,7 @@ export default function ThreadPage({
 }) {
   const router = useRouter();
   const { thread_id } = use(params);
+  const { currentInstallation } = useGitHubAppProvider();
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
     assistantId: MANAGER_GRAPH_ID,
@@ -34,6 +36,7 @@ export default function ThreadPage({
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
+    currentInstallation,
   });
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
