@@ -19,9 +19,7 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
     isLoading: isStatusLoading,
     error: statusError,
     taskPlan: realTimeTaskPlan,
-  } = useThreadStatus(thread.thread_id, {
-    useTaskPlanConfig: true,
-  });
+  } = useThreadStatus(thread.thread_id);
 
   const metadata: ThreadMetadata = useMemo((): ThreadMetadata => {
     const values = thread.values;
