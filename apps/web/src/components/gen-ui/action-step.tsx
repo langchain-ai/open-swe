@@ -146,6 +146,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   [plannerNotesTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
   [searchTool.name]: "Searching...",
+  [requestHumanHelpTool.name]: "Requesting help...",
 };
 
 function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
