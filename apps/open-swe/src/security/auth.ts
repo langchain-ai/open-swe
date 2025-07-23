@@ -17,7 +17,7 @@ import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
-import { isAllowedUser } from "../utils/github/allowed-users.js";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { validate } from "uuid";
 
 // TODO: Export from LangGraph SDK
