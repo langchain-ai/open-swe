@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   Terminal,
   FileText,
@@ -15,6 +15,8 @@ import {
   Zap,
   FileCode,
   CloudDownload,
+  HelpCircle,
+  Send,
 } from "lucide-react";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import {
@@ -34,6 +36,8 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
+import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { ToolIconWithTooltip } from "./tool-icon-tooltip";
 
 // Used only for Zod type inference.
