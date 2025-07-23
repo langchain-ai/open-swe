@@ -365,6 +365,7 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
+          tc.name === requestHumanHelpTool.name ||
           tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
