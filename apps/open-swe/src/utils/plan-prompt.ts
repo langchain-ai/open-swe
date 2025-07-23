@@ -52,7 +52,7 @@ export function formatPlanPrompt(
         : completedTasks
             .map(
               (task) =>
-                `<completed_task index="${task.index}">${task.plan}</completed_task>`,
+                `<completed_task index="${task.index}">\n${task.plan}\n</completed_task>`,
             )
             .join("\n")
       : "No completed tasks.",
@@ -63,14 +63,14 @@ export function formatPlanPrompt(
         ? remainingTasks
             .map(
               (task) =>
-                `<remaining_task index="${task.index}">${task.plan}</remaining_task>`,
+                `<remaining_task index="${task.index}">\n${task.plan}\n</remaining_task>`,
             )
             .join("\n")
         : "No remaining tasks.",
     )
     .replace(
       "{CURRENT_TASK}",
-      `<current_task index="${currentTask?.index}">${currentTask?.plan || "No current task found."}</current_task>`,
+      `<current_task index="${currentTask?.index}">\n${currentTask?.plan || "No current task found."}\n</current_task>`,
     );
 }
 
