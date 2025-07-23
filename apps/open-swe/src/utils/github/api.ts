@@ -6,12 +6,18 @@ import { getInstallationToken } from "@open-swe/shared/github/auth";
 import { getConfig } from "@langchain/langgraph";
 import { GITHUB_INSTALLATION_ID } from "@open-swe/shared/constants";
 import { updateConfig } from "../update-config.js";
+import { encryptSecret } from "@open-swe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-API");
 
 async function getInstallationTokenAndUpdateConfig() {
   try {
     const config = getConfig();
+    const encryptionSecret = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionSecret) {
+      throw new Error("Secrets encryption key not found");
+    }
+
     const installationId = config.configurable?.[GITHUB_INSTALLATION_ID];
     const appId = process.env.GITHUB_APP_ID;
     const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
@@ -20,8 +26,10 @@ async function getInstallationTokenAndUpdateConfig() {
         "GitHub installation ID, app ID, or private key not found",
       );
     }
+
     const token = await getInstallationToken(installationId, appId, privateKey);
-    updateConfig(GITHUB_INSTALLATION_ID, token);
+    const encryptedToken = encryptSecret(token, encryptionSecret);
+    updateConfig(GITHUB_INSTALLATION_ID, encryptedToken);
     return token;
   } catch (e) {
     logger.error("Failed to get installation token and update config", {
