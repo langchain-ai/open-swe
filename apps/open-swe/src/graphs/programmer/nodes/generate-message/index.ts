@@ -145,6 +145,7 @@ export async function generateAction(
     Task.PROGRAMMER,
   );
   const mcpTools = await getMcpTools(config);
+  const markTaskCompletedTool = createMarkTaskCompletedToolFields();
 
   const tools = [
     createSearchTool(state),
@@ -154,7 +155,7 @@ export async function generateAction(
     createUpdatePlanToolFields(),
     createGetURLContentTool(),
     createInstallDependenciesTool(state),
-    createMarkTaskCompletedToolFields(),
+    markTaskCompletedTool,
     ...mcpTools,
   ];
   logger.info(
@@ -213,9 +214,7 @@ export async function generateAction(
   if (
     response.tool_calls?.length &&
     response.tool_calls?.length > 1 &&
-    response.tool_calls.some(
-      (t) => t.name === createMarkTaskCompletedToolFields().name,
-    )
+    response.tool_calls.some((t) => t.name === markTaskCompletedTool.name)
   ) {
     logger.error(
       "Multiple tool calls found, including mark_task_completed. Removing the mark_task_completed call.",
@@ -224,7 +223,7 @@ export async function generateAction(
       },
     );
     response.tool_calls = response.tool_calls.filter(
-      (t) => t.name !== createMarkTaskCompletedToolFields().name,
+      (t) => t.name !== markTaskCompletedTool.name,
     );
   }
 
