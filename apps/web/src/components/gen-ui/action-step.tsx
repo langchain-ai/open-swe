@@ -183,6 +183,10 @@ const coerceStringToArray = (str: string | string[]) => {
 function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);
 
+  // State for request_human_help component
+  const [userResponse, setUserResponse] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const getStatusIcon = () => {
     switch (props.status) {
       case "loading":
