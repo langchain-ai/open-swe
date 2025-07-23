@@ -6,21 +6,10 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 export function getThreadTitle<State extends Record<string, any> = GraphState>(
   thread: Thread<State>,
 ): string {
-  const taskPlan = thread.values?.taskPlan;
-
-  if (taskPlan?.tasks?.length > 0) {
-    const firstTaskTitle = taskPlan.tasks[0]?.title;
-    if (firstTaskTitle && firstTaskTitle.trim()) {
-      return firstTaskTitle;
-    }
-  }
-
   const messages = thread?.values?.messages;
-
   if (!messages?.length || !messages[0]?.content) {
     return `Thread ${thread.thread_id.substring(0, 8)}`;
   }
-
   const threadTitle = getMessageContentString(messages[0].content);
   return threadTitle;
 }
