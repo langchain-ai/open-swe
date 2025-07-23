@@ -5,6 +5,7 @@ import {
   createApplyPatchTool,
   createGetURLContentTool,
   createShellTool,
+  createSearchDocumentForTool,
 } from "../../../tools/index.js";
 import {
   GraphState,
@@ -51,7 +52,7 @@ export async function takeAction(
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const getURLContentTool = createGetURLContentTool();
-
+  const searchDocumentForTool = createSearchDocumentForTool(config);
   const mcpTools = await getMcpTools(config);
 
   const mcpToolNames = mcpTools.map((t) => t.name);
@@ -62,6 +63,7 @@ export async function takeAction(
     installDependenciesTool,
     applyPatchTool,
     getURLContentTool,
+    searchDocumentForTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

@@ -14,6 +14,7 @@ import {
   createRequestHumanHelpToolFields,
   createUpdatePlanToolFields,
   createGetURLContentTool,
+  createSearchDocumentForTool,
 } from "../../../../tools/index.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
@@ -132,6 +133,7 @@ export async function generateAction(
     createUpdatePlanToolFields(),
     createGetURLContentTool(),
     createInstallDependenciesTool(state),
+    createSearchDocumentForTool(config),
     ...mcpTools,
   ];
   logger.info(

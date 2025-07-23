@@ -40,7 +40,7 @@ export async function handleMcpDocumentationOutput(
       .withConfig({ tags: ["nostream"], runName: "mcp-doc-toc-generation" })
       .invoke([
         {
-          role: "system",
+          role: "user",
           content: systemPrompt,
         },
       ]);

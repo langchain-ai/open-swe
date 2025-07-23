@@ -7,6 +7,7 @@ import {
 import {
   createGetURLContentTool,
   createShellTool,
+  createSearchDocumentForTool,
 } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
@@ -51,6 +52,7 @@ export async function takeActions(
   const searchTool = createSearchTool(state);
   const plannerNotesTool = createPlannerNotesTool();
   const getURLContentTool = createGetURLContentTool();
+  const searchDocumentForTool = createSearchDocumentForTool(config);
   const mcpTools = await getMcpTools(config);
 
   const mcpToolNames = mcpTools.map((t) => t.name);
@@ -60,6 +62,7 @@ export async function takeActions(
     searchTool,
     plannerNotesTool,
     getURLContentTool,
+    searchDocumentForTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

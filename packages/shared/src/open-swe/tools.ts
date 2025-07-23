@@ -391,6 +391,27 @@ export function createGetURLContentToolFields() {
   };
 }
 
+export function createSearchDocumentForToolFields() {
+  const searchDocumentForSchema = z.object({
+    url: z
+      .string()
+      .describe(
+        "The URL of the document to search within. This should be a URL that was previously fetched and processed.",
+      ),
+    query: z
+      .string()
+      .describe(
+        "The natural language query to search for within the document content. Be specific about what information you're looking for.",
+      ),
+  });
+
+  return {
+    name: "search_document_for",
+    description: "Search for specific information within a previously fetched document using natural language queries. This tool is particularly useful when working with large documents that have been summarized with a table of contents.",
+    schema: searchDocumentForSchema,
+  };
+}
+
 export function createWriteTechnicalNotesToolFields() {
   const writeTechnicalNotesSchema = z.object({
     notes: z

@@ -1,6 +1,7 @@
 export * from "./apply-patch.js";
 export * from "./shell.js";
 export * from "./url-content.js";
+export * from "./search-document-for.js";
 export {
   createUpdatePlanToolFields,
   createSessionPlanToolFields,
