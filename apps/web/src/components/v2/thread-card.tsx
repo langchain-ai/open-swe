@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
+import { computeThreadTitle } from "@/lib/thread";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -36,6 +37,7 @@ export function ThreadCard({
 }: ThreadCardProps) {
   const router = useRouter();
 
+  const threadTitle = computeThreadTitle(taskPlan, thread.title);
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);
 
@@ -48,7 +50,6 @@ export function ThreadCard({
       const planItems = getActivePlanItems(taskPlan);
       const sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
 
-      // Find the current task (lowest index among uncompleted tasks)
       const currentTaskIndex = sortedPlanItems
         .filter((item) => !item.completed)
         .reduce(
@@ -58,8 +59,8 @@ export function ThreadCard({
 
       const displayCurrentIndex =
         currentTaskIndex === Number.POSITIVE_INFINITY
-          ? sortedPlanItems.length // All tasks completed
-          : currentTaskIndex; // +1 for 1-based display
+          ? sortedPlanItems.length
+          : currentTaskIndex;
 
       return {
         currentTaskIndex: displayCurrentIndex,
@@ -137,7 +138,7 @@ export function ThreadCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <CardTitle className="text-foreground truncate text-sm">
-              <InlineMarkdownText>{thread.title}</InlineMarkdownText>
+              <InlineMarkdownText>{threadTitle}</InlineMarkdownText>
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">
               <GitBranch className="text-muted-foreground h-2 w-2" />
