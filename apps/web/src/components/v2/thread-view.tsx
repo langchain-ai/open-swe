@@ -355,7 +355,7 @@ export function ThreadView({
 
               <TabsContent
                 value="planner"
-                className="mb-10"
+                className="mb-2"
               >
                 <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
                   <CardContent className="h-full p-0">
@@ -400,7 +400,7 @@ export function ThreadView({
               </TabsContent>
               <TabsContent
                 value="programmer"
-                className="mb-10"
+                className="mb-2"
               >
                 <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
                   <CardContent className="h-full p-0">
