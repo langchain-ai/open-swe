@@ -38,7 +38,6 @@ export function ThreadCard({
   const router = useRouter();
 
   const threadTitle = computeThreadTitle(taskPlan, thread.title);
-
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);
 
