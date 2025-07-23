@@ -311,19 +311,9 @@ export function ThreadView({
               }
             >
               <div className="flex flex-shrink-0 items-center gap-3">
-                <TabsList className="bg-muted/70 h-13 px-2 dark:bg-gray-800">
-                  <TabsTrigger
-                    className="h-8"
-                    value="planner"
-                  >
-                    Planner
-                  </TabsTrigger>
-                  <TabsTrigger
-                    className="h-8"
-                    value="programmer"
-                  >
-                    Programmer
-                  </TabsTrigger>
+                <TabsList className="bg-muted/70 dark:bg-gray-800">
+                  <TabsTrigger value="planner">Planner</TabsTrigger>
+                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
                 </TabsList>
 
                 {programmerTaskPlan && (

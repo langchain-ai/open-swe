@@ -34,7 +34,7 @@ export function CancelStreamButton({
       onClick={cancelRun}
       size="sm"
       variant="destructive"
-      className="h-13 px-3"
+      className="h-8 px-3 text-xs"
     >
       <Loader2 className="mr-1 h-3 w-3 animate-spin" />
       Stop {streamName}
