@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
+import { useMemo } from "react";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -35,6 +36,20 @@ export function ThreadCard({
   taskPlan,
 }: ThreadCardProps) {
   const router = useRouter();
+
+  // Compute thread title using the same logic as ThreadView
+  const threadTitle = useMemo(() => {
+    // First priority: Use task title from taskPlan (real-time data)
+    if (taskPlan?.tasks && taskPlan.tasks.length > 0) {
+      const firstTaskTitle = taskPlan.tasks[0]?.title;
+      if (firstTaskTitle && firstTaskTitle.trim()) {
+        return firstTaskTitle;
+      }
+    }
+
+    // Fallback: Use the metadata title (message-based)
+    return thread.title;
+  }, [taskPlan, thread.title]);
 
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);
@@ -137,7 +152,7 @@ export function ThreadCard({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <CardTitle className="text-foreground truncate text-sm">
-              <InlineMarkdownText>{thread.title}</InlineMarkdownText>
+              <InlineMarkdownText>{threadTitle}</InlineMarkdownText>
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">
               <GitBranch className="text-muted-foreground h-2 w-2" />
