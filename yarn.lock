@@ -4194,6 +4194,7 @@ __metadata:
     eslint-plugin-import: ^2.27.5
     eslint-plugin-no-instanceof: ^1.0.1
     eslint-plugin-prettier: ^4.2.1
+    jsonwebtoken: ^9.0.2
     prettier: ^3.5.2
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0

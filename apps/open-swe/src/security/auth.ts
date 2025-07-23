@@ -6,6 +6,7 @@ import {
 } from "@open-swe/shared/github/verify-user";
 import {
   API_KEY_REQUIRED_MESSAGE,
+  GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
@@ -141,6 +142,12 @@ export const auth = new Auth()
     if (!installationNameHeader) {
       throw new HTTPException(401, {
         message: "GitHub installation name header missing",
+      });
+    }
+    const installationIdHeader = request.headers.get(GITHUB_INSTALLATION_ID);
+    if (!installationIdHeader) {
+      throw new HTTPException(401, {
+        message: "GitHub installation ID header missing",
       });
     }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInstallationToken } from "@/utils/github";
+import { getInstallationToken } from "@open-swe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
 
 /**

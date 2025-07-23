@@ -10,6 +10,7 @@ export const GITHUB_TOKEN_COOKIE = "x-github-access-token";
 export const GITHUB_INSTALLATION_TOKEN_COOKIE = "x-github-installation-token";
 export const GITHUB_INSTALLATION_NAME = "x-github-installation-name";
 export const GITHUB_PAT = "x-github-pat";
+export const GITHUB_INSTALLATION_ID = "x-github-installation-id";
 
 export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
