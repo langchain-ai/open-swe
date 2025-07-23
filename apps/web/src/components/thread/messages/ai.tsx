@@ -266,6 +266,15 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
+  } else if (toolCall?.name === requestHumanHelpTool.name) {
+    const args = toolCall.args as RequestHumanHelpToolArgs;
+    return {
+      actionType: "request_human_help",
+      status,
+      success,
+      help_request: args.help_request || "",
+      reasoningText,
+    };
   } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
       actionType: "mcp",
