@@ -116,13 +116,6 @@ export async function handleCompletedTask(
     });
   }
 
-  logger.info("Task marked as completed. Routing to task summarization step.", {
-    remainingTask: {
-      ...remainingTask,
-      completed: true,
-    },
-  });
-
   if (totalInternalTokenCount >= MAX_INTERNAL_TOKENS) {
     logger.info(
       "Internal messages list is at or above the max token limit. Routing to summarize history step.",

@@ -289,3 +289,109 @@ const BasicMarkdownTextImpl: FC<{ children: string; className?: string }> = ({
 };
 
 export const BasicMarkdownText = memo(BasicMarkdownTextImpl);
+
+const InlineMarkdownTextImpl: FC<{ children: string; className?: string }> = ({
+  children,
+  className,
+}) => {
+  const inlineMarkdownComponents: any = {
+    // Only include inline elements
+    strong: ({ className, ...props }: { className?: string }) => (
+      <strong
+        className={cn("font-semibold", className)}
+        {...props}
+      />
+    ),
+    em: ({ className, ...props }: { className?: string }) => (
+      <em
+        className={cn("italic", className)}
+        {...props}
+      />
+    ),
+    code: ({
+      className,
+      children,
+      ...props
+    }: {
+      className?: string;
+      children?: React.ReactNode;
+    }) => {
+      // Only render inline code, not code blocks
+      const match = /language-(\w+)/.exec(className || "");
+      if (match) {
+        // If it's a code block, render as plain text to keep it inline
+        return (
+          <span className={cn("font-mono text-sm", className)}>
+            {String(children)}
+          </span>
+        );
+      }
+      return (
+        <code
+          className={cn(
+            "bg-muted rounded px-1 py-0.5 font-mono text-sm",
+            className,
+          )}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+    a: ({ className, ...props }: { className?: string }) => (
+      <a
+        className={cn(
+          "text-primary hover:text-primary/80 font-medium underline underline-offset-4",
+          className,
+        )}
+        {...props}
+      />
+    ),
+    del: ({ className, ...props }: { className?: string }) => (
+      <del
+        className={cn("line-through", className)}
+        {...props}
+      />
+    ),
+    // Remove all block-level elements by not including them
+    // This will cause them to render as plain text
+  };
+
+  return (
+    <span className={cn("inline", className)}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={inlineMarkdownComponents}
+        // Disable block-level parsing by treating everything as inline
+        disallowedElements={[
+          "h1",
+          "h2",
+          "h3",
+          "h4",
+          "h5",
+          "h6",
+          "p",
+          "div",
+          "blockquote",
+          "ul",
+          "ol",
+          "li",
+          "pre",
+          "table",
+          "thead",
+          "tbody",
+          "tr",
+          "th",
+          "td",
+          "hr",
+          "br",
+        ]}
+        unwrapDisallowed
+      >
+        {children}
+      </ReactMarkdown>
+    </span>
+  );
+};
+
+export const InlineMarkdownText = memo(InlineMarkdownTextImpl);
