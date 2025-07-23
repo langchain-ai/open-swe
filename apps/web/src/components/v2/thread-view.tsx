@@ -1,7 +1,7 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
@@ -68,6 +68,22 @@ export function ThreadView({
     useThreadStatus(displayThread.id, {
       useTaskPlanConfig: true,
     });
+
+  // Compute thread title using the same taskPlan data that ProgressBar uses
+  const threadTitle = useMemo(() => {
+    // First priority: Use task title from realTimeTaskPlan (same source as ProgressBar)
+    if (realTimeTaskPlan?.tasks && realTimeTaskPlan.tasks.length > 0) {
+      const firstTaskTitle = realTimeTaskPlan.tasks[0]?.title;
+      if (firstTaskTitle && firstTaskTitle.trim()) {
+        console.log("🎯 ThreadView: Using TASK title:", firstTaskTitle);
+        return firstTaskTitle;
+      }
+    }
+
+    // Fallback: Use the metadata title (message-based)
+    console.log("📝 ThreadView: Using METADATA title:", displayThread.title);
+    return displayThread.title;
+  }, [realTimeTaskPlan, displayThread.title]);
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
@@ -265,7 +281,7 @@ export function ThreadView({
               )}
             ></div>
             <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
-              {displayThread.title}
+              {threadTitle}
             </span>
             {displayThread.repository && (
               <>

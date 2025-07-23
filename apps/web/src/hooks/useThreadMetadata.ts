@@ -18,7 +18,10 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
     status,
     isLoading: isStatusLoading,
     error: statusError,
-  } = useThreadStatus(thread.thread_id);
+    taskPlan: realTimeTaskPlan,
+  } = useThreadStatus(thread.thread_id, {
+    useTaskPlanConfig: true,
+  });
 
   const metadata: ThreadMetadata = useMemo((): ThreadMetadata => {
     const values = thread.values;
@@ -27,12 +30,13 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
       id: thread.thread_id,
       title: getThreadTitle(thread),
       lastActivity: calculateLastActivity(thread.updated_at),
-      taskCount: values?.taskPlan?.tasks.length ?? 0,
+      taskCount:
+        realTimeTaskPlan?.tasks.length ?? values?.taskPlan?.tasks.length ?? 0,
       repository: values?.targetRepository
         ? `${values.targetRepository.owner}/${values.targetRepository.repo}`
         : "",
       branch: values?.targetRepository?.branch || "main",
-      taskPlan: values?.taskPlan,
+      taskPlan: realTimeTaskPlan || values?.taskPlan,
       status,
       githubIssue: values?.githubIssueId
         ? {
@@ -41,7 +45,7 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
           }
         : undefined,
     };
-  }, [thread, status]);
+  }, [thread, status, realTimeTaskPlan]);
 
   return {
     metadata,
