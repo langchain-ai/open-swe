@@ -20,7 +20,6 @@ import { cn } from "@/lib/utils";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
-import { useMemo } from "react";
 import { computeThreadTitle } from "@/lib/thread";
 
 interface ThreadCardProps {
@@ -38,9 +37,7 @@ export function ThreadCard({
 }: ThreadCardProps) {
   const router = useRouter();
 
-  const threadTitle = useMemo(() => {
-    return computeThreadTitle(taskPlan, thread.title);
-  }, [taskPlan, thread.title]);
+  const threadTitle = computeThreadTitle(taskPlan, thread.title);
 
   const isStatusLoading = statusLoading && !status;
   const displayStatus = status || ("idle" as ThreadUIStatus);

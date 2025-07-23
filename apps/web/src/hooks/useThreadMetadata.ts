@@ -30,13 +30,12 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
       id: thread.thread_id,
       title: computeThreadTitle(realTimeTaskPlan, getThreadTitle(thread)),
       lastActivity: calculateLastActivity(thread.updated_at),
-      taskCount:
-        realTimeTaskPlan?.tasks.length ?? values?.taskPlan?.tasks.length ?? 0,
+      taskCount: realTimeTaskPlan?.tasks.length ?? 0,
       repository: values?.targetRepository
         ? `${values.targetRepository.owner}/${values.targetRepository.repo}`
         : "",
       branch: values?.targetRepository?.branch || "main",
-      taskPlan: realTimeTaskPlan || values?.taskPlan,
+      taskPlan: realTimeTaskPlan,
       status,
       githubIssue: values?.githubIssueId
         ? {
