@@ -4161,6 +4161,7 @@ __metadata:
     open: ^9.1.0
     prettier: ^3.5.2
     react: ^19.1.0
+    tsx: ^4.20.3
     typescript: ^5.8.3
   languageName: unknown
   linkType: soft
@@ -19878,7 +19879,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tsx@npm:^4.19.3":
+"tsx@npm:^4.19.3, tsx@npm:^4.20.3":
   version: 4.20.3
   resolution: "tsx@npm:4.20.3"
   dependencies:
