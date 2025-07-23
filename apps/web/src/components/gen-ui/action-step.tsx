@@ -303,6 +303,13 @@ function ActionItem(props: ActionItemProps) {
           icon={<Globe className={cn(defaultIconStyling)} />}
         />
       );
+    } else if (props.actionType === "request_human_help") {
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Request Human Help"
+          icon={<HelpCircle className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "mcp") {
       return (
         <ToolIconWithTooltip
@@ -691,3 +698,4 @@ function formatDiff(diff: string) {
     })
     .join("\n");
 }
+
