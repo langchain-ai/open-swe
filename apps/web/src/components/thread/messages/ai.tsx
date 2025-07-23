@@ -651,6 +651,13 @@ export function AssistantMessage({
           url: args?.url || "",
           output: "",
         } as ActionItemProps;
+      } else if (toolCall.name === requestHumanHelpTool.name) {
+        const args = toolCall.args as RequestHumanHelpToolArgs;
+        return {
+          actionType: "request_human_help",
+          status: "generating",
+          help_request: args?.help_request || "",
+        } as ActionItemProps;
       } else {
         if (isMcpTool(toolCall.name)) {
           return {
@@ -788,3 +795,4 @@ export function AssistantMessageLoading() {
     </div>
   );
 }
+
