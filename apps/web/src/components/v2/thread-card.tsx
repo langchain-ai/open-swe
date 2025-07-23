@@ -21,6 +21,7 @@ import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 import { useMemo } from "react";
+import { computeThreadTitle } from "@/lib/thread";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -38,14 +39,7 @@ export function ThreadCard({
   const router = useRouter();
 
   const threadTitle = useMemo(() => {
-    if (taskPlan?.tasks && taskPlan.tasks.length > 0) {
-      const firstTaskTitle = taskPlan.tasks[0]?.title;
-      if (firstTaskTitle && firstTaskTitle.trim()) {
-        return firstTaskTitle;
-      }
-    }
-
-    return thread.title;
+    return computeThreadTitle(taskPlan, thread.title);
   }, [taskPlan, thread.title]);
 
   const isStatusLoading = statusLoading && !status;

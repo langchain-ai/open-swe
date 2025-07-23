@@ -69,17 +69,6 @@ export function ThreadView({
       useTaskPlanConfig: true,
     });
 
-  const threadTitle = useMemo(() => {
-    if (realTimeTaskPlan?.tasks && realTimeTaskPlan.tasks.length > 0) {
-      const firstTaskTitle = realTimeTaskPlan.tasks[0]?.title;
-      if (firstTaskTitle && firstTaskTitle.trim()) {
-        return firstTaskTitle;
-      }
-    }
-
-    return displayThread.title;
-  }, [realTimeTaskPlan, displayThread.title]);
-
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
@@ -274,7 +263,7 @@ export function ThreadView({
               )}
             ></div>
             <span className="text-muted-foreground max-w-[500px] truncate font-mono text-sm">
-              {threadTitle}
+              {displayThread.title}
             </span>
             {displayThread.repository && (
               <>
