@@ -1,14 +1,16 @@
 import { PlanItem } from "@open-swe/shared/open-swe/types";
 
-export const PLAN_PROMPT = `## Completed Tasks
-{COMPLETED_TASKS}
+export const PLAN_PROMPT = `<completed_tasks>
+  {COMPLETED_TASKS}
+</completed_tasks>
 
-## Remaining Tasks
-(This list does not include the current task)
-{REMAINING_TASKS}
+<remaining_tasks>
+  (This list does not include the current task)
+  {REMAINING_TASKS}
+</remaining_tasks>
 
-## Current Task
-{CURRENT_TASK}`;
+  {CURRENT_TASK}
+`;
 
 /**
  * Formats a plan for use in a prompt.
@@ -50,7 +52,7 @@ export function formatPlanPrompt(
         : completedTasks
             .map(
               (task) =>
-                `<completed-task index="${task.index}">${task.plan}</completed-task>`,
+                `<completed_task index="${task.index}">${task.plan}</completed_task>`,
             )
             .join("\n")
       : "No completed tasks.",
@@ -61,14 +63,14 @@ export function formatPlanPrompt(
         ? remainingTasks
             .map(
               (task) =>
-                `<remaining-task index="${task.index}">${task.plan}</remaining-task>`,
+                `<remaining_task index="${task.index}">${task.plan}</remaining_task>`,
             )
             .join("\n")
         : "No remaining tasks.",
     )
     .replace(
       "{CURRENT_TASK}",
-      `<current-task index="${currentTask?.index}">${currentTask?.plan || "No current task found."}</current-task>`,
+      `<current_task index="${currentTask?.index}">${currentTask?.plan || "No current task found."}</current_task>`,
     );
 }
 
@@ -76,7 +78,7 @@ export function formatPlanPromptWithSummaries(taskPlan: PlanItem[]): string {
   return taskPlan
     .map(
       (p) =>
-        `<${p.completed ? "completed-" : ""}task index="${p.index}">\n${p.plan}\n  <task-summary>\n${p.summary || "No task summary found"}\n  </task-summary>\n</${p.completed ? "completed-" : ""}task>`,
+        `<${p.completed ? "completed_" : ""}task index="${p.index}">\n${p.plan}\n  <task_summary>\n${p.summary || "No task summary found"}\n  </task_summary>\n</${p.completed ? "completed_" : ""}task>`,
     )
     .join("\n");
 }
