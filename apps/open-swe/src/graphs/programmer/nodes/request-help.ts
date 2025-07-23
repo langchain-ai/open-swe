@@ -36,6 +36,26 @@ export async function requestHelp(
 
   const toolCall = lastMessage.tool_calls[0];
 
+  // Post a GitHub issue comment notifying the user that Open SWE needs help
+  const runUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/chat?threadId=${config.configurable?.thread_id || 'unknown'}`;
+  const commentBody = `### 🤖 Open SWE Needs Help
+
+I've encountered a situation where I need human assistance to continue.
+
+**Help Request:**
+${toolCall.args.help_request}
+
+You can view and respond to this request in the [Open SWE interface](${runUrl}).
+
+Please provide guidance so I can continue working on this issue.`;
+
+  await postGitHubIssueComment({
+    githubIssueId: state.githubIssueId,
+    targetRepository: state.targetRepository,
+    commentBody,
+    config,
+  });
+
   const interruptInput: HumanInterrupt = {
     action_request: {
       action: "Help Requested",
@@ -96,3 +116,4 @@ export async function requestHelp(
     `Invalid interrupt response type. Must be one of 'ignore' or 'response'. Received: ${interruptRes.type}`,
   );
 }
+
