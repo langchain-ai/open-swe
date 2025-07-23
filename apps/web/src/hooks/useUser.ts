@@ -29,8 +29,10 @@ async function fetchUser(): Promise<UserData> {
 }
 
 export function useUser(): UseUserResult {
-  const { data, error, isLoading, mutate } = useSWR<UserData>("user", fetchUser);
+  const { data, error, isLoading, mutate } = useSWR<UserData>(
+    "user",
+    fetchUser,
+  );
 
   return { user: data || null, isLoading, error, mutate };
 }
-

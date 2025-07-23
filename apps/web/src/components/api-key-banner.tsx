@@ -43,10 +43,8 @@ export function ApiKeyBanner() {
 
   // Check if user has any API keys configured
   const apiKeys = config.apiKeys || {};
-  const hasApiKeys = 
-    apiKeys.anthropicApiKey || 
-    apiKeys.openaiApiKey || 
-    apiKeys.googleApiKey;
+  const hasApiKeys =
+    apiKeys.anthropicApiKey || apiKeys.openaiApiKey || apiKeys.googleApiKey;
 
   // If user has API keys, don't show banner
   if (hasApiKeys) {
@@ -62,7 +60,7 @@ export function ApiKeyBanner() {
     <div
       className={cn(
         "rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950/20",
-        "flex items-center justify-between"
+        "flex items-center justify-between",
       )}
     >
       <div className="flex items-center gap-3">
@@ -72,7 +70,8 @@ export function ApiKeyBanner() {
             API Key Required
           </h3>
           <p className="text-sm text-blue-700 dark:text-blue-300">
-            You need to add an API key to use Open SWE. Add your Anthropic, OpenAI, or Google API key to get started.
+            You need to add an API key to use Open SWE. Add your Anthropic,
+            OpenAI, or Google API key to get started.
           </p>
         </div>
       </div>
@@ -98,4 +97,3 @@ export function ApiKeyBanner() {
     </div>
   );
 }
-
