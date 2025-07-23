@@ -18,6 +18,9 @@ export function ApiKeyBanner() {
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
     // Check if user has previously dismissed the banner
     const hasDismissed = localStorage.getItem(API_KEY_BANNER_DISMISSED_KEY);
     if (hasDismissed === "true") {
@@ -52,6 +55,9 @@ export function ApiKeyBanner() {
   }
 
   const handleDismiss = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
     setDismissed(true);
     localStorage.setItem(API_KEY_BANNER_DISMISSED_KEY, "true");
   };
