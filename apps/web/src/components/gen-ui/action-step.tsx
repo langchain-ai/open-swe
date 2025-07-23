@@ -253,6 +253,8 @@ function ActionItem(props: ActionItemProps) {
       return !!(props.notes && props.notes.length > 0);
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
+    } else if (props.actionType === "request_human_help") {
+      return !!props.help_request || props.status === "done";
       const hasOutput = !!props.output;
       return hasArgs || hasOutput;
     }
