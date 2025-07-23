@@ -407,7 +407,8 @@ export function createSearchDocumentForToolFields() {
 
   return {
     name: "search_document_for",
-    description: "Search for specific information within a previously fetched document using natural language queries. This tool is particularly useful when working with large documents that have been summarized with a table of contents.",
+    description:
+      "Search for specific information within a previously fetched document using natural language queries. This tool is particularly useful when working with large documents that have been summarized with a table of contents.",
     schema: searchDocumentForSchema,
   };
 }

@@ -483,12 +483,14 @@ function ActionItem(props: ActionItemProps) {
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
-          {(props.actionType === "shell" || props.actionType === "search") && 
-           "errorCode" in props && props.errorCode !== undefined && !props.success && (
-            <div className="mt-1 text-xs text-red-500 dark:text-red-400">
-              Exit code: {props.errorCode}
-            </div>
-          )}
+          {(props.actionType === "shell" || props.actionType === "search") &&
+            "errorCode" in props &&
+            props.errorCode !== undefined &&
+            !props.success && (
+              <div className="mt-1 text-xs text-red-500 dark:text-red-400">
+                Exit code: {props.errorCode}
+              </div>
+            )}
         </div>
       );
     } else if (props.actionType === "mcp") {
