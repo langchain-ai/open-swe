@@ -674,6 +674,7 @@ export function AssistantMessage({
           actionType: "request_human_help",
           status: "generating",
           help_request: args?.help_request || "",
+          onSubmitResponse: handleHumanHelpResponse,
         } as ActionItemProps;
       } else {
         if (isMcpTool(toolCall.name)) {
