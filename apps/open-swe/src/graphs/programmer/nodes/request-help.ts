@@ -11,6 +11,7 @@ import {
   getSandboxWithErrorHandling,
   stopSandbox,
 } from "../../../utils/sandbox.js";
+import { postGitHubIssueComment } from "../../planner/nodes/proposed-plan.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
