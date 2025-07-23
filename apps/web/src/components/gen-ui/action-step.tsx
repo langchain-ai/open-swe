@@ -251,10 +251,10 @@ function ActionItem(props: ActionItemProps) {
       return !!props.diff;
     } else if (props.actionType === "planner_notes") {
       return !!(props.notes && props.notes.length > 0);
-    } else if (props.actionType === "mcp") {
-      const hasArgs = props.args && Object.keys(props.args).length > 0;
     } else if (props.actionType === "request_human_help") {
       return !!props.help_request || props.status === "done";
+    } else if (props.actionType === "mcp") {
+      const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
       return hasArgs || hasOutput;
     }
