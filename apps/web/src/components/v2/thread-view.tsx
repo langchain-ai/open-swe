@@ -69,19 +69,14 @@ export function ThreadView({
       useTaskPlanConfig: true,
     });
 
-  // Compute thread title using the same taskPlan data that ProgressBar uses
   const threadTitle = useMemo(() => {
-    // First priority: Use task title from realTimeTaskPlan (same source as ProgressBar)
     if (realTimeTaskPlan?.tasks && realTimeTaskPlan.tasks.length > 0) {
       const firstTaskTitle = realTimeTaskPlan.tasks[0]?.title;
       if (firstTaskTitle && firstTaskTitle.trim()) {
-        console.log("🎯 ThreadView: Using TASK title:", firstTaskTitle);
         return firstTaskTitle;
       }
     }
 
-    // Fallback: Use the metadata title (message-based)
-    console.log("📝 ThreadView: Using METADATA title:", displayThread.title);
     return displayThread.title;
   }, [realTimeTaskPlan, displayThread.title]);
 
@@ -204,12 +199,10 @@ export function ThreadView({
     }
   }, [plannerStream.values, selectedTab]);
 
-  // Extract task plan from programmer stream
   useEffect(() => {
     if (programmerStream.values?.taskPlan) {
       setProgrammerTaskPlan(programmerStream.values.taskPlan);
     } else if (realTimeTaskPlan) {
-      // Fallback to real-time task plan if stream doesn't have it
       setProgrammerTaskPlan(realTimeTaskPlan);
     }
   }, [programmerStream.values, realTimeTaskPlan]);

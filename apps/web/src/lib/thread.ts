@@ -6,7 +6,6 @@ import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 export function getThreadTitle<State extends Record<string, any> = GraphState>(
   thread: Thread<State>,
 ): string {
-  // First, try to get the title from the first task in the task plan (which comes from the proposed plan title)
   const taskPlan = thread.values?.taskPlan;
 
   if (taskPlan?.tasks?.length > 0) {
@@ -16,7 +15,6 @@ export function getThreadTitle<State extends Record<string, any> = GraphState>(
     }
   }
 
-  // Fall back to the original behavior: extract from first message content
   const messages = thread?.values?.messages;
 
   if (!messages?.length || !messages[0]?.content) {

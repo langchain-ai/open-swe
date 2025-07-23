@@ -37,9 +37,7 @@ export function ThreadCard({
 }: ThreadCardProps) {
   const router = useRouter();
 
-  // Compute thread title using the same logic as ThreadView
   const threadTitle = useMemo(() => {
-    // First priority: Use task title from taskPlan (real-time data)
     if (taskPlan?.tasks && taskPlan.tasks.length > 0) {
       const firstTaskTitle = taskPlan.tasks[0]?.title;
       if (firstTaskTitle && firstTaskTitle.trim()) {
@@ -47,7 +45,6 @@ export function ThreadCard({
       }
     }
 
-    // Fallback: Use the metadata title (message-based)
     return thread.title;
   }, [taskPlan, thread.title]);
 
@@ -63,7 +60,6 @@ export function ThreadCard({
       const planItems = getActivePlanItems(taskPlan);
       const sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
 
-      // Find the current task (lowest index among uncompleted tasks)
       const currentTaskIndex = sortedPlanItems
         .filter((item) => !item.completed)
         .reduce(
@@ -73,8 +69,8 @@ export function ThreadCard({
 
       const displayCurrentIndex =
         currentTaskIndex === Number.POSITIVE_INFINITY
-          ? sortedPlanItems.length // All tasks completed
-          : currentTaskIndex; // +1 for 1-based display
+          ? sortedPlanItems.length
+          : currentTaskIndex;
 
       return {
         currentTaskIndex: displayCurrentIndex,
