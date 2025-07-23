@@ -327,9 +327,9 @@ export function TasksSidebar({
                       <div className="min-w-0 flex-1">
                         <>
                           <div className="mb-1 flex items-start justify-between gap-2">
-                            <p className="text-sm leading-relaxed text-gray-900 dark:text-gray-100">
-                              <BasicMarkdownText>{item.plan}</BasicMarkdownText>
-                            </p>
+                            <BasicMarkdownText className="text-sm leading-relaxed text-gray-900 dark:text-gray-100">
+                              {item.plan}
+                            </BasicMarkdownText>
                           </div>
 
                           <div className="flex items-center justify-between">

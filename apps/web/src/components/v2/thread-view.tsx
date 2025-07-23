@@ -188,12 +188,10 @@ export function ThreadView({
     }
   }, [plannerStream.values, selectedTab]);
 
-  // Extract task plan from programmer stream
   useEffect(() => {
     if (programmerStream.values?.taskPlan) {
       setProgrammerTaskPlan(programmerStream.values.taskPlan);
     } else if (realTimeTaskPlan) {
-      // Fallback to real-time task plan if stream doesn't have it
       setProgrammerTaskPlan(realTimeTaskPlan);
     }
   }, [programmerStream.values, realTimeTaskPlan]);
