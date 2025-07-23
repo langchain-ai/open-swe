@@ -2,6 +2,7 @@ import { Thread } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 
 export function computeThreadTitle(
   taskPlan: TaskPlan | undefined,

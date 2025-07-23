@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ProgressBar } from "./progress-bar";
 import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
-import { InlineMarkdownText } from "../thread/markdown-text";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 interface TasksSidebarProps {
   isOpen: boolean;
@@ -327,11 +327,9 @@ export function TasksSidebar({
                       <div className="min-w-0 flex-1">
                         <>
                           <div className="mb-1 flex items-start justify-between gap-2">
-                            <p className="text-sm leading-relaxed text-gray-900 dark:text-gray-100">
-                              <InlineMarkdownText>
-                                {item.plan}
-                              </InlineMarkdownText>
-                            </p>
+                            <BasicMarkdownText className="text-sm leading-relaxed text-gray-900 dark:text-gray-100">
+                              {item.plan}
+                            </BasicMarkdownText>
                           </div>
 
                           <div className="flex items-center justify-between">
@@ -387,9 +385,9 @@ export function TasksSidebar({
                               </CollapsibleTrigger>
                               <CollapsibleContent className="mt-2">
                                 <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                  <InlineMarkdownText>
+                                  <BasicMarkdownText>
                                     {item.summary}
-                                  </InlineMarkdownText>
+                                  </BasicMarkdownText>
                                 </div>
                               </CollapsibleContent>
                             </Collapsible>
