@@ -41,6 +41,15 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
   if (!tokenData || tokenData.length === 0) return null;
 
   const mergedTokenData = mergeTokenData(tokenData);
+  const totalCachedInputTokens =
+    mergedTokenData.cacheCreationInputTokens +
+    mergedTokenData.cacheReadInputTokens;
+  const totalUncachedInputTokens = mergedTokenData.inputTokens;
+  const cachePercentage = (
+    (totalCachedInputTokens /
+      (totalCachedInputTokens + totalUncachedInputTokens)) *
+    100
+  ).toFixed(2);
   const metrics = calculateCostSavings(mergedTokenData);
 
   return (
@@ -66,7 +75,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
-                <Zap className="h-3 w-3 text-blue-500" />
+                <Zap className="h-3 w-3 text-blue-500 dark:text-blue-400" />
                 <span className="text-muted-foreground text-xs font-medium">
                   Input
                 </span>
@@ -77,7 +86,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
-                <TrendingUp className="h-3 w-3 text-green-500" />
+                <TrendingUp className="h-3 w-3 text-green-500 dark:text-green-400" />
                 <span className="text-muted-foreground text-xs font-medium">
                   Output
                 </span>
@@ -103,7 +112,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <Coins className="h-3 w-3 text-amber-500" />
+                  <Coins className="h-3 w-3 text-amber-500 dark:text-amber-400" />
                   <span className="text-muted-foreground text-xs font-medium">
                     Cost
                   </span>
@@ -114,17 +123,30 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
               </div>
 
               {metrics.totalSavings > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-green-600">
-                    Cache Savings
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className="border-green-200 text-green-600"
-                  >
-                    -${metrics.totalSavings.toFixed(2)}
-                  </Badge>
-                </div>
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                      Cache Percentage
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="border-blue-200 text-blue-600 dark:border-blue-800 dark:text-blue-400"
+                    >
+                      {cachePercentage}%
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                      Cache Savings
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="border-green-200 text-green-600 dark:border-green-800 dark:text-green-400"
+                    >
+                      -${metrics.totalSavings.toFixed(2)}
+                    </Badge>
+                  </div>
+                </>
               )}
             </div>
           </div>

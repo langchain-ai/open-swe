@@ -7,6 +7,7 @@ import {
   CheckCircle,
   MessageSquare,
 } from "lucide-react";
+import { BasicMarkdownText } from "../thread/markdown-text";
 
 type DiagnoseErrorActionProps = {
   status: "loading" | "generating" | "done";
@@ -57,9 +58,9 @@ export function DiagnoseErrorAction({
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-300">
+            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-300">
               {reasoningText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}
