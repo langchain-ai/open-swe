@@ -221,7 +221,7 @@ export async function takeAction(
     }),
   };
   return new Command({
-    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "progress-plan-step",
+    goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",
     update: commandUpdate,
   });
 }

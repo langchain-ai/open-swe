@@ -124,7 +124,7 @@ export function ThreadView({
       programmerSession.runId !== joinedProgrammerRunId.current
     ) {
       joinedProgrammerRunId.current = programmerSession.runId;
-      plannerStream.joinStream(programmerSession.runId).catch(console.error);
+      programmerStream.joinStream(programmerSession.runId).catch(console.error);
     } else if (!programmerSession?.runId) {
       joinedProgrammerRunId.current = undefined;
     }
@@ -311,19 +311,9 @@ export function ThreadView({
               }
             >
               <div className="flex flex-shrink-0 items-center gap-3">
-                <TabsList className="bg-muted/70 h-13 px-2 dark:bg-gray-800">
-                  <TabsTrigger
-                    className="h-8"
-                    value="planner"
-                  >
-                    Planner
-                  </TabsTrigger>
-                  <TabsTrigger
-                    className="h-8"
-                    value="programmer"
-                  >
-                    Programmer
-                  </TabsTrigger>
+                <TabsList className="bg-muted/70 dark:bg-gray-800">
+                  <TabsTrigger value="planner">Planner</TabsTrigger>
+                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
                 </TabsList>
 
                 {programmerTaskPlan && (
@@ -333,7 +323,7 @@ export function ThreadView({
                   />
                 )}
 
-                <div className="flex items-center justify-center gap-2">
+                <div className="ml-auto flex items-center justify-center gap-2">
                   {selectedTab === "planner" && plannerStream.isLoading && (
                     <CancelStreamButton
                       stream={plannerStream}
@@ -365,7 +355,7 @@ export function ThreadView({
 
               <TabsContent
                 value="planner"
-                className="mb-10"
+                className="mb-2"
               >
                 <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
                   <CardContent className="h-full p-0">
@@ -410,7 +400,7 @@ export function ThreadView({
               </TabsContent>
               <TabsContent
                 value="programmer"
-                className="mb-10"
+                className="mb-2"
               >
                 <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
                   <CardContent className="h-full p-0">

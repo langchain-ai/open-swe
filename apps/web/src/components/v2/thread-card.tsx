@@ -19,6 +19,7 @@ import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { InlineMarkdownText } from "../thread/markdown-text";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -133,10 +134,10 @@ export function ThreadCard({
       }}
     >
       <CardHeader>
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-foreground truncate text-sm font-medium">
-              {thread.title}
+            <CardTitle className="text-foreground truncate text-sm">
+              <InlineMarkdownText>{thread.title}</InlineMarkdownText>
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">
               <GitBranch className="text-muted-foreground h-2 w-2" />

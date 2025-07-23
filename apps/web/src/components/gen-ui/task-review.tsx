@@ -70,9 +70,9 @@ export function MarkTaskCompleted({
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-400">
+            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-400">
               {reasoningText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}
@@ -194,9 +194,9 @@ export function MarkTaskIncomplete({
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <p className="mt-1 text-xs font-normal text-blue-800">
+            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800">
               {reasoningText}
-            </p>
+            </BasicMarkdownText>
           )}
         </div>
       )}

@@ -658,9 +658,9 @@ export function ActionStep(props: ActionStepProps) {
           {showReasoning ? "Hide reasoning" : "Show reasoning"}
         </button>
         {showReasoning && (
-          <p className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
+          <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
             {reasoningText || "No reasoning provided."}
-          </p>
+          </BasicMarkdownText>
         )}
       </div>
 

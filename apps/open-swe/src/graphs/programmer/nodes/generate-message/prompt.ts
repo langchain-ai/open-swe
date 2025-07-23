@@ -86,6 +86,15 @@ You are a terminal-based agentic coding assistant built by LangChain. You wrap L
         <description>Use this tool to add or remove tasks from the plan, or to update the plan in any other way</description>
     </special_tools>
 
+    <mark_task_completed_guidelines>
+        - When you believe you've completed a task, you may call the \`mark_task_completed\` tool to mark the task as complete.
+        - The \`mark_task_completed\` tool should NEVER be called in parallel with any other tool calls. Ensure it's the only tool you're calling in this message, if you do determine the task is completed.
+        - Carefully read over the actions you've taken, and the current task (listed below) to ensure the task is complete. You want to avoid prematurely marking a task as complete.
+        - If the current task involves fixing an issue, such as a failing test, a broken build, etc., you must validate the issue is ACTUALLY fixed before marking it as complete.
+            - To verify a fix, ensure you run the test, build, or other command first to validate the fix.
+        - If you do not believe the task is complete, you do not need to call the \`mark_task_completed\` tool. You can continue working on the task, until you determine it is complete.
+    </mark_task_completed_guidelines>
+
 </instructions>
 
 <custom_rules>
@@ -113,8 +122,10 @@ export const CODE_REVIEW_PROMPT = `<code_review>
 export const DYNAMIC_SYSTEM_PROMPT = `<context>
 
 <plan_information>
-- Current plan with summaries
-{PLAN_PROMPT_WITH_SUMMARIES}
+- Task execution plan
+<execution_plan>
+    {PLAN_PROMPT}
+</execution_plan>
 
 - Plan generation notes
 These are notes you took while gathering context for the plan:
