@@ -225,7 +225,9 @@ function ActionItem(props: ActionItemProps) {
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
       } else if (props.actionType === "request_human_help") {
-        return props.status === "done" ? "Help request sent" : "Requesting help";
+        return props.status === "done"
+          ? "Help request sent"
+          : "Requesting help";
       } else if (props.actionType === "mcp") {
         return props.success
           ? `${props.toolName} completed`
@@ -492,7 +494,7 @@ function ActionItem(props: ActionItemProps) {
     } else if (props.actionType === "request_human_help") {
       const [userResponse, setUserResponse] = useState("");
       const textareaRef = useRef<HTMLTextAreaElement>(null);
-      
+
       const handleSubmit = () => {
         if (userResponse.trim() && props.onSubmitResponse) {
           props.onSubmitResponse(userResponse.trim());
@@ -530,7 +532,12 @@ function ActionItem(props: ActionItemProps) {
               placeholder="Type your response here... (Ctrl+Enter to submit)"
               className="min-h-[80px] text-xs"
             />
-            <Button onClick={handleSubmit} disabled={!userResponse.trim()} size="sm" className="w-full">
+            <Button
+              onClick={handleSubmit}
+              disabled={!userResponse.trim()}
+              size="sm"
+              className="w-full"
+            >
               <Send className="mr-2 h-3 w-3" />
               Submit Response
             </Button>
@@ -754,5 +761,3 @@ function formatDiff(diff: string) {
     })
     .join("\n");
 }
-
-

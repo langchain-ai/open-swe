@@ -311,7 +311,7 @@ export function AssistantMessage({
   threadMessages: Message[];
 }) {
   const content = message?.content ?? [];
-  
+
   // Handler for request_human_help submission
   const handleHumanHelpResponse = (response: string) => {
     const humanResponse: HumanResponse[] = [
@@ -320,7 +320,7 @@ export function AssistantMessage({
         args: response,
       },
     ];
-    
+
     // Submit the response using the thread's submit method
     thread.submit({}, { command: { resume: humanResponse } });
   };
@@ -813,7 +813,3 @@ export function AssistantMessageLoading() {
     </div>
   );
 }
-
-
-
-
