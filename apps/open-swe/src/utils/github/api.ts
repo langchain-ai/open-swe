@@ -185,6 +185,7 @@ export async function createPullRequest({
   try {
     logger.info(
       `Creating pull request against default branch: ${repoBaseBranch}`,
+      { nullOnError },
     );
 
     // Step 2: Create the pull request
@@ -208,6 +209,9 @@ export async function createPullRequest({
     if (error instanceof Error && error.message.includes("already exists")) {
       logger.info(
         "Pull request already exists. Getting existing pull request...",
+        {
+          nullOnError,
+        },
       );
       return getExistingPullRequest(
         owner,
