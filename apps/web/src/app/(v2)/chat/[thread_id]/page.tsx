@@ -2,7 +2,6 @@
 
 import { ThreadView } from "@/components/v2/thread-view";
 import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
-import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -37,6 +36,7 @@ export default function ThreadPage({
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
+    disableOrgFiltering: true,
   });
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);

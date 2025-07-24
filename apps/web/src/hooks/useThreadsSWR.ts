@@ -24,6 +24,7 @@ interface UseThreadsSWROptions {
   revalidateOnFocus?: boolean;
   revalidateOnReconnect?: boolean;
   currentInstallation?: Installation | null;
+  disableOrgFiltering?: boolean;
 }
 
 /**
@@ -43,6 +44,7 @@ export function useThreadsSWR<
     revalidateOnFocus = THREAD_SWR_CONFIG.revalidateOnFocus,
     revalidateOnReconnect = THREAD_SWR_CONFIG.revalidateOnReconnect,
     currentInstallation,
+    disableOrgFiltering,
   } = options;
 
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -82,6 +84,11 @@ export function useThreadsSWR<
 
   const threads = useMemo(() => {
     const allThreads = data ?? [];
+
+    if (disableOrgFiltering) {
+      return allThreads;
+    }
+
     if (!currentInstallation) {
       return [];
     }
@@ -93,7 +100,7 @@ export function useThreadsSWR<
         threadInstallationName === currentInstallation.accountName
       );
     });
-  }, [data, currentInstallation]);
+  }, [data, currentInstallation, disableOrgFiltering]);
 
   return {
     threads,
