@@ -280,6 +280,7 @@ export function mapToolMessageToActionStepProps(
       help_request: args.help_request || "",
       reasoningText,
       onSubmitResponse: onSubmitHumanHelpResponse,
+    };
   } else if (toolCall?.name === searchDocumentForTool.name) {
     const args = toolCall.args as SearchDocumentForToolArgs;
     return {
@@ -689,6 +690,7 @@ export function AssistantMessage({
           status: "generating",
           help_request: args?.help_request || "",
           onSubmitResponse: handleHumanHelpResponse,
+        } as ActionItemProps;
       } else if (toolCall.name === searchDocumentForTool.name) {
         const args = toolCall.args as SearchDocumentForToolArgs;
         return {

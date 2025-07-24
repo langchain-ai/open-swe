@@ -140,7 +140,7 @@ export type ActionItemProps =
   | GetURLContentActionProps
   | McpActionProps
   | SearchActionProps
-  | RequestHumanHelpActionProps;
+  | RequestHumanHelpActionProps
   | SearchDocumentForActionProps;
 
 export type ActionStepProps = {
@@ -330,6 +330,8 @@ function ActionItem(props: ActionItemProps) {
         <ToolIconWithTooltip
           toolNamePretty="Request Human Help"
           icon={<HelpCircle className={cn(defaultIconStyling)} />}
+        />
+      );
     } else if (props.actionType === "search_document_for") {
       return (
         <ToolIconWithTooltip
@@ -532,7 +534,6 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     } else if (props.actionType === "request_human_help") {
-
       const handleSubmit = () => {
         if (userResponse.trim() && props.onSubmitResponse) {
           props.onSubmitResponse(userResponse.trim());
