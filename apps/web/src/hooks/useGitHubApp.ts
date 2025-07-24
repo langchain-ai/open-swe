@@ -183,12 +183,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
       if (!repo) {
         setSelectedBranchParam(null); // Clear branch when repo is null
-      }
+      
       setBranches([]); // Clear branches when switching repos
       setBranchesPage(1); // Reset pagination
       setBranchesHasMore(false); // Reset pagination state
-      }
-    },
+      
+    ,
     [setSelectedRepositoryParam, setSelectedBranchParam],
   );
 
