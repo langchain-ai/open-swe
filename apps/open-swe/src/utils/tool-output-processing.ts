@@ -38,6 +38,14 @@ export async function processToolCallContent(
     const url = toolCall.args?.url || toolCall.args?.uri || toolCall.args?.path;
     const parsedResult = typeof url === "string" ? parseUrl(url) : null;
     const parsedUrl = parsedResult?.success ? parsedResult.url.href : undefined;
+
+    // avoid generating TOC again if it's already in the cache
+    if (parsedUrl && state.documentCache[parsedUrl]) {
+      return {
+        content: state.documentCache[parsedUrl],
+      };
+    }
+
     const processedContent = await handleMcpDocumentationOutput(
       result,
       config,
