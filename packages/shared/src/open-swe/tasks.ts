@@ -111,6 +111,55 @@ export function updateTaskPlanItems(
 }
 
 /**
+ * Adds a pull request number to the active task in the task plan.
+ *
+ * @param taskPlan The task plan to update
+ * @param pullRequestNumber The pull request number to add
+ * @returns The updated task plan
+ * @throws Error if the task ID doesn't exist
+ */
+export function addPullRequestNumberToActiveTask(
+  taskPlan: TaskPlan,
+  pullRequestNumber: number,
+): TaskPlan {
+  const activeTaskIndex = taskPlan.activeTaskIndex;
+  const activeTask = taskPlan.tasks[activeTaskIndex];
+
+  if (!activeTask) {
+    throw new Error(`Task with index ${activeTaskIndex} not found`);
+  }
+
+  // Create an updated task marked as completed
+  const updatedTask: Task = {
+    ...activeTask,
+    pullRequestNumber,
+  };
+
+  // Create a new array of tasks with the updated task
+  const updatedTasks = [...taskPlan.tasks];
+  updatedTasks[activeTaskIndex] = updatedTask;
+
+  // Return the updated task plan
+  return {
+    ...taskPlan,
+    tasks: updatedTasks,
+  };
+}
+
+/**
+ * Gets the pull request number from the active task in the task plan.
+ *
+ * @param taskPlan The task plan
+ * @returns The pull request number of the active task, or undefined if the active task has no pull request number
+ */
+export function getPullRequestNumberFromActiveTask(
+  taskPlan: TaskPlan,
+): number | undefined {
+  const activeTask = getActiveTask(taskPlan);
+  return activeTask.pullRequestNumber;
+}
+
+/**
  * Helper function to get the active task from a TaskPlan
  *
  * @param taskPlan The task plan

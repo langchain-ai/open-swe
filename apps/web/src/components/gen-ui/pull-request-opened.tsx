@@ -8,7 +8,15 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  GitPullRequestDraft,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 
 type PullRequestOpenedProps = {
   status: "loading" | "generating" | "done";
@@ -18,6 +26,7 @@ type PullRequestOpenedProps = {
   prNumber?: number;
   branch?: string;
   targetBranch?: string;
+  isDraft?: boolean;
 };
 
 export function PullRequestOpened({
@@ -28,6 +37,7 @@ export function PullRequestOpened({
   prNumber,
   branch,
   targetBranch = "main",
+  isDraft = false,
 }: PullRequestOpenedProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -63,10 +73,42 @@ export function PullRequestOpened({
     return status === "done" && description;
   };
 
+  const iconClassName = "mr-2 h-3.5 w-3.5";
+
+  const getIconWithTooltip = () => {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            {isDraft && (
+              <GitPullRequestDraft
+                className={cn(
+                  iconClassName,
+                  "text-gray-500 dark:text-gray-400",
+                )}
+              />
+            )}
+            {!isDraft && (
+              <GitPullRequest
+                className={cn(
+                  iconClassName,
+                  "text-green-500 dark:text-green-400",
+                )}
+              />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>
+            {isDraft ? "Opened draft pull request" : "Opened pull request"}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+
   return (
     <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
       <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
-        <GitPullRequest className="mr-2 h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+        {getIconWithTooltip()}
         <div className="flex-1">
           {title && status === "done" && (
             <div className="mb-0.5 text-xs font-normal text-gray-800 dark:text-gray-200">

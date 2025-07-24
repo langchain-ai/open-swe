@@ -5,11 +5,13 @@ import {
   createApplyPatchTool,
   createGetURLContentTool,
   createShellTool,
+  createSearchDocumentForTool,
 } from "../../../tools/index.js";
 import {
   GraphState,
   GraphConfig,
   GraphUpdate,
+  TaskPlan,
 } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
@@ -20,7 +22,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
@@ -32,6 +34,9 @@ import { createSearchTool } from "../../../tools/search.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
+import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -49,9 +54,15 @@ export async function takeAction(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const getURLContentTool = createGetURLContentTool();
-
+  const getURLContentTool = createGetURLContentTool(state);
+  const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
+
+  const higherContextLimitToolNames = [
+    ...mcpTools.map((t) => t.name),
+    getURLContentTool.name,
+    searchDocumentForTool.name,
+  ];
 
   const allTools = [
     shellTool,
@@ -59,6 +70,7 @@ export async function takeAction(
     installDependenciesTool,
     applyPatchTool,
     getURLContentTool,
+    searchDocumentForTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(
@@ -89,7 +101,7 @@ export async function takeAction(
         name: toolCall.name,
         status: "error",
       });
-      return toolMessage;
+      return { toolMessage, stateUpdates: undefined };
     }
 
     let result = "";
@@ -136,18 +148,45 @@ export async function takeAction(
       }
     }
 
+    const { content, stateUpdates } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames,
+        state,
+        config,
+      },
+    );
+
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncateOutput(result),
+      content,
       name: toolCall.name,
       status: toolCallStatus,
     });
 
-    return toolMessage;
+    return { toolMessage, stateUpdates };
   });
 
-  const toolCallResults = await Promise.all(toolCallResultsPromise);
+  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  const toolCallResults = toolCallResultsWithUpdates.map(
+    (item) => item.toolMessage,
+  );
+
+  // merging document cache updates from tool calls
+  const allStateUpdates = toolCallResultsWithUpdates
+    .map((item) => item.stateUpdates)
+    .filter(Boolean)
+    .reduce(
+      (acc: { documentCache: Record<string, string> }, update) => {
+        if (update?.documentCache) {
+          acc.documentCache = { ...acc.documentCache, ...update.documentCache };
+        }
+        return acc;
+      },
+      { documentCache: {} } as { documentCache: Record<string, string> },
+    );
 
   let wereDependenciesInstalled: boolean | null = null;
   toolCallResults.forEach((toolCallResult) => {
@@ -164,20 +203,29 @@ export async function takeAction(
   );
 
   let branchName: string | undefined = state.branchName;
+  let pullRequestNumber: number | undefined;
+  let updatedTaskPlan: TaskPlan | undefined;
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    branchName = await checkoutBranchAndCommit(
+    const result = await checkoutBranchAndCommit(
       config,
       state.targetRepository,
       sandbox,
       {
         branchName,
         githubInstallationToken,
+        taskPlan: state.taskPlan,
+        githubIssueId: state.githubIssueId,
       },
     );
+    branchName = result.branchName;
+    pullRequestNumber = result.updatedTaskPlan
+      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+      : undefined;
+    updatedTaskPlan = result.updatedTaskPlan;
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -200,15 +248,30 @@ export async function takeAction(
         ? dependenciesInstalled
         : null;
 
+  // Add the tool call messages for the draft PR to the user facing messages if a draft PR was opened
+  const userFacingMessagesUpdate = [
+    ...toolCallResults,
+    ...(updatedTaskPlan && pullRequestNumber
+      ? createPullRequestToolCallMessage(
+          state.targetRepository,
+          pullRequestNumber,
+          true,
+        )
+      : []),
+  ];
   const commandUpdate: GraphUpdate = {
-    messages: toolCallResults,
+    messages: userFacingMessagesUpdate,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
+    ...(updatedTaskPlan && {
+      taskPlan: updatedTaskPlan,
+    }),
     codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandbox.id,
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
+    ...allStateUpdates,
   };
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",

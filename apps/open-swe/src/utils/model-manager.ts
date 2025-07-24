@@ -254,7 +254,7 @@ export class ModelManager {
       [Task.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-sonnet-4-0",
+          "google-genai:gemini-2.5-pro",
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
     };

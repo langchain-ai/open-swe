@@ -1,6 +1,12 @@
 import { Octokit } from "@octokit/rest";
 import { createLogger, LogLevel } from "../logger.js";
-import { GitHubIssue, GitHubIssueComment, GitHubPullRequest } from "./types.js";
+import {
+  GitHubIssue,
+  GitHubIssueComment,
+  GitHubPullRequest,
+  GitHubPullRequestList,
+  GitHubPullRequestUpdate,
+} from "./types.js";
 import { getOpenSWELabel } from "./label.js";
 import { getInstallationToken } from "@open-swe/shared/github/auth";
 import { getConfig } from "@langchain/langgraph";
@@ -12,6 +18,7 @@ const logger = createLogger(LogLevel.INFO, "GitHub-API");
 
 async function getInstallationTokenAndUpdateConfig() {
   try {
+    logger.info("Fetching a new GitHub installation token.");
     const config = getConfig();
     const encryptionSecret = process.env.SECRETS_ENCRYPTION_KEY;
     if (!encryptionSecret) {
@@ -30,6 +37,7 @@ async function getInstallationTokenAndUpdateConfig() {
     const token = await getInstallationToken(installationId, appId, privateKey);
     const encryptedToken = encryptSecret(token, encryptionSecret);
     updateConfig(GITHUB_INSTALLATION_ID, encryptedToken);
+    logger.info("Successfully fetched a new GitHub installation token.");
     return token;
   } catch (e) {
     logger.error("Failed to get installation token and update config", {
@@ -77,6 +85,7 @@ async function withGitHubRetry<T>(
     }
 
     logger.error(errorMessage, {
+      numRetries,
       ...additionalLogFields,
       ...(errorFields ?? { error }),
     });
@@ -90,7 +99,7 @@ async function getExistingPullRequest(
   branchName: string,
   githubToken: string,
   numRetries = 1,
-) {
+): Promise<GitHubPullRequestList[number] | null> {
   return withGitHubRetry(
     async (token: string) => {
       const octokit = new Octokit({
@@ -120,6 +129,8 @@ export async function createPullRequest({
   body = "",
   githubInstallationToken,
   baseBranch,
+  draft = false,
+  nullOnError = false,
 }: {
   owner: string;
   repo: string;
@@ -128,7 +139,9 @@ export async function createPullRequest({
   body?: string;
   githubInstallationToken: string;
   baseBranch?: string;
-}) {
+  draft?: boolean;
+  nullOnError?: boolean;
+}): Promise<GitHubPullRequest | GitHubPullRequestList[number] | null> {
   const octokit = new Octokit({
     auth: githubInstallationToken,
   });
@@ -172,10 +185,12 @@ export async function createPullRequest({
   try {
     logger.info(
       `Creating pull request against default branch: ${repoBaseBranch}`,
+      { nullOnError },
     );
 
     // Step 2: Create the pull request
     const { data: pullRequestData } = await octokit.pulls.create({
+      draft,
       owner,
       repo,
       title,
@@ -187,9 +202,16 @@ export async function createPullRequest({
     pullRequest = pullRequestData;
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
   } catch (error) {
+    if (nullOnError) {
+      return null;
+    }
+
     if (error instanceof Error && error.message.includes("already exists")) {
       logger.info(
         "Pull request already exists. Getting existing pull request...",
+        {
+          nullOnError,
+        },
       );
       return getExistingPullRequest(
         owner,
@@ -226,6 +248,45 @@ export async function createPullRequest({
   }
 
   return pullRequest;
+}
+
+export async function markPullRequestReadyForReview({
+  owner,
+  repo,
+  pullNumber,
+  title,
+  body,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  title: string;
+  body: string;
+  githubInstallationToken: string;
+}): Promise<GitHubPullRequestUpdate | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: updatedPR } = await octokit.pulls.update({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        title,
+        body,
+        draft: false,
+      });
+      logger.info(`Pull request #${pullNumber} marked as ready for review.`);
+      return updatedPR;
+    },
+    githubInstallationToken,
+    "Failed to mark pull request as ready for review",
+    { pullNumber, owner, repo },
+    1,
+  );
 }
 
 export async function getIssue({

@@ -120,6 +120,10 @@ export type Task = {
    * Optional parent task id if this task was derived from another task
    */
   parentTaskId?: string;
+  /**
+   * The pull request number associated with this task
+   */
+  pullRequestNumber?: number;
 };
 
 export type TaskPlan = {
@@ -220,6 +224,16 @@ export const GraphAnnotation = MessagesZodState.extend({
       schema: z.custom<string>(),
       fn: (_state, update) => update,
     },
+  }),
+  /**
+   * Cache of fetched document content keyed by URLs.
+   */
+  documentCache: withLangGraph(z.custom<Record<string, string>>(), {
+    reducer: {
+      schema: z.custom<Record<string, string>>(),
+      fn: (state, update) => ({ ...state, ...update }),
+    },
+    default: () => ({}),
   }),
   /**
    * The ID of the Github issue this thread is associated with
