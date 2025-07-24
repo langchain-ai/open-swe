@@ -251,6 +251,18 @@ async function performClone(
     logger.info("Created branch", {
       branch: branchName,
     });
+
+    const setUpstreamBranchRes = await sandbox.process.executeCommand(
+      `git branch --set-upstream-to=origin/${branchName}`,
+      absoluteRepoDir,
+    );
+    if (setUpstreamBranchRes.exitCode !== 0) {
+      logger.error("Failed to set upstream branch", {
+        setUpstreamBranchRes,
+      });
+    }
+    logger.info("Set upstream branch");
+
     return branchName;
   } catch {
     logger.info("Failed to create branch, checking out branch", {
@@ -262,5 +274,17 @@ async function performClone(
   logger.info("Checked out branch", {
     branch: branchName,
   });
+
+  const setUpstreamBranchRes = await sandbox.process.executeCommand(
+    `git branch --set-upstream-to=origin/${branchName}`,
+    absoluteRepoDir,
+  );
+  if (setUpstreamBranchRes.exitCode !== 0) {
+    logger.error("Failed to set upstream branch", {
+      setUpstreamBranchRes,
+    });
+  }
+  logger.info("Set upstream branch");
+
   return branchName;
 }
