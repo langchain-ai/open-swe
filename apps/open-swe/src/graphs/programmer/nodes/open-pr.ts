@@ -9,7 +9,10 @@ import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
-import { createPullRequest } from "../../../utils/github/api.js";
+import {
+  createPullRequest,
+  markPullRequestReadyForReview,
+} from "../../../utils/github/api.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
 import {
