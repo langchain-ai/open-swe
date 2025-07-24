@@ -73,7 +73,6 @@ function hasRecentDiagnosisToolCall(
   messages: Array<BaseMessage>,
   groupCount: number,
 ): boolean {
-  // Get all tool groups (including diagnosis ones for this check)
   const allGroups: ToolMessage[][] = [];
   let currentGroup: ToolMessage[] = [];
   let processingToolsForAI = false;
@@ -82,17 +81,14 @@ function hasRecentDiagnosisToolCall(
     const message = messages[i];
 
     if (isAIMessage(message)) {
-      // If we were already processing tools for a previous AI message, save that group
       if (currentGroup.length > 0) {
         allGroups.push([...currentGroup]);
         currentGroup = [];
       }
       processingToolsForAI = true;
     } else if (isToolMessage(message) && processingToolsForAI) {
-      // Include ALL tool messages (including diagnosis ones) for this check
       currentGroup.push(message);
     } else if (!isToolMessage(message) && processingToolsForAI) {
-      // We've encountered a non-tool message after an AI message, end the current group
       if (currentGroup.length > 0) {
         allGroups.push([...currentGroup]);
         currentGroup = [];
@@ -101,12 +97,10 @@ function hasRecentDiagnosisToolCall(
     }
   }
 
-  // Add the last group if it exists
   if (currentGroup.length > 0) {
     allGroups.push(currentGroup);
   }
 
-  // Check the last N groups for diagnosis tool calls
   const recentGroups = allGroups.slice(-groupCount);
   return recentGroups.some((group) =>
     group.some((message) => message.additional_kwargs?.is_diagnosis),
@@ -121,22 +115,16 @@ function hasRecentDiagnosisToolCall(
  * @param messages All messages to analyze
  */
 export function shouldDiagnoseError(messages: Array<BaseMessage>) {
-  // Group tool messages by their parent AI message
   const toolGroups = groupToolMessagesByAIMessage(messages);
 
-  // If we don't have at least 3 groups, we can't make a determination
   if (toolGroups.length < 3) return false;
 
-  // Get the last three groups
   const lastThreeGroups = toolGroups.slice(-3);
 
-  // Check if there was a diagnose error tool call within the last three groups
-  // We need to check the original messages to find diagnosis tool calls
   const hasRecentDiagnosis = hasRecentDiagnosisToolCall(messages, 3);
   if (hasRecentDiagnosis) return false;
 
-  // Check if all of the last three groups have an error rate >= 75%
-  const ERROR_THRESHOLD = 0.75; // 75%
+  const ERROR_THRESHOLD = 0.75;
   return lastThreeGroups.every(
     (group) => calculateErrorRate(group) >= ERROR_THRESHOLD,
   );
