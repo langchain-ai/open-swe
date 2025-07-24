@@ -16,28 +16,34 @@ type SearchDocumentForInput = z.infer<
 >;
 
 export function createSearchDocumentForTool(
-  config: GraphConfig,
   state: Pick<GraphState, "documentCache">,
+  config: GraphConfig,
 ) {
   const searchDocumentForTool = tool(
     async (
       input: SearchDocumentForInput,
-    ): Promise<{ result: string; status: "success" | "error" }> => {
+    ): Promise<{
+      result: string;
+      status: "success" | "error";
+      stateUpdates?: Partial<Pick<GraphState, "documentCache">>;
+    }> => {
       const { url, query } = input;
 
       const urlParseResult = parseUrl(url);
       if (!urlParseResult.success) {
         return { result: urlParseResult.errorMessage, status: "error" };
       }
-      const parsedUrl = urlParseResult.url;
+      const parsedUrl = urlParseResult.url?.href;
 
       try {
-        let documentContent = state.documentCache[url];
+        let documentContent = state.documentCache[parsedUrl];
 
         if (!documentContent) {
-          logger.info("Document not cached, fetching via FireCrawl", { url });
+          logger.info("Document not cached, fetching via FireCrawl", {
+            url: parsedUrl,
+          });
           const loader = new FireCrawlLoader({
-            url: parsedUrl.href,
+            url: parsedUrl,
             mode: "scrape",
             params: {
               formats: ["markdown"],
@@ -48,11 +54,17 @@ export function createSearchDocumentForTool(
           documentContent = docs.map((doc) => doc.pageContent).join("\n\n");
 
           if (state.documentCache) {
-            state.documentCache[url] = documentContent;
+            const stateUpdates = {
+              documentCache: {
+                ...state.documentCache,
+                [parsedUrl]: documentContent,
+              },
+            };
+            return { result: documentContent, status: "success", stateUpdates };
           }
         } else {
           logger.info("Using cached document content", {
-            url,
+            url: parsedUrl,
             contentLength: documentContent.length,
           });
         }
@@ -95,12 +107,12 @@ export function createSearchDocumentForTool(
       } catch (e) {
         const errorString = e instanceof Error ? e.message : String(e);
         logger.error("Failed to search document", {
-          url,
+          url: parsedUrl,
           query,
           error: errorString,
         });
         return {
-          result: `Failed to search document at ${url}\nError:\n${errorString}`,
+          result: `Failed to search document at ${parsedUrl}\nError:\n${errorString}`,
           status: "error",
         };
       }

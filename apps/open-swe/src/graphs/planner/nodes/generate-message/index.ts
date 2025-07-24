@@ -81,7 +81,7 @@ export async function generateAction(
     createShellTool(state),
     createPlannerNotesTool(),
     createGetURLContentTool(state),
-    createSearchDocumentForTool(config, state),
+    createSearchDocumentForTool(state, config),
     ...mcpTools,
   ];
   logger.info(

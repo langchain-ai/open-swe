@@ -157,7 +157,7 @@ export async function generateAction(
     createGetURLContentTool(state),
     createInstallDependenciesTool(state),
     markTaskCompletedTool,
-    createSearchDocumentForTool(config, state),
+    createSearchDocumentForTool(state, config),
     ...mcpTools,
   ];
   logger.info(

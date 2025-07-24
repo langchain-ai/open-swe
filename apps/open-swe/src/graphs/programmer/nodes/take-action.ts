@@ -52,7 +52,7 @@ export async function takeAction(
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const getURLContentTool = createGetURLContentTool(state);
-  const searchDocumentForTool = createSearchDocumentForTool(config, state);
+  const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
   const higherContextLimitToolNames = [
@@ -98,7 +98,7 @@ export async function takeAction(
         name: toolCall.name,
         status: "error",
       });
-      return toolMessage;
+      return { toolMessage, stateUpdates: undefined };
     }
 
     let result = "";
@@ -145,10 +145,15 @@ export async function takeAction(
       }
     }
 
-    const content = await processToolCallContent(toolCall, result, config, {
-      higherContextLimitToolNames,
-      state,
-    });
+    const { content, stateUpdates } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames,
+        state,
+        config,
+      },
+    );
 
     const toolMessage = new ToolMessage({
       id: uuidv4(),
@@ -158,10 +163,27 @@ export async function takeAction(
       status: toolCallStatus,
     });
 
-    return toolMessage;
+    return { toolMessage, stateUpdates };
   });
 
-  const toolCallResults = await Promise.all(toolCallResultsPromise);
+  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  const toolCallResults = toolCallResultsWithUpdates.map(
+    (item) => item.toolMessage,
+  );
+
+  // merging document cache updates from tool calls
+  const allStateUpdates = toolCallResultsWithUpdates
+    .map((item) => item.stateUpdates)
+    .filter(Boolean)
+    .reduce(
+      (acc: { documentCache: Record<string, string> }, update) => {
+        if (update?.documentCache) {
+          acc.documentCache = { ...acc.documentCache, ...update.documentCache };
+        }
+        return acc;
+      },
+      { documentCache: {} } as { documentCache: Record<string, string> },
+    );
 
   let wereDependenciesInstalled: boolean | null = null;
   toolCallResults.forEach((toolCallResult) => {
@@ -223,6 +245,7 @@ export async function takeAction(
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,
     }),
+    ...allStateUpdates,
   };
   return new Command({
     goto: shouldRouteDiagnoseNode ? "diagnose-error" : "generate-action",

@@ -52,7 +52,7 @@ export async function takeActions(
   const searchTool = createSearchTool(state);
   const plannerNotesTool = createPlannerNotesTool();
   const getURLContentTool = createGetURLContentTool(state);
-  const searchDocumentForTool = createSearchDocumentForTool(config, state);
+  const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
   const higherContextLimitToolNames = [
@@ -98,7 +98,7 @@ export async function takeActions(
         status: "error",
       });
 
-      return toolMessage;
+      return { toolMessage, stateUpdates: undefined };
     }
 
     logger.info("Executing planner tool action", {
@@ -152,10 +152,15 @@ export async function takeActions(
       }
     }
 
-    const content = await processToolCallContent(toolCall, result, config, {
-      higherContextLimitToolNames,
-      state,
-    });
+    const { content, stateUpdates } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames,
+        state,
+        config,
+      },
+    );
 
     const toolMessage = new ToolMessage({
       id: uuidv4(),
@@ -165,10 +170,28 @@ export async function takeActions(
       status: toolCallStatus,
     });
 
-    return toolMessage;
+    return { toolMessage, stateUpdates };
   });
 
-  let toolCallResults = await Promise.all(toolCallResultsPromise);
+  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  let toolCallResults = toolCallResultsWithUpdates.map(
+    (item) => item.toolMessage,
+  );
+
+  // merging document cache updates from tool calls
+  const allStateUpdates = toolCallResultsWithUpdates
+    .map((item) => item.stateUpdates)
+    .filter(Boolean)
+    .reduce(
+      (acc: { documentCache: Record<string, string> }, update) => {
+        if (update?.documentCache) {
+          acc.documentCache = { ...acc.documentCache, ...update.documentCache };
+        }
+        return acc;
+      },
+      { documentCache: {} } as { documentCache: Record<string, string> },
+    );
+
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
@@ -208,6 +231,7 @@ ${tc.content}`,
     sandboxSessionId: sandbox.id,
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
+    ...allStateUpdates,
   };
 
   const maxContextActions = config.configurable?.maxContextActions ?? 75;
