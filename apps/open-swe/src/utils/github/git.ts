@@ -85,7 +85,7 @@ export async function checkoutBranchAndCommit(
     branchName?: string;
     githubInstallationToken: string;
   },
-): Promise<string> {
+): Promise<{ branchName: string; pullRequestNumber?: number; }> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options.branchName || getBranchName(config);
 
@@ -129,11 +129,30 @@ export async function checkoutBranchAndCommit(
     throw new Error("Failed to push changes");
   }
 
+  // Check if this is the first commit by checking if pullRequestNumbers is empty
+  const { pullRequestNumbers } = config.state;
+  let pullRequestNumber;
+  if (!pullRequestNumbers || pullRequestNumbers.length === 0) {
+    logger.info("First commit detected, creating a draft pull request.");
+    const pullRequest = await createPullRequest({
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      headBranch: branchName,
+      title: "Initial draft PR",
+      githubInstallationToken: options.githubInstallationToken,
+      draft: true,
+    });
+    if (pullRequest) {
+      pullRequestNumber = pullRequest.number;
+      logger.info(`Draft pull request created: #${pullRequestNumber}`);
+    }
+  }
+
   logger.info("Successfully checked out & committed changes.", {
     commitAuthor: userName,
   });
 
-  return branchName;
+  return { branchName, pullRequestNumber };
 }
 
 export async function pullLatestChanges(
@@ -264,3 +283,4 @@ async function performClone(
   });
   return branchName;
 }
+
