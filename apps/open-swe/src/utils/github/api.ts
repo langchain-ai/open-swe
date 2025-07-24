@@ -12,6 +12,7 @@ const logger = createLogger(LogLevel.INFO, "GitHub-API");
 
 async function getInstallationTokenAndUpdateConfig() {
   try {
+    logger.info("Fetching a new GitHub installation token.");
     const config = getConfig();
     const encryptionSecret = process.env.SECRETS_ENCRYPTION_KEY;
     if (!encryptionSecret) {
@@ -30,6 +31,7 @@ async function getInstallationTokenAndUpdateConfig() {
     const token = await getInstallationToken(installationId, appId, privateKey);
     const encryptedToken = encryptSecret(token, encryptionSecret);
     updateConfig(GITHUB_INSTALLATION_ID, encryptedToken);
+    logger.info("Successfully fetched a new GitHub installation token.");
     return token;
   } catch (e) {
     logger.error("Failed to get installation token and update config", {
@@ -77,6 +79,7 @@ async function withGitHubRetry<T>(
     }
 
     logger.error(errorMessage, {
+      numRetries,
       ...additionalLogFields,
       ...(errorFields ?? { error }),
     });
