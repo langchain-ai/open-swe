@@ -363,6 +363,23 @@ export function createTakePlannerNotesFields() {
   };
 }
 
+export function createScratchpadFields() {
+  const scratchpadSchema = z.object({
+    scratchpad: z
+      .array(z.string())
+      .describe(
+        "Write concise, technical, and useful notes to your scratchpad. These notes will be saved for you to use when providing your final review.",
+      ),
+  });
+
+  return {
+    name: "scratchpad",
+    schema: scratchpadSchema,
+    description:
+      "Use this tool to write & save technical notes on the review actions you take, and any notes you believe will be useful when providing your final review.",
+  };
+}
+
 export function createDiagnoseErrorToolFields() {
   const diagnoseErrorToolSchema = z.object({
     diagnosis: z.string().describe("The diagnosis of the error."),

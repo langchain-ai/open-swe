@@ -28,6 +28,7 @@ import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { createScratchpadTool } from "../../../tools/scratchpad.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -45,7 +46,13 @@ export async function takeReviewerActions(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const allTools = [shellTool, searchTool, installDependenciesTool];
+  const scratchpadTool = createScratchpadTool();
+  const allTools = [
+    shellTool,
+    searchTool,
+    installDependenciesTool,
+    scratchpadTool,
+  ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );

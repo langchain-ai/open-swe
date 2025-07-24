@@ -52,26 +52,44 @@ By reviewing these actions, and comparing them to the plan and original user req
 </reviewing_guidelines>
 
 <instructions>
-    You should inspect each of the files modified by the programmer (see the <changed_files> section below), and confirm they properly implement the plan (see the <completed_tasks_and_summaries> section below), and that the user's request has been fully implemented.
     You should be reviewing them from the perspective of a quality assurance engineer, ensuring the code written is of the highest quality, fully implements the user's request, and all actions have been taken for the PR to be accepted.
 
     You're also provided with the conversation history of the actions the programmer has taken, and any user input they've received. The first user message below contains this information.
     Ensure you carefully read over all of these messages to ensure you have the proper context and do not duplicate actions the programmer has already taken.
 
-    Common tasks you should always confirm were executed:
-    - Linter/formatter scripts were executed
-    - Unit tests were executed
-    - If no tests for the code written/updated exists, confirm whether or not tests should be written
-    - Documentation was updated, if applicable
+    When reviewing the changes, you should preform these actions in order:
+
+    <required_scripts>
+    Search for any scripts which are required for the pull request to pass CI. This may include unit tests (you do not have access to environment variables, and thus can not run integration tests), linters, formatters, etc.
+    Once you find these, ensure you write to your scratchpad to record the names of the scripts, how to invoke them, and any other relevant context required to run them.
+    </required_scripts>
+
+    <changed_files>
+    You should carefully review each of the following changed files. For each changed file, ask yourself:
+    - Should this file be committed? You should only include files which are required for the pull request with the changes to be merged. This means backup files, scripts you wrote during development, etc. should be identified, and deleted.
+    You should write to your scratchpad to record the names of the files which should be deleted.
+
+    - Is this file in the correct location? You should ensure that the file is in the correct location for the pull request with the changes to be merged. This means that if the file is in the wrong location, you should identify it, and move it to the correct location.
+    You should write to your scratchpad to record the names of the files which should be moved, and the new location for each file.
+
+    - Do the changes in the file make sense in relation to the user's request?
+    You should inspect the diff (run \`git diff\` via the shell tool) to ensure all of the changes made are:
+    1. Complete, and accurate
+    2. Required for the user's request to be successfully completed
+    3. Are there extraneous comments, or code which is no longer needed?
+
+    Remember that you want to avoid doing more work than necessary, so any extra changes which are unrelated to the users request should be removed.
+    You should write to your scratchpad to record the names of the files, and the content inside the files which should be removed/updated.
+    </changed_files>
+
+    You MUST preform the above actions. You should write your findings to the scratchpad, as you do not need to take action on your findings right now.
+    Once you've completed your review you'll be given the chance to say whether or not the task has been successfully completed, and if not, you'll be able to provide a list of new actions to take.
 
     **IMPORTANT**:
     Keep in mind that not all requests/changes will need tests to be written, or documentation to be added/updated. Ensure you consider whether or not the standard engineering organization would write tests, or documentation for the changes you're reviewing.
     After considering this, you may not need to check if tests should be written, or documentation should be added/updated.
 
     Based on the generated plan, the actions taken and files changed, you should review the modified code and determine if it properly completes the overall task, or if more changes need to be made/existing changes should be modified.
-    On top of inspecting the changed files, you should also look to see if the programmer missed anything, made changes which do not respect the custom rules, or if the changes are otherwise insufficient to complete the task.
-
-    You do not want to do more work than required, but you always should complete tasks which you believe are necessary to complete the user's request, and merge the pull request without further action.
 
     After you're satisfied with the context you've gathered, and are ready to provide a final review, respond with exactly 'done' without any tool calls.
     This will redirect you to a final review step where you'll submit your final review, and optionally provide a list of additional actions to take.

@@ -32,6 +32,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
@@ -119,6 +120,7 @@ export async function generateReviewActions(
     createSearchTool(state),
     createShellTool(state),
     createInstallDependenciesTool(state),
+    createScratchpadTool(),
   ];
   tools[tools.length - 1] = {
     ...tools[tools.length - 1],
