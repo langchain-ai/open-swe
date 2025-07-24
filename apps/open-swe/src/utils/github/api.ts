@@ -230,6 +230,30 @@ export async function createPullRequest({
   return pullRequest;
 }
 
+export async function markPullRequestReadyForReview({
+  owner,
+  repo,
+  pullNumber,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  githubInstallationToken: string;
+}) {
+  const octokit = new Octokit({
+    auth: githubInstallationToken,
+  });
+
+  await octokit.pulls.update({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    draft: false,
+  });
+  logger.info(`Pull request #${pullNumber} marked as ready for review.`);
+}
+
 export async function getIssue({
   owner,
   repo,
@@ -469,3 +493,4 @@ export async function updateIssueComment({
     numRetries,
   );
 }
+
