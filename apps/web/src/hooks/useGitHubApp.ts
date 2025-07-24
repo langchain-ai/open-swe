@@ -182,10 +182,11 @@ export function useGitHubApp(): UseGitHubAppReturn {
       saveRepositoryToLocalStorage(repo);
 
       if (!repo) {
-        setSelectedBranchParam(null);
-        setBranches([]);
-        setBranchesPage(1);
-        setBranchesHasMore(false);
+        setSelectedBranchParam(null); // Clear branch when repo is null
+      }
+      setBranches([]); // Clear branches when switching repos
+      setBranchesPage(1); // Reset pagination
+      setBranchesHasMore(false); // Reset pagination state
       }
     },
     [setSelectedRepositoryParam, setSelectedBranchParam],
@@ -530,3 +531,4 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
+
