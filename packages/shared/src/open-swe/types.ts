@@ -270,6 +270,10 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
+  pullRequestNumbers: z
+    .array(z.number())
+    .optional()
+    .describe("Array of pull request numbers for tracking multiple PRs."),
   tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
     reducer: {
       schema: z.custom<CacheMetrics>().optional(),
