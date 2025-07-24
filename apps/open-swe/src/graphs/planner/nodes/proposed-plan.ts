@@ -245,6 +245,7 @@ export async function interruptProposedPlan(
     targetRepository: state.targetRepository,
     githubIssueId: state.githubIssueId,
     internalMessages: state.messages,
+    documentCache: state.documentCache,
   };
 
   if (state.autoAcceptPlan) {

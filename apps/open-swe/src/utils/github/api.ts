@@ -2,43 +2,117 @@ import { Octokit } from "@octokit/rest";
 import { createLogger, LogLevel } from "../logger.js";
 import { GitHubIssue, GitHubIssueComment, GitHubPullRequest } from "./types.js";
 import { getOpenSWELabel } from "./label.js";
+import { getInstallationToken } from "@open-swe/shared/github/auth";
+import { getConfig } from "@langchain/langgraph";
+import { GITHUB_INSTALLATION_ID } from "@open-swe/shared/constants";
+import { updateConfig } from "../update-config.js";
+import { encryptSecret } from "@open-swe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-API");
+
+async function getInstallationTokenAndUpdateConfig() {
+  try {
+    logger.info("Fetching a new GitHub installation token.");
+    const config = getConfig();
+    const encryptionSecret = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionSecret) {
+      throw new Error("Secrets encryption key not found");
+    }
+
+    const installationId = config.configurable?.[GITHUB_INSTALLATION_ID];
+    const appId = process.env.GITHUB_APP_ID;
+    const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+    if (!installationId || !appId || !privateKey) {
+      throw new Error(
+        "GitHub installation ID, app ID, or private key not found",
+      );
+    }
+
+    const token = await getInstallationToken(installationId, appId, privateKey);
+    const encryptedToken = encryptSecret(token, encryptionSecret);
+    updateConfig(GITHUB_INSTALLATION_ID, encryptedToken);
+    logger.info("Successfully fetched a new GitHub installation token.");
+    return token;
+  } catch (e) {
+    logger.error("Failed to get installation token and update config", {
+      error: e,
+    });
+    return null;
+  }
+}
+
+/**
+ * Generic utility for handling GitHub API calls with automatic retry on 401 errors
+ */
+async function withGitHubRetry<T>(
+  operation: (token: string) => Promise<T>,
+  initialToken: string,
+  errorMessage: string,
+  additionalLogFields?: Record<string, any>,
+  numRetries = 1,
+): Promise<T | null> {
+  try {
+    return await operation(initialToken);
+  } catch (error) {
+    const errorFields =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : {};
+
+    // Retry with a max retries of 2
+    if (errorFields && errorFields.message?.includes("401") && numRetries < 2) {
+      const token = await getInstallationTokenAndUpdateConfig();
+      if (!token) {
+        return null;
+      }
+      return withGitHubRetry(
+        operation,
+        token,
+        errorMessage,
+        additionalLogFields,
+        numRetries + 1,
+      );
+    }
+
+    logger.error(errorMessage, {
+      numRetries,
+      ...additionalLogFields,
+      ...(errorFields ?? { error }),
+    });
+    return null;
+  }
+}
 
 async function getExistingPullRequest(
   owner: string,
   repo: string,
   branchName: string,
   githubToken: string,
+  numRetries = 1,
 ) {
-  try {
-    const octokit = new Octokit({
-      auth: githubToken,
-    });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-    const { data: pullRequests } = await octokit.pulls.list({
-      owner,
-      repo,
-      head: branchName,
-    });
+      const { data: pullRequests } = await octokit.pulls.list({
+        owner,
+        repo,
+        head: branchName,
+      });
 
-    if (pullRequests?.[0]) {
-      return pullRequests[0];
-    }
-  } catch (e) {
-    logger.error(`Failed to get existing pull request`, {
-      branch: branchName,
-      owner,
-      repo,
-      ...(e instanceof Error && {
-        name: e.name,
-        message: e.message,
-        stack: e.stack,
-      }),
-    });
-  }
-
-  return null;
+      return pullRequests?.[0] || null;
+    },
+    githubToken,
+    "Failed to get existing pull request",
+    { branch: branchName, owner, repo },
+    numRetries,
+  );
 }
 
 export async function createPullRequest({
@@ -162,30 +236,33 @@ export async function getIssue({
   repo,
   issueNumber,
   githubInstallationToken,
+  numRetries = 1,
 }: {
   owner: string;
   repo: string;
   issueNumber: number;
   githubInstallationToken: string;
+  numRetries?: number;
 }): Promise<GitHubIssue | null> {
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: issue } = await octokit.issues.get({
-      owner,
-      repo,
-      issue_number: issueNumber,
-    });
+      const { data: issue } = await octokit.issues.get({
+        owner,
+        repo,
+        issue_number: issueNumber,
+      });
 
-    return issue;
-  } catch (error) {
-    logger.error(`Failed to get issue`, {
-      error,
-    });
-    return null;
-  }
+      return issue;
+    },
+    githubInstallationToken,
+    "Failed to get issue",
+    undefined,
+    numRetries,
+  );
 }
 
 export async function getIssueComments({
@@ -194,39 +271,42 @@ export async function getIssueComments({
   issueNumber,
   githubInstallationToken,
   filterBotComments = true,
+  numRetries = 1,
 }: {
   owner: string;
   repo: string;
   issueNumber: number;
   githubInstallationToken: string;
   filterBotComments?: boolean;
+  numRetries?: number;
 }): Promise<GitHubIssueComment[] | null> {
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: comments } = await octokit.issues.listComments({
-      owner,
-      repo,
-      issue_number: issueNumber,
-    });
+      const { data: comments } = await octokit.issues.listComments({
+        owner,
+        repo,
+        issue_number: issueNumber,
+      });
 
-    if (!filterBotComments) {
-      return comments;
-    }
+      if (!filterBotComments) {
+        return comments;
+      }
 
-    return comments.filter((comment) => {
-      return (
-        comment.user?.type !== "Bot" || !comment.user?.name?.includes("[bot]")
-      );
-    });
-  } catch (error) {
-    logger.error(`Failed to get issue comments`, {
-      error,
-    });
-    return null;
-  }
+      return comments.filter((comment) => {
+        return (
+          comment.user?.type !== "Bot" || !comment.user?.name?.includes("[bot]")
+        );
+      });
+    },
+    githubInstallationToken,
+    "Failed to get issue comments",
+    undefined,
+    numRetries,
+  );
 }
 
 export async function createIssue({
@@ -256,9 +336,15 @@ export async function createIssue({
 
     return issue;
   } catch (error) {
-    logger.error(`Failed to create issue`, {
-      error,
-    });
+    const errorFields =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : { error };
+    logger.error(`Failed to create issue`, errorFields);
     return null;
   }
 }
@@ -270,6 +356,7 @@ export async function updateIssue({
   githubInstallationToken,
   body,
   title,
+  numRetries = 1,
 }: {
   owner: string;
   repo: string;
@@ -277,31 +364,33 @@ export async function updateIssue({
   githubInstallationToken: string;
   body?: string;
   title?: string;
+  numRetries?: number;
 }) {
   if (!body && !title) {
     throw new Error("Must provide either body or title to update issue");
   }
 
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: issue } = await octokit.issues.update({
-      owner,
-      repo,
-      issue_number: issueNumber,
-      ...(body && { body }),
-      ...(title && { title }),
-    });
+      const { data: issue } = await octokit.issues.update({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        ...(body && { body }),
+        ...(title && { title }),
+      });
 
-    return issue;
-  } catch (error) {
-    logger.error(`Failed to update issue`, {
-      error,
-    });
-    return null;
-  }
+      return issue;
+    },
+    githubInstallationToken,
+    "Failed to update issue",
+    undefined,
+    numRetries,
+  );
 }
 
 export async function createIssueComment({
@@ -310,6 +399,7 @@ export async function createIssueComment({
   issueNumber,
   body,
   githubToken,
+  numRetries = 1,
 }: {
   owner: string;
   repo: string;
@@ -320,26 +410,28 @@ export async function createIssueComment({
    * or an access token if creating a user comment.
    */
   githubToken: string;
+  numRetries?: number;
 }): Promise<GitHubIssueComment | null> {
-  const octokit = new Octokit({
-    auth: githubToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: comment } = await octokit.issues.createComment({
-      owner,
-      repo,
-      issue_number: issueNumber,
-      body,
-    });
+      const { data: comment } = await octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        body,
+      });
 
-    return comment;
-  } catch (error) {
-    logger.error(`Failed to create issue comment`, {
-      error,
-    });
-    return null;
-  }
+      return comment;
+    },
+    githubToken,
+    "Failed to create issue comment",
+    undefined,
+    numRetries,
+  );
 }
 
 export async function updateIssueComment({
@@ -348,30 +440,33 @@ export async function updateIssueComment({
   commentId,
   body,
   githubInstallationToken,
+  numRetries = 1,
 }: {
   owner: string;
   repo: string;
   commentId: number;
   body: string;
   githubInstallationToken: string;
+  numRetries?: number;
 }): Promise<GitHubIssueComment | null> {
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  try {
-    const { data: comment } = await octokit.issues.updateComment({
-      owner,
-      repo,
-      comment_id: commentId,
-      body,
-    });
+      const { data: comment } = await octokit.issues.updateComment({
+        owner,
+        repo,
+        comment_id: commentId,
+        body,
+      });
 
-    return comment;
-  } catch (error) {
-    logger.error(`Failed to update issue comment`, {
-      error,
-    });
-    return null;
-  }
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to update issue comment",
+    undefined,
+    numRetries,
+  );
 }

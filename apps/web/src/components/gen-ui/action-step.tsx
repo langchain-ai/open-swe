@@ -27,6 +27,7 @@ import {
   createGetURLContentToolFields,
   createSearchToolFields,
   createRequestHumanHelpToolFields,
+  createSearchDocumentForToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import {
@@ -58,6 +59,8 @@ const searchTool = createSearchToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const requestHumanHelpTool = createRequestHumanHelpToolFields();
 type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
+const searchDocumentForTool = createSearchDocumentForToolFields();
+type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -109,6 +112,12 @@ type SearchActionProps = BaseActionProps &
     errorCode?: number;
   };
 
+type SearchDocumentForActionProps = BaseActionProps &
+  Partial<SearchDocumentForToolArgs> & {
+    actionType: "search_document_for";
+    output?: string;
+  };
+
 type McpActionProps = BaseActionProps & {
   actionType: "mcp";
   toolName: string;
@@ -132,6 +141,7 @@ export type ActionItemProps =
   | McpActionProps
   | SearchActionProps
   | RequestHumanHelpActionProps;
+  | SearchDocumentForActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -145,6 +155,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   [installDependenciesTool.name]: "Installing dependencies...",
   [plannerNotesTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
+  [searchDocumentForTool.name]: "Searching document...",
   [searchTool.name]: "Searching...",
   [requestHumanHelpTool.name]: "Requesting help...",
 };
@@ -226,6 +237,10 @@ function ActionItem(props: ActionItemProps) {
         return props.success
           ? "URL content fetched"
           : "Failed to fetch URL content";
+      } else if (props.actionType === "search_document_for") {
+        return props.success
+          ? "Document search completed"
+          : "Document search failed";
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
       } else if (props.actionType === "request_human_help") {
@@ -250,6 +265,7 @@ function ActionItem(props: ActionItemProps) {
       props.actionType === "shell" ||
       props.actionType === "install_dependencies" ||
       props.actionType === "get_url_content" ||
+      props.actionType === "search_document_for" ||
       props.actionType === "search"
     ) {
       return !!props.output;
@@ -314,6 +330,11 @@ function ActionItem(props: ActionItemProps) {
         <ToolIconWithTooltip
           toolNamePretty="Request Human Help"
           icon={<HelpCircle className={cn(defaultIconStyling)} />}
+    } else if (props.actionType === "search_document_for") {
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Search Document"
+          icon={<FileText className={cn(defaultIconStyling)} />}
         />
       );
     } else if (props.actionType === "mcp") {
@@ -446,6 +467,17 @@ function ActionItem(props: ActionItemProps) {
           </code>
         </div>
       );
+    } else if (props.actionType === "search_document_for") {
+      return (
+        <div className="flex flex-col">
+          <code className="text-foreground/80 text-xs font-normal">
+            {props.query}
+          </code>
+          <div className="text-muted-foreground mt-1 text-xs font-normal">
+            {props.url}
+          </div>
+        </div>
+      );
     } else if (props.actionType === "mcp") {
       return (
         <div className="flex items-center">
@@ -480,6 +512,7 @@ function ActionItem(props: ActionItemProps) {
     if (
       (props.actionType === "shell" ||
         props.actionType === "search" ||
+        props.actionType === "search_document_for" ||
         props.actionType === "install_dependencies") &&
       props.output
     ) {
@@ -488,11 +521,14 @@ function ActionItem(props: ActionItemProps) {
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
-          {props.errorCode !== undefined && !props.success && (
-            <div className="mt-1 text-xs text-red-500 dark:text-red-400">
-              Exit code: {props.errorCode}
-            </div>
-          )}
+          {(props.actionType === "shell" || props.actionType === "search") &&
+            "errorCode" in props &&
+            props.errorCode !== undefined &&
+            !props.success && (
+              <div className="mt-1 text-xs text-red-500 dark:text-red-400">
+                Exit code: {props.errorCode}
+              </div>
+            )}
         </div>
       );
     } else if (props.actionType === "request_human_help") {

@@ -21,6 +21,7 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   GITHUB_PAT,
   DEFAULT_MCP_SERVERS,
+  GITHUB_INSTALLATION_ID,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
@@ -221,6 +222,16 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
   }),
   /**
+   * Cache of fetched document content keyed by URLs.
+   */
+  documentCache: withLangGraph(z.custom<Record<string, string>>(), {
+    reducer: {
+      schema: z.custom<Record<string, string>>(),
+      fn: (state, update) => ({ ...state, ...update }),
+    },
+    default: () => ({}),
+  }),
+  /**
    * The ID of the Github issue this thread is associated with
    */
   githubIssueId: withLangGraph(z.custom<number>(), {
@@ -417,6 +428,11 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  [GITHUB_INSTALLATION_ID]: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
   [GITHUB_PAT]: {
     x_open_swe_ui_config: {
       type: "hidden",
@@ -552,6 +568,12 @@ export const GraphConfiguration = z.object({
    */
   [GITHUB_INSTALLATION_NAME]: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME],
+  }),
+  /**
+   * The installation ID of the GitHub app the user is using to create the run.
+   */
+  [GITHUB_INSTALLATION_ID]: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_ID],
   }),
   /**
    * GitHub Personal Access Token. Used for simpler authentication in environments like evals

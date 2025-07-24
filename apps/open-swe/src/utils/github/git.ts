@@ -5,6 +5,7 @@ import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
+import { withRetry } from "../retry.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -102,11 +103,31 @@ export async function checkoutBranchAndCommit(
   await sandbox.git.commit(absoluteRepoDir, "Apply patch", userName, userEmail);
 
   // Push the changes using the git API so it handles authentication for us.
-  await sandbox.git.push(
-    absoluteRepoDir,
-    "git",
-    options.githubInstallationToken,
+  const pushRes = await withRetry(
+    async () => {
+      return await sandbox.git.push(
+        absoluteRepoDir,
+        "git",
+        options.githubInstallationToken,
+      );
+    },
+    { retries: 3, delay: 0 },
   );
+
+  if (pushRes instanceof Error) {
+    const errorFields = {
+      ...(pushRes instanceof Error
+        ? {
+            name: pushRes.name,
+            message: pushRes.message,
+            stack: pushRes.stack,
+            cause: pushRes.cause,
+          }
+        : pushRes),
+    };
+    logger.error("Failed to push changes", errorFields);
+    throw new Error("Failed to push changes");
+  }
 
   logger.info("Successfully checked out & committed changes.", {
     commitAuthor: userName,
@@ -230,6 +251,18 @@ async function performClone(
     logger.info("Created branch", {
       branch: branchName,
     });
+
+    const setUpstreamBranchRes = await sandbox.process.executeCommand(
+      `git branch --set-upstream-to=origin/${branchName}`,
+      absoluteRepoDir,
+    );
+    if (setUpstreamBranchRes.exitCode !== 0) {
+      logger.error("Failed to set upstream branch", {
+        setUpstreamBranchRes,
+      });
+    }
+    logger.info("Set upstream branch");
+
     return branchName;
   } catch {
     logger.info("Failed to create branch, checking out branch", {
@@ -241,5 +274,17 @@ async function performClone(
   logger.info("Checked out branch", {
     branch: branchName,
   });
+
+  const setUpstreamBranchRes = await sandbox.process.executeCommand(
+    `git branch --set-upstream-to=origin/${branchName}`,
+    absoluteRepoDir,
+  );
+  if (setUpstreamBranchRes.exitCode !== 0) {
+    logger.error("Failed to set upstream branch", {
+      setUpstreamBranchRes,
+    });
+  }
+  logger.info("Set upstream branch");
+
   return branchName;
 }

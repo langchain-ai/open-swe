@@ -1,3 +1,5 @@
+"use client";
+
 import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { createContext, useContext, ReactNode } from "react";
 

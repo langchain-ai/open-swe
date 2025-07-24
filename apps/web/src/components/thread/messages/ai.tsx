@@ -42,6 +42,7 @@ import {
   createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
+  createSearchDocumentForToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
   createRequestHumanHelpToolFields,
@@ -94,6 +95,8 @@ type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
+const searchDocumentForTool = createSearchDocumentForToolFields();
+type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
@@ -277,6 +280,16 @@ export function mapToolMessageToActionStepProps(
       help_request: args.help_request || "",
       reasoningText,
       onSubmitResponse: onSubmitHumanHelpResponse,
+  } else if (toolCall?.name === searchDocumentForTool.name) {
+    const args = toolCall.args as SearchDocumentForToolArgs;
+    return {
+      actionType: "search_document_for",
+      status,
+      success,
+      url: args.url || "",
+      query: args.query || "",
+      output: getContentString(message.content),
+      reasoningText,
     };
   } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
@@ -676,6 +689,14 @@ export function AssistantMessage({
           status: "generating",
           help_request: args?.help_request || "",
           onSubmitResponse: handleHumanHelpResponse,
+      } else if (toolCall.name === searchDocumentForTool.name) {
+        const args = toolCall.args as SearchDocumentForToolArgs;
+        return {
+          actionType: "search_document_for",
+          status: "generating",
+          url: args?.url || "",
+          query: args?.query || "",
+          output: "",
         } as ActionItemProps;
       } else {
         if (isMcpTool(toolCall.name)) {
