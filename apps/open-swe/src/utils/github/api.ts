@@ -185,7 +185,6 @@ export async function createPullRequest({
   try {
     logger.info(
       `Creating pull request against default branch: ${repoBaseBranch}`,
-      { nullOnError },
     );
 
     // Step 2: Create the pull request
@@ -203,18 +202,12 @@ export async function createPullRequest({
     logger.info(`🐙 Pull request created: ${pullRequest.html_url}`);
   } catch (error) {
     if (nullOnError) {
-      logger.info("Pull request creation failed, returning null", {
-        nullOnError,
-      });
       return null;
     }
 
     if (error instanceof Error && error.message.includes("already exists")) {
       logger.info(
         "Pull request already exists. Getting existing pull request...",
-        {
-          nullOnError,
-        },
       );
       return getExistingPullRequest(
         owner,
@@ -267,21 +260,29 @@ export async function markPullRequestReadyForReview({
   title: string;
   body: string;
   githubInstallationToken: string;
-}): Promise<GitHubPullRequestUpdate> {
-  const octokit = new Octokit({
-    auth: githubInstallationToken,
-  });
+}): Promise<GitHubPullRequestUpdate | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
 
-  const { data: updatedPR } = await octokit.pulls.update({
-    owner,
-    repo,
-    pull_number: pullNumber,
-    title,
-    body,
-    draft: false,
-  });
-  logger.info(`Pull request #${pullNumber} marked as ready for review.`);
-  return updatedPR;
+      const { data: updatedPR } = await octokit.pulls.update({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        title,
+        body,
+        draft: false,
+      });
+      logger.info(`Pull request #${pullNumber} marked as ready for review.`);
+      return updatedPR;
+    },
+    githubInstallationToken,
+    "Failed to mark pull request as ready for review",
+    { pullNumber, owner, repo },
+    1,
+  );
 }
 
 export async function getIssue({
