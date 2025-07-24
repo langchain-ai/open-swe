@@ -120,6 +120,7 @@ export async function createPullRequest({
   body = "",
   githubInstallationToken,
   baseBranch,
+  draft = false,
 }: {
   owner: string;
   repo: string;
