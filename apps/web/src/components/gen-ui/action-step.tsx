@@ -191,8 +191,15 @@ const coerceStringToArray = (str: string | string[]) => {
   }
 };
 
+function isRequestHumanHelpAction(
+  props: ActionItemProps,
+): props is RequestHumanHelpActionProps {
+  return "actionType" in props && props.actionType === "request_human_help";
+}
+
 function ActionItem(props: ActionItemProps) {
-  const [expanded, setExpanded] = useState(false);
+  const initialExpanded = isRequestHumanHelpAction(props);
+  const [expanded, setExpanded] = useState(initialExpanded);
 
   // State for request_human_help component
   const [userResponse, setUserResponse] = useState("");
@@ -243,7 +250,7 @@ function ActionItem(props: ActionItemProps) {
           : "Document search failed";
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
-      } else if (props.actionType === "request_human_help") {
+      } else if (isRequestHumanHelpAction(props)) {
         return props.status === "done"
           ? "Help request sent"
           : "Requesting help";
@@ -257,8 +264,14 @@ function ActionItem(props: ActionItemProps) {
     return "";
   };
 
-  // Determine if we should show the content toggle button
   const shouldShowToggle = () => {
+    if (isRequestHumanHelpAction(props)) {
+      return (
+        !!props.help_request &&
+        (props.status === "generating" || props.status === "done")
+      );
+    }
+
     if (props.status !== "done") return false;
 
     if (
@@ -273,8 +286,6 @@ function ActionItem(props: ActionItemProps) {
       return !!props.diff;
     } else if (props.actionType === "planner_notes") {
       return !!(props.notes && props.notes.length > 0);
-    } else if (props.actionType === "request_human_help") {
-      return !!props.help_request || props.status === "done";
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
@@ -325,7 +336,7 @@ function ActionItem(props: ActionItemProps) {
           icon={<Globe className={cn(defaultIconStyling)} />}
         />
       );
-    } else if (props.actionType === "request_human_help") {
+    } else if (isRequestHumanHelpAction(props)) {
       return (
         <ToolIconWithTooltip
           toolNamePretty="Request Human Help"
@@ -488,7 +499,7 @@ function ActionItem(props: ActionItemProps) {
           </span>
         </div>
       );
-    } else if (props.actionType === "request_human_help") {
+    } else if (isRequestHumanHelpAction(props)) {
       return (
         <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
@@ -507,8 +518,13 @@ function ActionItem(props: ActionItemProps) {
 
   // Render the content based on action type
   const renderContent = () => {
-    if (props.status !== "done" || !("actionType" in props)) return null;
+    if (!("actionType" in props)) return null;
 
+    const shouldShowContent =
+      props.status === "done" ||
+      (isRequestHumanHelpAction(props) && props.status === "generating");
+
+    if (!shouldShowContent) return null;
     if (!expanded) return null;
 
     if (
@@ -533,7 +549,7 @@ function ActionItem(props: ActionItemProps) {
             )}
         </div>
       );
-    } else if (props.actionType === "request_human_help") {
+    } else if (isRequestHumanHelpAction(props)) {
       const handleSubmit = () => {
         if (userResponse.trim() && props.onSubmitResponse) {
           props.onSubmitResponse(userResponse.trim());
