@@ -203,6 +203,10 @@ function ActionItem(props: ActionItemProps) {
 
   // State for request_human_help component
   const [userResponse, setUserResponse] = useState("");
+  const [submittedResponse, setSubmittedResponse] = useState<string | null>(
+    null,
+  );
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const getStatusIcon = () => {
@@ -251,6 +255,9 @@ function ActionItem(props: ActionItemProps) {
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
       } else if (isRequestHumanHelpAction(props)) {
+        if (hasSubmitted) {
+          return "Response submitted";
+        }
         return props.status === "done"
           ? "Help request sent"
           : "Requesting help";
@@ -268,7 +275,9 @@ function ActionItem(props: ActionItemProps) {
     if (isRequestHumanHelpAction(props)) {
       return (
         !!props.help_request &&
-        (props.status === "generating" || props.status === "done")
+        (props.status === "generating" ||
+          props.status === "done" ||
+          hasSubmitted)
       );
     }
 
@@ -522,7 +531,8 @@ function ActionItem(props: ActionItemProps) {
 
     const shouldShowContent =
       props.status === "done" ||
-      (isRequestHumanHelpAction(props) && props.status === "generating");
+      (isRequestHumanHelpAction(props) &&
+        (props.status === "generating" || hasSubmitted));
 
     if (!shouldShowContent) return null;
     if (!expanded) return null;
@@ -552,7 +562,10 @@ function ActionItem(props: ActionItemProps) {
     } else if (isRequestHumanHelpAction(props)) {
       const handleSubmit = () => {
         if (userResponse.trim() && props.onSubmitResponse) {
-          props.onSubmitResponse(userResponse.trim());
+          const response = userResponse.trim();
+          setSubmittedResponse(response);
+          setHasSubmitted(true);
+          props.onSubmitResponse(response);
           setUserResponse("");
         }
       };
@@ -578,25 +591,43 @@ function ActionItem(props: ActionItemProps) {
               </div>
             </div>
           )}
-          <div className="space-y-2">
-            <Textarea
-              ref={textareaRef}
-              value={userResponse}
-              onChange={(e) => setUserResponse(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type your response here... (Ctrl+Enter to submit)"
-              className="min-h-[80px] text-xs"
-            />
-            <Button
-              onClick={handleSubmit}
-              disabled={!userResponse.trim()}
-              size="sm"
-              className="w-full"
-            >
-              <Send className="mr-2 h-3 w-3" />
-              Submit Response
-            </Button>
-          </div>
+
+          {hasSubmitted && submittedResponse ? (
+            <div className="space-y-2">
+              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
+                Your Response
+              </div>
+              <div className="rounded border border-green-200 bg-green-100/50 p-3 dark:border-green-800 dark:bg-green-900/30">
+                <div className="text-xs whitespace-pre-wrap text-green-700 dark:text-green-300">
+                  {submittedResponse}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle className="h-3 w-3" />
+                <span>Response submitted successfully</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Textarea
+                ref={textareaRef}
+                value={userResponse}
+                onChange={(e) => setUserResponse(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your response here... (Ctrl+Enter to submit)"
+                className="min-h-[80px] text-xs"
+              />
+              <Button
+                onClick={handleSubmit}
+                disabled={!userResponse.trim()}
+                size="sm"
+                className="w-full"
+              >
+                <Send className="mr-2 h-3 w-3" />
+                Submit Response
+              </Button>
+            </div>
+          )}
         </div>
       );
     } else if (props.actionType === "mcp") {

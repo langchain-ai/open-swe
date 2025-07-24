@@ -336,7 +336,16 @@ export function AssistantMessage({
     ];
 
     // Submit the response using the thread's submit method
-    thread.submit({}, { command: { resume: humanResponse } });
+    thread.submit(
+      {},
+      {
+        command: { resume: humanResponse },
+        config: {
+          recursion_limit: 400,
+        },
+        streamResumable: true,
+      },
+    );
   };
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
@@ -347,9 +356,7 @@ export function AssistantMessage({
   const messages = threadMessages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
 
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
