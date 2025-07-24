@@ -188,7 +188,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranchesPage(1); // Reset pagination
       setBranchesHasMore(false); // Reset pagination state
       
-    ,
+    },
     [setSelectedRepositoryParam, setSelectedBranchParam],
   );
 
