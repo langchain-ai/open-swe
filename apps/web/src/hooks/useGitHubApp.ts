@@ -187,7 +187,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranches([]); // Clear branches when switching repos
       setBranchesPage(1); // Reset pagination
       setBranchesHasMore(false); // Reset pagination state
-      
     },
     [setSelectedRepositoryParam, setSelectedBranchParam],
   );
@@ -531,4 +530,3 @@ export function useGitHubApp(): UseGitHubAppReturn {
     defaultBranch,
   };
 }
-
