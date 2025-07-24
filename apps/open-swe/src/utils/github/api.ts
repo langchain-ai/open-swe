@@ -180,7 +180,7 @@ export async function createPullRequest({
 
     // Step 2: Create the pull request
     const { data: pullRequestData } = await octokit.pulls.create({
-    draft,
+      draft,
       owner,
       repo,
       title,
@@ -496,4 +496,3 @@ export async function updateIssueComment({
     numRetries,
   );
 }
-

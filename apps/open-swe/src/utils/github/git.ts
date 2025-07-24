@@ -85,7 +85,7 @@ export async function checkoutBranchAndCommit(
     branchName?: string;
     githubInstallationToken: string;
   },
-): Promise<{ branchName: string; pullRequestNumber?: number; }> {
+): Promise<{ branchName: string; pullRequestNumber?: number }> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options.branchName || getBranchName(config);
 
@@ -307,4 +307,3 @@ async function performClone(
 
   return branchName;
 }
-
