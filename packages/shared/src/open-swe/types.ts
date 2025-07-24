@@ -120,6 +120,10 @@ export type Task = {
    * Optional parent task id if this task was derived from another task
    */
   parentTaskId?: string;
+  /**
+   * The pull request number associated with this task
+   */
+  pullRequestNumber?: number;
 };
 
 export type TaskPlan = {
@@ -270,10 +274,6 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
-  pullRequestNumbers: z
-    .array(z.number())
-    .optional()
-    .describe("Array of pull request numbers for tracking multiple PRs."),
   tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
     reducer: {
       schema: z.custom<CacheMetrics>().optional(),

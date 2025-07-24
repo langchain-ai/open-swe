@@ -11,6 +11,7 @@ import {
   GraphState,
   GraphConfig,
   GraphUpdate,
+  TaskPlan,
 } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
@@ -34,6 +35,8 @@ import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
+import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -201,6 +204,7 @@ export async function takeAction(
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
+  let updatedTaskPlan: TaskPlan | undefined;
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
@@ -213,10 +217,15 @@ export async function takeAction(
       {
         branchName,
         githubInstallationToken,
+        taskPlan: state.taskPlan,
+        githubIssueId: state.githubIssueId,
       },
     );
     branchName = result.branchName;
-    pullRequestNumber = result.pullRequestNumber;
+    pullRequestNumber = result.updatedTaskPlan
+      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+      : undefined;
+    updatedTaskPlan = result.updatedTaskPlan;
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -239,15 +248,23 @@ export async function takeAction(
         ? dependenciesInstalled
         : null;
 
+  // Add the tool call messages for the draft PR to the user facing messages if a draft PR was opened
+  const userFacingMessagesUpdate = [
+    ...toolCallResults,
+    ...(updatedTaskPlan && pullRequestNumber
+      ? createPullRequestToolCallMessage(
+          state.targetRepository,
+          pullRequestNumber,
+          true,
+        )
+      : []),
+  ];
   const commandUpdate: GraphUpdate = {
-    messages: toolCallResults,
+    messages: userFacingMessagesUpdate,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
-    ...(pullRequestNumber && {
-      pullRequestNumbers: [
-        ...(state.pullRequestNumbers || []),
-        pullRequestNumber,
-      ],
+    ...(updatedTaskPlan && {
+      taskPlan: updatedTaskPlan,
     }),
     codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandbox.id,

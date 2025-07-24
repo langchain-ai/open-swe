@@ -1,11 +1,22 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../logger.js";
-import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
+import {
+  GraphConfig,
+  TargetRepository,
+  TaskPlan,
+} from "@open-swe/shared/open-swe/types";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 import { withRetry } from "../retry.js";
+import {
+  addPullRequestNumberToActiveTask,
+  getActiveTask,
+  getPullRequestNumberFromActiveTask,
+} from "@open-swe/shared/open-swe/tasks";
+import { createPullRequest } from "./api.js";
+import { addTaskPlanToIssue } from "./issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -84,8 +95,10 @@ export async function checkoutBranchAndCommit(
   options: {
     branchName?: string;
     githubInstallationToken: string;
+    taskPlan: TaskPlan;
+    githubIssueId: number;
   },
-): Promise<{ branchName: string; pullRequestNumber?: number }> {
+): Promise<{ branchName: string; updatedTaskPlan?: TaskPlan }> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options.branchName || getBranchName(config);
 
@@ -127,24 +140,41 @@ export async function checkoutBranchAndCommit(
     };
     logger.error("Failed to push changes", errorFields);
     throw new Error("Failed to push changes");
+  } else {
+    logger.info("Successfully pushed changes");
   }
 
-  // Check if this is the first commit by checking if pullRequestNumbers is empty
-  const { pullRequestNumbers } = config.state;
-  let pullRequestNumber;
-  if (!pullRequestNumbers || pullRequestNumbers.length === 0) {
+  // Check if the active task has a PR associated with it. If not, create a draft PR.
+  let updatedTaskPlan: TaskPlan | undefined;
+  const activeTask = getActiveTask(options.taskPlan);
+  const prForTask = getPullRequestNumberFromActiveTask(options.taskPlan);
+  if (!prForTask) {
     logger.info("First commit detected, creating a draft pull request.");
     const pullRequest = await createPullRequest({
       owner: targetRepository.owner,
       repo: targetRepository.repo,
       headBranch: branchName,
-      title: "Initial draft PR",
+      title: `[WIP]: ${activeTask?.title ?? "Open SWE task"}`,
+      body: `**WORK IN PROGRESS OPEN SWE PR**\n\nFixes: #${options.githubIssueId}`,
       githubInstallationToken: options.githubInstallationToken,
       draft: true,
+      baseBranch: targetRepository.branch,
+      nullOnError: true,
     });
     if (pullRequest) {
-      pullRequestNumber = pullRequest.number;
-      logger.info(`Draft pull request created: #${pullRequestNumber}`);
+      updatedTaskPlan = addPullRequestNumberToActiveTask(
+        options.taskPlan,
+        pullRequest.number,
+      );
+      await addTaskPlanToIssue(
+        {
+          githubIssueId: options.githubIssueId,
+          targetRepository,
+        },
+        config,
+        updatedTaskPlan,
+      );
+      logger.info(`Draft pull request created: #${pullRequest.number}`);
     }
   }
 
@@ -152,7 +182,7 @@ export async function checkoutBranchAndCommit(
     commitAuthor: userName,
   });
 
-  return { branchName, pullRequestNumber };
+  return { branchName, updatedTaskPlan };
 }
 
 export async function pullLatestChanges(
@@ -271,16 +301,11 @@ async function performClone(
       branch: branchName,
     });
 
-    const setUpstreamBranchRes = await sandbox.process.executeCommand(
-      `git branch --set-upstream-to=origin/${branchName}`,
-      absoluteRepoDir,
-    );
-    if (setUpstreamBranchRes.exitCode !== 0) {
-      logger.error("Failed to set upstream branch", {
-        setUpstreamBranchRes,
-      });
-    }
-    logger.info("Set upstream branch");
+    // push an empty commit so that the branch exists in the remote
+    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
+    logger.info("Pushed empty commit to remote", {
+      branch: branchName,
+    });
 
     return branchName;
   } catch {
@@ -302,8 +327,9 @@ async function performClone(
     logger.error("Failed to set upstream branch", {
       setUpstreamBranchRes,
     });
+  } else {
+    logger.info("Set upstream branch");
   }
-  logger.info("Set upstream branch");
 
   return branchName;
 }

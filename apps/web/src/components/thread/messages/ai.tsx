@@ -516,14 +516,15 @@ export function AssistantMessage({
 
     const status = correspondingToolResult ? "done" : "generating";
 
+    const content = correspondingToolResult
+      ? getContentString(correspondingToolResult.content)
+      : "";
+
     // Extract PR URL from the tool message content
     // Format: "Created pull request: https://github.com/owner/repo/pull/123"
     let prUrl: string | undefined = undefined;
-    if (correspondingToolResult) {
-      const content = getContentString(correspondingToolResult.content);
-      if (content.includes("Created pull request: ")) {
-        prUrl = content.split("Created pull request: ")[1].trim();
-      }
+    if (content && content.includes("pull request: ")) {
+      prUrl = content.split("pull request: ")[1].trim();
     }
 
     // Extract PR number from URL if available
@@ -545,6 +546,7 @@ export function AssistantMessage({
           prNumber={prNumber}
           branch={branch}
           targetBranch={targetBranch}
+          isDraft={content.includes("Opened draft")}
         />
       </div>
     );
