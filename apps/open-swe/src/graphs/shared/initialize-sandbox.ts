@@ -275,6 +275,16 @@ export async function initializeSandbox(
       "error",
       "Failed to clone repository. Please check your repo URL and permissions.",
     );
+    const errorFields = {
+      ...(cloneRepoRes instanceof Error
+        ? {
+            name: cloneRepoRes.name,
+            message: cloneRepoRes.message,
+            stack: cloneRepoRes.stack,
+          }
+        : cloneRepoRes),
+    };
+    logger.error("Cloning repository failed", errorFields);
     throw new Error("Failed to clone repository.");
   }
   const newBranchName =
