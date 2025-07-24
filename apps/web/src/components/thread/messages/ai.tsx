@@ -42,6 +42,7 @@ import {
   createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
+  createSearchDocumentForToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
   createReviewStartedToolFields,
@@ -92,6 +93,8 @@ type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
+const searchDocumentForTool = createSearchDocumentForToolFields();
+type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
@@ -258,6 +261,17 @@ export function mapToolMessageToActionStepProps(
       status,
       success,
       url: args.url || "",
+      output: getContentString(message.content),
+      reasoningText,
+    };
+  } else if (toolCall?.name === searchDocumentForTool.name) {
+    const args = toolCall.args as SearchDocumentForToolArgs;
+    return {
+      actionType: "search_document_for",
+      status,
+      success,
+      url: args.url || "",
+      query: args.query || "",
       output: getContentString(message.content),
       reasoningText,
     };
@@ -635,6 +649,15 @@ export function AssistantMessage({
           actionType: "get_url_content",
           status: "generating",
           url: args?.url || "",
+          output: "",
+        } as ActionItemProps;
+      } else if (toolCall.name === searchDocumentForTool.name) {
+        const args = toolCall.args as SearchDocumentForToolArgs;
+        return {
+          actionType: "search_document_for",
+          status: "generating",
+          url: args?.url || "",
+          query: args?.query || "",
           output: "",
         } as ActionItemProps;
       } else {

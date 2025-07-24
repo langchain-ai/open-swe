@@ -7,6 +7,7 @@ import {
 import {
   createGetURLContentTool,
   createShellTool,
+  createSearchDocumentForTool,
 } from "../../../tools/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
@@ -18,7 +19,7 @@ import {
   safeSchemaToString,
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
-import { truncateOutput } from "../../../utils/truncate-outputs.js";
+
 import { createSearchTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
@@ -32,6 +33,7 @@ import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -49,14 +51,22 @@ export async function takeActions(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const plannerNotesTool = createPlannerNotesTool();
-  const getURLContentTool = createGetURLContentTool();
+  const getURLContentTool = createGetURLContentTool(state);
+  const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
+
+  const higherContextLimitToolNames = [
+    ...mcpTools.map((t) => t.name),
+    getURLContentTool.name,
+    searchDocumentForTool.name,
+  ];
 
   const allTools = [
     shellTool,
     searchTool,
     plannerNotesTool,
     getURLContentTool,
+    searchDocumentForTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(
@@ -88,7 +98,7 @@ export async function takeActions(
         status: "error",
       });
 
-      return toolMessage;
+      return { toolMessage, stateUpdates: undefined };
     }
 
     logger.info("Executing planner tool action", {
@@ -142,26 +152,46 @@ export async function takeActions(
       }
     }
 
-    const truncatedOutput =
-      toolCall.name === getURLContentTool.name
-        ? // Allow for more context to be included from URL contents.
-          truncateOutput(result, {
-            numStartCharacters: 10000,
-            numEndCharacters: 10000,
-          })
-        : truncateOutput(result);
+    const { content, stateUpdates } = await processToolCallContent(
+      toolCall,
+      result,
+      {
+        higherContextLimitToolNames,
+        state,
+        config,
+      },
+    );
 
     const toolMessage = new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: truncatedOutput,
+      content,
       name: toolCall.name,
       status: toolCallStatus,
     });
-    return toolMessage;
+
+    return { toolMessage, stateUpdates };
   });
 
-  let toolCallResults = await Promise.all(toolCallResultsPromise);
+  const toolCallResultsWithUpdates = await Promise.all(toolCallResultsPromise);
+  let toolCallResults = toolCallResultsWithUpdates.map(
+    (item) => item.toolMessage,
+  );
+
+  // merging document cache updates from tool calls
+  const allStateUpdates = toolCallResultsWithUpdates
+    .map((item) => item.stateUpdates)
+    .filter(Boolean)
+    .reduce(
+      (acc: { documentCache: Record<string, string> }, update) => {
+        if (update?.documentCache) {
+          acc.documentCache = { ...acc.documentCache, ...update.documentCache };
+        }
+        return acc;
+      },
+      { documentCache: {} } as { documentCache: Record<string, string> },
+    );
+
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
@@ -201,6 +231,7 @@ ${tc.content}`,
     sandboxSessionId: sandbox.id,
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
+    ...allStateUpdates,
   };
 
   const maxContextActions = config.configurable?.maxContextActions ?? 75;

@@ -36,6 +36,16 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * Cache of fetched document content keyed by URLs.
+   */
+  documentCache: withLangGraph(z.custom<Record<string, string>>(), {
+    reducer: {
+      schema: z.custom<Record<string, string>>(),
+      fn: (state, update) => ({ ...state, ...update }),
+    },
+    default: () => ({}),
+  }),
   taskPlan: withLangGraph(z.custom<TaskPlan>(), {
     reducer: {
       schema: z.custom<TaskPlan>(),

@@ -222,6 +222,16 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
   }),
   /**
+   * Cache of fetched document content keyed by URLs.
+   */
+  documentCache: withLangGraph(z.custom<Record<string, string>>(), {
+    reducer: {
+      schema: z.custom<Record<string, string>>(),
+      fn: (state, update) => ({ ...state, ...update }),
+    },
+    default: () => ({}),
+  }),
+  /**
    * The ID of the Github issue this thread is associated with
    */
   githubIssueId: withLangGraph(z.custom<number>(), {
