@@ -51,32 +51,55 @@ function routeGeneratedAction(
   | "request-help"
   | "generate-action"
   | "handle-completed-task"
-  | Send {
+  | Send
+  | Send[] {
   const { internalMessages } = state;
   const lastMessage = internalMessages[internalMessages.length - 1];
 
   // If the message is an AI message, and it has tool calls, we should take action.
   if (isAIMessage(lastMessage) && lastMessage.tool_calls?.length) {
-    const toolCall = lastMessage.tool_calls[0];
-    if (toolCall.name === "request_human_help") {
+    const toolCalls = lastMessage.tool_calls;
+    
+    // Check for request_human_help among all tool calls
+    const requestHelpCall = toolCalls.find((tc: any) => tc.name === "request_human_help");
+    if (requestHelpCall) {
       return "request-help";
     }
 
-    if (
-      toolCall.name === "update_plan" &&
-      "update_plan_reasoning" in toolCall.args &&
-      typeof toolCall.args?.update_plan_reasoning === "string"
-    ) {
-      // Need to return a `Send` here so that we can update the state to include the plan change request.
-      return new Send("update-plan", {
-        planChangeRequest: toolCall.args?.update_plan_reasoning,
-      });
+    // Check for update_plan among all tool calls
+    const updatePlanCall = toolCalls.find((tc: any) => 
+      tc.name === "update_plan" &&
+      "update_plan_reasoning" in tc.args &&
+      typeof tc.args?.update_plan_reasoning === "string"
+    );
+
+    // Check for mark_task_completed among all tool calls
+    const markTaskCompletedCall = toolCalls.find((tc: any) => 
+      tc.name === createMarkTaskCompletedToolFields().name
+    );
+
+    if (markTaskCompletedCall) {
+      return "handle-completed-task";
     }
 
-    const taskMarkedCompleted =
-      toolCall.name === createMarkTaskCompletedToolFields().name;
-    if (taskMarkedCompleted) {
-      return "handle-completed-task";
+    // If update_plan is called alongside other tools, handle multiple routing
+    if (updatePlanCall) {
+      const otherToolCalls = toolCalls.filter((tc: any) => tc.name !== "update_plan");
+      
+      if (otherToolCalls.length > 0) {
+        // Return multiple Send objects: one for update-plan and one for take-action
+        return [
+          new Send("update-plan", {
+            planChangeRequest: updatePlanCall.args?.update_plan_reasoning,
+          }),
+          new Send("take-action", {})
+        ];
+      } else {
+        // Only update_plan is called, return single Send object
+        return new Send("update-plan", {
+          planChangeRequest: updatePlanCall.args?.update_plan_reasoning,
+        });
+      }
     }
 
     return "take-action";
@@ -102,7 +125,7 @@ function routeGenerateActionsOrEnd(
   state: GraphState,
 ): "generate-conclusion" | "generate-action" {
   const activePlanItems = getActivePlanItems(state.taskPlan);
-  const allCompleted = activePlanItems.every((p) => p.completed);
+  const allCompleted = activePlanItems.every((p: any) => p.completed);
   if (allCompleted) {
     return "generate-conclusion";
   }

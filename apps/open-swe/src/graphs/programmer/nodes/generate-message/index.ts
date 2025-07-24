@@ -211,6 +211,24 @@ export async function generateAction(
     newSandboxSessionId = await stopSandbox(state.sandboxSessionId);
   }
 
+  // Handle concurrent tool calls - if request_human_help is called alongside other tools,
+  // remove all other tool calls to ensure only request_human_help is processed
+  if (
+    response.tool_calls?.length &&
+    response.tool_calls?.length > 1 &&
+    response.tool_calls.some((t) => t.name === "request_human_help")
+  ) {
+    logger.info(
+      "Multiple tool calls found, including request_human_help. Removing all other tool calls to process only request_human_help.",
+      {
+        toolCalls: JSON.stringify(response.tool_calls, null, 2),
+      },
+    );
+    response.tool_calls = response.tool_calls.filter(
+      (t) => t.name === "request_human_help",
+    );
+  }
+
   if (
     response.tool_calls?.length &&
     response.tool_calls?.length > 1 &&
