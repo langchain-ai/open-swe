@@ -200,12 +200,13 @@ export async function takeAction(
   );
 
   let branchName: string | undefined = state.branchName;
+  let pullRequestNumber: number | undefined;
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    branchName = await checkoutBranchAndCommit(
+    const result = await checkoutBranchAndCommit(
       config,
       state.targetRepository,
       sandbox,
@@ -214,6 +215,8 @@ export async function takeAction(
         githubInstallationToken,
       },
     );
+    branchName = result.branchName;
+    pullRequestNumber = result.pullRequestNumber;
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -240,6 +243,12 @@ export async function takeAction(
     messages: toolCallResults,
     internalMessages: toolCallResults,
     ...(branchName && { branchName }),
+    ...(pullRequestNumber && {
+      pullRequestNumbers: [
+        ...(state.pullRequestNumbers || []),
+        pullRequestNumber,
+      ],
+    }),
     codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandbox.id,
     ...(dependenciesInstalledUpdate !== null && {
@@ -252,3 +261,4 @@ export async function takeAction(
     update: commandUpdate,
   });
 }
+
