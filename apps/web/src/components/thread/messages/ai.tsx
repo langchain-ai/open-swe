@@ -194,6 +194,9 @@ export function mapToolMessageToActionStepProps(
   const status: ActionItemProps["status"] = "done";
   const success = message.status === "success";
 
+  const msgContent = getContentString(message.content);
+  const output = msgContent === "" ? "Empty string" : msgContent;
+
   if (toolCall?.name === shellTool.name) {
     const args = toolCall.args as ShellToolArgs;
     return {
@@ -202,7 +205,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || [],
       workdir: args.workdir,
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   } else if (toolCall?.name === applyPatchTool.name) {
@@ -231,7 +234,7 @@ export function mapToolMessageToActionStepProps(
       exclude_files: args.exclude_files || "",
       include_files: args.include_files || "",
       file_types: args.file_types || [],
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   } else if (toolCall?.name === installDependenciesTool.name) {
@@ -242,7 +245,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "",
       workdir: args.workdir || "",
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   } else if (toolCall?.name === scratchpadTool.name) {
@@ -261,7 +264,7 @@ export function mapToolMessageToActionStepProps(
       status,
       success,
       url: args.url || "",
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   } else if (toolCall?.name === searchDocumentForTool.name) {
@@ -272,7 +275,7 @@ export function mapToolMessageToActionStepProps(
       success,
       url: args.url || "",
       query: args.query || "",
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   } else if (toolCall && isMcpTool(toolCall.name)) {
@@ -282,7 +285,7 @@ export function mapToolMessageToActionStepProps(
       success,
       toolName: toolCall.name,
       args: toolCall.args as Record<string, any>,
-      output: getContentString(message.content),
+      output,
       reasoningText,
     };
   }

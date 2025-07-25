@@ -123,8 +123,8 @@ export async function takeAction(
         toolCallStatus = toolResult.status;
       }
 
-      if (!result) {
-        result = toolCallStatus;
+      if (!result && result !== "") {
+        result = "";
       }
     } catch (e) {
       toolCallStatus = "error";

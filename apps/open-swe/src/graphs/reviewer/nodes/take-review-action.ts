@@ -105,11 +105,13 @@ export async function takeReviewerActions(
           result: string;
           status: "success" | "error";
         };
+
       result = toolResult.result;
-      if (!result) {
-        result = toolResult.status;
-      }
       toolCallStatus = toolResult.status;
+
+      if (!result && result !== "") {
+        result = "";
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
