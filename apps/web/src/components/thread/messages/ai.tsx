@@ -28,6 +28,7 @@ import {
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
 import { CodeReviewStarted } from "@/components/gen-ui/code-review-started";
+import { RequestHumanHelp } from "@/components/gen-ui/request-human-help";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -271,16 +272,6 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
-  } else if (toolCall?.name === requestHumanHelpTool.name) {
-    const args = toolCall.args as RequestHumanHelpToolArgs;
-    return {
-      actionType: "request_human_help",
-      status,
-      success,
-      help_request: args.help_request || "",
-      reasoningText,
-      onSubmitResponse: onSubmitHumanHelpResponse,
-    };
   } else if (toolCall?.name === searchDocumentForTool.name) {
     const args = toolCall.args as SearchDocumentForToolArgs;
     return {
@@ -384,7 +375,6 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === requestHumanHelpTool.name ||
           tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === plannerNotesTool.name ||
@@ -433,6 +423,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === reviewStartedTool.name)
     : undefined;
 
+  const requestHumanHelpToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === requestHumanHelpTool.name)
+    : undefined;
+
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
     const correspondingToolResult = toolResults.find(
@@ -460,6 +454,27 @@ export function AssistantMessage({
       <div className="flex flex-col gap-4">
         <CodeReviewStarted
           status={correspondingToolResult ? "done" : "generating"}
+        />
+      </div>
+    );
+  }
+
+  // Check if this is a request human help message
+  if (requestHumanHelpToolCall && aiToolCalls.length === 1) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === requestHumanHelpToolCall.id,
+    );
+
+    const args = requestHumanHelpToolCall.args as RequestHumanHelpToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <RequestHumanHelp
+          status={correspondingToolResult ? "done" : "generating"}
+          helpRequest={args.help_request}
+          reasoningText={reasoningText}
+          onSubmitResponse={handleHumanHelpResponse}
         />
       </div>
     );
@@ -687,14 +702,6 @@ export function AssistantMessage({
           status: "generating",
           url: args?.url || "",
           output: "",
-        } as ActionItemProps;
-      } else if (toolCall.name === requestHumanHelpTool.name) {
-        const args = toolCall.args as RequestHumanHelpToolArgs;
-        return {
-          actionType: "request_human_help",
-          status: "generating",
-          help_request: args?.help_request || "",
-          onSubmitResponse: handleHumanHelpResponse,
         } as ActionItemProps;
       } else if (toolCall.name === searchDocumentForTool.name) {
         const args = toolCall.args as SearchDocumentForToolArgs;

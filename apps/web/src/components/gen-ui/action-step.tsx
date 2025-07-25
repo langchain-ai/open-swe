@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import {
   Terminal,
   FileText,
@@ -15,8 +15,6 @@ import {
   Zap,
   FileCode,
   CloudDownload,
-  HelpCircle,
-  Send,
 } from "lucide-react";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import {
@@ -26,7 +24,6 @@ import {
   createTakePlannerNotesFields,
   createGetURLContentToolFields,
   createSearchToolFields,
-  createRequestHumanHelpToolFields,
   createSearchDocumentForToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
@@ -37,8 +34,6 @@ import {
   TooltipTrigger,
 } from "../ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
 import { ToolIconWithTooltip } from "./tool-icon-tooltip";
 
 // Used only for Zod type inference.
@@ -57,8 +52,7 @@ const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 const searchTool = createSearchToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
-const requestHumanHelpTool = createRequestHumanHelpToolFields();
-type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
+
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 
@@ -125,11 +119,7 @@ type McpActionProps = BaseActionProps & {
   output?: string;
 };
 
-type RequestHumanHelpActionProps = BaseActionProps &
-  Partial<RequestHumanHelpToolArgs> & {
-    actionType: "request_human_help";
-    onSubmitResponse?: (response: string) => void;
-  };
+
 
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
@@ -140,7 +130,6 @@ export type ActionItemProps =
   | GetURLContentActionProps
   | McpActionProps
   | SearchActionProps
-  | RequestHumanHelpActionProps
   | SearchDocumentForActionProps;
 
 export type ActionStepProps = {
@@ -157,7 +146,6 @@ const ACTION_GENERATING_TEXT_MAP = {
   [getURLContentTool.name]: "Fetching URL content...",
   [searchDocumentForTool.name]: "Searching document...",
   [searchTool.name]: "Searching...",
-  [requestHumanHelpTool.name]: "Requesting help...",
 };
 
 function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
@@ -191,22 +179,10 @@ const coerceStringToArray = (str: string | string[]) => {
   }
 };
 
-function isRequestHumanHelpAction(
-  props: ActionItemProps,
-): props is RequestHumanHelpActionProps {
-  return "actionType" in props && props.actionType === "request_human_help";
-}
+
 
 function ActionItem(props: ActionItemProps) {
-  const initialExpanded = isRequestHumanHelpAction(props);
-  const [expanded, setExpanded] = useState(initialExpanded);
-
-  const [userResponse, setUserResponse] = useState("");
-  const [submittedResponse, setSubmittedResponse] = useState<string | null>(
-    null,
-  );
-  const [hasSubmitted, setHasSubmitted] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const getStatusIcon = () => {
     switch (props.status) {
@@ -253,13 +229,6 @@ function ActionItem(props: ActionItemProps) {
           : "Document search failed";
       } else if (props.actionType === "search") {
         return props.success ? "Search completed" : "Search failed";
-      } else if (isRequestHumanHelpAction(props)) {
-        if (hasSubmitted) {
-          return "Response submitted";
-        }
-        return props.status === "done"
-          ? "Help request sent"
-          : "Requesting help";
       } else if (props.actionType === "mcp") {
         return props.success
           ? `${props.toolName} completed`
@@ -271,15 +240,6 @@ function ActionItem(props: ActionItemProps) {
   };
 
   const shouldShowToggle = () => {
-    if (isRequestHumanHelpAction(props)) {
-      return (
-        !!props.help_request &&
-        (props.status === "generating" ||
-          props.status === "done" ||
-          hasSubmitted)
-      );
-    }
-
     if (props.status !== "done") return false;
 
     if (
@@ -342,13 +302,6 @@ function ActionItem(props: ActionItemProps) {
         <ToolIconWithTooltip
           toolNamePretty="Get URL Contents"
           icon={<Globe className={cn(defaultIconStyling)} />}
-        />
-      );
-    } else if (isRequestHumanHelpAction(props)) {
-      return (
-        <ToolIconWithTooltip
-          toolNamePretty="Request Human Help"
-          icon={<HelpCircle className={cn(defaultIconStyling)} />}
         />
       );
     } else if (props.actionType === "search_document_for") {
@@ -507,14 +460,6 @@ function ActionItem(props: ActionItemProps) {
           </span>
         </div>
       );
-    } else if (isRequestHumanHelpAction(props)) {
-      return (
-        <div className="flex items-center">
-          <span className="text-foreground/80 text-xs font-normal">
-            Help requested from human
-          </span>
-        </div>
-      );
     } else {
       return (
         <code className="text-foreground/80 flex items-center text-xs font-normal">
@@ -527,13 +472,7 @@ function ActionItem(props: ActionItemProps) {
   // Render the content based on action type
   const renderContent = () => {
     if (!("actionType" in props)) return null;
-
-    const shouldShowContent =
-      props.status === "done" ||
-      (isRequestHumanHelpAction(props) &&
-        (props.status === "generating" || hasSubmitted));
-
-    if (!shouldShowContent) return null;
+    if (props.status !== "done") return null;
     if (!expanded) return null;
 
     if (
@@ -556,77 +495,6 @@ function ActionItem(props: ActionItemProps) {
                 Exit code: {props.errorCode}
               </div>
             )}
-        </div>
-      );
-    } else if (isRequestHumanHelpAction(props)) {
-      const handleSubmit = () => {
-        if (userResponse.trim() && props.onSubmitResponse) {
-          const response = userResponse.trim();
-          setSubmittedResponse(response);
-          setHasSubmitted(true);
-          props.onSubmitResponse(response);
-          setUserResponse("");
-        }
-      };
-
-      const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-          e.preventDefault();
-          handleSubmit();
-        }
-      };
-
-      return (
-        <div className="bg-muted p-3 dark:bg-gray-900">
-          {props.help_request && (
-            <div className="mb-3">
-              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
-                Help Request
-              </div>
-              <div className="bg-muted-foreground/5 rounded border p-3">
-                <BasicMarkdownText className="text-xs">
-                  {props.help_request}
-                </BasicMarkdownText>
-              </div>
-            </div>
-          )}
-
-          {hasSubmitted && submittedResponse ? (
-            <div className="space-y-2">
-              <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
-                Your Response
-              </div>
-              <div className="rounded border border-green-200 bg-green-100/50 p-3 dark:border-green-800 dark:bg-green-900/30">
-                <div className="text-xs whitespace-pre-wrap text-green-700 dark:text-green-300">
-                  {submittedResponse}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                <CheckCircle className="h-3 w-3" />
-                <span>Response submitted successfully</span>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Textarea
-                ref={textareaRef}
-                value={userResponse}
-                onChange={(e) => setUserResponse(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your response here... (Ctrl+Enter to submit)"
-                className="min-h-[80px] text-xs"
-              />
-              <Button
-                onClick={handleSubmit}
-                disabled={!userResponse.trim()}
-                size="sm"
-                className="w-full"
-              >
-                <Send className="mr-2 h-3 w-3" />
-                Submit Response
-              </Button>
-            </div>
-          )}
         </div>
       );
     } else if (props.actionType === "mcp") {
