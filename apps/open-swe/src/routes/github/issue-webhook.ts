@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { extractImageUrls } from "@open-swe/shared/github-images";
 import { Context } from "hono";
 import { BlankEnv, BlankInput } from "hono/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -14,7 +15,7 @@ import {
   MANAGER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { encryptSecret } from "@open-swe/shared/crypto";
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, MessageContent } from "@langchain/core/messages";
 import {
   getOpenSWEAutoAcceptLabel,
   getOpenSWELabel,
@@ -88,6 +89,46 @@ const getHeaders = (
   return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
+/**
+ * Converts issue content to multimodal content array when images are detected
+ * @param title - The issue title
+ * @param body - The issue body content
+ * @returns MessageContent array with text and image_url blocks
+ */
+const createIssueMessageContent = (
+  title: string,
+  body: string,
+): MessageContent => {
+  const fullText = `**${title}**\n\n${body}`;
+  const extractedImages = extractImageUrls(body);
+
+  // If no images found, return as plain text
+  if (extractedImages.length === 0) {
+    return fullText;
+  }
+
+  // Create multimodal content array with text and images
+  const contentBlocks: Array<
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } }
+  > = [
+    {
+      type: "text",
+      text: fullText,
+    },
+  ];
+
+  // Add image blocks
+  for (const image of extractedImages) {
+    contentBlocks.push({
+      type: "image_url",
+      image_url: { url: image.url },
+    });
+  }
+
+  return contentBlocks;
+};
+
 webhooks.on("issues.labeled", async ({ payload }) => {
   if (!process.env.SECRETS_ENCRYPTION_KEY) {
     throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
@@ -156,7 +197,10 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       messages: [
         new HumanMessage({
           id: uuidv4(),
-          content: `**${issueData.issueTitle}**\n\n${issueData.issueBody}`,
+          content: createIssueMessageContent(
+            issueData.issueTitle,
+            issueData.issueBody,
+          ),
           additional_kwargs: {
             isOriginalIssue: true,
             githubIssueId: issueData.issueNumber,
