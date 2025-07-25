@@ -31,7 +31,7 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
     temperature: 0,
   },
   [Task.SUMMARIZER]: {
-    modelName: "google-genai:gemini-2.5-pro",
+    modelName: "openai:gpt-4.1-mini",
     temperature: 0,
   },
 };

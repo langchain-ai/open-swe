@@ -8,3 +8,9 @@ export type GitHubIssueComment =
 
 export type GitHubPullRequest =
   RestEndpointMethodTypes["pulls"]["create"]["response"]["data"];
+
+export type GitHubPullRequestUpdate =
+  RestEndpointMethodTypes["pulls"]["update"]["response"]["data"];
+
+export type GitHubPullRequestList =
+  RestEndpointMethodTypes["pulls"]["list"]["response"]["data"];

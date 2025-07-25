@@ -120,6 +120,10 @@ export type Task = {
    * Optional parent task id if this task was derived from another task
    */
   parentTaskId?: string;
+  /**
+   * The pull request number associated with this task
+   */
+  pullRequestNumber?: number;
 };
 
 export type TaskPlan = {
