@@ -42,6 +42,7 @@ import {
   createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
   createGetURLContentToolFields,
+  createSearchDocumentForToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
   createReviewStartedToolFields,
@@ -92,6 +93,8 @@ type DiagnoseErrorToolArgs = z.infer<typeof diagnoseErrorTool.schema>;
 
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
+const searchDocumentForTool = createSearchDocumentForToolFields();
+type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 
 const writeTechnicalNotesTool = createWriteTechnicalNotesToolFields();
 type WriteTechnicalNotesToolArgs = z.infer<
@@ -258,6 +261,17 @@ export function mapToolMessageToActionStepProps(
       status,
       success,
       url: args.url || "",
+      output: getContentString(message.content),
+      reasoningText,
+    };
+  } else if (toolCall?.name === searchDocumentForTool.name) {
+    const args = toolCall.args as SearchDocumentForToolArgs;
+    return {
+      actionType: "search_document_for",
+      status,
+      success,
+      url: args.url || "",
+      query: args.query || "",
       output: getContentString(message.content),
       reasoningText,
     };
@@ -502,14 +516,15 @@ export function AssistantMessage({
 
     const status = correspondingToolResult ? "done" : "generating";
 
+    const content = correspondingToolResult
+      ? getContentString(correspondingToolResult.content)
+      : "";
+
     // Extract PR URL from the tool message content
     // Format: "Created pull request: https://github.com/owner/repo/pull/123"
     let prUrl: string | undefined = undefined;
-    if (correspondingToolResult) {
-      const content = getContentString(correspondingToolResult.content);
-      if (content.includes("Created pull request: ")) {
-        prUrl = content.split("Created pull request: ")[1].trim();
-      }
+    if (content && content.includes("pull request: ")) {
+      prUrl = content.split("pull request: ")[1].trim();
     }
 
     // Extract PR number from URL if available
@@ -531,6 +546,7 @@ export function AssistantMessage({
           prNumber={prNumber}
           branch={branch}
           targetBranch={targetBranch}
+          isDraft={content.includes("Opened draft")}
         />
       </div>
     );
@@ -635,6 +651,15 @@ export function AssistantMessage({
           actionType: "get_url_content",
           status: "generating",
           url: args?.url || "",
+          output: "",
+        } as ActionItemProps;
+      } else if (toolCall.name === searchDocumentForTool.name) {
+        const args = toolCall.args as SearchDocumentForToolArgs;
+        return {
+          actionType: "search_document_for",
+          status: "generating",
+          url: args?.url || "",
+          query: args?.query || "",
           output: "",
         } as ActionItemProps;
       } else {

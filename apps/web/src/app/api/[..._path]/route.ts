@@ -4,6 +4,7 @@ import {
   GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_INSTALLATION_NAME,
+  GITHUB_INSTALLATION_ID,
 } from "@open-swe/shared/constants";
 import {
   getGitHubInstallationTokenOrThrow,
@@ -72,6 +73,7 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
         [GITHUB_INSTALLATION_TOKEN_COOKIE]: installationToken,
         [GITHUB_INSTALLATION_NAME]: installationName,
+        [GITHUB_INSTALLATION_ID]: installationIdCookie,
       };
     },
   });

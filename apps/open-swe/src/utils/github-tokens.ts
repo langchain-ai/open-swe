@@ -1,6 +1,7 @@
 import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_ID,
 } from "@open-swe/shared/constants";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { decryptSecret } from "@open-swe/shared/crypto";
@@ -9,6 +10,7 @@ import { getGitHubPatFromConfig } from "./github-pat.js";
 export function getGitHubTokensFromConfig(config: GraphConfig): {
   githubAccessToken: string;
   githubInstallationToken: string;
+  installationId: string;
 } {
   if (!config.configurable) {
     throw new Error("No configurable object found in graph config.");
@@ -22,12 +24,20 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
 
   const isProd = process.env.NODE_ENV === "production";
 
+  const installationId = config.configurable[GITHUB_INSTALLATION_ID];
+  if (!installationId) {
+    throw new Error(
+      `Missing required ${GITHUB_INSTALLATION_ID} in configuration.`,
+    );
+  }
+
   const githubPat = getGitHubPatFromConfig(config.configurable, encryptionKey);
   if (githubPat && !isProd) {
     // check for PAT-only mode
     return {
       githubAccessToken: githubPat,
       githubInstallationToken: githubPat,
+      installationId,
     };
   }
 
@@ -49,5 +59,5 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
     encryptionKey,
   );
 
-  return { githubAccessToken, githubInstallationToken };
+  return { githubAccessToken, githubInstallationToken, installationId };
 }

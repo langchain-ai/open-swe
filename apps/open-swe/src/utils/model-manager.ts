@@ -5,7 +5,7 @@ import {
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
 import { Task } from "./load-model.js";
-import { isAllowedUser } from "./github/allowed-users.js";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
@@ -254,7 +254,7 @@ export class ModelManager {
       [Task.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-sonnet-4-0",
+          "google-genai:gemini-2.5-pro",
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
     };

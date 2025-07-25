@@ -31,7 +31,7 @@ const TASK_TO_CONFIG_DEFAULTS_MAP = {
     temperature: 0,
   },
   [Task.SUMMARIZER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
+    modelName: "openai:gpt-4.1-mini",
     temperature: 0,
   },
 };

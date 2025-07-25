@@ -1,7 +1,20 @@
 import { Thread } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+
+export function computeThreadTitle(
+  taskPlan: TaskPlan | undefined,
+  fallbackTitle: string,
+): string {
+  if (taskPlan?.tasks && taskPlan.tasks.length > 0) {
+    const firstTaskTitle = taskPlan.tasks[0]?.title;
+    if (firstTaskTitle && firstTaskTitle.trim()) {
+      return firstTaskTitle;
+    }
+  }
+  return fallbackTitle;
+}
 
 export function getThreadTitle<State extends Record<string, any> = GraphState>(
   thread: Thread<State>,

@@ -3,8 +3,9 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadStatus } from "./useThreadStatus";
 import { useMemo } from "react";
-import { getThreadTitle } from "@/lib/thread";
+import { getThreadTitle, computeThreadTitle } from "@/lib/thread";
 import { calculateLastActivity } from "@/lib/thread-utils";
+import { ThreadStatusError } from "@/lib/schemas/thread-status";
 
 /**
  * Hook that combines thread metadata with real-time status
@@ -12,12 +13,13 @@ import { calculateLastActivity } from "@/lib/thread-utils";
 export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
   metadata: ThreadMetadata;
   isStatusLoading: boolean;
-  statusError: Error | null;
+  statusError: Error | ThreadStatusError | null;
 } {
   const {
     status,
     isLoading: isStatusLoading,
     error: statusError,
+    taskPlan: realTimeTaskPlan,
   } = useThreadStatus(thread.thread_id);
 
   const metadata: ThreadMetadata = useMemo((): ThreadMetadata => {
@@ -25,14 +27,14 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
 
     return {
       id: thread.thread_id,
-      title: getThreadTitle(thread),
+      title: computeThreadTitle(realTimeTaskPlan, getThreadTitle(thread)),
       lastActivity: calculateLastActivity(thread.updated_at),
-      taskCount: values?.taskPlan?.tasks.length ?? 0,
+      taskCount: realTimeTaskPlan?.tasks.length ?? 0,
       repository: values?.targetRepository
         ? `${values.targetRepository.owner}/${values.targetRepository.repo}`
         : "",
       branch: values?.targetRepository?.branch || "main",
-      taskPlan: values?.taskPlan,
+      taskPlan: realTimeTaskPlan,
       status,
       githubIssue: values?.githubIssueId
         ? {
@@ -41,7 +43,7 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
           }
         : undefined,
     };
-  }, [thread, status]);
+  }, [thread, status, realTimeTaskPlan]);
 
   return {
     metadata,
