@@ -119,8 +119,6 @@ type McpActionProps = BaseActionProps & {
   output?: string;
 };
 
-
-
 export type ActionItemProps =
   | (BaseActionProps & { status: "loading" })
   | ShellActionProps
@@ -178,8 +176,6 @@ const coerceStringToArray = (str: string | string[]) => {
     return [str];
   }
 };
-
-
 
 function ActionItem(props: ActionItemProps) {
   const [expanded, setExpanded] = useState(false);

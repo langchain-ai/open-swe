@@ -28,7 +28,9 @@ export function RequestHumanHelp({
 }: RequestHumanHelpProps) {
   const [expanded, setExpanded] = useState(true); // Start expanded for help requests
   const [userResponse, setUserResponse] = useState("");
-  const [submittedResponse, setSubmittedResponse] = useState<string | null>(null);
+  const [submittedResponse, setSubmittedResponse] = useState<string | null>(
+    null,
+  );
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -76,12 +78,15 @@ export function RequestHumanHelp({
     }
   }, [userResponse, onSubmitResponse]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  }, [handleSubmit]);
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit],
+  );
 
   const renderContent = () => {
     if (!expanded) return null;
@@ -98,7 +103,7 @@ export function RequestHumanHelp({
             <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
               Help Request
             </div>
-            <div 
+            <div
               id="help-request-description"
               className="bg-muted-foreground/5 rounded border p-3"
             >
@@ -125,7 +130,8 @@ export function RequestHumanHelp({
             </div>
           </div>
         ) : (
-          (status === "generating" || status === "done") && onSubmitResponse && (
+          (status === "generating" || status === "done") &&
+          onSubmitResponse && (
             <div className="space-y-2">
               <Textarea
                 ref={textareaRef}
@@ -191,4 +197,4 @@ export function RequestHumanHelp({
       )}
     </div>
   );
-} 
+}
