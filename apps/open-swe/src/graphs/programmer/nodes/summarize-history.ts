@@ -5,7 +5,7 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/llms/index.js";
 import {
   AIMessage,
   BaseMessage,

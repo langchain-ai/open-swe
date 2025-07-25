@@ -15,7 +15,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../utils/load-model.js";
+} from "../../utils/llms/index.js";
 import { trackCachePerformance } from "../../utils/caching.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");

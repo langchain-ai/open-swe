@@ -6,7 +6,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/index.js";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,

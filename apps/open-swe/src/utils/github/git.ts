@@ -128,6 +128,7 @@ export async function checkoutBranchAndCommit(
   );
 
   if (pushRes instanceof Error) {
+    const gitStatus = await sandbox.git.status(absoluteRepoDir);
     const errorFields = {
       ...(pushRes instanceof Error
         ? {
@@ -138,7 +139,10 @@ export async function checkoutBranchAndCommit(
           }
         : pushRes),
     };
-    logger.error("Failed to push changes", errorFields);
+    logger.error("Failed to push changes", {
+      ...errorFields,
+      gitStatus: JSON.stringify(gitStatus, null, 2),
+    });
     throw new Error("Failed to push changes");
   } else {
     logger.info("Successfully pushed changes");
