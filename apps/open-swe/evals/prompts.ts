@@ -42,7 +42,48 @@ export async function formatInputs(
 
 <codebase-readme>
 {CODEBASE_README}
-</codebase-readme>`;
+</codebase-readme>
+
+IMPORTANT: We'll run a LangGraph evaluation script on your code. Make sure to:
+
+1. Create a file at the project root named 'agent.py'.
+2. In 'agent.py', import and build your graph, e.g.:
+
+     from langgraph.graph import StateGraph, START, END
+     # … define nodes …
+     graph = graph_builder.compile()
+
+3. Export the compiled graph as:
+
+     compiled_graph = graph
+
+4. **EVALUATION INPUT FORMAT**: The evaluation script will always provide input as:
+     {"messages": [HumanMessage(content="user_input_here")]}
+   
+   Your State schema MUST include:
+     class State(TypedDict):
+         messages: list  # Required for evaluation compatibility
+         # ... your other fields
+   
+   Extract the actual input in your first node:
+     if "messages" in state and state["messages"]:
+         user_input = state["messages"][0].content
+     else:
+         user_input = state.get("your_field", "")
+
+5. Create a 'langgraph.json' file at the project root:
+     {
+       "dependencies": ["."],
+       "graphs": {
+         "agent": "./agent.py:compiled_graph"
+       },
+       "env": ".env"
+     }
+
+If agent.py is missing, doesn't export compiled_graph, or langgraph.json is missing, your submission will score 0.
+Don't add logger or unnecessary print statements as they will be captured by the evaluation script,
+interfering with the evaluation.
+`;
 
   const userMessageContent = SIMPLE_PROMPT_TEMPLATE.replace(
     "{REPO}",

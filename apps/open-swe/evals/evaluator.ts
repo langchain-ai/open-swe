@@ -8,7 +8,14 @@ import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { cloneRepo } from "../src/utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
-import { runRuffLint, runMyPyTypeCheck } from "./tests.js";
+import {
+  runRuffLint,
+  runMyPyTypeCheck,
+  runLangGraphEvaluation,
+} from "./tests.js";
+import { writeFile } from "../src/utils/read-write.js";
+import * as fs from "fs";
+import * as path from "path";
 
 const logger = createLogger(LogLevel.INFO, "Evaluator ");
 
@@ -22,6 +29,7 @@ const RUN_PIP_IN_VENV = `${VENV_PATH}/bin/pip`;
 async function setupEnv(
   sandbox: Sandbox,
   absoluteRepoDir: string,
+  envVars?: Record<string, string>,
 ): Promise<boolean> {
   logger.info("Setting up Python environment...");
 
@@ -29,7 +37,7 @@ async function setupEnv(
   const createVenvRes = await sandbox.process.executeCommand(
     createVenvCommand,
     absoluteRepoDir,
-    undefined,
+    envVars,
     TIMEOUT_SEC,
   );
   if (createVenvRes.exitCode !== 0) {
@@ -43,7 +51,7 @@ async function setupEnv(
   const upgradePipRes = await sandbox.process.executeCommand(
     `${RUN_PIP_IN_VENV} install --upgrade pip`,
     absoluteRepoDir,
-    undefined,
+    envVars,
     TIMEOUT_SEC,
   );
   if (upgradePipRes.exitCode !== 0) {
@@ -53,7 +61,7 @@ async function setupEnv(
   const requirementsExistRes = await sandbox.process.executeCommand(
     "test -f requirements.txt",
     absoluteRepoDir,
-    undefined,
+    envVars,
     TIMEOUT_SEC,
   );
 
@@ -62,7 +70,7 @@ async function setupEnv(
     const installReqRes = await sandbox.process.executeCommand(
       `${RUN_PIP_IN_VENV} install -r requirements.txt`,
       absoluteRepoDir,
-      undefined,
+      envVars,
       TIMEOUT_SEC * 3,
     );
     if (installReqRes.exitCode !== 0) {
@@ -74,10 +82,27 @@ async function setupEnv(
     logger.info("No requirements.txt found, skipping repository dependencies");
   }
 
+  // Install evaluation-specific dependencies
+  logger.info("Installing evaluation dependencies...");
+  const installEvalDepsRes = await sandbox.process.executeCommand(
+    `${RUN_PIP_IN_VENV} install langchain langchain-core langchain-openai pydantic openai`,
+    absoluteRepoDir,
+    envVars,
+    TIMEOUT_SEC * 2,
+  );
+  if (installEvalDepsRes.exitCode !== 0) {
+    logger.warn(
+      "Failed to install evaluation dependencies, continuing anyway",
+      {
+        installEvalDepsRes,
+      },
+    );
+  }
+
   const installAnalysisToolsRes = await sandbox.process.executeCommand(
     `${RUN_PIP_IN_VENV} install ruff mypy`,
     absoluteRepoDir,
-    undefined,
+    envVars,
     TIMEOUT_SEC,
   );
   if (installAnalysisToolsRes.exitCode !== 0) {
@@ -85,6 +110,34 @@ async function setupEnv(
       installAnalysisToolsRes,
     });
     return false;
+  }
+
+  logger.info("Copying LangGraph evaluation script to sandbox...");
+  try {
+    const evalScriptPath = path.join(
+      __dirname,
+      "scripts",
+      "langgraph_check.py",
+    );
+    const evalScriptContent = fs.readFileSync(evalScriptPath, "utf8");
+
+    const { success: copyScriptSuccess, output: copyScriptOutput } =
+      await writeFile({
+        sandbox,
+        filePath: "langgraph_check.py",
+        content: evalScriptContent,
+        workDir: absoluteRepoDir,
+      });
+
+    if (!copyScriptSuccess) {
+      logger.warn("Failed to copy LangGraph evaluation script", {
+        copyScriptOutput,
+      });
+    } else {
+      logger.info("Successfully copied LangGraph evaluation script to sandbox");
+    }
+  } catch (error) {
+    logger.warn("Error copying LangGraph evaluation script", { error });
   }
 
   logger.info("Environment setup completed successfully");
@@ -97,16 +150,25 @@ async function setupEnv(
 async function runCodeTests(
   sandbox: Sandbox,
   absoluteRepoDir: string,
-): Promise<{ ruffScore: number; mypyScore: number; details: CodeTestDetails }> {
+  openSWEInputs: OpenSWEInput,
+  envVars?: Record<string, string>,
+): Promise<{
+  ruffScore: number;
+  mypyScore: number;
+  langGraphScore: number;
+  details: CodeTestDetails;
+}> {
   logger.info("Running code analysis on all Python files in repository");
 
   const testResults: {
     ruffScore: number;
     mypyScore: number;
+    langGraphScore: number;
     details: CodeTestDetails;
   } = {
     ruffScore: 0,
     mypyScore: 0,
+    langGraphScore: 0,
     details: {
       ruff: {
         issues: [],
@@ -116,20 +178,30 @@ async function runCodeTests(
         issues: [],
         error: null,
       },
+      langGraph: {
+        explanation: "",
+        error: null,
+      },
     },
   };
 
-  const [ruffLint, mypyCheck] = await Promise.all([
+  const [ruffLint, mypyCheck, langGraphEval] = await Promise.all([
     runRuffLint(sandbox, {
       command: `${RUN_PYTHON_IN_VENV} -m ruff check . --output-format=json`,
       workingDir: absoluteRepoDir,
-      env: undefined,
+      env: envVars,
       timeoutSec: TIMEOUT_SEC * 3,
     }),
     runMyPyTypeCheck(sandbox, {
       command: `${RUN_PYTHON_IN_VENV} -m mypy . --no-error-summary --show-error-codes --no-color-output`,
       workingDir: absoluteRepoDir,
-      env: undefined,
+      env: envVars,
+      timeoutSec: TIMEOUT_SEC * 3,
+    }),
+    runLangGraphEvaluation(sandbox, {
+      command: `${RUN_PYTHON_IN_VENV} -m langgraph_check agent.py -i "${openSWEInputs.test_input}" -g "${openSWEInputs.ground_truth}"`,
+      workingDir: absoluteRepoDir,
+      env: envVars,
       timeoutSec: TIMEOUT_SEC * 3,
     }),
   ]);
@@ -137,6 +209,7 @@ async function runCodeTests(
   Object.assign(testResults, {
     ruffScore: ruffLint.ruffScore,
     mypyScore: mypyCheck.mypyScore,
+    langGraphScore: langGraphEval.langGraphScore,
     details: {
       ruff: {
         issues: ruffLint.issues,
@@ -146,14 +219,20 @@ async function runCodeTests(
         issues: mypyCheck.issues,
         error: mypyCheck.error,
       },
+      langGraph: {
+        explanation: langGraphEval.explanation,
+        error: langGraphEval.error,
+      },
     },
   });
 
   logger.info("Code tests completed", {
     ruffScore: testResults.ruffScore,
     mypyScore: testResults.mypyScore,
+    langGraphScore: testResults.langGraphScore,
     ruffIssues: testResults.details.ruff.issues.length,
     mypyIssues: testResults.details.mypy.issues.length,
+    langGraphExplanation: testResults.details.langGraph.explanation,
   });
 
   return testResults;
@@ -195,7 +274,41 @@ export async function evaluator(inputs: {
 
     const absoluteRepoDir = getRepoAbsolutePath(output.targetRepository);
 
-    const envSetupSuccess = await setupEnv(sandbox, absoluteRepoDir);
+    const envVars: Record<string, string> = {};
+    const apiKeys = [
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "LANGCHAIN_API_KEY",
+      "LANGCHAIN_TRACING_V2",
+      "LANGCHAIN_PROJECT",
+      "GOOGLE_API_KEY",
+      "TAVILY_API_KEY",
+    ];
+
+    apiKeys.forEach((key) => {
+      if (process.env[key]) {
+        envVars[key] = process.env[key]!;
+        logger.info(`Added environment variable: ${key}`);
+      }
+    });
+
+    logger.info(`Checking out agent's solution branch: ${solutionBranch}`);
+
+    const checkoutBranchRes = await sandbox.process.executeCommand(
+      `git checkout ${solutionBranch}`,
+      absoluteRepoDir,
+      envVars,
+      TIMEOUT_SEC,
+    );
+    if (checkoutBranchRes.exitCode !== 0) {
+      logger.error("Failed to checkout solution branch", {
+        solutionBranch,
+        checkoutResult: checkoutBranchRes,
+      });
+      throw new Error(`Failed to checkout solution branch: ${solutionBranch}`);
+    }
+
+    const envSetupSuccess = await setupEnv(sandbox, absoluteRepoDir, envVars);
     if (!envSetupSuccess) {
       logger.error("Failed to setup environment");
       return [
@@ -206,14 +319,24 @@ export async function evaluator(inputs: {
       ];
     }
 
-    const analysisResult = await runCodeTests(sandbox, absoluteRepoDir);
+    const analysisResult = await runCodeTests(
+      sandbox,
+      absoluteRepoDir,
+      openSWEInputs,
+      envVars,
+    );
 
-    const overallScore = analysisResult.ruffScore + analysisResult.mypyScore;
+    const overallScore =
+      analysisResult.ruffScore +
+      analysisResult.mypyScore +
+      analysisResult.langGraphScore;
 
     logger.info("Evaluation completed", {
       overallScore,
       ruffScore: analysisResult.ruffScore,
       mypyScore: analysisResult.mypyScore,
+      langGraphScore: analysisResult.langGraphScore,
+      langGraphExplanation: analysisResult.details.langGraph.explanation,
       repo: openSWEInputs.repo,
       originalBranch: openSWEInputs.branch,
       solutionBranch,
@@ -227,10 +350,17 @@ export async function evaluator(inputs: {
       {
         key: "ruff-score",
         score: analysisResult.ruffScore,
+        comment: analysisResult.details.ruff.issues.join("\n"),
       },
       {
         key: "mypy-score",
         score: analysisResult.mypyScore,
+        comment: analysisResult.details.mypy.issues.join("\n"),
+      },
+      {
+        key: "langgraph-score",
+        score: analysisResult.langGraphScore,
+        comment: analysisResult.details.langGraph.explanation,
       },
     ];
   } catch (error) {

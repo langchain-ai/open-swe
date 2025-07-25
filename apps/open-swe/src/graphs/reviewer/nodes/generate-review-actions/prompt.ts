@@ -62,7 +62,26 @@ By reviewing these actions, and comparing them to the plan and original user req
     - Linter/formatter scripts were executed
     - Unit tests were executed
     - If no tests for the code written/updated exists, confirm whether or not tests should be written
+    - Always try executing the main file of the codebase to ensure it runs properly. If the errors are related to env, ignore but if the errors are related to the code, you should ask the programmer to fix them.
     - Documentation was updated, if applicable
+    - **FOR LANGGRAPH AGENTS - CRITICAL CHECK**: If the request involves creating or modifying a LangGraph agent, you MUST verify:
+      * The 'agent.py' file exists at the project root
+      * The compiled graph is exported as 'app' in agent.py
+      * The 'langgraph.json' file exists in the same directory as agent.py
+      * The langgraph.json references the correct export: "./agent.py:app"
+      * **VALIDATION REQUIREMENTS - ALWAYS RUN THESE CHECKS**:
+        - For Python agents (\`agent.py\`):
+          * Run \`ruff check agent.py\` (install with \`pip install ruff\` if needed)
+          * Run \`mypy agent.py\` (install with \`pip install mypy\` if needed)
+          * Test compilation: \`python -c "from agent import app; print('Agent compiles successfully')"\`
+        - For TypeScript agents (\`agent.ts\`):
+          * Run \`npx eslint agent.ts\` (install with \`npm install -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin\` if needed)
+          * Run \`npx tsc --noEmit agent.ts\` (install with \`npm install -g typescript\` if needed)
+          * Test compilation: \`node -e "const {app} = require('./agent'); console.log('Agent compiles successfully')"\`
+        - **CRITICAL**: Report ALL validation failures - these MUST be fixed before completion
+        - **CRITICAL**: If validation tools are missing, install them and retry validation
+        - Exit codes: 0 = success, non-zero = issues found that need programmer attention
+      * **FAILURE TO VERIFY THESE REQUIREMENTS WILL CAUSE FAILURES**
 
     **IMPORTANT**:
     Keep in mind that not all requests/changes will need tests to be written, or documentation to be added/updated. Ensure you consider whether or not the standard engineering organization would write tests, or documentation for the changes you're reviewing.
