@@ -128,22 +128,44 @@ export async function checkoutBranchAndCommit(
   );
 
   if (pushRes instanceof Error) {
-    const gitStatus = await sandbox.git.status(absoluteRepoDir);
-    const errorFields = {
-      ...(pushRes instanceof Error
-        ? {
-            name: pushRes.name,
-            message: pushRes.message,
-            stack: pushRes.stack,
-            cause: pushRes.cause,
-          }
-        : pushRes),
-    };
-    logger.error("Failed to push changes", {
-      ...errorFields,
-      gitStatus: JSON.stringify(gitStatus, null, 2),
-    });
-    throw new Error("Failed to push changes");
+    logger.info("Failed to push changes, attempting to pull and push again");
+    // attempt to git pull, then push again
+    await sandbox.git.pull(
+      absoluteRepoDir,
+      "git",
+      options.githubInstallationToken,
+    );
+    logger.info("Successfully pulled changes. Pushing again.");
+    const pushRes2 = await withRetry(
+      async () => {
+        return await sandbox.git.push(
+          absoluteRepoDir,
+          "git",
+          options.githubInstallationToken,
+        );
+      },
+      { retries: 3, delay: 0 },
+    );
+    if (pushRes2 instanceof Error) {
+      const gitStatus = await sandbox.git.status(absoluteRepoDir);
+      const errorFields = {
+        ...(pushRes2 instanceof Error
+          ? {
+              name: pushRes2.name,
+              message: pushRes2.message,
+              stack: pushRes2.stack,
+              cause: pushRes2.cause,
+            }
+          : pushRes2),
+      };
+      logger.error("Failed to push changes", {
+        ...errorFields,
+        gitStatus: JSON.stringify(gitStatus, null, 2),
+      });
+      throw new Error("Failed to push changes");
+    } else {
+      logger.info("Pulling changes before pushing succeeded");
+    }
   } else {
     logger.info("Successfully pushed changes");
   }
