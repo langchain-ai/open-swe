@@ -1,5 +1,5 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../llms/load-model.js";
+import { loadModel, Task } from "../llms/index.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { DOCUMENT_TOC_GENERATION_PROMPT } from "./prompt.js";
 import { getMessageContentString } from "@open-swe/shared/messages";

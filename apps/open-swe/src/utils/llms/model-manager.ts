@@ -4,7 +4,7 @@ import {
 } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
-import { Task } from "./load-model.js";
+import { Task } from "./constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
 import { TASK_TO_CONFIG_DEFAULTS_MAP } from "./constants.js";

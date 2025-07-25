@@ -9,7 +9,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/llms/load-model.js";
+} from "../../../utils/llms/index.js";
 import { getMissingMessages } from "../../../utils/github/issue-messages.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";

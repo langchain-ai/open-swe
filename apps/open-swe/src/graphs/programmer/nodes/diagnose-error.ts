@@ -18,7 +18,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/llms/load-model.js";
+} from "../../../utils/llms/index.js";
 import { z } from "zod";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {

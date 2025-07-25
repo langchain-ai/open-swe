@@ -1,5 +1,5 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { Task } from "./llms/load-model.js";
+import { Task } from "./llms/index.js";
 import { ModelManager } from "./llms/model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { Runnable, RunnableConfig } from "@langchain/core/runnables";

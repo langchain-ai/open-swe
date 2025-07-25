@@ -26,5 +26,3 @@ export function supportsParallelToolCallsParam(
 
   return !MODELS_NO_PARALLEL_TOOL_CALLING.some((model) => modelStr === model);
 }
-
-export { Task } from "./constants.js";
