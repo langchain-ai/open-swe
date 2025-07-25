@@ -12,6 +12,7 @@ import {
   stopSandbox,
 } from "../../../utils/sandbox.js";
 import { postGitHubIssueComment } from "../../planner/nodes/proposed-plan.js";
+import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -36,8 +37,14 @@ export async function requestHelp(
 
   const toolCall = lastMessage.tool_calls[0];
 
-  const runUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/chat?threadId=${config.configurable?.thread_id || "unknown"}`;
-  const commentBody = `### 🤖 Open SWE Needs Help
+  const threadId = config.configurable?.thread_id;
+  if (!threadId) {
+    throw new Error("Thread ID not found in config");
+  }
+
+  const runUrl = getOpenSweAppUrl(threadId);
+  const commentBody = runUrl
+    ? `### 🤖 Open SWE Needs Help
 
 I've encountered a situation where I need human assistance to continue.
 
@@ -46,7 +53,15 @@ ${toolCall.args.help_request}
 
 You can view and respond to this request in the [Open SWE interface](${runUrl}).
 
-Please provide guidance so I can continue working on this issue.`;
+Please provide guidance so I can continue working on this issue.`
+    : `### 🤖 Open SWE Needs Help
+
+I've encountered a situation where I need human assistance to continue.
+
+**Help Request:**
+${toolCall.args.help_request}
+
+Please check the Open SWE interface to respond to this request.`;
 
   await postGitHubIssueComment({
     githubIssueId: state.githubIssueId,
