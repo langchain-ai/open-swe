@@ -2,15 +2,13 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
-    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="50%">
+    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="35%">
   </picture>
 </div>
 
 <div align="center">
   <h1>Open SWE - An open source, fully autonomous coding agent.</h1>
 </div>
-
-<hr />
 
 Open SWE is an open-source cloud based coding agent. It's built with [LangGraph](https://langchain-ai.github.io/langgraphjs/), and is designed to autonomously understand, plan, and execute code changes across entire repositories.
 
