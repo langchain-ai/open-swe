@@ -5,6 +5,7 @@ import { useThreadStatus } from "./useThreadStatus";
 import { useMemo } from "react";
 import { getThreadTitle, computeThreadTitle } from "@/lib/thread";
 import { calculateLastActivity } from "@/lib/thread-utils";
+import { ThreadStatusError } from "@/lib/schemas/thread-status";
 
 /**
  * Hook that combines thread metadata with real-time status
@@ -12,7 +13,7 @@ import { calculateLastActivity } from "@/lib/thread-utils";
 export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
   metadata: ThreadMetadata;
   isStatusLoading: boolean;
-  statusError: Error | null;
+  statusError: Error | ThreadStatusError | null;
 } {
   const {
     status,

@@ -2,6 +2,7 @@
 
 import { ThreadView } from "@/components/v2/thread-view";
 import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
+import { ThreadErrorCard } from "@/components/v2/thread-error-card";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -53,13 +54,22 @@ export default function ThreadPage({
     created_at: new Date().toISOString(),
   };
 
-  const { metadata: currentDisplayThread } = useThreadMetadata(
+  const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,
   );
 
   const handleBackToHome = () => {
     router.push("/chat");
   };
+
+  if (statusError && "message" in statusError && "type" in statusError) {
+    return (
+      <ThreadErrorCard
+        error={statusError}
+        onGoBack={handleBackToHome}
+      />
+    );
+  }
 
   if (!thread || threadsLoading) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
