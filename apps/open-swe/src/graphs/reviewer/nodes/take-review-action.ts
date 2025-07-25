@@ -109,8 +109,8 @@ export async function takeReviewerActions(
       result = toolResult.result;
       toolCallStatus = toolResult.status;
 
-      if (!result && result !== "") {
-        result = "";
+      if (!result) {
+        result = toolCallStatus;
       }
     } catch (e) {
       toolCallStatus = "error";

@@ -127,8 +127,8 @@ export async function takeActions(
         toolCallStatus = toolResult.status;
       }
 
-      if (!result && result !== "") {
-        result = "";
+      if (!result) {
+        result = toolCallStatus;
       }
     } catch (e) {
       toolCallStatus = "error";
