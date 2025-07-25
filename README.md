@@ -7,7 +7,7 @@
 </div>
 
 <div align="center">
-  <h1>Open SWE - An open source, fully autonomous coding agent.</h1>
+  <h1>Open SWE - An cloud based, fully autonomous coding agent.</h1>
 </div>
 
 Open SWE is an open-source cloud based coding agent. It's built with [LangGraph](https://langchain-ai.github.io/langgraphjs/), and is designed to autonomously understand, plan, and execute code changes across entire repositories.
