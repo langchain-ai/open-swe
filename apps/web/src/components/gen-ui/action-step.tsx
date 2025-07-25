@@ -201,7 +201,6 @@ function ActionItem(props: ActionItemProps) {
   const initialExpanded = isRequestHumanHelpAction(props);
   const [expanded, setExpanded] = useState(initialExpanded);
 
-  // State for request_human_help component
   const [userResponse, setUserResponse] = useState("");
   const [submittedResponse, setSubmittedResponse] = useState<string | null>(
     null,

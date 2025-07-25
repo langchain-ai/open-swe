@@ -36,7 +36,6 @@ export async function requestHelp(
 
   const toolCall = lastMessage.tool_calls[0];
 
-  // Post a GitHub issue comment notifying the user that Open SWE needs help
   const runUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000"}/chat?threadId=${config.configurable?.thread_id || "unknown"}`;
   const commentBody = `### 🤖 Open SWE Needs Help
 
