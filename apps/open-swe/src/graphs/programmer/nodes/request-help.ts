@@ -7,6 +7,7 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
+import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
 import {
   getSandboxWithErrorHandling,
   stopSandbox,
@@ -42,11 +43,14 @@ export async function requestHelp(
     throw new Error("Thread ID not found in config");
   }
 
+  const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
+  const userTag = userLogin ? `@${userLogin} ` : "";
+
   const runUrl = getOpenSweAppUrl(threadId);
   const commentBody = runUrl
     ? `### 🤖 Open SWE Needs Help
 
-I've encountered a situation where I need human assistance to continue.
+${userTag}I've encountered a situation where I need human assistance to continue.
 
 **Help Request:**
 ${toolCall.args.help_request}
@@ -56,7 +60,7 @@ You can view and respond to this request in the [Open SWE interface](${runUrl}).
 Please provide guidance so I can continue working on this issue.`
     : `### 🤖 Open SWE Needs Help
 
-I've encountered a situation where I need human assistance to continue.
+${userTag}I've encountered a situation where I need human assistance to continue.
 
 **Help Request:**
 ${toolCall.args.help_request}

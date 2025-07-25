@@ -52,7 +52,6 @@ const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 const searchTool = createSearchToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
-
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 

@@ -26,7 +26,7 @@ export function RequestHumanHelp({
   reasoningText,
   onSubmitResponse,
 }: RequestHumanHelpProps) {
-  const [expanded, setExpanded] = useState(true); // Start expanded for help requests
+  const [expanded, setExpanded] = useState(true);
   const [userResponse, setUserResponse] = useState("");
   const [submittedResponse, setSubmittedResponse] = useState<string | null>(
     null,

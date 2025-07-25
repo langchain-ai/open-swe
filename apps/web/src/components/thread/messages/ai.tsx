@@ -459,7 +459,6 @@ export function AssistantMessage({
     );
   }
 
-  // Check if this is a request human help message
   if (requestHumanHelpToolCall && aiToolCalls.length === 1) {
     const correspondingToolResult = toolResults.find(
       (tr) => tr && tr.tool_call_id === requestHumanHelpToolCall.id,
