@@ -120,7 +120,9 @@ export async function generateReviewActions(
     createSearchTool(state),
     createShellTool(state),
     createInstallDependenciesTool(state),
-    createScratchpadTool(),
+    createScratchpadTool(
+      "when generating a final review, after all context gathering and reviewing is complete",
+    ),
   ];
   tools[tools.length - 1] = {
     ...tools[tools.length - 1],

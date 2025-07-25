@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { createScratchpadFields } from "@open-swe/shared/open-swe/tools";
 
-export function createScratchpadTool() {
+export function createScratchpadTool(whenMessage: string) {
   const scratchpadTool = tool(
     async (
       _input,
@@ -12,7 +12,7 @@ export function createScratchpadTool() {
         status: "success",
       };
     },
-    createScratchpadFields(),
+    createScratchpadFields(whenMessage),
   );
 
   return scratchpadTool;

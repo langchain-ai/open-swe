@@ -57,7 +57,7 @@ By reviewing these actions, and comparing them to the plan and original user req
     You're also provided with the conversation history of the actions the programmer has taken, and any user input they've received. The first user message below contains this information.
     Ensure you carefully read over all of these messages to ensure you have the proper context and do not duplicate actions the programmer has already taken.
 
-    When reviewing the changes, you should preform these actions in order:
+    When reviewing the changes, you should perform these actions in order:
 
     <required_scripts>
     Search for any scripts which are required for the pull request to pass CI. This may include unit tests (you do not have access to environment variables, and thus can not run integration tests), linters, formatters, etc.
@@ -82,7 +82,7 @@ By reviewing these actions, and comparing them to the plan and original user req
     You should write to your scratchpad to record the names of the files, and the content inside the files which should be removed/updated.
     </changed_files>
 
-    You MUST preform the above actions. You should write your findings to the scratchpad, as you do not need to take action on your findings right now.
+    You MUST perform the above actions. You should write your findings to the scratchpad, as you do not need to take action on your findings right now.
     Once you've completed your review you'll be given the chance to say whether or not the task has been successfully completed, and if not, you'll be able to provide a list of new actions to take.
 
     **IMPORTANT**:

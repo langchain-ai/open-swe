@@ -349,7 +349,7 @@ export function createScratchpadFields(whenMessage: string) {
     scratchpad: z
       .array(z.string())
       .describe(
-        `Write concise, technical, and useful notes to your scratchpad. These notes will be saved for you to use when ${whenMessage}`,
+        `Write concise, technical, and useful notes to your scratchpad. These notes will be saved for you to use ${whenMessage}.`,
       ),
   });
 
@@ -357,8 +357,8 @@ export function createScratchpadFields(whenMessage: string) {
     name: "scratchpad",
     schema: scratchpadSchema,
     description:
-      `Use this tool to write & save technical notes on the actions you take, and observations you make, and any notes you believe will be useful when ${whenMessage}.` +
-      "This should be called if you come across context which you believe will be useful to you during later steps.",
+      `Use this tool to write & save technical notes on the actions you take, and observations you make, and any notes you believe will be useful ${whenMessage}.` +
+      " This should be called if you come across context which you believe will be useful to you during later steps.",
   };
 }
 

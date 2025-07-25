@@ -79,7 +79,9 @@ export async function generateAction(
   const tools = [
     createSearchTool(state),
     createShellTool(state),
-    createScratchpadTool(),
+    createScratchpadTool(
+      "when generating a final plan, after all context gathering is complete",
+    ),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
     ...mcpTools,

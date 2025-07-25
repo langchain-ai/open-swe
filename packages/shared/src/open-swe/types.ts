@@ -178,7 +178,7 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
   }),
   /**
-   * Notes taken based on the actions preformed by the planning agent.
+   * Notes taken based on the actions performed by the planning agent.
    */
   contextGatheringNotes: withLangGraph(z.custom<string>(), {
     reducer: {

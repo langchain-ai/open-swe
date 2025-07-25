@@ -50,7 +50,7 @@ export async function takeActions(
 
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
-  const scratchpadTool = createScratchpadTool();
+  const scratchpadTool = createScratchpadTool("");
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);

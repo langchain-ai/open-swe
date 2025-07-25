@@ -71,11 +71,11 @@ const getScratchpadNotesString = (messages: BaseMessage[]) => {
       (m) =>
         isAIMessage(m) &&
         m.tool_calls?.length &&
-        m.tool_calls?.some((tc) => tc.name === createScratchpadTool().name),
+        m.tool_calls?.some((tc) => tc.name === createScratchpadTool("").name),
     )
     .map((m) => {
       const scratchpadTool = (m as AIMessage).tool_calls?.find(
-        (tc) => tc.name === createScratchpadTool().name,
+        (tc) => tc.name === createScratchpadTool("").name,
       );
       if (!scratchpadTool) {
         return "";
