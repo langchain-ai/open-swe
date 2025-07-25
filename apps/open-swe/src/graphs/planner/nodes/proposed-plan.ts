@@ -199,7 +199,7 @@ async function startProgrammerRun(input: {
       ifNotExists: "create",
       streamResumable: true,
       streamSubgraphs: true,
-      streamMode: ["values", "messages-tuple", "custom"],
+      streamMode: ["values", "updates", "messages-tuple", "custom"],
     },
   );
 

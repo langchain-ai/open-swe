@@ -92,7 +92,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     },
     ifNotExists: "create",
     streamResumable: true,
-    streamMode: ["values", "messages-tuple", "custom"],
+    streamMode: ["values", "updates", "messages-tuple", "custom"],
   });
 
   return {

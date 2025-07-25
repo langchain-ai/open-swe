@@ -54,7 +54,7 @@ export async function startPlanner(
         ifNotExists: "create",
         multitaskStrategy: "enqueue",
         streamResumable: true,
-        streamMode: ["values", "messages-tuple", "custom"],
+        streamMode: ["values", "updates", "messages-tuple", "custom"],
       },
     );
 

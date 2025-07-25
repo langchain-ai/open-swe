@@ -104,7 +104,7 @@ export function TerminalInput({
             },
             ifNotExists: "create",
             streamResumable: true,
-            streamMode: ["values", "messages-tuple", "custom"],
+            streamMode: ["values", "updates", "messages-tuple", "custom"],
           },
         );
 

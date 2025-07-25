@@ -263,7 +263,7 @@ export async function classifyMessage(
           command: {
             resume: plannerResume,
           },
-          streamMode: ["values", "messages-tuple", "custom"],
+          streamMode: ["values", "updates", "messages-tuple", "custom"],
         },
       );
       newPlannerId = newPlannerRun.run_id;
