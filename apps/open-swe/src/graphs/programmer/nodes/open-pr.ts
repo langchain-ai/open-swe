@@ -20,7 +20,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/load-model.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";

@@ -4,7 +4,7 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/llms/load-model.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";

@@ -2,7 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { createSearchDocumentForToolFields } from "@open-swe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
-import { loadModel, Task } from "../../utils/load-model.js";
+import { loadModel, Task } from "../../utils/llms/load-model.js";
 import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { DOCUMENT_SEARCH_PROMPT } from "./prompt.js";

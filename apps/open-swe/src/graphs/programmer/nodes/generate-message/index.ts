@@ -8,7 +8,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/load-model.js";
 import {
   createShellTool,
   createApplyPatchTool,

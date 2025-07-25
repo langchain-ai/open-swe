@@ -3,10 +3,11 @@ import {
   initChatModel,
 } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { createLogger, LogLevel } from "./logger.js";
+import { createLogger, LogLevel } from "../logger.js";
 import { Task } from "./load-model.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
+import { TASK_TO_CONFIG_DEFAULTS_MAP } from "./constants.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -242,19 +243,19 @@ export class ModelManager {
       [Task.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-sonnet-4-0",
+          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
       [Task.ROUTER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "anthropic:claude-3-5-haiku-latest",
+          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
       [Task.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
-          "google-genai:gemini-2.5-pro",
+          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
     };
@@ -307,7 +308,7 @@ export class ModelManager {
       openai: {
         [Task.PROGRAMMER]: "gpt-4o",
         [Task.ROUTER]: "gpt-4o-mini",
-        [Task.SUMMARIZER]: "gpt-4o",
+        [Task.SUMMARIZER]: "gpt-4.1-mini",
       },
     };
 
