@@ -1,8 +1,8 @@
-export const PLANNER_NOTES_PROMPT = `Here is a collection of technical notes you took while gathering context for the plan. Ensure you take these into account when writing your plan.
+export const SCRATCHPAD_PROMPT = `Here is a collection of technical notes you wrote to a scratchpad while gathering context for the plan. Ensure you take these into account when writing your plan.
 
-<planner_notes>
-{PLANNER_NOTES}
-</planner_notes>`;
+<scratchpad>
+{SCRATCHPAD}
+</scratchpad>`;
 
 export const SYSTEM_PROMPT = `You are a terminal-based agentic coding assistant built by LangChain, designed to enable natural language interaction with local codebases through wrapped LLM models.
 
@@ -63,6 +63,6 @@ Structure your plan items as clear directives, for example:
 
 {CUSTOM_RULES}
 
-{PLANNER_NOTES}
+{SCRATCHPAD}
 
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;

@@ -19,8 +19,8 @@ import {
 import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { getPlannerNotes } from "../../utils/get-notes.js";
-import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import { getScratchpad } from "../../utils/scratchpad-notes.js";
+import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
@@ -28,7 +28,7 @@ import { trackCachePerformance } from "../../../../utils/caching.js";
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  const plannerNotes = getPlannerNotes(state.messages)
+  const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
   return SYSTEM_PROMPT.replace(
@@ -42,9 +42,9 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll(
-      "{PLANNER_NOTES}",
-      plannerNotes.length
-        ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
+      "{SCRATCHPAD}",
+      scratchpad.length
+        ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
     );
 }

@@ -25,10 +25,10 @@ import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createSearchTool } from "../../../../tools/search.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
-import { getPlannerNotes } from "../../utils/get-notes.js";
+import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   convertMessagesToCacheControlledMessages,
@@ -40,7 +40,7 @@ const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  const plannerNotes = getPlannerNotes(state.messages)
+  const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
   return SYSTEM_PROMPT.replace(
@@ -49,7 +49,7 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       ? formatFollowupMessagePrompt(
           state.taskPlan,
           state.proposedPlan,
-          plannerNotes,
+          scratchpad,
         )
       : "",
   )
@@ -79,7 +79,7 @@ export async function generateAction(
   const tools = [
     createSearchTool(state),
     createShellTool(state),
-    createPlannerNotesTool(),
+    createScratchpadTool(),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
     ...mcpTools,

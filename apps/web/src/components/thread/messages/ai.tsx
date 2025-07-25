@@ -37,7 +37,6 @@ import {
   createSearchToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
-  createTakePlannerNotesFields,
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
   createDiagnoseErrorToolFields,
@@ -46,6 +45,7 @@ import {
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
   createReviewStartedToolFields,
+  createScratchpadFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -75,8 +75,8 @@ const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
 >;
-const plannerNotesTool = createTakePlannerNotesFields();
-type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const scratchpadTool = createScratchpadFields("");
+type ScratchpadToolArgs = z.infer<typeof scratchpadTool.schema>;
 const markFinalReviewTaskCompletedTool =
   createCodeReviewMarkTaskCompletedFields();
 type MarkFinalReviewTaskCompletedToolArgs = z.infer<
@@ -113,7 +113,7 @@ function isMcpTool(toolName: string): boolean {
     shellTool.name,
     applyPatchTool.name,
     installDependenciesTool.name,
-    plannerNotesTool.name,
+    scratchpadTool.name,
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
@@ -245,13 +245,13 @@ export function mapToolMessageToActionStepProps(
       output: getContentString(message.content),
       reasoningText,
     };
-  } else if (toolCall?.name === plannerNotesTool.name) {
-    const args = toolCall.args as PlannerNotesToolArgs;
+  } else if (toolCall?.name === scratchpadTool.name) {
+    const args = toolCall.args as ScratchpadToolArgs;
     return {
-      actionType: "planner_notes",
+      actionType: "scratchpad",
       status,
       success,
-      notes: args.notes || [],
+      scratchpad: args.scratchpad || [],
       reasoningText,
     };
   } else if (toolCall?.name === getURLContentTool.name) {
@@ -351,7 +351,7 @@ export function AssistantMessage({
           tc.name === applyPatchTool.name ||
           tc.name === searchTool.name ||
           tc.name === installDependenciesTool.name ||
-          tc.name === plannerNotesTool.name ||
+          tc.name === scratchpadTool.name ||
           tc.name === getURLContentTool.name ||
           isMcpTool(tc.name),
       )
@@ -638,12 +638,12 @@ export function AssistantMessage({
           workdir: args?.workdir || "",
           output: "",
         } as ActionItemProps;
-      } else if (toolCall.name === plannerNotesTool.name) {
-        const args = toolCall.args as PlannerNotesToolArgs;
+      } else if (toolCall.name === scratchpadTool.name) {
+        const args = toolCall.args as ScratchpadToolArgs;
         return {
-          actionType: "planner_notes",
+          actionType: "scratchpad",
           status: "generating",
-          notes: args?.notes || [],
+          scratchpad: args?.scratchpad || [],
         } as ActionItemProps;
       } else if (toolCall.name === getURLContentTool.name) {
         const args = toolCall.args as GetURLContentToolArgs;
