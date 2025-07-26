@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FilePlus2, Archive, Zap } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ThreadMetadata } from "./types";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
 import { cn } from "@/lib/utils";
@@ -31,19 +30,46 @@ import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
-import { Settings } from "lucide-react";
+import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
 
 function OpenSettingsButton() {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger>
+        <TooltipTrigger
+          asChild
+          className="hover:bg-accent hover:text-accent-foreground size-6 rounded-md p-1 hover:cursor-pointer"
+        >
           <NextLink href="/settings">
             <Settings className="size-4" />
           </NextLink>
         </TooltipTrigger>
         <TooltipContent side="bottom">Open Settings</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+const DOCUMENTATION_URL = "https://docs.langchain.com/labs/swe";
+
+function OpenDocumentationButton() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          asChild
+          className="hover:bg-accent hover:text-accent-foreground size-6 rounded-md p-1 hover:cursor-pointer"
+        >
+          <a
+            href={DOCUMENTATION_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <BookOpen className="size-4" />
+          </a>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Open Documentation</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );
@@ -106,6 +132,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
+            <OpenDocumentationButton />
             <OpenSettingsButton />
             <ThemeToggle />
             <GitHubLogoutButton />
