@@ -20,6 +20,9 @@
     },
     "dev": {
       "dependsOn": ["^dev"]
+    },
+    "test": {
+      "dependsOn": ["^test"]
     }
   }
 }
