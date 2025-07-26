@@ -344,22 +344,21 @@ export function createOpenPrToolFields() {
   };
 }
 
-export function createTakePlannerNotesFields() {
-  const plannerContextNotesSchema = z.object({
-    notes: z
+export function createScratchpadFields(whenMessage: string) {
+  const scratchpadSchema = z.object({
+    scratchpad: z
       .array(z.string())
       .describe(
-        "The high quality, concise and technical notes you deem important to save for the programmer to use when implementing the plan.",
+        `Write concise, technical, and useful notes to your scratchpad. These notes will be saved for you to use ${whenMessage}.`,
       ),
   });
 
   return {
-    name: "take_notes",
-    schema: plannerContextNotesSchema,
+    name: "scratchpad",
+    schema: scratchpadSchema,
     description:
-      "Use this tool to write & save technical notes on the planner context.\n" +
-      "This should be called if you come across context you think will be highly useful to the programmer when they are actually implementing the plan, and you want to ensure it's not lost.\n" +
-      "Do not duplicate any information present in the user provided 'custom rules', as we want to avoid duplicating context.",
+      `Use this tool to write & save technical notes on the actions you take, and observations you make, and any notes you believe will be useful ${whenMessage}.` +
+      " This should be called if you come across context which you believe will be useful to you during later steps.",
   };
 }
 

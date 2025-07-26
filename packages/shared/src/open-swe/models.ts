@@ -1,20 +1,20 @@
 export const MODEL_OPTIONS = [
-  // {
-  //   label: "Claude Sonnet 4 (Extended Thinking)",
-  //   value: "anthropic:extended-thinking:claude-sonnet-4-0",
-  // },
-  // {
-  //   label: "Claude Opus 4 (Extended Thinking)",
-  //   value: "anthropic:extended-thinking:claude-opus-4-0",
-  // },
+  {
+    label: "Claude Sonnet 4 (Extended Thinking)",
+    value: "anthropic:extended-thinking:claude-sonnet-4-0",
+  },
+  {
+    label: "Claude Opus 4 (Extended Thinking)",
+    value: "anthropic:extended-thinking:claude-opus-4-0",
+  },
   {
     label: "Claude Sonnet 4",
     value: "anthropic:claude-sonnet-4-0",
   },
-  // {
-  //   label: "Claude Opus 4",
-  //   value: "anthropic:claude-opus-4-0",
-  // },
+  {
+    label: "Claude Opus 4",
+    value: "anthropic:claude-opus-4-0",
+  },
   {
     label: "Claude 3.7 Sonnet",
     value: "anthropic:claude-3-7-sonnet-latest",
@@ -27,10 +27,10 @@ export const MODEL_OPTIONS = [
     label: "Claude 3.5 Haiku",
     value: "anthropic:claude-3-5-haiku-latest",
   },
-  // {
-  //   label: "o4",
-  //   value: "openai:o4",
-  // },
+  {
+    label: "o4",
+    value: "openai:o4",
+  },
   {
     label: "o4 mini",
     value: "openai:o4-mini",
@@ -60,12 +60,12 @@ export const MODEL_OPTIONS = [
     value: "openai:gpt-4.1-mini",
   },
   {
-    label: "Gemini 2.5 Pro Preview",
-    value: "google-genai:gemini-2.5-pro-preview-05-06",
+    label: "Gemini 2.5 Pro",
+    value: "google-genai:gemini-2.5-pro",
   },
   {
-    label: "Gemini 2.5 Flash Preview",
-    value: "google-genai:gemini-2.5-flash-preview-05-20",
+    label: "Gemini 2.5 Flash",
+    value: "google-genai:gemini-2.5-flash",
   },
 ];
 

@@ -4,19 +4,23 @@ import {
   GraphState,
   GraphUpdate,
   PlanItem,
+  TaskPlan,
 } from "@open-swe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
-import { createPullRequest } from "../../../utils/github/api.js";
+import {
+  createPullRequest,
+  markPullRequestReadyForReview,
+} from "../../../utils/github/api.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/index.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
@@ -25,10 +29,18 @@ import {
   getSandboxWithErrorHandling,
 } from "../../../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import {
+  getActivePlanItems,
+  getPullRequestNumberFromActiveTask,
+} from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import {
+  GitHubPullRequest,
+  GitHubPullRequestList,
+  GitHubPullRequestUpdate,
+} from "../../../utils/github/types.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -81,19 +93,24 @@ export async function openPullRequest(
     sandbox,
   );
   let branchName = state.branchName;
+  let updatedTaskPlan: TaskPlan | undefined;
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    branchName = await checkoutBranchAndCommit(
+    const result = await checkoutBranchAndCommit(
       config,
       state.targetRepository,
       sandbox,
       {
         branchName,
         githubInstallationToken,
+        taskPlan: state.taskPlan,
+        githubIssueId: state.githubIssueId,
       },
     );
+    branchName = result.branchName;
+    updatedTaskPlan = result.updatedTaskPlan;
   }
 
   const openPrTool = createOpenPrToolFields();
@@ -132,18 +149,39 @@ export async function openPullRequest(
 
   const { title, body } = toolCall.args as z.infer<typeof openPrTool.schema>;
 
-  const pr = await createPullRequest({
-    owner,
-    repo,
-    headBranch: branchName,
-    title,
-    body: `Fixes #${state.githubIssueId}\n\n${body}`,
-    githubInstallationToken,
-    baseBranch: state.targetRepository.branch,
-  });
+  const prForTask = getPullRequestNumberFromActiveTask(
+    updatedTaskPlan ?? state.taskPlan,
+  );
+  let pullRequest:
+    | GitHubPullRequest
+    | GitHubPullRequestList[number]
+    | GitHubPullRequestUpdate
+    | null = null;
+  if (!prForTask) {
+    // No PR created yet. Shouldn't be possible, but we have a condition here anyway
+    pullRequest = await createPullRequest({
+      owner,
+      repo,
+      headBranch: branchName,
+      title,
+      body: `Fixes #${state.githubIssueId}\n\n${body}`,
+      githubInstallationToken,
+      baseBranch: state.targetRepository.branch,
+    });
+  } else {
+    // Ensure the PR is ready for review
+    pullRequest = await markPullRequestReadyForReview({
+      owner,
+      repo,
+      title,
+      body: `Fixes #${state.githubIssueId}\n\n${body}`,
+      pullNumber: prForTask,
+      githubInstallationToken,
+    });
+  }
 
   let sandboxDeleted = false;
-  if (pr) {
+  if (pullRequest) {
     // Delete the sandbox.
     sandboxDeleted = await deleteSandbox(sandboxSessionId);
   }
@@ -161,12 +199,12 @@ export async function openPullRequest(
     new ToolMessage({
       id: uuidv4(),
       tool_call_id: toolCall.id ?? "",
-      content: pr
-        ? `Created pull request: ${pr.html_url}`
-        : "Failed to create pull request.",
+      content: pullRequest
+        ? `Marked pull request as ready for review: ${pullRequest.html_url}`
+        : "Failed to mark pull request as ready for review.",
       name: toolCall.name,
       additional_kwargs: {
-        pull_request: pr,
+        pull_request: pullRequest,
       },
     }),
   ];
@@ -182,5 +220,6 @@ export async function openPullRequest(
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
     tokenData: trackCachePerformance(response),
+    ...(updatedTaskPlan && { taskPlan: updatedTaskPlan }),
   };
 }

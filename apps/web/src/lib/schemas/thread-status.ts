@@ -33,6 +33,11 @@ export function mapLangGraphToUIStatus(status: ThreadStatus): ThreadUIStatus {
   }
 }
 
+export interface ThreadStatusError {
+  message: string;
+  type: "not_found" | "unauthorized";
+}
+
 export interface ThreadStatusData {
   graph:
     | typeof MANAGER_GRAPH_ID
@@ -42,4 +47,5 @@ export interface ThreadStatusData {
   threadId: string;
   status: ThreadUIStatus;
   taskPlan?: TaskPlan; // Task plan data when available from programmer sessions
+  error?: ThreadStatusError;
 }

@@ -2,6 +2,7 @@
 
 import { ThreadView } from "@/components/v2/thread-view";
 import { ThreadViewLoading } from "@/components/v2/thread-view-loading";
+import { ThreadErrorCard } from "@/components/v2/thread-error-card";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
@@ -24,7 +25,6 @@ export default function ThreadPage({
 }) {
   const router = useRouter();
   const { thread_id } = use(params);
-  const { currentInstallation } = useGitHubAppProvider();
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
     assistantId: MANAGER_GRAPH_ID,
@@ -35,7 +35,6 @@ export default function ThreadPage({
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    currentInstallation,
     disableOrgFiltering: true,
   });
 
@@ -53,13 +52,22 @@ export default function ThreadPage({
     created_at: new Date().toISOString(),
   };
 
-  const { metadata: currentDisplayThread } = useThreadMetadata(
+  const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,
   );
 
   const handleBackToHome = () => {
     router.push("/chat");
   };
+
+  if (statusError && "message" in statusError && "type" in statusError) {
+    return (
+      <ThreadErrorCard
+        error={statusError}
+        onGoBack={handleBackToHome}
+      />
+    );
+  }
 
   if (!thread || threadsLoading) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;

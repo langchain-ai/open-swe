@@ -1,24 +1,24 @@
+> [!WARNING]
+> Open SWE is under active development and is not yet ready for production use.
+
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
-    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo">
+    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="35%">
   </picture>
 </div>
 
-Open SWE is an open-source cloud based coding agent. It's built with [LangGraph](https://langchain-ai.github.io/langgraphjs/), and is designed to autonomously understand, plan, and execute code changes across entire repositories.
+<div align="center">
+  <h1>Open SWE - An cloud based, fully autonomous coding agent</h1>
+</div>
 
-Think of Open SWE as your own personal engineer who can handle complex tasks end to end, from planning to execution, to opening a pull request.
-
-> [!WARNING]
-> Open SWE is under active development and is not yet ready for production use.
+Open SWE is an open-source cloud-based coding agent built with [LangGraph](https://langchain-ai.github.io/langgraphjs/). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories—from initial planning to opening pull requests.
 
 > [!TIP]
 > Try out Open SWE yourself using our [public demo](https://swe.langchain.com)!
 >
 > **Note: you're required to set your own LLM API keys to use the demo.**
-
-![UI Screenshot](./static/ui-screenshot.png)
 
 # Features
 
@@ -26,6 +26,8 @@ Think of Open SWE as your own personal engineer who can handle complex tasks end
 - 🤝 **Human in the loop**: With Open SWE, you can send it messages while it's running (both during the planning and execution steps). This allows for giving real time feedback and instructions without having to interrupt the process.
 - 🏃 **Parallel Execution**: You can run as many Open SWE tasks as you want in parallel! Since it runs in a sandbox environment in the cloud, you're not limited by the number of tasks you can run at once.
 - 🧑‍💻 **End to end task management**: Open SWE will automatically create GitHub issues for tasks, and create pull requests which will close the issue when implementation is complete.
+
+![UI Screenshot](./static/ui-screenshot.png)
 
 ## Usage
 

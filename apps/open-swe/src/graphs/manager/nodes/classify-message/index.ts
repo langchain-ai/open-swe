@@ -15,7 +15,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/index.js";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import {

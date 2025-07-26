@@ -56,7 +56,7 @@ export function useThreadStatus(
     status: data?.status || "idle",
     taskPlan: data?.taskPlan,
     isLoading,
-    error,
+    error: data?.error ?? error,
     mutate,
   };
 }

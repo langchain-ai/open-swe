@@ -5,7 +5,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/index.js";
 import { getMessageString } from "../../../utils/message/content.js";
 
 export async function createIssueFieldsFromMessages(

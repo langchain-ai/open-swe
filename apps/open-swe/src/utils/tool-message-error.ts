@@ -64,26 +64,67 @@ export function calculateErrorRate(group: ToolMessage[]): number {
 }
 
 /**
+ * Check if there was a diagnosis tool call within the last N tool message groups
+ * @param messages Array of messages to check
+ * @param groupCount Number of recent groups to check
+ * @returns True if a diagnosis tool call was found in the recent groups
+ */
+function hasRecentDiagnosisToolCall(
+  messages: Array<BaseMessage>,
+  groupCount: number,
+): boolean {
+  const allGroups: ToolMessage[][] = [];
+  let currentGroup: ToolMessage[] = [];
+  let processingToolsForAI = false;
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+
+    if (isAIMessage(message)) {
+      if (currentGroup.length > 0) {
+        allGroups.push([...currentGroup]);
+        currentGroup = [];
+      }
+      processingToolsForAI = true;
+    } else if (isToolMessage(message) && processingToolsForAI) {
+      currentGroup.push(message);
+    } else if (!isToolMessage(message) && processingToolsForAI) {
+      if (currentGroup.length > 0) {
+        allGroups.push([...currentGroup]);
+        currentGroup = [];
+      }
+      processingToolsForAI = false;
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    allGroups.push(currentGroup);
+  }
+
+  const recentGroups = allGroups.slice(-groupCount);
+  return recentGroups.some((group) =>
+    group.some((message) => message.additional_kwargs?.is_diagnosis),
+  );
+}
+
+/**
  * Whether or not to route to the diagnose error step. This is true if:
  * - the last three tool call groups all have >= 75% error rates
- *
- * TBD: Should this be checking that each of the last 3 have >= 75% error rates,
- * or >= 75% error rate of all tool messages from the last 3 groups?
+ * - there hasn't been a diagnose error tool call within the last three message groups
  *
  * @param messages All messages to analyze
  */
-export function shouldDiagnoseError(messages: Array<any>) {
-  // Group tool messages by their parent AI message
+export function shouldDiagnoseError(messages: Array<BaseMessage>) {
   const toolGroups = groupToolMessagesByAIMessage(messages);
 
-  // If we don't have at least 3 groups, we can't make a determination
   if (toolGroups.length < 3) return false;
 
-  // Get the last three groups
   const lastThreeGroups = toolGroups.slice(-3);
 
-  // Check if all of the last three groups have an error rate >= 75%
-  const ERROR_THRESHOLD = 0.75; // 75%
+  const hasRecentDiagnosis = hasRecentDiagnosisToolCall(messages, 3);
+  if (hasRecentDiagnosis) return false;
+
+  const ERROR_THRESHOLD = 0.75;
   return lastThreeGroups.every(
     (group) => calculateErrorRate(group) >= ERROR_THRESHOLD,
   );

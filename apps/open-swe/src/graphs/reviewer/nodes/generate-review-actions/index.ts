@@ -2,7 +2,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/index.js";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -32,6 +32,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
@@ -119,6 +120,9 @@ export async function generateReviewActions(
     createSearchTool(state),
     createShellTool(state),
     createInstallDependenciesTool(state),
+    createScratchpadTool(
+      "when generating a final review, after all context gathering and reviewing is complete",
+    ),
   ];
   tools[tools.length - 1] = {
     ...tools[tools.length - 1],

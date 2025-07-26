@@ -120,6 +120,10 @@ export type Task = {
    * Optional parent task id if this task was derived from another task
    */
   parentTaskId?: string;
+  /**
+   * The pull request number associated with this task
+   */
+  pullRequestNumber?: number;
 };
 
 export type TaskPlan = {
@@ -174,7 +178,7 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
   }),
   /**
-   * Notes taken based on the actions preformed by the planning agent.
+   * Notes taken based on the actions performed by the planning agent.
    */
   contextGatheringNotes: withLangGraph(z.custom<string>(), {
     reducer: {

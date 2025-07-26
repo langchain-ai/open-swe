@@ -21,7 +21,7 @@ import {
   createApplyPatchToolFields,
   createShellToolFields,
   createInstallDependenciesToolFields,
-  createTakePlannerNotesFields,
+  createScratchpadFields,
   createGetURLContentToolFields,
   createSearchToolFields,
   createSearchDocumentForToolFields,
@@ -46,8 +46,8 @@ const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
 >;
-const plannerNotesTool = createTakePlannerNotesFields();
-type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const scratchpadTool = createScratchpadFields("");
+type ScratchpadToolArgs = z.infer<typeof scratchpadTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
 const searchTool = createSearchToolFields(dummyRepo);
@@ -87,9 +87,9 @@ type InstallDependenciesActionProps = BaseActionProps &
     errorCode?: number;
   };
 
-type PlannerNotesActionProps = BaseActionProps &
-  Partial<PlannerNotesToolArgs> & {
-    actionType: "planner_notes";
+type ScratchpadActionProps = BaseActionProps &
+  Partial<ScratchpadToolArgs> & {
+    actionType: "scratchpad";
   };
 
 type GetURLContentActionProps = BaseActionProps &
@@ -123,7 +123,7 @@ export type ActionItemProps =
   | ShellActionProps
   | PatchActionProps
   | InstallDependenciesActionProps
-  | PlannerNotesActionProps
+  | ScratchpadActionProps
   | GetURLContentActionProps
   | McpActionProps
   | SearchActionProps
@@ -139,7 +139,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   [shellTool.name]: "Executing...",
   [applyPatchTool.name]: "Applying patch...",
   [installDependenciesTool.name]: "Installing dependencies...",
-  [plannerNotesTool.name]: "Saving notes...",
+  [scratchpadTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
   [searchDocumentForTool.name]: "Searching document...",
   [searchTool.name]: "Searching...",
@@ -212,8 +212,10 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Patch applied" : "Patch failed";
       } else if (props.actionType === "install_dependencies") {
         return props.success ? "Dependencies installed" : "Installation failed";
-      } else if (props.actionType === "planner_notes") {
-        return props.success ? "Notes saved" : "Failed to save notes";
+      } else if (props.actionType === "scratchpad") {
+        return props.success
+          ? "Scratchpad updated"
+          : "Failed to update scratchpad";
       } else if (props.actionType === "get_url_content") {
         return props.success
           ? "URL content fetched"
@@ -248,8 +250,8 @@ function ActionItem(props: ActionItemProps) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
-    } else if (props.actionType === "planner_notes") {
-      return !!(props.notes && props.notes.length > 0);
+    } else if (props.actionType === "scratchpad") {
+      return !!(props.scratchpad && props.scratchpad.length > 0);
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
@@ -272,10 +274,10 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "planner_notes") {
+    if (props.actionType === "scratchpad") {
       return (
         <ToolIconWithTooltip
-          toolNamePretty="Planner Notes"
+          toolNamePretty="Scratchpad"
           icon={<FileText className={cn(defaultIconStyling)} />}
         />
       );
@@ -341,11 +343,11 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "planner_notes") {
+    if (props.actionType === "scratchpad") {
       return (
         <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
-            Planner Notes
+            Scratchpad
           </span>
         </div>
       );
@@ -584,14 +586,14 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     } else if (
-      props.actionType === "planner_notes" &&
-      props.notes &&
-      props.notes.length > 0
+      props.actionType === "scratchpad" &&
+      props.scratchpad &&
+      props.scratchpad.length > 0
     ) {
       return (
         <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
           <ul className="list-disc pl-5 text-xs font-normal">
-            {props.notes.map((note, i) => (
+            {props.scratchpad.map((note, i) => (
               <li
                 key={i}
                 className="text-foreground/90 mb-1 whitespace-pre-wrap"

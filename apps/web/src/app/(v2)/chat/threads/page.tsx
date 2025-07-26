@@ -11,7 +11,7 @@ import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { InstallationSelector } from "@/components/github/installation-selector";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
@@ -260,7 +260,9 @@ function AllThreadsPageContent() {
 export default function AllThreadsPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <AllThreadsPageContent />
+      <GitHubAppProvider>
+        <AllThreadsPageContent />
+      </GitHubAppProvider>
     </Suspense>
   );
 }

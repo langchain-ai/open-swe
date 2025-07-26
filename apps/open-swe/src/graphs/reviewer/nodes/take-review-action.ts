@@ -8,7 +8,7 @@ import {
   createInstallDependenciesTool,
   createShellTool,
 } from "../../../tools/index.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -28,6 +28,9 @@ import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { createScratchpadTool } from "../../../tools/scratchpad.js";
+import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
+import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -45,7 +48,13 @@ export async function takeReviewerActions(
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const allTools = [shellTool, searchTool, installDependenciesTool];
+  const scratchpadTool = createScratchpadTool("");
+  const allTools = [
+    shellTool,
+    searchTool,
+    installDependenciesTool,
+    scratchpadTool,
+  ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -96,11 +105,16 @@ export async function takeReviewerActions(
           result: string;
           status: "success" | "error";
         };
+
       result = toolResult.result;
-      if (!result) {
-        result = toolResult.status;
-      }
       toolCallStatus = toolResult.status;
+
+      if (!result) {
+        result =
+          toolCallStatus === "success"
+            ? "Tool call returned no result"
+            : "Tool call failed";
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (
@@ -136,21 +150,32 @@ export async function takeReviewerActions(
   const toolCallResults = await Promise.all(toolCallResultsPromise);
   const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+
   let branchName: string | undefined = state.branchName;
+  let pullRequestNumber: number | undefined;
+  let updatedTaskPlan: TaskPlan | undefined;
+
   if (changedFiles.length > 0) {
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    branchName = await checkoutBranchAndCommit(
+    const result = await checkoutBranchAndCommit(
       config,
       state.targetRepository,
       sandbox,
       {
         branchName,
         githubInstallationToken,
+        taskPlan: state.taskPlan,
+        githubIssueId: state.githubIssueId,
       },
     );
+    branchName = result.branchName;
+    pullRequestNumber = result.updatedTaskPlan
+      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+      : undefined;
+    updatedTaskPlan = result.updatedTaskPlan;
   }
 
   let wereDependenciesInstalled: boolean | null = null;
@@ -175,10 +200,23 @@ export async function takeReviewerActions(
     })),
   });
 
+  const userFacingMessagesUpdate = [
+    ...toolCallResults,
+    ...(updatedTaskPlan && pullRequestNumber
+      ? createPullRequestToolCallMessage(
+          state.targetRepository,
+          pullRequestNumber,
+          true,
+        )
+      : []),
+  ];
   const commandUpdate: ReviewerGraphUpdate = {
-    messages: toolCallResults,
+    messages: userFacingMessagesUpdate,
     reviewerMessages: toolCallResults,
     ...(branchName && { branchName }),
+    ...(updatedTaskPlan && {
+      taskPlan: updatedTaskPlan,
+    }),
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,

@@ -11,6 +11,42 @@ import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
 import { SessionCache, SessionCacheData } from "@/hooks/useThreadsStatus";
 
+function getErrorFields(error: unknown): {
+  message: string;
+  type: "not_found" | "unauthorized";
+} {
+  if (
+    !error ||
+    typeof error !== "object" ||
+    !("message" in error) ||
+    !("status" in error)
+  ) {
+    return {
+      message: "Unknown error",
+      type: "unauthorized",
+    };
+  }
+
+  if (error.status === 404) {
+    return {
+      message: "Thread not found",
+      type: "not_found",
+    };
+  }
+
+  if (error.status === 401) {
+    return {
+      message: "Unauthorized",
+      type: "unauthorized",
+    };
+  }
+
+  return {
+    message: "Unknown error",
+    type: "unauthorized",
+  };
+}
+
 interface StatusResult {
   graph: "manager" | "planner" | "programmer";
   runId: string;
@@ -134,6 +170,7 @@ export async function fetchThreadStatus(
       sessionCache,
     );
   } catch (error) {
+    const errorFields = getErrorFields(error);
     console.error(`Error fetching thread status for ${threadId}:`, error);
 
     const graph = lastPollingState?.graph || "manager";
@@ -145,6 +182,7 @@ export async function fetchThreadStatus(
       runId,
       threadId: errorThreadId,
       status: "error",
+      error: errorFields,
     };
   }
 }
