@@ -70,7 +70,7 @@ function cleanTaskItems(taskItem: string): string {
 /**
  * Posts a comment to a GitHub issue using the installation token
  */
-async function postGitHubIssueComment(input: {
+export async function postGitHubIssueComment(input: {
   githubIssueId: number;
   targetRepository: { owner: string; repo: string };
   commentBody: string;

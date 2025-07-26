@@ -22,6 +22,7 @@ import {
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
+import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -32,19 +33,6 @@ const githubApp = new GitHubApp();
 const webhooks = new Webhooks({
   secret: GITHUB_WEBHOOK_SECRET,
 });
-
-const getOpenSweAppUrl = (threadId: string) => {
-  if (!process.env.OPEN_SWE_APP_URL) {
-    return "";
-  }
-  try {
-    const baseUrl = new URL(process.env.OPEN_SWE_APP_URL);
-    baseUrl.pathname = `/chat/${threadId}`;
-    return baseUrl.toString();
-  } catch {
-    return "";
-  }
-};
 
 const getPayload = (body: string): Record<string, any> | null => {
   try {

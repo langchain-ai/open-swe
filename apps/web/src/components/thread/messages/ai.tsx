@@ -28,6 +28,7 @@ import {
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
 import { CodeReviewStarted } from "@/components/gen-ui/code-review-started";
+import { RequestHumanHelp } from "@/components/gen-ui/request-human-help";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -44,6 +45,7 @@ import {
   createSearchDocumentForToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
+  createRequestHumanHelpToolFields,
   createReviewStartedToolFields,
   createScratchpadFields,
 } from "@open-swe/shared/open-swe/tools";
@@ -52,6 +54,7 @@ import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -107,6 +110,9 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+const requestHumanHelpTool = createRequestHumanHelpToolFields();
+type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
+
 // Helper function to detect MCP tools by checking if tool name is NOT in known tools
 function isMcpTool(toolName: string): boolean {
   const knownToolNames = [
@@ -117,6 +123,7 @@ function isMcpTool(toolName: string): boolean {
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
+    requestHumanHelpTool.name,
   ];
   return !knownToolNames.some((t) => t === toolName);
 }
@@ -178,6 +185,7 @@ function parseAnthropicStreamedToolCalls(
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   threadMessages: Message[],
+  onSubmitHumanHelpResponse?: (response: string) => void,
 ): ActionItemProps {
   const toolCall: ToolCall | undefined = threadMessages
     .filter(isAIMessageSDK)
@@ -311,6 +319,26 @@ export function AssistantMessage({
   threadMessages: Message[];
 }) {
   const content = message?.content ?? [];
+
+  const handleHumanHelpResponse = (response: string) => {
+    const humanResponse: HumanResponse[] = [
+      {
+        type: "response",
+        args: response,
+      },
+    ];
+
+    thread.submit(
+      {},
+      {
+        command: { resume: humanResponse },
+        config: {
+          recursion_limit: 400,
+        },
+        streamResumable: true,
+      },
+    );
+  };
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
@@ -320,9 +348,7 @@ export function AssistantMessage({
   const messages = threadMessages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
 
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
@@ -400,6 +426,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === reviewStartedTool.name)
     : undefined;
 
+  const requestHumanHelpToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === requestHumanHelpTool.name)
+    : undefined;
+
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
     const correspondingToolResult = toolResults.find(
@@ -427,6 +457,26 @@ export function AssistantMessage({
       <div className="flex flex-col gap-4">
         <CodeReviewStarted
           status={correspondingToolResult ? "done" : "generating"}
+        />
+      </div>
+    );
+  }
+
+  if (requestHumanHelpToolCall && aiToolCalls.length === 1) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === requestHumanHelpToolCall.id,
+    );
+
+    const args = requestHumanHelpToolCall.args as RequestHumanHelpToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <RequestHumanHelp
+          status={correspondingToolResult ? "done" : "generating"}
+          helpRequest={args.help_request}
+          reasoningText={reasoningText}
+          onSubmitResponse={handleHumanHelpResponse}
         />
       </div>
     );
@@ -615,6 +665,7 @@ export function AssistantMessage({
         return mapToolMessageToActionStepProps(
           correspondingToolResult,
           threadMessages,
+          handleHumanHelpResponse,
         );
       } else if (isSearchTool) {
         const args = toolCall.args as SearchToolArgs;

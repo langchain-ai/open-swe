@@ -236,7 +236,6 @@ function ActionItem(props: ActionItemProps) {
     return "";
   };
 
-  // Determine if we should show the content toggle button
   const shouldShowToggle = () => {
     if (props.status !== "done") return false;
 
@@ -469,8 +468,8 @@ function ActionItem(props: ActionItemProps) {
 
   // Render the content based on action type
   const renderContent = () => {
-    if (props.status !== "done" || !("actionType" in props)) return null;
-
+    if (!("actionType" in props)) return null;
+    if (props.status !== "done") return null;
     if (!expanded) return null;
 
     if (
