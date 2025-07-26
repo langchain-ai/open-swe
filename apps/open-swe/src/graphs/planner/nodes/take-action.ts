@@ -128,7 +128,7 @@ export async function takeActions(
       }
 
       if (!result) {
-        result = toolCallStatus;
+        result = toolCallStatus === "success" ? "Tool call returned no result" : "Tool call failed";
       }
     } catch (e) {
       toolCallStatus = "error";

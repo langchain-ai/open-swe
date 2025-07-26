@@ -110,7 +110,7 @@ export async function takeReviewerActions(
       toolCallStatus = toolResult.status;
 
       if (!result) {
-        result = toolCallStatus;
+        result = toolCallStatus === "success" ? "Tool call returned no result" : "Tool call failed";
       }
     } catch (e) {
       toolCallStatus = "error";
