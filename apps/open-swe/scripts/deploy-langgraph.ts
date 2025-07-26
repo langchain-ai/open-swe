@@ -215,3 +215,11 @@ async function deployLangGraph(): Promise<void> {
   } catch (error) {
     logger.error("LangGraph deployment failed", { error: error instanceof Error ? error.message : String(error) });
     process.exit(1);
+  }
+}
+
+// Execute deployment if this script is run directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  deployLangGraph();
+}
+
