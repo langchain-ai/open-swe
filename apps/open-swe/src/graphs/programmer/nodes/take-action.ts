@@ -54,6 +54,7 @@ export async function takeAction(
   const applyPatchTool = createApplyPatchTool(state);
   const shellTool = createShellTool(state);
   const searchTool = createSearchTool(state);
+  const textEditorTool = createTextEditorTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
