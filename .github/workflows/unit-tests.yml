@@ -1,7 +1,8 @@
 # This workflow will run unit tests for the current project
 
 name: Unit Tests
-
+permissions:
+  contents: read
 on:
   push:
     branches: ["main"]
