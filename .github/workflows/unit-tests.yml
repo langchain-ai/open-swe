@@ -24,18 +24,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
+      - name: Enable Corepack
+        run: corepack enable
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
           cache: "yarn"
-
       - name: Install dependencies
-        run: yarn install --immutable
-
+        run: yarn install --immutable --mode=skip-build
       - name: Build project
         run: yarn build
-
       - name: Run tests
         run: yarn test
