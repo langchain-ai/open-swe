@@ -152,7 +152,7 @@ export async function generateAction(
     createSearchTool(state),
     {
       type: "text_editor_20250429",
-      name: "str_replace_based_edit_tool"
+      name: "str_replace_based_edit_tool",
     },
     createShellTool(state),
     createApplyPatchTool(state),

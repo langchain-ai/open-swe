@@ -40,7 +40,9 @@ function createTextEditorToolFields(targetRepository: any) {
     file_text: z
       .string()
       .optional()
-      .describe("The content to write to the new file. Required for create command."),
+      .describe(
+        "The content to write to the new file. Required for create command.",
+      ),
     insert_line: z
       .number()
       .optional()
@@ -78,11 +80,11 @@ async function handleViewCommand(
         `ls -la "${path}"`,
         workDir,
       );
-      
+
       if (lsOutput.exitCode !== 0) {
         throw new Error(`Failed to list directory: ${lsOutput.result}`);
       }
-      
+
       return `Directory listing for ${path}:\n${lsOutput.result}`;
     }
 
@@ -99,29 +101,33 @@ async function handleViewCommand(
 
     // Apply view range if specified
     if (viewRange) {
-      const lines = output.split('\n');
+      const lines = output.split("\n");
       const [start, end] = viewRange;
       const startIndex = Math.max(0, start - 1); // Convert to 0-indexed
       const endIndex = end === -1 ? lines.length : Math.min(lines.length, end);
-      
+
       const selectedLines = lines.slice(startIndex, endIndex);
       const numberedLines = selectedLines.map(
         (line, index) => `${startIndex + index + 1}: ${line}`,
       );
-      
-      return numberedLines.join('\n');
+
+      return numberedLines.join("\n");
     }
 
     // Return full file with line numbers
-    const lines = output.split('\n');
+    const lines = output.split("\n");
     const numberedLines = lines.map((line, index) => `${index + 1}: ${line}`);
-    return numberedLines.join('\n');
+    return numberedLines.join("\n");
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      throw new Error(`Failed to view ${path}: ${errorFields.result || errorFields.error}`);
+      throw new Error(
+        `Failed to view ${path}: ${errorFields.result || errorFields.error}`,
+      );
     }
-    throw new Error(`Failed to view ${path}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(
+      `Failed to view ${path}: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 }
 
@@ -143,14 +149,22 @@ async function handleStrReplaceCommand(
   }
 
   // Count occurrences of old string
-  const occurrences = (fileContent.match(new RegExp(oldStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-  
+  const occurrences = (
+    fileContent.match(
+      new RegExp(oldStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+    ) || []
+  ).length;
+
   if (occurrences === 0) {
-    throw new Error(`No match found for replacement text in ${path}. Please check your text and try again.`);
+    throw new Error(
+      `No match found for replacement text in ${path}. Please check your text and try again.`,
+    );
   }
-  
+
   if (occurrences > 1) {
-    throw new Error(`Found ${occurrences} matches for replacement text in ${path}. Please provide more context to make a unique match.`);
+    throw new Error(
+      `Found ${occurrences} matches for replacement text in ${path}. Please provide more context to make a unique match.`,
+    );
   }
 
   // Perform replacement
@@ -184,7 +198,9 @@ async function handleCreateCommand(
   });
 
   if (readSuccess) {
-    throw new Error(`File ${path} already exists. Use str_replace to modify existing files.`);
+    throw new Error(
+      `File ${path} already exists. Use str_replace to modify existing files.`,
+    );
   }
 
   const { success: writeSuccess, output: writeOutput } = await writeFile({
@@ -218,13 +234,13 @@ async function handleInsertCommand(
     throw new Error(`Failed to read file ${path}: ${fileContent}`);
   }
 
-  const lines = fileContent.split('\n');
-  
+  const lines = fileContent.split("\n");
+
   // Insert at specified line (0 = beginning, 1 = after first line, etc.)
   const insertIndex = Math.max(0, Math.min(lines.length, insertLine));
   lines.splice(insertIndex, 0, newStr);
-  
-  const newContent = lines.join('\n');
+
+  const newContent = lines.join("\n");
 
   const { success: writeSuccess, output: writeOutput } = await writeFile({
     sandbox,
@@ -248,45 +264,82 @@ export function createTextEditorTool(
       try {
         const sandbox = await getSandboxSessionOrThrow(input);
         const workDir = getRepoAbsolutePath(state.targetRepository);
-        
-        const { command, path, view_range, old_str, new_str, file_text, insert_line } = input;
+
+        const {
+          command,
+          path,
+          view_range,
+          old_str,
+          new_str,
+          file_text,
+          insert_line,
+        } = input;
 
         let result: string;
 
         switch (command) {
           case "view":
-            result = await handleViewCommand(sandbox, path, workDir, view_range);
+            result = await handleViewCommand(
+              sandbox,
+              path,
+              workDir,
+              view_range,
+            );
             break;
           case "str_replace":
             if (!old_str || new_str === undefined) {
-              throw new Error("str_replace command requires both old_str and new_str parameters");
+              throw new Error(
+                "str_replace command requires both old_str and new_str parameters",
+              );
             }
-            result = await handleStrReplaceCommand(sandbox, path, workDir, old_str, new_str);
+            result = await handleStrReplaceCommand(
+              sandbox,
+              path,
+              workDir,
+              old_str,
+              new_str,
+            );
             break;
           case "create":
             if (!file_text) {
               throw new Error("create command requires file_text parameter");
             }
-            result = await handleCreateCommand(sandbox, path, workDir, file_text);
+            result = await handleCreateCommand(
+              sandbox,
+              path,
+              workDir,
+              file_text,
+            );
             break;
           case "insert":
             if (insert_line === undefined || new_str === undefined) {
-              throw new Error("insert command requires both insert_line and new_str parameters");
+              throw new Error(
+                "insert command requires both insert_line and new_str parameters",
+              );
             }
-            result = await handleInsertCommand(sandbox, path, workDir, insert_line, new_str);
+            result = await handleInsertCommand(
+              sandbox,
+              path,
+              workDir,
+              insert_line,
+              new_str,
+            );
             break;
           default:
             throw new Error(`Unknown command: ${command}`);
         }
 
-        logger.info(`Text editor command '${command}' executed successfully on ${path}`);
+        logger.info(
+          `Text editor command '${command}' executed successfully on ${path}`,
+        );
         return { result, status: "success" };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         logger.error(`Text editor command failed: ${errorMessage}`);
         return {
           result: `Error: ${errorMessage}`,
-          status: "error"
+          status: "error",
         };
       }
     },
