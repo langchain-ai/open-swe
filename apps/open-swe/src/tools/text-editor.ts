@@ -19,8 +19,7 @@ function createTextEditorToolFields(targetRepository: any) {
       .string()
       .describe("The path to the file or directory to operate on"),
     view_range: z
-      .array(z.number())
-      .length(2)
+      .tuple([z.number(), z.number()])
       .optional()
       .describe(
         "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command.",
@@ -351,3 +350,4 @@ export function createTextEditorTool(
 
   return textEditorTool;
 }
+
