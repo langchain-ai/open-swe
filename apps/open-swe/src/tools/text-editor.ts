@@ -120,9 +120,7 @@ async function handleViewCommand(
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
-      throw new Error(
-        `Failed to view ${path}: ${errorFields.result}`,
-      );
+      throw new Error(`Failed to view ${path}: ${errorFields.result}`);
     }
     throw new Error(
       `Failed to view ${path}: ${e instanceof Error ? e.message : String(e)}`,
@@ -350,4 +348,3 @@ export function createTextEditorTool(
 
   return textEditorTool;
 }
-
