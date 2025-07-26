@@ -164,9 +164,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
 
   useEffect(() => {
     if (selectedRepository && !branchesLoading) {
-      fetchBranches();
-      // Reset branch pagination when repository changes
+      setBranches([]);
       setBranchesPage(1);
+      fetchBranches();
     } else if (!selectedRepository) {
       setBranches([]);
       setSelectedBranchParam(null);
@@ -181,12 +181,10 @@ export function useGitHubApp(): UseGitHubAppReturn {
       // Persist to localStorage whenever repository is selected
       saveRepositoryToLocalStorage(repo);
 
-      if (!repo) {
-        setSelectedBranchParam(null);
-        setBranches([]);
-        setBranchesPage(1);
-        setBranchesHasMore(false);
-      }
+      setSelectedBranchParam(null);
+      setBranches([]);
+      setBranchesPage(1);
+      setBranchesHasMore(false);
     },
     [setSelectedRepositoryParam, setSelectedBranchParam],
   );
@@ -314,7 +312,6 @@ export function useGitHubApp(): UseGitHubAppReturn {
         );
 
         if (branch) {
-          // Add the found branch to the existing branches list if it's not already there
           setBranches((prev) => {
             const exists = prev.some((b) => b.name === branch.name);
             if (!exists) {
@@ -354,15 +351,12 @@ export function useGitHubApp(): UseGitHubAppReturn {
         hasCheckedLocalStorageRef.current = false;
       }
 
-      // Update the previous installation ID reference
       previousInstallationIdRef.current = currentInstallationId;
 
-      // Fetch repositories for the current installation
       checkInstallation();
     }
   }, [currentInstallationId]);
 
-  // Check localStorage for previously selected repository
   useEffect(() => {
     if (
       !hasCheckedLocalStorageRef.current &&
@@ -432,13 +426,13 @@ export function useGitHubApp(): UseGitHubAppReturn {
   // Auto-select first repository on initial page load
   useEffect(() => {
     if (
-      !hasAutoSelectedRef.current && // Haven't auto-selected yet
-      !selectedRepository && // No repo currently selected
-      !isLoading && // Not loading repositories
-      !error && // No error occurred
-      isInstalled === true && // GitHub App is installed
-      repositories.length > 0 && // Repositories are available
-      hasCheckedLocalStorageRef.current // Only after localStorage check is complete
+      !hasAutoSelectedRef.current &&
+      !selectedRepository &&
+      !isLoading &&
+      !error &&
+      isInstalled === true &&
+      repositories.length > 0 &&
+      hasCheckedLocalStorageRef.current
     ) {
       const firstRepo = repositories[0];
       const targetRepo = {

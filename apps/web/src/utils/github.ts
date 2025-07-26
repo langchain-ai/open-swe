@@ -105,8 +105,7 @@ export async function getRepositoryBranches(
       const defaultBranchData = branches[defaultBranchIndex];
       branches.splice(defaultBranchIndex, 1);
       branches.unshift(defaultBranchData);
-    } else {
-      // Need to fetch default branch
+    } else if (defaultBranchIndex === -1) {
       const defaultBranchResponse = await fetch(
         `${getBaseApiUrl()}github/proxy/repos/${owner}/${repo}/branches/${defaultBranch}`,
         {
