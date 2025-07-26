@@ -192,7 +192,7 @@ export function mapToolMessageToActionStepProps(
     : undefined;
 
   const status: ActionItemProps["status"] = "done";
-  const success = message.status === "success";
+  const success = message.status !== "error";
 
   const msgContent = getContentString(message.content);
   const output = msgContent === "" ? "Empty string" : msgContent;
