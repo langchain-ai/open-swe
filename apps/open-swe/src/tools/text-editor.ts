@@ -122,7 +122,7 @@ async function handleViewCommand(
     const errorFields = getSandboxErrorFields(e);
     if (errorFields) {
       throw new Error(
-        `Failed to view ${path}: ${errorFields.result || errorFields.error}`,
+        `Failed to view ${path}: ${errorFields.result}`,
       );
     }
     throw new Error(
