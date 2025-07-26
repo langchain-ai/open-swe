@@ -22,7 +22,5 @@ export default {
   setupFiles: ["dotenv/config"],
   passWithNoTests: true,
   testTimeout: 20_000,
-  testMatch: [
-    "<rootDir>/src/**/*.test.ts"
-  ],
+  testMatch: ["<rootDir>/src/**/*.test.ts"],
 };

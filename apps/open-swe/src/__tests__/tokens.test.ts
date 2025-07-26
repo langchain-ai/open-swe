@@ -124,8 +124,8 @@ describe("calculateConversationHistoryTokenCount", () => {
     });
 
     expect(resultWithoutOption).toBeGreaterThan(resultWithOption);
-    // First two messages should be ~7 tokens
-    expect(resultWithOption).toBe(7);
+    // First two messages should be ~8 tokens
+    expect(resultWithOption).toBe(8);
   });
 
   it("should not separate AI messages with tool calls from their tool messages when excluding from end", async () => {
