@@ -69,6 +69,7 @@ export async function takeAction(
   const allTools = [
     shellTool,
     searchTool,
+    textEditorTool,
     installDependenciesTool,
     applyPatchTool,
     getURLContentTool,
