@@ -12,6 +12,7 @@ import {
 import {
   createShellTool,
   createApplyPatchTool,
+  createTextEditorTool,
   createRequestHumanHelpToolFields,
   createUpdatePlanToolFields,
   createGetURLContentTool,
