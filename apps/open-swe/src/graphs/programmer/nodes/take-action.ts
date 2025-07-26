@@ -4,6 +4,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
   createGetURLContentTool,
+  createTextEditorTool,
   createShellTool,
   createSearchDocumentForTool,
 } from "../../../tools/index.js";
