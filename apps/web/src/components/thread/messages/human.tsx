@@ -1,4 +1,3 @@
-import { useStreamContext } from "@/providers/Stream";
 import { Message } from "@langchain/langgraph-sdk";
 import { useState } from "react";
 import { getContentString } from "../utils";
@@ -8,6 +7,7 @@ import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
 import { BaseMessage } from "@langchain/core/messages";
+import { useStream } from "@langchain/langgraph-sdk/react";
 
 function EditableContent({
   value,
@@ -38,12 +38,17 @@ function EditableContent({
 export function HumanMessage({
   message,
   isLoading,
+  submit,
+  setBranch,
+  getMessagesMetadata,
 }: {
   message: Message;
   isLoading: boolean;
+  submit: ReturnType<typeof useStream>["submit"];
+  setBranch: ReturnType<typeof useStream>["setBranch"];
+  getMessagesMetadata: ReturnType<typeof useStream>["getMessagesMetadata"];
 }) {
-  const thread = useStreamContext();
-  const meta = thread.getMessagesMetadata(message);
+  const meta = getMessagesMetadata(message);
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
 
   const [isEditing, setIsEditing] = useState(false);
@@ -57,7 +62,7 @@ export function HumanMessage({
       type: "human",
       content: value,
     } as unknown as BaseMessage;
-    thread.submit(
+    submit(
       { messages: [newMessage], internalMessages: [newMessage] },
       {
         checkpoint: parentCheckpoint,
@@ -69,7 +74,7 @@ export function HumanMessage({
           return {
             ...values,
             messages: [
-              ...(values.messages ?? []),
+              ...((values.messages as Message[]) ?? []),
               newMessage,
             ] as unknown as BaseMessage[],
           };
@@ -136,7 +141,7 @@ export function HumanMessage({
           <BranchSwitcher
             branch={meta?.branch}
             branchOptions={meta?.branchOptions}
-            onSelect={(branch) => thread.setBranch(branch)}
+            onSelect={(branch) => setBranch(branch)}
             isLoading={isLoading}
           />
           <CommandBar
