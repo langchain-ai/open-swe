@@ -13,7 +13,8 @@
     "format": "turbo format",
     "format:check": "turbo format:check",
     "lint": "turbo lint",
-    "lint:fix": "turbo lint:fix"
+    "lint:fix": "turbo lint:fix",
+    "test": "turbo test"
   },
   "devDependencies": {
     "turbo": "^2.5.0",

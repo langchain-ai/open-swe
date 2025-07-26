@@ -6,7 +6,7 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../utils/tokens.js";
 
-describe("calculateConversationHistoryTokenCount", async () => {
+describe("calculateConversationHistoryTokenCount", () => {
   it("should return 0 for empty messages array", async () => {
     const result = calculateConversationHistoryTokenCount([]);
     expect(result).toBe(0);
@@ -214,7 +214,7 @@ describe("calculateConversationHistoryTokenCount", async () => {
   });
 });
 
-describe("getMessagesSinceLastSummary", async () => {
+describe("getMessagesSinceLastSummary", () => {
   it("should return all messages when there is no summary message", async () => {
     const messages = [
       new HumanMessage({ content: "Message 1" }),
@@ -632,7 +632,7 @@ describe("getMessagesSinceLastSummary", async () => {
   });
 });
 
-describe("MAX_INTERNAL_TOKENS constant", async () => {
+describe("MAX_INTERNAL_TOKENS constant", () => {
   it("should be defined as 60,000", async () => {
     expect(MAX_INTERNAL_TOKENS).toBe(60_000);
   });
