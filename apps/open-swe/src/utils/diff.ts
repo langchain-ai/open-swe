@@ -36,9 +36,8 @@ export function fixGitPatch(
 
   // Parse patch into structured format
   function parsePatch(patch: string): ParsedPatch {
-    const lines: string[] = patch
-      .split("\n")
-      .filter((line): line is string => line !== undefined);
+    // Don't filter out any lines - preserve everything including empty lines
+    const lines: string[] = patch.split("\n");
     const result: ParsedPatch = {
       files: [],
     };
@@ -48,9 +47,9 @@ export function fixGitPatch(
     let i: number = 0;
 
     while (i < lines.length) {
-      const line: string = lines[i];
+      const line: string = lines[i] || ""; // Handle undefined lines as empty strings
 
-      // Skip empty lines between files
+      // Skip empty lines between files (but not within hunks)
       if (!line && !currentHunk) {
         i++;
         continue;
@@ -108,20 +107,35 @@ export function fixGitPatch(
 
       // Hunk content
       if (currentHunk) {
-        // For diff content, include all lines that are part of the diff
+        // Include all lines that are part of the diff
         if (
           line.startsWith(" ") ||
           line.startsWith("+") ||
           line.startsWith("-")
         ) {
           currentHunk.lines.push(line);
+        } else if (line.startsWith("\\ No newline at end of file")) {
+          // Handle Git's "No newline at end of file" marker
+          currentHunk.lines.push(line);
+        } else if (line === "" && currentHunk.lines.length > 0) {
+          // Include empty lines within hunks (they might be context)
+          currentHunk.lines.push(" "); // Treat as context line
+        } else if (
+          !line.startsWith("@@") &&
+          !line.startsWith("---") &&
+          !line.startsWith("+++")
+        ) {
+          // If we're in a hunk and encounter a line that doesn't start with expected prefixes,
+          // it might be a malformed line - try to preserve it as context
+          currentHunk.lines.push(line.startsWith(" ") ? line : " " + line);
         }
       }
 
       i++;
     }
 
-    if (currentFile && currentFile.hunks.length > 0) {
+    // Always add the last file if it exists, even if no new file header was encountered
+    if (currentFile) {
       result.files.push(currentFile);
     }
 
@@ -147,7 +161,17 @@ export function fixGitPatch(
 
     for (const variant of variations) {
       if (variant in contents) {
-        return contents[variant].split("\n");
+        const lines = contents[variant].split("\n");
+        // Remove trailing empty line if the file doesn't actually end with a newline
+        // This prevents extra empty strings from being created
+        if (
+          lines.length > 0 &&
+          lines[lines.length - 1] === "" &&
+          !contents[variant].endsWith("\n\n")
+        ) {
+          lines.pop();
+        }
+        return lines;
       }
     }
 
@@ -357,7 +381,12 @@ export function fixGitPatch(
       }
     }
 
-    return result.join("\n");
+    // Join with newlines but ensure we don't add extra trailing newlines
+    const patchContent = result.join("\n");
+
+    // Remove any trailing newlines that might have been added
+    // A proper patch should end with content, not empty lines
+    return patchContent.replace(/\n+$/, "");
   }
 
   // Main logic
