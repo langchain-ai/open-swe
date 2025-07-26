@@ -151,6 +151,10 @@ export async function generateAction(
 
   const tools = [
     createSearchTool(state),
+    {
+      type: "text_editor_20250429",
+      name: "str_replace_based_edit_tool"
+    },
     createShellTool(state),
     createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
