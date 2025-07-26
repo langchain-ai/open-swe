@@ -1,4 +1,4 @@
-import { createLogger, LogLevel } from "../src/utils/logger.js";
+import { createLogger, LogLevel } from "../../src/utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "DeployLangGraph");
 
