@@ -18,7 +18,8 @@
     "strictFunctionTypes": false,
     "outDir": "dist",
     "types": ["jest", "node"],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "isolatedModules": true
   },
   "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
   "exclude": ["node_modules", "dist"]
