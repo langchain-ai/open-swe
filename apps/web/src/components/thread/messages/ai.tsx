@@ -551,9 +551,18 @@ export function AssistantMessage({
 
     // Extract PR URL from the tool message content
     // Format: "Created pull request: https://github.com/owner/repo/pull/123"
+    // or "Marked pull request as ready for review: https://github.com/owner/repo/pull/123"
     let prUrl: string | undefined = undefined;
-    if (content && content.includes("pull request: ")) {
-      prUrl = content.split("pull request: ")[1].trim();
+    if (content) {
+      if (content.includes("pull request: ")) {
+        prUrl = content.split("pull request: ")[1].trim();
+      } else if (
+        content.includes("Marked pull request as ready for review: ")
+      ) {
+        prUrl = content
+          .split("Marked pull request as ready for review: ")[1]
+          .trim();
+      }
     }
 
     // Extract PR number from URL if available
