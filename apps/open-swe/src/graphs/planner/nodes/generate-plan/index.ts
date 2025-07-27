@@ -23,6 +23,7 @@ import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
@@ -54,6 +55,8 @@ export async function generatePlan(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.SUMMARIZER,
@@ -125,6 +128,6 @@ export async function generatePlan(
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }
