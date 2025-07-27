@@ -530,8 +530,12 @@ export function AssistantMessage({
     if (content) {
       if (content.includes("pull request: ")) {
         prUrl = content.split("pull request: ")[1].trim();
-      } else if (content.includes("Marked pull request as ready for review: ")) {
-        prUrl = content.split("Marked pull request as ready for review: ")[1].trim();
+      } else if (
+        content.includes("Marked pull request as ready for review: ")
+      ) {
+        prUrl = content
+          .split("Marked pull request as ready for review: ")[1]
+          .trim();
       }
     }
 
