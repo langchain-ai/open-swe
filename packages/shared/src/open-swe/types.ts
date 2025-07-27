@@ -32,6 +32,11 @@ export interface CacheMetrics {
   cacheReadInputTokens: number;
   inputTokens: number;
   outputTokens: number;
+  model: string;
+}
+
+export interface ModelTokenData extends CacheMetrics {
+  model: string;
 }
 
 export type PlanItem = {
@@ -612,3 +617,4 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
+
