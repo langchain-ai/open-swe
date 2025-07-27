@@ -1,4 +1,5 @@
 import {
+  getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
   Task,
@@ -31,7 +32,6 @@ import {
   CacheablePromptSegment,
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
-  getModelManager,
 } from "../../../../utils/caching.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 

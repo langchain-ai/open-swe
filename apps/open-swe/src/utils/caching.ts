@@ -24,7 +24,7 @@ export interface CacheablePromptSegment {
 export function trackCachePerformance(
   response: AIMessageChunk,
   model: string,
-): ModelTokenData {
+): ModelTokenData[] {
   const metrics: CacheMetrics = {
     cacheCreationInputTokens:
       response.usage_metadata?.input_token_details?.cache_creation || 0,
@@ -50,10 +50,12 @@ export function trackCachePerformance(
     ...metrics,
   });
 
-  return {
-    ...metrics,
-    model,
-  };
+  return [
+    {
+      ...metrics,
+      model,
+    },
+  ];
 }
 
 function addCacheControlToMessageContent(
@@ -120,4 +122,3 @@ export function convertMessagesToCacheControlledMessages(
   newMessages[lastIndex] = convertToCacheControlMessage(newMessages[lastIndex]);
   return newMessages;
 }
-

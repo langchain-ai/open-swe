@@ -7,7 +7,7 @@ import {
 import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 
 import { z } from "zod";
-import { CacheMetrics, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { ModelTokenData, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
@@ -77,7 +77,7 @@ const formatUserPrompt = (messages: BaseMessage[]): string => {
 interface DiagnoseErrorInputs {
   messages: BaseMessage[];
   codebaseTree: string;
-  tokenData?: CacheMetrics;
+  tokenData?: ModelTokenData[];
 }
 
 type DiagnoseErrorUpdate = Partial<DiagnoseErrorInputs>;

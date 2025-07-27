@@ -282,9 +282,9 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
-  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+  tokenData: withLangGraph(z.custom<ModelTokenData[]>().optional(), {
     reducer: {
-      schema: z.custom<CacheMetrics>().optional(),
+      schema: z.custom<ModelTokenData[]>().optional(),
       fn: tokenDataReducer,
     },
   }),
@@ -620,4 +620,3 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
-

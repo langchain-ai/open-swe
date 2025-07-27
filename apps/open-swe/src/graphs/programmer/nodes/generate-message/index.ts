@@ -5,6 +5,7 @@ import {
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
 import {
+  getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
   Task,
@@ -46,7 +47,6 @@ import {
   CacheablePromptSegment,
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
-  getModelManager,
 } from "../../../../utils/caching.js";
 import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 import { HumanMessage } from "@langchain/core/messages";

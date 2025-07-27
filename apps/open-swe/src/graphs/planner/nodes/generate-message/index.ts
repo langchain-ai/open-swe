@@ -1,4 +1,5 @@
 import {
+  getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
   Task,
@@ -32,7 +33,6 @@ import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   convertMessagesToCacheControlledMessages,
-  getModelManager,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 

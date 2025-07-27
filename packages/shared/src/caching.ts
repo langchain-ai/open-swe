@@ -1,4 +1,4 @@
-import { CacheMetrics } from "./open-swe/types.js";
+import { CacheMetrics, ModelTokenData } from "./open-swe/types.js";
 
 export function calculateCostSavings(metrics: CacheMetrics): {
   totalSavings: number;
@@ -48,18 +48,41 @@ export function calculateCostSavings(metrics: CacheMetrics): {
 }
 
 export function tokenDataReducer(
-  state: CacheMetrics | undefined,
-  update: CacheMetrics,
-): CacheMetrics {
+  state: ModelTokenData[] | undefined,
+  update: ModelTokenData[],
+): ModelTokenData[] {
   if (!state) {
     return update;
   }
-  return {
-    cacheCreationInputTokens:
-      state.cacheCreationInputTokens + update.cacheCreationInputTokens,
-    cacheReadInputTokens:
-      state.cacheReadInputTokens + update.cacheReadInputTokens,
-    inputTokens: state.inputTokens + update.inputTokens,
-    outputTokens: state.outputTokens + update.outputTokens,
-  };
+
+  // Create a map to merge data by model
+  const modelMap = new Map<string, ModelTokenData>();
+
+  // Add existing state data to the map
+  for (const data of state) {
+    modelMap.set(data.model, { ...data });
+  }
+
+  // Merge update data with existing data
+  for (const data of update) {
+    const existing = modelMap.get(data.model);
+    if (existing) {
+      // Merge the metrics for the same model
+      modelMap.set(data.model, {
+        model: data.model,
+        cacheCreationInputTokens:
+          existing.cacheCreationInputTokens + data.cacheCreationInputTokens,
+        cacheReadInputTokens:
+          existing.cacheReadInputTokens + data.cacheReadInputTokens,
+        inputTokens: existing.inputTokens + data.inputTokens,
+        outputTokens: existing.outputTokens + data.outputTokens,
+      });
+    } else {
+      // Add new model data
+      modelMap.set(data.model, { ...data });
+    }
+  }
+
+  // Convert map back to array
+  return Array.from(modelMap.values());
 }
