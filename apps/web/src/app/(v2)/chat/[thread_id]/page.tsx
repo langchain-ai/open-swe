@@ -25,7 +25,6 @@ export default function ThreadPage({
 }) {
   const router = useRouter();
   const { thread_id } = use(params);
-  const { currentInstallation } = useGitHubAppProvider();
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
     assistantId: MANAGER_GRAPH_ID,
@@ -36,7 +35,6 @@ export default function ThreadPage({
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    currentInstallation,
     disableOrgFiltering: true,
   });
 

@@ -2,12 +2,12 @@
 
 import { DefaultView } from "@/components/v2/default-view";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { Toaster } from "@/components/ui/sonner";
 import { Suspense } from "react";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 
-export default function ChatPage() {
+function ChatPageComponent() {
   const { currentInstallation } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
@@ -28,5 +28,13 @@ export default function ChatPage() {
         />
       </Suspense>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <GitHubAppProvider>
+      <ChatPageComponent />
+    </GitHubAppProvider>
   );
 }
