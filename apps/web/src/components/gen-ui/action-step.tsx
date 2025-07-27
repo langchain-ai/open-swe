@@ -51,8 +51,8 @@ const scratchpadTool = createScratchpadFields("");
 type ScratchpadToolArgs = z.infer<typeof scratchpadTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-const searchTool = createGrepToolFields(dummyRepo);
-type SearchToolArgs = z.infer<typeof searchTool.schema>;
+const grepTool = createGrepToolFields(dummyRepo);
+type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
 const textEditorTool = createTextEditorToolFields(dummyRepo);
@@ -102,8 +102,8 @@ type GetURLContentActionProps = BaseActionProps &
   };
 
 type SearchActionProps = BaseActionProps &
-  Partial<SearchToolArgs> & {
-    actionType: "search";
+  Partial<GrepToolArgs> & {
+    actionType: "grep";
     output?: string;
     errorCode?: number;
   };
@@ -152,7 +152,7 @@ const ACTION_GENERATING_TEXT_MAP = {
   [scratchpadTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
   [searchDocumentForTool.name]: "Searching document...",
-  [searchTool.name]: "Searching...",
+  [grepTool.name]: "Searching...",
   [textEditorTool.name]: "Editing file...",
 };
 
@@ -235,7 +235,7 @@ function ActionItem(props: ActionItemProps) {
         return props.success
           ? "Document search completed"
           : "Document search failed";
-      } else if (props.actionType === "search") {
+      } else if (props.actionType === "grep") {
         return props.success ? "Search completed" : "Search failed";
       } else if (props.actionType === "text_editor") {
         const command = props.command || "unknown";
@@ -273,7 +273,7 @@ function ActionItem(props: ActionItemProps) {
       props.actionType === "install_dependencies" ||
       props.actionType === "get_url_content" ||
       props.actionType === "search_document_for" ||
-      props.actionType === "search" ||
+      props.actionType === "grep" ||
       props.actionType === "text_editor"
     ) {
       return !!props.output;
@@ -345,7 +345,7 @@ function ActionItem(props: ActionItemProps) {
           icon={<Zap className={cn(defaultIconStyling)} />}
         />
       );
-    } else if (props.actionType === "search") {
+    } else if (props.actionType === "grep") {
       return (
         <ToolIconWithTooltip
           toolNamePretty="Search"
@@ -399,7 +399,7 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "search") {
+    if (props.actionType === "grep") {
       const castProps = props as SearchActionProps;
       return (
         <div className="flex flex-col">
@@ -548,7 +548,7 @@ function ActionItem(props: ActionItemProps) {
 
     if (
       (props.actionType === "shell" ||
-        props.actionType === "search" ||
+        props.actionType === "grep" ||
         props.actionType === "search_document_for" ||
         props.actionType === "install_dependencies" ||
         props.actionType === "text_editor") &&
@@ -559,7 +559,7 @@ function ActionItem(props: ActionItemProps) {
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
-          {(props.actionType === "shell" || props.actionType === "search") &&
+          {(props.actionType === "shell" || props.actionType === "grep") &&
             "errorCode" in props &&
             props.errorCode !== undefined &&
             !props.success && (

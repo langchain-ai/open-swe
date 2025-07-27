@@ -68,8 +68,8 @@ type MarkTaskNotCompletedToolArgs = z.infer<
 >;
 const reviewStartedTool = createReviewStartedToolFields();
 type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
-const searchTool = createGrepToolFields(dummyRepo);
-type SearchToolArgs = z.infer<typeof searchTool.schema>;
+const grepTool = createGrepToolFields(dummyRepo);
+type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
@@ -227,10 +227,10 @@ export function mapToolMessageToActionStepProps(
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
     };
-  } else if (toolCall?.name === searchTool.name) {
-    const args = toolCall.args as SearchToolArgs;
+  } else if (toolCall?.name === grepTool.name) {
+    const args = toolCall.args as GrepToolArgs;
     return {
-      actionType: "search",
+      actionType: "grep",
       status,
       success,
       query: args.query || "",
@@ -376,7 +376,7 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === searchTool.name ||
+          tc.name === grepTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === scratchpadTool.name ||
           tc.name === getURLContentTool.name ||
@@ -629,7 +629,7 @@ export function AssistantMessage({
     if (
       actionableToolCalls[0].name !== "shell" &&
       actionableToolCalls[0].name !== "scratchpad" &&
-      actionableToolCalls[0].name !== "search"
+      actionableToolCalls[0].name !== "grep"
     ) {
       console.log("actionableToolCalls", actionableToolCalls[0]);
     }
@@ -639,7 +639,7 @@ export function AssistantMessage({
       );
 
       const isShellTool = toolCall.name === shellTool.name;
-      const isSearchTool = toolCall.name === searchTool.name;
+      const isGrepTool = toolCall.name === grepTool.name;
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
       const isTextEditorTool = toolCall.name === textEditorTool.name;
@@ -650,10 +650,10 @@ export function AssistantMessage({
           correspondingToolResult,
           threadMessages,
         );
-      } else if (isSearchTool) {
-        const args = toolCall.args as SearchToolArgs;
+      } else if (isGrepTool) {
+        const args = toolCall.args as GrepToolArgs;
         return {
-          actionType: "search",
+          actionType: "grep",
           status: "generating",
           query: args?.query || "",
           match_string: args?.match_string || false,
