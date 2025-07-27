@@ -46,6 +46,7 @@ import {
   CacheablePromptSegment,
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
+  getModelManager,
 } from "../../../../utils/caching.js";
 import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 import { HumanMessage } from "@langchain/core/messages";
@@ -141,6 +142,8 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.PROGRAMMER,
@@ -246,6 +249,6 @@ export async function generateAction(
     internalMessages: newMessagesList,
     ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }
