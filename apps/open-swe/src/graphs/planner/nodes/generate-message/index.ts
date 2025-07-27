@@ -23,7 +23,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createSearchTool } from "../../../../tools/search.js";
+import { createGrepTool } from "../../../../tools/search.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -77,7 +77,7 @@ export async function generateAction(
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createSearchTool(state),
+    createGrepTool(state),
     createShellTool(state),
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",

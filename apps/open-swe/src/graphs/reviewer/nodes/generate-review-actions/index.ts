@@ -13,7 +13,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { PREVIOUS_REVIEW_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
-  createSearchTool,
+  createGrepTool,
   createShellTool,
   createInstallDependenciesTool,
 } from "../../../../tools/index.js";
@@ -117,7 +117,7 @@ export async function generateReviewActions(
     Task.PROGRAMMER,
   );
   const tools = [
-    createSearchTool(state),
+    createGrepTool(state),
     createShellTool(state),
     createInstallDependenciesTool(state),
     createScratchpadTool(

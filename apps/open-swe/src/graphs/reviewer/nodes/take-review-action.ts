@@ -17,7 +17,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/search.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -46,7 +46,7 @@ export async function takeReviewerActions(
   }
 
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
+  const searchTool = createGrepTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const scratchpadTool = createScratchpadTool("");
   const allTools = [

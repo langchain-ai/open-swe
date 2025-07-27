@@ -34,7 +34,7 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createSearchTool } from "../../../../tools/search.js";
+import { createGrepTool } from "../../../../tools/search.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -163,7 +163,7 @@ export async function generateAction(
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
   const sharedTools = [
-    createSearchTool(state),
+    createGrepTool(state),
     createShellTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),

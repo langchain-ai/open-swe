@@ -106,7 +106,7 @@ export function createUpdatePlanToolFields() {
   };
 }
 
-export function createSearchToolFields(targetRepository: TargetRepository) {
+export function createGrepToolFields(targetRepository: TargetRepository) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
   const searchSchema = z.object({
     query: z
@@ -166,18 +166,18 @@ export function createSearchToolFields(targetRepository: TargetRepository) {
   });
 
   return {
-    name: "search",
+    name: "grep",
     schema: searchSchema,
-    description: `Execute a search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
+    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
   };
 }
 
 // Only used for type inference
-const _tmpSearchToolSchema = createSearchToolFields({
+const _tmpSearchToolSchema = createGrepToolFields({
   owner: "x",
   repo: "x",
 }).schema;
-export type SearchCommand = z.infer<typeof _tmpSearchToolSchema>;
+export type GrepCommand = z.infer<typeof _tmpSearchToolSchema>;
 
 function escapeShellArg(arg: string): string {
   // If the string contains a single quote, close the string, escape the single quote, and reopen it
@@ -185,8 +185,8 @@ function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function formatSearchCommand(
-  cmd: SearchCommand,
+export function formatGrepCommand(
+  cmd: GrepCommand,
   options?: {
     excludeRequiredFlags?: boolean;
   },

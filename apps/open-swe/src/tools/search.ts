@@ -4,8 +4,8 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import {
-  createSearchToolFields,
-  formatSearchCommand,
+  createGrepToolFields,
+  formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { wrapScript } from "../utils/wrap-script.js";
@@ -18,7 +18,7 @@ const DEFAULT_ENV = {
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-export function createSearchTool(
+export function createGrepTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
   const searchTool = tool(
@@ -27,7 +27,7 @@ export function createSearchTool(
         const sandbox = await getSandboxSessionOrThrow(input);
 
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
-        const command = formatSearchCommand(input);
+        const command = formatGrepCommand(input);
         logger.info("Running search command", {
           command: command.join(" "),
           repoRoot,
@@ -71,7 +71,7 @@ export function createSearchTool(
         throw e;
       }
     },
-    createSearchToolFields(state.targetRepository),
+    createGrepToolFields(state.targetRepository),
   );
 
   return searchTool;

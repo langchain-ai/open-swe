@@ -20,7 +20,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/search.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,
@@ -49,7 +49,7 @@ export async function takeActions(
   }
 
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
+  const searchTool = createGrepTool(state);
   const scratchpadTool = createScratchpadTool("");
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);

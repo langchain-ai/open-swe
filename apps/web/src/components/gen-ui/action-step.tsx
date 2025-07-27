@@ -23,7 +23,7 @@ import {
   createInstallDependenciesToolFields,
   createScratchpadFields,
   createGetURLContentToolFields,
-  createSearchToolFields,
+  createGrepToolFields,
   createSearchDocumentForToolFields,
   createTextEditorToolFields,
 } from "@open-swe/shared/open-swe/tools";
@@ -51,7 +51,7 @@ const scratchpadTool = createScratchpadFields("");
 type ScratchpadToolArgs = z.infer<typeof scratchpadTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-const searchTool = createSearchToolFields(dummyRepo);
+const searchTool = createGrepToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;

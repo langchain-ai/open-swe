@@ -34,7 +34,7 @@ import {
   createShellToolFields,
   createMarkTaskCompletedToolFields,
   createMarkTaskNotCompletedToolFields,
-  createSearchToolFields,
+  createGrepToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createCodeReviewMarkTaskCompletedFields,
@@ -68,7 +68,7 @@ type MarkTaskNotCompletedToolArgs = z.infer<
 >;
 const reviewStartedTool = createReviewStartedToolFields();
 type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
-const searchTool = createSearchToolFields(dummyRepo);
+const searchTool = createGrepToolFields(dummyRepo);
 type SearchToolArgs = z.infer<typeof searchTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;

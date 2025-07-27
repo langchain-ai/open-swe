@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.23.1",
-    "@langchain/anthropic": "file:/Users/bracesproul/code/lang-chain-ai/langchainjs/libs/langchain-anthropic",
+    "@langchain/anthropic": "^0.3.25",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",
     "@langchain/google-genai": "^0.2.9",

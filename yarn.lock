@@ -2690,15 +2690,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/anthropic@file:/Users/bracesproul/code/lang-chain-ai/langchainjs/libs/langchain-anthropic::locator=%40open-swe%2Fagent%40workspace%3Aapps%2Fopen-swe":
-  version: 0.3.24
-  resolution: "@langchain/anthropic@file:/Users/bracesproul/code/lang-chain-ai/langchainjs/libs/langchain-anthropic#/Users/bracesproul/code/lang-chain-ai/langchainjs/libs/langchain-anthropic::hash=40e6cb&locator=%40open-swe%2Fagent%40workspace%3Aapps%2Fopen-swe"
+"@langchain/anthropic@npm:^0.3.25":
+  version: 0.3.25
+  resolution: "@langchain/anthropic@npm:0.3.25"
   dependencies:
     "@anthropic-ai/sdk": ^0.56.0
     fast-xml-parser: ^4.4.1
   peerDependencies:
     "@langchain/core": ">=0.3.58 <0.4.0"
-  checksum: f5695100662f218521b039cd0427e16eeafb6212061eb12590b01a0c0da5274ee783ba4dadbd99af2a23ffbb5035fe8309641c700489677ecbc9d77cb4aba6a4
+  checksum: e7a48d130379f7d26b415ac3eb8ee9a9d44c3b51f1333568e2fa97b82c272e18057a8ee10a2bb0d8a0c18c69ee7d8945cf7aebd05198afc0da86540b38bc3dc0
   languageName: node
   linkType: hard
 
@@ -4095,7 +4095,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/anthropic": "file:/Users/bracesproul/code/lang-chain-ai/langchainjs/libs/langchain-anthropic"
+    "@langchain/anthropic": ^0.3.25
     "@langchain/community": ^0.3.47
     "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
