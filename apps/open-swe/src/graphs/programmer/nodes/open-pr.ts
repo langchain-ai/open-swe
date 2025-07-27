@@ -36,6 +36,7 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 import {
   GitHubPullRequest,
   GitHubPullRequestList,
@@ -116,6 +117,8 @@ export async function openPullRequest(
   const openPrTool = createOpenPrToolFields();
   // use the router model since this is a simple task that doesn't need an advanced model
   const model = await loadModel(config, Task.ROUTER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.ROUTER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.ROUTER,
@@ -219,7 +222,7 @@ export async function openPullRequest(
     }),
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
     ...(updatedTaskPlan && { taskPlan: updatedTaskPlan }),
   };
 }
