@@ -35,9 +35,8 @@ export interface CacheMetrics {
   model: string;
 }
 
-export interface ModelTokenData extends CacheMetrics {
-  model: string;
-}
+// ModelTokenData is now just an alias for CacheMetrics since it includes model info
+export type ModelTokenData = CacheMetrics;
 
 export type PlanItem = {
   /**
