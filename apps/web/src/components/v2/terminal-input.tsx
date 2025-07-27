@@ -200,14 +200,14 @@ export function TerminalInput({
       </div>
 
       {/* Multiline Input */}
-      <div className="mt-2 flex gap-2">
+      <div className="my-2 flex gap-2">
         <Textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyPress}
           placeholder={placeholder}
           disabled={disabled}
-          className="text-foreground placeholder:text-muted-foreground min-h-[80px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="text-foreground placeholder:text-muted-foreground max-h-[50vh] min-h-[80px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={6}
           onPaste={onPaste}
         />
