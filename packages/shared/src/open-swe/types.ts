@@ -32,11 +32,15 @@ export interface CacheMetrics {
   cacheReadInputTokens: number;
   inputTokens: number;
   outputTokens: number;
-  model: string;
 }
 
-// ModelTokenData is now just an alias for CacheMetrics since it includes model info
-export type ModelTokenData = CacheMetrics;
+export interface ModelTokenData extends CacheMetrics {
+  /**
+   * The model name that generated this token usage data
+   * e.g., "anthropic:claude-sonnet-4-0", "openai:gpt-4.1-mini"
+   */
+  model: string;
+}
 
 export type PlanItem = {
   /**
