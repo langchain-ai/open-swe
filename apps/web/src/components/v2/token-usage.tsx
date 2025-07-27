@@ -1,5 +1,8 @@
 import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
-import { calculateCostSavings } from "@open-swe/shared/caching";
+import {
+  calculateCostSavings,
+  tokenDataReducer,
+} from "@open-swe/shared/caching";
 import { Badge } from "../ui/badge";
 import { Separator } from "../ui/separator";
 import {
@@ -51,6 +54,14 @@ function mergeTokenData(
       outputTokens: 0,
     },
   );
+}
+
+function mergeModelTokenData(tokenData: ModelTokenData[]): ModelTokenData[] {
+  if (tokenData.length <= 1) {
+    return tokenData;
+  }
+  const [firstTokenData, ...restTokenData] = tokenData;
+  return tokenDataReducer([firstTokenData], restTokenData);
 }
 
 function getModelPricingPlaceholder(model: string): {
@@ -184,7 +195,9 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
   const metrics = calculateCostSavings(mergedTokenData);
 
   const hasModelData = isModelTokenData(tokenData);
-  const modelTokenData = hasModelData ? (tokenData as ModelTokenData[]) : [];
+  const modelTokenData = hasModelData
+    ? mergeModelTokenData(tokenData as ModelTokenData[])
+    : [];
 
   // Calculate total cost using model-specific pricing if available
   const totalModelCost = hasModelData
@@ -346,12 +359,15 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                           </Badge>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="space-y-2 text-xs">
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">
-                              Input:
-                            </span>
-                            <span>
+                            <div className="flex items-center gap-1.5">
+                              <Zap className="h-3 w-3 text-blue-500 dark:text-blue-400" />
+                              <span className="text-muted-foreground font-medium">
+                                Input
+                              </span>
+                            </div>
+                            <span className="font-semibold">
                               {(
                                 model.inputTokens +
                                 model.cacheCreationInputTokens +
@@ -360,21 +376,29 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                             </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">
-                              Output:
+                            <div className="flex items-center gap-1.5">
+                              <TrendingUp className="h-3 w-3 text-green-500 dark:text-green-400" />
+                              <span className="text-muted-foreground font-medium">
+                                Output
+                              </span>
+                            </div>
+                            <span className="font-semibold">
+                              {model.outputTokens.toLocaleString()}
                             </span>
-                            <span>{model.outputTokens.toLocaleString()}</span>
                           </div>
                         </div>
 
                         {modelCachedTokens > 0 && (
                           <div className="flex justify-between text-xs">
-                            <span className="text-blue-600 dark:text-blue-400">
-                              Cache:
+                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              Cache Percentage
                             </span>
-                            <span className="text-blue-600 dark:text-blue-400">
+                            <Badge
+                              variant="outline"
+                              className="border-blue-200 text-blue-600 dark:border-blue-800 dark:text-blue-400"
+                            >
                               {modelCachePercentage}%
-                            </span>
+                            </Badge>
                           </div>
                         )}
                       </div>
@@ -382,7 +406,8 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                   })}
 
                   <div className="text-muted-foreground border-t pt-2 text-xs">
-                    * Estimated costs based on placeholder pricing
+                    * Estimated costs. Please review all token usage and pricing
+                    to ensure accuracy.
                   </div>
                 </CollapsibleContent>
               </Collapsible>
