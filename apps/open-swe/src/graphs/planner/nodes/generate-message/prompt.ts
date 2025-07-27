@@ -33,6 +33,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
     8. Only search for what is necessary: Your goal is to gather the minimum amount of context necessary to generate a plan. You should not gather context or perform searches that are not necessary to generate a plan.
         - You will always be able to gather more context after the planning phase, so ensure that the actions you perform in this planning phase are only the most necessary and targeted actions to gather context.
         - Avoid rabbit holes for gathering context. You should always first consider whether or not the action you're about to take is necessary to generate a plan for the user's request. If it is not, do not take it.
+    9. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd. You may use cd if the User explicitly requests it.
 </context_gathering_guidelines>
 
 <workspace_information>

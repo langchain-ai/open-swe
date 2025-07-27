@@ -1,64 +1,13 @@
 import { tool } from "@langchain/core/tools";
-import { z } from "zod";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
+import { createTextEditorToolFields } from "@open-swe/shared/open-swe/tools";
 
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
-
-function createTextEditorToolFields(targetRepository: any) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
-  const textEditorToolSchema = z.object({
-    command: z
-      .enum(["view", "str_replace", "create", "insert"])
-      .describe("The command to execute: view, str_replace, create, or insert"),
-    path: z
-      .string()
-      .describe("The path to the file or directory to operate on"),
-    view_range: z
-      .tuple([z.number(), z.number()])
-      .optional()
-      .describe(
-        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command.",
-      ),
-    old_str: z
-      .string()
-      .optional()
-      .describe(
-        "The text to replace (must match exactly, including whitespace and indentation). Required for str_replace command.",
-      ),
-    new_str: z
-      .string()
-      .optional()
-      .describe(
-        "The new text to insert. Required for str_replace and insert commands.",
-      ),
-    file_text: z
-      .string()
-      .optional()
-      .describe(
-        "The content to write to the new file. Required for create command.",
-      ),
-    insert_line: z
-      .number()
-      .optional()
-      .describe(
-        "The line number after which to insert the text (0 for beginning of file). Required for insert command.",
-      ),
-  });
-
-  return {
-    name: "str_replace_based_edit_tool",
-    description:
-      "A text editor tool that can view, create, and edit files. " +
-      `The working directory is \`${repoRoot}\`. Ensure file paths are relative to this directory. ` +
-      "Supports commands: view (read file/directory), str_replace (replace text), create (new file), insert (add text at line).",
-    schema: textEditorToolSchema,
-  };
-}
 
 async function handleViewCommand(
   sandbox: any,

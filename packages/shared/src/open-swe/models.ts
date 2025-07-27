@@ -13,7 +13,7 @@ export const MODEL_OPTIONS = [
   },
   {
     label: "Claude Opus 4",
-    value: "anthropic:claude-opus-4-0",
+    value: "anthropic:claude-opus-4-20250514",
   },
   {
     label: "Claude 3.7 Sonnet",

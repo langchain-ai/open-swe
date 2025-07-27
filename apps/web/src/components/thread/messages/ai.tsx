@@ -46,6 +46,7 @@ import {
   createConversationHistorySummaryToolFields,
   createReviewStartedToolFields,
   createScratchpadFields,
+  createTextEditorToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -107,6 +108,12 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+const textEditorTool = createTextEditorToolFields({
+  owner: "dummy",
+  repo: "dummy",
+});
+type TextEditorToolArgs = z.infer<typeof textEditorTool.schema>;
+
 // Helper function to detect MCP tools by checking if tool name is NOT in known tools
 function isMcpTool(toolName: string): boolean {
   const knownToolNames = [
@@ -117,6 +124,7 @@ function isMcpTool(toolName: string): boolean {
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
+    textEditorTool.name,
   ];
   return !knownToolNames.some((t) => t === toolName);
 }
@@ -278,6 +286,22 @@ export function mapToolMessageToActionStepProps(
       output,
       reasoningText,
     };
+  } else if (toolCall?.name === textEditorTool.name) {
+    const args = toolCall.args as TextEditorToolArgs;
+    return {
+      actionType: "text_editor",
+      status,
+      success,
+      command: args.command || "view",
+      path: args.path || "",
+      view_range: args.view_range,
+      old_str: args.old_str,
+      new_str: args.new_str,
+      file_text: args.file_text,
+      insert_line: args.insert_line,
+      output,
+      reasoningText,
+    };
   } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
       actionType: "mcp",
@@ -356,6 +380,8 @@ export function AssistantMessage({
           tc.name === installDependenciesTool.name ||
           tc.name === scratchpadTool.name ||
           tc.name === getURLContentTool.name ||
+          tc.name === textEditorTool.name ||
+          tc.name === searchDocumentForTool.name ||
           isMcpTool(tc.name),
       )
     : [];
@@ -600,6 +626,13 @@ export function AssistantMessage({
   }
 
   if (actionableToolCalls.length > 0) {
+    if (
+      actionableToolCalls[0].name !== "shell" &&
+      actionableToolCalls[0].name !== "scratchpad" &&
+      actionableToolCalls[0].name !== "search"
+    ) {
+      console.log("actionableToolCalls", actionableToolCalls[0]);
+    }
     const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
       const correspondingToolResult = toolResults.find(
         (tr) => tr && tr.tool_call_id === toolCall.id,
@@ -609,6 +642,7 @@ export function AssistantMessage({
       const isSearchTool = toolCall.name === searchTool.name;
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
+      const isTextEditorTool = toolCall.name === textEditorTool.name;
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
@@ -663,6 +697,20 @@ export function AssistantMessage({
           status: "generating",
           url: args?.url || "",
           query: args?.query || "",
+          output: "",
+        } as ActionItemProps;
+      } else if (isTextEditorTool) {
+        const args = toolCall.args as TextEditorToolArgs;
+        return {
+          actionType: "text_editor",
+          status: "generating",
+          command: args?.command || "view",
+          path: args?.path || "",
+          view_range: args?.view_range,
+          old_str: args?.old_str,
+          new_str: args?.new_str,
+          file_text: args?.file_text,
+          insert_line: args?.insert_line,
           output: "",
         } as ActionItemProps;
       } else {
