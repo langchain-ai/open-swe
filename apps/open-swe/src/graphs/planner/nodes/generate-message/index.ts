@@ -32,6 +32,7 @@ import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   convertMessagesToCacheControlledMessages,
+  getModelManager,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 
@@ -70,6 +71,8 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.PROGRAMMER,
@@ -145,6 +148,6 @@ export async function generateAction(
   return {
     messages: [...missingMessages, response],
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }
