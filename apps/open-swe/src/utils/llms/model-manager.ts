@@ -233,6 +233,14 @@ export class ModelManager {
   }
 
   /**
+   * Get the model name for a task from GraphConfig
+   */
+  public getModelNameForTask(config: GraphConfig, task: Task): string {
+    const baseConfig = this.getBaseConfigForTask(config, task);
+    return baseConfig.modelName;
+  }
+
+  /**
    * Get base configuration for a task from GraphConfig
    */
   private getBaseConfigForTask(
@@ -428,3 +436,4 @@ export function resetModelManager(): void {
     globalModelManager = null;
   }
 }
+
