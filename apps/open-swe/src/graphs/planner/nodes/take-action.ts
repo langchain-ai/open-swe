@@ -20,7 +20,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 
-import { createGrepTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,

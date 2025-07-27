@@ -31,7 +31,7 @@ import {
 } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import { createGrepTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";

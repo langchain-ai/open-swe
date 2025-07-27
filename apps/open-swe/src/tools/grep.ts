@@ -11,7 +11,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { wrapScript } from "../utils/wrap-script.js";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
-const logger = createLogger(LogLevel.INFO, "SearchTool");
+const logger = createLogger(LogLevel.INFO, "GrepTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
@@ -21,14 +21,14 @@ const DEFAULT_ENV = {
 export function createGrepTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
-  const searchTool = tool(
+  const grepTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const sandbox = await getSandboxSessionOrThrow(input);
 
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
         const command = formatGrepCommand(input);
-        logger.info("Running search command", {
+        logger.info("Running grep search command", {
           command: command.join(" "),
           repoRoot,
         });
@@ -50,7 +50,7 @@ export function createGrepTool(
         } else if (response.exitCode > 1) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Failed to run search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
+            `Failed to run grep search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
           );
         }
 
@@ -64,7 +64,7 @@ export function createGrepTool(
           const errorResult =
             errorFields.result ?? errorFields.artifacts?.stdout;
           throw new Error(
-            `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+            `Failed to run grep search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
         }
 
@@ -74,5 +74,5 @@ export function createGrepTool(
     createGrepToolFields(state.targetRepository),
   );
 
-  return searchTool;
+  return grepTool;
 }

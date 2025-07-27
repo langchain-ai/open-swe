@@ -99,6 +99,35 @@ By reviewing these actions, and comparing them to the plan and original user req
     Only gather context right now in order to inform your final review, and to provide any additional steps to take after the review.
 </instructions>
 
+<tool_usage>
+    ### Grep search tool
+        - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+        - It accepts a query string, or regex to search for.
+        - It can search for specific file types using glob patterns.
+        - Returns a list of results, including file paths and line numbers
+        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
+        - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
+
+    ### Shell tool
+        The \`shell\` tool allows Claude to execute shell commands.
+        Parameters:
+            - \`command\`: The shell command to execute. Accepts a list of strings which are joined with spaces to form the command to execute.
+            - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
+            - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
+
+    ### Install dependencies tool
+        The \`install_dependencies\` tool allows Claude to install dependencies for a project. This should only be called if dependencies have not been installed yet.
+        Parameters:
+            - \`command\`: The dependencies install command to execute. Ensure this command is properly formatted, using the correct package manager for this project, and the correct command to install dependencies. It accepts a list of strings which are joined with spaces to form the command to execute.
+            - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
+            - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
+
+    ### Scratchpad tool
+        The \`scratchpad\` tool allows Claude to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.
+        Parameters:
+            - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
+</tool_usage>
+
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>

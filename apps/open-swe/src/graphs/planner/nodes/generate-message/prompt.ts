@@ -19,11 +19,11 @@ Your sole objective in this phase is to gather comprehensive context about the c
         - You do not want to have to generate tasks such as 'Locate the XYZ file', 'Examine the structure of the codebase', or 'Do X if Y is true, otherwise to Z'. 
         - To ensure the above does not happen, you should be thorough in your context gathering. Always gather enough context to cover all edge cases, and prevent unclear instructions.
     4. Leverage efficient search tools:
-        - Use \`search\` tool for all file searches. The \`search\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
-            - It's significantly faster results than alternatives like grep or ls -R.
+        - Use \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+            - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
+            - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
             - When searching for specific file types, use glob patterns
             - The query field supports both basic strings, and regex
-        - Always use the \`search\` tools instead calling \`grep\` via the \`shell\` tool. You should NEVER call \`grep\` as the same functionality is better provided by \`search\`.
         - If the user passes a URL, you should use the \`get_url_content\` tool to fetch the contents of the URL.
             - You should only use this tool to fetch the contents of a URL the user has provided, or that you've discovered during your context searching, which you believe is vital to gathering context for the user's request.
     5. Format shell commands precisely: Ensure all shell commands include proper quoting and escaping. Well-formatted commands prevent errors and provide reliable results.

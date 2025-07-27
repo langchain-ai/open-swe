@@ -17,7 +17,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createGrepTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,

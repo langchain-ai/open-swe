@@ -8,6 +8,6 @@ export {
   createSessionPlanToolFields,
   createRequestHumanHelpToolFields,
 } from "@open-swe/shared/open-swe/tools";
-export * from "./search.js";
+export * from "./grep.js";
 export * from "./install-dependencies.js";
 export * from "./planner-notes.js";
