@@ -341,12 +341,10 @@ export function ThreadView({
                       />
                     )}
                   <TokenUsage
-                    tokenData={
-                      [
-                        plannerStream.values.tokenData,
-                        programmerStream.values.tokenData,
-                      ].filter(Boolean) as CacheMetrics[]
-                    }
+                    tokenData={[
+                      ...(plannerStream.values.tokenData ?? []),
+                      ...(programmerStream.values.tokenData ?? []),
+                    ].filter(Boolean)}
                   />
                 </div>
               </div>
