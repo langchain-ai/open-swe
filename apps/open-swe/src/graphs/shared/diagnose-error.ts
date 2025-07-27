@@ -17,6 +17,7 @@ import {
   Task,
 } from "../../utils/llms/index.js";
 import { trackCachePerformance } from "../../utils/caching.js";
+import { getModelManager } from "../../utils/llms/model-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
@@ -95,6 +96,8 @@ export async function diagnoseError(
   logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.SUMMARIZER,
@@ -142,6 +145,6 @@ export async function diagnoseError(
 
   return {
     messages: [response, toolMessage],
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }
