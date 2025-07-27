@@ -309,7 +309,7 @@ export class ModelManager {
     const defaultModels: Record<Provider, Record<Task, string>> = {
       anthropic: {
         [Task.PLANNER]: "claude-sonnet-4-0",
-        [Task.PROGRAMMER]: "claude-opus-4-0",
+        [Task.PROGRAMMER]: "claude-sonnet-4-0",
         [Task.REVIEWER]: "claude-sonnet-4-0",
         [Task.ROUTER]: "claude-3-5-haiku-latest",
         [Task.SUMMARIZER]: "claude-sonnet-4-0",

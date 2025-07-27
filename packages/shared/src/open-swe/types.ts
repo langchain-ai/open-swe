@@ -349,7 +349,7 @@ export const GraphConfigurationMetadata: {
   programmerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-opus-4-0",
+      default: "anthropic:claude-sonnet-4-0",
       description:
         "The model to use for programming/other advanced technical tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -541,7 +541,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
-   * @default "anthropic:claude-opus-4-0"
+   * @default "anthropic:claude-sonnet-4-0"
    */
   programmerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.programmerModelName,
