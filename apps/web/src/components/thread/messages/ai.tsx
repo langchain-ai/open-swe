@@ -315,7 +315,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range: args.view_range,
+      view_range: args.view_range as [number, number] | undefined,
       output,
       reasoningText,
     };
