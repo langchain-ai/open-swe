@@ -2,14 +2,14 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { getModelManager, Provider } from "./model-manager.js";
 import { FallbackRunnable } from "../runtime-fallback.js";
 import { Task, TASK_TO_CONFIG_DEFAULTS_MAP } from "./constants.js";
-import { StructuredToolInterface } from "@langchain/core/tools";
+import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { BaseMessageLike } from "@langchain/core/messages";
 
 export async function loadModel(
   config: GraphConfig,
   task: Task,
   options?: {
-    providerTools?: Record<Provider, StructuredToolInterface[]>;
+    providerTools?: Record<Provider, BindToolsInput[]>;
     providerSystemPrompt?: Record<Provider, BaseMessageLike>;
   },
 ) {

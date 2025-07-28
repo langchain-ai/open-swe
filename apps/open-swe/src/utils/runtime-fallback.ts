@@ -21,7 +21,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
 interface ExtractedTools {
-  tools: StructuredToolInterface[];
+  tools: BindToolsInput[];
   kwargs: Record<string, any>;
 }
 
@@ -86,7 +86,7 @@ export class FallbackRunnable<
   private config: GraphConfig;
   private task: Task;
   private modelManager: ModelManager;
-  private providerTools?: Record<Provider, StructuredToolInterface[]>;
+  private providerTools?: Record<Provider, BindToolsInput[]>;
   private providerSystemPrompt?: Record<Provider, BaseMessageLike>;
 
   constructor(
@@ -95,7 +95,7 @@ export class FallbackRunnable<
     task: Task,
     modelManager: ModelManager,
     options?: {
-      providerTools?: Record<Provider, StructuredToolInterface[]>;
+      providerTools?: Record<Provider, BindToolsInput[]>;
       providerSystemPrompt?: Record<Provider, BaseMessageLike>;
     },
   ) {

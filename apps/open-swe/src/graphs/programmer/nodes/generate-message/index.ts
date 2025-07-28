@@ -151,7 +151,6 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
@@ -173,34 +172,21 @@ export async function generateAction(
     ...mcpTools,
   ];
   const anthropicModelTools = [
+    ...sharedTools,
     {
       type: "text_editor_20250429",
       name: "str_replace_based_edit_tool",
+      cache_control: { type: "ephemeral" },
     },
   ];
-  const nonAnthropicModelTools = [createApplyPatchTool(state)];
-
-  const tools = [
+  const nonAnthropicModelTools = [
     ...sharedTools,
-    ...(isAnthropicModel ? anthropicModelTools : nonAnthropicModelTools),
+    { ...createApplyPatchTool(state), cache_control: { type: "ephemeral" } },
   ];
+
   logger.info(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
   );
-  // Cache Breakpoint 1: Add cache_control marker to the last tool for tools definition caching
-  tools[tools.length - 1] = {
-    ...tools[tools.length - 1],
-    cache_control: { type: "ephemeral" },
-  } as any;
-
-  const modelWithTools = model.bindTools(tools, {
-    tool_choice: "auto",
-    ...(modelSupportsParallelToolCallsParam
-      ? {
-          parallel_tool_calls: true,
-        }
-      : {}),
-  });
 
   const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
     getMissingMessages(state, config),
@@ -217,6 +203,25 @@ export async function generateAction(
 
   const inputMessagesWithCache =
     convertMessagesToCacheControlledMessages(inputMessages);
+
+  const model = await loadModel(config, Task.PROGRAMMER, {
+    providerTools: {
+      anthropic: anthropicModelTools,
+      openai: nonAnthropicModelTools,
+      "google-genai": nonAnthropicModelTools,
+    },
+  });
+  const modelWithTools = model.bindTools(
+    isAnthropicModel ? anthropicModelTools : nonAnthropicModelTools,
+    {
+      tool_choice: "auto",
+      ...(modelSupportsParallelToolCallsParam
+        ? {
+            parallel_tool_calls: true,
+          }
+        : {}),
+    },
+  );
   const response = await modelWithTools.invoke([
     {
       role: "system",
