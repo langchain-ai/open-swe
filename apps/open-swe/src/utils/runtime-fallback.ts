@@ -8,7 +8,11 @@ import {
   ConfigurableChatModelCallOptions,
   ConfigurableModel,
 } from "langchain/chat_models/universal";
-import { AIMessageChunk, BaseMessage } from "@langchain/core/messages";
+import {
+  AIMessageChunk,
+  BaseMessage,
+  BaseMessageLike,
+} from "@langchain/core/messages";
 import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
@@ -21,6 +25,58 @@ interface ExtractedTools {
   kwargs: Record<string, any>;
 }
 
+function mergeProviderSystemPrompt(
+  initialInput: BaseLanguageModelInput,
+  providerSystemPrompt?: Record<Provider, BaseMessageLike>,
+  provider?: Provider,
+): BaseLanguageModelInput {
+  if (typeof initialInput === "string" || !Array.isArray(initialInput)) {
+    return initialInput;
+  }
+
+  if (!provider || !providerSystemPrompt?.[provider]) {
+    return initialInput;
+  }
+
+  const systemPrompt = initialInput.map((message) => {
+    if (typeof message === "string") {
+      return message;
+    }
+    if (
+      Array.isArray(message) &&
+      typeof message[0] === "string" &&
+      message[0] === "system"
+    ) {
+      return providerSystemPrompt[provider];
+    }
+    if (typeof message === "object") {
+      if ("role" in message && message.role === "system") {
+        return providerSystemPrompt[provider];
+      }
+      if ("type" in message && message.type === "system") {
+        return providerSystemPrompt[provider];
+      }
+      if (
+        "_getType" in message &&
+        typeof message._getType === "function" &&
+        message._getType() === "system"
+      ) {
+        return providerSystemPrompt[provider];
+      }
+      if (
+        "getType" in message &&
+        typeof message.getType === "function" &&
+        message.getType() === "system"
+      ) {
+        return providerSystemPrompt[provider];
+      }
+    }
+    return message;
+  });
+
+  return systemPrompt;
+}
+
 export class FallbackRunnable<
   RunInput extends BaseLanguageModelInput = BaseLanguageModelInput,
   CallOptions extends
@@ -31,13 +87,17 @@ export class FallbackRunnable<
   private task: Task;
   private modelManager: ModelManager;
   private providerTools?: Record<Provider, StructuredToolInterface[]>;
+  private providerSystemPrompt?: Record<Provider, BaseMessageLike>;
 
   constructor(
     primaryRunnable: any,
     config: GraphConfig,
     task: Task,
     modelManager: ModelManager,
-    providerTools?: Record<Provider, StructuredToolInterface[]>,
+    options?: {
+      providerTools?: Record<Provider, StructuredToolInterface[]>;
+      providerSystemPrompt?: Record<Provider, BaseMessageLike>;
+    },
   ) {
     super({
       configurableFields: "any",
@@ -49,7 +109,8 @@ export class FallbackRunnable<
     this.config = config;
     this.task = task;
     this.modelManager = modelManager;
-    this.providerTools = providerTools;
+    this.providerTools = options?.providerTools;
+    this.providerSystemPrompt = options?.providerSystemPrompt;
   }
 
   async _generate(
@@ -126,7 +187,14 @@ export class FallbackRunnable<
           runnableToUse = runnableToUse.withConfig(config);
         }
 
-        const result = await runnableToUse.invoke(input, options);
+        const result = await runnableToUse.invoke(
+          mergeProviderSystemPrompt(
+            input,
+            this.providerSystemPrompt,
+            modelConfig.provider,
+          ),
+          options,
+        );
         this.modelManager.recordSuccess(modelKey);
         return result;
       } catch (error) {
@@ -154,7 +222,10 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
-      this.providerTools,
+      {
+        providerTools: this.providerTools,
+        providerSystemPrompt: this.providerSystemPrompt,
+      },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
@@ -169,7 +240,10 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
-      this.providerTools,
+      {
+        providerTools: this.providerTools,
+        providerSystemPrompt: this.providerSystemPrompt,
+      },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
