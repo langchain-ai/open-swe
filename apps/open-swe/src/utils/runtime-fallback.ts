@@ -1,6 +1,6 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { Task } from "./llms/index.js";
-import { ModelManager } from "./llms/model-manager.js";
+import { ModelManager, Provider } from "./llms/model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { Runnable, RunnableConfig } from "@langchain/core/runnables";
 import { StructuredToolInterface } from "@langchain/core/tools";
@@ -8,7 +8,11 @@ import {
   ConfigurableChatModelCallOptions,
   ConfigurableModel,
 } from "langchain/chat_models/universal";
-import { AIMessageChunk, BaseMessage } from "@langchain/core/messages";
+import {
+  AIMessageChunk,
+  BaseMessage,
+  BaseMessageLike,
+} from "@langchain/core/messages";
 import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
@@ -17,8 +21,19 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
 interface ExtractedTools {
-  tools: StructuredToolInterface[];
+  tools: BindToolsInput[];
   kwargs: Record<string, any>;
+}
+
+function useProviderMessages(
+  initialInput: BaseLanguageModelInput,
+  providerMessages?: Record<Provider, BaseMessageLike[]>,
+  provider?: Provider,
+): BaseLanguageModelInput {
+  if (!provider || !providerMessages?.[provider]) {
+    return initialInput;
+  }
+  return providerMessages[provider];
 }
 
 export class FallbackRunnable<
@@ -30,12 +45,18 @@ export class FallbackRunnable<
   private config: GraphConfig;
   private task: Task;
   private modelManager: ModelManager;
+  private providerTools?: Record<Provider, BindToolsInput[]>;
+  private providerMessages?: Record<Provider, BaseMessageLike[]>;
 
   constructor(
     primaryRunnable: any,
     config: GraphConfig,
     task: Task,
     modelManager: ModelManager,
+    options?: {
+      providerTools?: Record<Provider, BindToolsInput[]>;
+      providerMessages?: Record<Provider, BaseMessageLike[]>;
+    },
   ) {
     super({
       configurableFields: "any",
@@ -47,6 +68,8 @@ export class FallbackRunnable<
     this.config = config;
     this.task = task;
     this.modelManager = modelManager;
+    this.providerTools = options?.providerTools;
+    this.providerMessages = options?.providerMessages;
   }
 
   async _generate(
@@ -90,11 +113,31 @@ export class FallbackRunnable<
         let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
           model;
 
-        const tools = this.extractBoundTools();
-        if (tools && "bindTools" in runnableToUse && runnableToUse.bindTools) {
+        // Check if provider-specific tools exist for this provider
+        const providerSpecificTools =
+          this.providerTools?.[modelConfig.provider];
+        let toolsToUse: ExtractedTools | null = null;
+
+        if (providerSpecificTools) {
+          // Use provider-specific tools if available
+          const extractedTools = this.extractBoundTools();
+          toolsToUse = {
+            tools: providerSpecificTools,
+            kwargs: extractedTools?.kwargs || {},
+          };
+        } else {
+          // Fall back to extracted bound tools from primary model
+          toolsToUse = this.extractBoundTools();
+        }
+
+        if (
+          toolsToUse &&
+          "bindTools" in runnableToUse &&
+          runnableToUse.bindTools
+        ) {
           runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
-            tools.tools,
-            tools.kwargs,
+            toolsToUse.tools,
+            toolsToUse.kwargs,
           );
         }
 
@@ -103,7 +146,14 @@ export class FallbackRunnable<
           runnableToUse = runnableToUse.withConfig(config);
         }
 
-        const result = await runnableToUse.invoke(input, options);
+        const result = await runnableToUse.invoke(
+          useProviderMessages(
+            input,
+            this.providerMessages,
+            modelConfig.provider,
+          ),
+          options,
+        );
         this.modelManager.recordSuccess(modelKey);
         return result;
       } catch (error) {
@@ -131,6 +181,10 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
+      {
+        providerTools: this.providerTools,
+        providerMessages: this.providerMessages,
+      },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
@@ -145,6 +199,10 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
+      {
+        providerTools: this.providerTools,
+        providerMessages: this.providerMessages,
+      },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
