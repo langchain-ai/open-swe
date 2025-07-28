@@ -185,11 +185,21 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       },
       autoAcceptPlan: isAutoAcceptLabel,
     };
+    // Create config object with Claude Opus 4 model configuration for max labels
+    const config: any = {
+      recursion_limit: 400,
+    };
+
+    if (isMaxLabel) {
+      config.configurable = {
+        plannerModelName: "anthropic:claude-opus-4-0",
+        programmerModelName: "anthropic:claude-opus-4-0",
+      };
+    }
+
     const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
       input: runInput,
-      config: {
-        recursion_limit: 400,
-      },
+      config,
       ifNotExists: "create",
       streamResumable: true,
       streamMode: ["values", "messages-tuple", "custom"],
@@ -253,6 +263,7 @@ export async function issueWebhookHandler(
     return c.json({ error: "Webhook processing failed" }, { status: 400 });
   }
 }
+
 
 
 
