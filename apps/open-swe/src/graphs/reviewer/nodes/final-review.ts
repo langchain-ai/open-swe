@@ -117,12 +117,12 @@ export async function finalReview(
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.REVIEWER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
+  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.REVIEWER,
   );
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",

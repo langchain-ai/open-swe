@@ -4,31 +4,31 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import {
-  createSearchToolFields,
-  formatSearchCommand,
+  createGrepToolFields,
+  formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { wrapScript } from "../utils/wrap-script.js";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
-const logger = createLogger(LogLevel.INFO, "SearchTool");
+const logger = createLogger(LogLevel.INFO, "GrepTool");
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-export function createSearchTool(
+export function createGrepTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
 ) {
-  const searchTool = tool(
+  const grepTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const sandbox = await getSandboxSessionOrThrow(input);
 
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
-        const command = formatSearchCommand(input);
-        logger.info("Running search command", {
+        const command = formatGrepCommand(input);
+        logger.info("Running grep search command", {
           command: command.join(" "),
           repoRoot,
         });
@@ -50,7 +50,7 @@ export function createSearchTool(
         } else if (response.exitCode > 1) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
-            `Failed to run search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
+            `Failed to run grep search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
           );
         }
 
@@ -64,15 +64,15 @@ export function createSearchTool(
           const errorResult =
             errorFields.result ?? errorFields.artifacts?.stdout;
           throw new Error(
-            `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+            `Failed to run grep search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
           );
         }
 
         throw e;
       }
     },
-    createSearchToolFields(state.targetRepository),
+    createGrepToolFields(state.targetRepository),
   );
 
-  return searchTool;
+  return grepTool;
 }

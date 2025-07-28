@@ -29,12 +29,13 @@ import {
   DEPENDENCIES_INSTALLED_PROMPT,
   DEPENDENCIES_NOT_INSTALLED_PROMPT,
   DYNAMIC_SYSTEM_PROMPT,
+  STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createSearchTool } from "../../../../tools/search.js";
+import { createGrepTool } from "../../../../tools/grep.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -75,21 +76,30 @@ const formatDynamicContextPrompt = (state: GraphState) => {
     );
 };
 
-const formatStaticInstructionsPrompt = (state: GraphState) => {
-  return STATIC_SYSTEM_INSTRUCTIONS.replaceAll(
-    "{REPO_DIRECTORY}",
-    getRepoAbsolutePath(state.targetRepository),
-  ).replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+const formatStaticInstructionsPrompt = (
+  state: GraphState,
+  isAnthropicModel: boolean,
+) => {
+  return (
+    isAnthropicModel
+      ? STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS
+      : STATIC_SYSTEM_INSTRUCTIONS
+  )
+    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 };
 
-const formatCacheablePrompt = (state: GraphState): CacheablePromptSegment[] => {
+const formatCacheablePrompt = (
+  state: GraphState,
+  isAnthropicModel: boolean,
+): CacheablePromptSegment[] => {
   const codeReview = getCodeReviewFields(state.internalMessages);
 
   const segments: CacheablePromptSegment[] = [
     // Cache Breakpoint 2: Static Instructions
     {
       type: "text",
-      text: formatStaticInstructionsPrompt(state),
+      text: formatStaticInstructionsPrompt(state, isAnthropicModel),
       cache_control: { type: "ephemeral" },
     },
 
@@ -150,11 +160,10 @@ export async function generateAction(
   );
   const mcpTools = await getMcpTools(config);
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
-
-  const tools = [
-    createSearchTool(state),
+  const isAnthropicModel = modelName.includes("claude-");
+  const sharedTools = [
+    createGrepTool(state),
     createShellTool(state),
-    createApplyPatchTool(state),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
     createGetURLContentTool(state),
@@ -162,6 +171,18 @@ export async function generateAction(
     markTaskCompletedTool,
     createSearchDocumentForTool(state, config),
     ...mcpTools,
+  ];
+  const anthropicModelTools = [
+    {
+      type: "text_editor_20250429",
+      name: "str_replace_based_edit_tool",
+    },
+  ];
+  const nonAnthropicModelTools = [createApplyPatchTool(state)];
+
+  const tools = [
+    ...sharedTools,
+    ...(isAnthropicModel ? anthropicModelTools : nonAnthropicModelTools),
   ];
   logger.info(
     `MCP tools added to Programmer: ${mcpTools.map((t) => t.name).join(", ")}`,
@@ -199,10 +220,13 @@ export async function generateAction(
   const response = await modelWithTools.invoke([
     {
       role: "system",
-      content: formatCacheablePrompt({
-        ...state,
-        taskPlan: latestTaskPlan ?? state.taskPlan,
-      }),
+      content: formatCacheablePrompt(
+        {
+          ...state,
+          taskPlan: latestTaskPlan ?? state.taskPlan,
+        },
+        isAnthropicModel,
+      ),
     },
     ...inputMessagesWithCache,
     formatSpecificPlanPrompt(state),

@@ -20,7 +20,7 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,
@@ -34,6 +34,7 @@ import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { createViewTool } from "../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -48,8 +49,9 @@ export async function takeActions(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
+  const viewTool = createViewTool(state);
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
+  const searchTool = createGrepTool(state);
   const scratchpadTool = createScratchpadTool("");
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
@@ -62,6 +64,7 @@ export async function takeActions(
   ];
 
   const allTools = [
+    viewTool,
     shellTool,
     searchTool,
     scratchpadTool,
