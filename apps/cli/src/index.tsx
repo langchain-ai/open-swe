@@ -9,13 +9,19 @@ import {
 } from "./auth-server.js";
 import open from "open";
 import { v4 as uuidv4 } from "uuid";
-import { encryptSecret } from "../../../packages/shared/dist/crypto.js";
+import { encryptSecret } from "@open-swe/shared/crypto";
 import {
   MANAGER_GRAPH_ID,
-  PLANNER_GRAPH_ID,
-} from "../../../packages/shared/dist/constants.js";
+  GITHUB_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_INSTALLATION_NAME,
+  GITHUB_INSTALLATION_ID,
+  OPEN_SWE_STREAM_MODE,
+} from "@open-swe/shared/constants";
 import { Client } from "@langchain/langgraph-sdk";
 import { formatDisplayLog } from "./logger.js";
+import { submitFeedback } from "./utils.js";
+import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interrupt";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 const GITHUB_LOGIN_URL =
@@ -163,22 +169,6 @@ const RepoSearchSelect: React.FC<{
   );
 };
 
-function isAgentInboxInterruptSchema(value: unknown): boolean {
-  const valueAsObject = Array.isArray(value) ? value[0] : value;
-  return (
-    valueAsObject &&
-    typeof valueAsObject === "object" &&
-    "action_request" in valueAsObject &&
-    typeof valueAsObject.action_request === "object" &&
-    "config" in valueAsObject &&
-    typeof valueAsObject.config === "object" &&
-    "allow_respond" in valueAsObject.config &&
-    "allow_accept" in valueAsObject.config &&
-    "allow_edit" in valueAsObject.config &&
-    "allow_ignore" in valueAsObject.config
-  );
-}
-
 const App: React.FC = () => {
   const [authPrompt, setAuthPrompt] = useState<null | boolean>(null);
   const [authInput, setAuthInput] = useState("");
@@ -213,7 +203,7 @@ const App: React.FC = () => {
         return;
       }
 
-      setLogs((prev) => [...prev, `📤 Interrupt: "${message}"`]);
+      setLogs((prev) => [...prev, `📤 Interrupt Response: "${message}"`]);
 
       try {
         const [owner, repoName] = selectedRepo.full_name.split("/");
@@ -237,7 +227,7 @@ const App: React.FC = () => {
           ifNotExists: "create",
           streamResumable: true,
           multitaskStrategy: "enqueue",
-          streamMode: ["values", "messages"],
+          streamMode: OPEN_SWE_STREAM_MODE,
         });
 
         // Just submit the interrupt - existing planner session will pick it up automatically
@@ -426,10 +416,10 @@ const App: React.FC = () => {
           const newClient = new Client({
             apiUrl: LANGGRAPH_URL,
             defaultHeaders: {
-              GITHUB_TOKEN_COOKIE: encryptedUserToken,
-              GITHUB_INSTALLATION_TOKEN_COOKIE: encryptedInstallationToken,
-              GITHUB_INSTALLATION_NAME: owner,
-              GITHUB_INSTALLATION_ID: installationId,
+              [GITHUB_TOKEN_COOKIE]: encryptedUserToken,
+              [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptedInstallationToken,
+              [GITHUB_INSTALLATION_NAME]: owner,
+              [GITHUB_INSTALLATION_ID]: installationId,
             },
           });
           setClient(newClient);
@@ -441,7 +431,7 @@ const App: React.FC = () => {
             config: { recursion_limit: 400 },
             ifNotExists: "create",
             streamResumable: true,
-            streamMode: ["updates", "values"],
+            streamMode: OPEN_SWE_STREAM_MODE,
           });
 
           let plannerStreamed = false;
@@ -476,7 +466,7 @@ const App: React.FC = () => {
                 chunk.data.plannerSession.threadId,
                 chunk.data.plannerSession.runId,
                 {
-                  streamMode: ["updates", "values"],
+                  streamMode: OPEN_SWE_STREAM_MODE,
                 },
               )) {
                 if (subChunk.event === "updates") {
@@ -556,108 +546,15 @@ const App: React.FC = () => {
       // Immediately switch to streaming mode to hide the feedback prompt
       setStreamingPhase("streaming");
 
-      const submitFeedback = async () => {
-        try {
-          const userAccessToken = getAccessToken();
-          const installationAccessToken = await getInstallationAccessToken();
-          const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-
-          if (!userAccessToken || !installationAccessToken || !encryptionKey) {
-            setLogs((prev) => [
-              ...prev,
-              "Missing access tokens for feedback submission",
-            ]);
-            return;
-          }
-
-          const encryptedUserToken = encryptSecret(
-            userAccessToken,
-            encryptionKey,
-          );
-          const encryptedInstallationToken = encryptSecret(
-            installationAccessToken,
-            encryptionKey,
-          );
-          const [owner] = selectedRepo?.full_name.split("/") || [];
-
-          const installationId = getInstallationId();
-          const client = new Client({
-            apiUrl: LANGGRAPH_URL,
-            defaultHeaders: {
-              "x-github-access-token": encryptedUserToken,
-              "x-github-installation-token": encryptedInstallationToken,
-              "x-github-installation-name": owner,
-              "x-github-installation-id": installationId,
-            },
-          });
-
-          const formatted = formatDisplayLog(
-            `Human feedback: ${plannerFeedback}`,
-          );
-          if (formatted.length > 0) {
-            setLogs((prev) => [...prev, ...formatted]);
-          }
-
-          // Create a new stream with the feedback
-          const stream = await client.runs.stream(
-            plannerThreadId,
-            PLANNER_GRAPH_ID,
-            {
-              command: {
-                resume: [
-                  {
-                    type: plannerFeedback === "approve" ? "accept" : "ignore",
-                    args: null,
-                  },
-                ],
-              },
-              streamMode: ["updates", "messages"],
-            },
-          );
-
-          let programmerStreamed = false;
-          // Process the stream response
-          for await (const chunk of stream) {
-            const formatted = formatDisplayLog(chunk);
-            if (formatted.length > 0) {
-              setLogs((prev) => [...prev, ...formatted]);
-            }
-
-            // Check for programmer session in the resumed planner stream
-            const chunkData = chunk.data as any;
-            if (
-              !programmerStreamed &&
-              chunkData?.programmerSession?.threadId &&
-              typeof chunkData.programmerSession.threadId === "string" &&
-              typeof chunkData.programmerSession.runId === "string"
-            ) {
-              programmerStreamed = true;
-              // Join programmer stream
-              for await (const programmerChunk of client.runs.joinStream(
-                chunkData.programmerSession.threadId,
-                chunkData.programmerSession.runId,
-              )) {
-                const formatted = formatDisplayLog(programmerChunk);
-                if (formatted.length > 0) {
-                  setLogs((prev) => [...prev, ...formatted]);
-                }
-              }
-            }
-          }
-        } catch (error: unknown) {
-          const errorMessage =
-            error instanceof Error ? error.message : "Unknown error";
-          setLogs((prev) => [
-            ...prev,
-            `Error submitting feedback: ${errorMessage}`,
-          ]);
-        } finally {
-          // Clear feedback state
-          setPlannerFeedback(null);
-        }
-      };
-
-      submitFeedback();
+      (async () => {
+        await submitFeedback({
+          plannerFeedback,
+          plannerThreadId,
+          selectedRepo,
+          setLogs,
+          setPlannerFeedback,
+        });
+      })();
     }
   }, [streamingPhase, plannerFeedback, selectedRepo, plannerThreadId]);
 
