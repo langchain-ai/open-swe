@@ -22,22 +22,22 @@ const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
 // Default patterns for files/directories that should not be committed
 const DEFAULT_EXCLUDED_PATTERNS = [
-  'node_modules',
-  'langgraph_api',
-  '.env',
-  '.env.local',
-  '.env.production',
-  '.env.development',
-  'dist',
-  'build',
-  '.turbo',
-  '.next',
-  'coverage',
-  '.nyc_output',
-  'logs',
-  '*.log',
-  '.DS_Store',
-  'Thumbs.db'
+  "node_modules",
+  "langgraph_api",
+  ".env",
+  ".env.local",
+  ".env.production",
+  ".env.development",
+  "dist",
+  "build",
+  ".turbo",
+  ".next",
+  "coverage",
+  ".nyc_output",
+  "logs",
+  "*.log",
+  ".DS_Store",
+  "Thumbs.db",
 ];
 
 /**
@@ -47,7 +47,7 @@ const DEFAULT_EXCLUDED_PATTERNS = [
 async function getValidFilesToCommit(
   absoluteRepoDir: string,
   sandbox: Sandbox,
-  excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS
+  excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
 ): Promise<string[]> {
   const gitStatusOutput = await sandbox.process.executeCommand(
     "git status --porcelain",
@@ -91,22 +91,27 @@ async function getValidFilesToCommit(
 /**
  * Checks if a file should be excluded from commits based on patterns.
  */
-function shouldExcludeFile(filePath: string, excludePatterns: string[]): boolean {
-  const normalizedPath = filePath.replace(/\\/g, '/');
-  
-  return excludePatterns.some(pattern => {
-    if (pattern.includes('*')) {
-      const regexPattern = pattern
-        .replace(/\./g, '\\.')
-        .replace(/\*/g, '.*');
-      const regex = new RegExp(`^${regexPattern}$|/${regexPattern}$|^${regexPattern}/|/${regexPattern}/`);
+function shouldExcludeFile(
+  filePath: string,
+  excludePatterns: string[],
+): boolean {
+  const normalizedPath = filePath.replace(/\\/g, "/");
+
+  return excludePatterns.some((pattern) => {
+    if (pattern.includes("*")) {
+      const regexPattern = pattern.replace(/\./g, "\\.").replace(/\*/g, ".*");
+      const regex = new RegExp(
+        `^${regexPattern}$|/${regexPattern}$|^${regexPattern}/|/${regexPattern}/`,
+      );
       return regex.test(normalizedPath);
     }
-    
-    return normalizedPath === pattern ||
-           normalizedPath.startsWith(pattern + '/') ||
-           normalizedPath.includes('/' + pattern + '/') ||
-           normalizedPath.endsWith('/' + pattern);
+
+    return (
+      normalizedPath === pattern ||
+      normalizedPath.startsWith(pattern + "/") ||
+      normalizedPath.includes("/" + pattern + "/") ||
+      normalizedPath.endsWith("/" + pattern)
+    );
   });
 }
 
@@ -193,15 +198,15 @@ export async function checkoutBranchAndCommit(
   const branchName = options.branchName || getBranchName(config);
 
   logger.info(`Committing changes to branch ${branchName}`);
-  
+
   // Validate and filter files before committing
   const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox);
-  
+
   if (validFiles.length === 0) {
     logger.info("No valid files to commit after filtering");
     return { branchName, updatedTaskPlan: options.taskPlan };
   }
-  
+
   // Add only validated files instead of adding all files with "."
   await sandbox.git.add(absoluteRepoDir, validFiles);
 
