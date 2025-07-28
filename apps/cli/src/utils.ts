@@ -15,6 +15,7 @@ import {
 } from "./auth-server.js";
 import { formatDisplayLog } from "./logger.js";
 
+type StreamMode = "values" | "updates" | "messages";
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 /**
@@ -79,7 +80,7 @@ export async function submitFeedback({
           },
         ],
       },
-      streamMode: OPEN_SWE_STREAM_MODE,
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     });
 
     let programmerStreamed = false;
