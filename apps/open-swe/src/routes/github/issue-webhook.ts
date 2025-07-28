@@ -106,7 +106,9 @@ webhooks.on("issues.labeled", async ({ payload }) => {
   ) {
     return;
   }
-  const isAutoAcceptLabel = payload.label.name === getOpenSWEAutoAcceptLabel();
+  const isAutoAcceptLabel = 
+    payload.label.name === getOpenSWEAutoAcceptLabel() ||
+    payload.label.name === getOpenSWEMaxAutoAcceptLabel();
 
   logger.info(
     `'${payload.label.name}' label added to issue #${payload.issue.number}`,
@@ -246,5 +248,6 @@ export async function issueWebhookHandler(
     return c.json({ error: "Webhook processing failed" }, { status: 400 });
   }
 }
+
 
 
