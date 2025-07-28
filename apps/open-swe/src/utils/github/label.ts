@@ -20,7 +20,9 @@ export function getOpenSWEAutoAcceptLabel():
  * @returns "open-swe-max" or "open-swe-max-dev" based on the NODE_ENV.
  */
 export function getOpenSWEMaxLabel(): "open-swe-max" | "open-swe-max-dev" {
-  return process.env.NODE_ENV === "production" ? "open-swe-max" : "open-swe-max-dev";
+  return process.env.NODE_ENV === "production"
+    ? "open-swe-max"
+    : "open-swe-max-dev";
 }
 
 /**
@@ -33,4 +35,3 @@ export function getOpenSWEMaxAutoAcceptLabel():
     ? "open-swe-max-auto"
     : "open-swe-max-auto-dev";
 }
-
