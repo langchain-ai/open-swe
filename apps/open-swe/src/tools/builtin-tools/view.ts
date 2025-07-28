@@ -26,7 +26,7 @@ export function createViewTool(
           sandbox,
           path,
           workDir,
-          view_range,
+          view_range as [number, number] | undefined,
         );
 
         logger.info(`View command executed successfully on ${path}`);
