@@ -17,28 +17,10 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequest } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
+import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
+import { escapeRegExp } from "../string-utils.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
-
-// Default patterns for files/directories that should not be committed
-const DEFAULT_EXCLUDED_PATTERNS = [
-  "node_modules",
-  "langgraph_api",
-  ".env",
-  ".env.local",
-  ".env.production",
-  ".env.development",
-  "dist",
-  "build",
-  ".turbo",
-  ".next",
-  "coverage",
-  ".nyc_output",
-  "logs",
-  "*.log",
-  ".DS_Store",
-  "Thumbs.db",
-];
 
 /**
  * Validates and filters files before git add operation.
@@ -86,13 +68,6 @@ async function getValidFilesToCommit(
   }
 
   return validFiles;
-}
-
-/**
- * Escapes regex metacharacters in a string to treat them as literal characters.
- */
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
