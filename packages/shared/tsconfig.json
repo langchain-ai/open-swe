@@ -20,10 +20,6 @@
     "types": ["jest", "node"],
     "resolveJsonModule": true
   },
-  "include": [
-    "src/**/*.ts",
-    "src/*.ts",
-    "../../apps/open-swe/src/utils/github/string-utils.ts"
-  ],
+  "include": ["src/**/*.ts", "src/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
