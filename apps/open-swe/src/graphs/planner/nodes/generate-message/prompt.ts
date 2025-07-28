@@ -36,6 +36,46 @@ Your sole objective in this phase is to gather comprehensive context about the c
     9. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd. You may use cd if the User explicitly requests it.
 </context_gathering_guidelines>
 
+<tool_usage>
+    ### Grep search tool
+        - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+        - It accepts a query string, or regex to search for.
+        - It can search for specific file types using glob patterns.
+        - Returns a list of results, including file paths and line numbers
+        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
+        - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
+
+    ### Shell tool
+        The \`shell\` tool allows Claude to execute shell commands.
+        Parameters:
+            - \`command\`: The shell command to execute. Accepts a list of strings which are joined with spaces to form the command to execute.
+            - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
+            - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
+
+    ### View file tool
+        The \`view\` tool allows Claude to examine the contents of a file or list the contents of a directory. It can read the entire file or a specific range of lines.
+        Parameters:
+            - \`command\`: Must be “view”
+            - \`path\`: The path to the file or directory to view
+            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+
+    ### Scratchpad tool
+        The \`scratchpad\` tool allows Claude to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.
+        Parameters:
+            - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
+
+    ### Get URL content tool
+        The \`get_url_content\` tool allows Claude to fetch the contents of a URL. If the total character count of the URL contents exceeds the limit, the \`get_url_content\` tool will return a summarized version of the contents.
+        Parameters:
+            - \`url\`: The URL to fetch the contents of
+
+    ### Search document for tool
+        The \`search_document_for\` tool allows Claude to search for specific content within a document/url contents.
+        Parameters:
+            - \`url\`: The URL to fetch the contents of
+            - \`query\`: The query to search for within the document. This should be a natural language query. The query will be passed to a separate LLM and prompted to extract context from the document which answers this query.
+</tool_usage>
+
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>

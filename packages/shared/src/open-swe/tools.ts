@@ -545,3 +545,28 @@ export function createTextEditorToolFields(targetRepository: TargetRepository) {
     schema: textEditorToolSchema,
   };
 }
+
+export function createViewToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const viewSchema = z.object({
+    command: z.enum(["view"]).describe("The command to execute: view"),
+    path: z
+      .string()
+      .describe("The path to the file or directory to operate on"),
+    view_range: z
+      .tuple([z.number(), z.number()])
+      .optional()
+      .describe(
+        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command.",
+      ),
+  });
+
+  return {
+    name: "view",
+    description:
+      "A text editor tool that can view files. " +
+      `The working directory is \`${repoRoot}\`. Ensure file paths are absolute and properly formatted. ` +
+      "Supports commands: view (read file/directory).",
+    schema: viewSchema,
+  };
+}

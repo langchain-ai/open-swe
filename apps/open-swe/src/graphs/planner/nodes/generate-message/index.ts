@@ -34,6 +34,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createViewTool } from "../../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -69,16 +70,17 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.PLANNER,
   );
   const mcpTools = await getMcpTools(config);
 
   const tools = [
     createGrepTool(state),
     createShellTool(state),
+    createViewTool(state),
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",
     ),

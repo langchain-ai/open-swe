@@ -115,6 +115,13 @@ By reviewing these actions, and comparing them to the plan and original user req
             - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
             - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
 
+    ### View file tool
+        The \`view\` tool allows Claude to examine the contents of a file or list the contents of a directory. It can read the entire file or a specific range of lines.
+        Parameters:
+            - \`command\`: Must be “view”
+            - \`path\`: The path to the file or directory to view
+            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+
     ### Install dependencies tool
         The \`install_dependencies\` tool allows Claude to install dependencies for a project. This should only be called if dependencies have not been installed yet.
         Parameters:

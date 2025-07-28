@@ -53,10 +53,10 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    Task.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {

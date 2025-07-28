@@ -1,6 +1,6 @@
 export * from "./apply-patch.js";
 export * from "./shell.js";
-export * from "./text-editor.js";
+export * from "./builtin-tools/text-editor.js";
 export * from "./url-content.js";
 export * from "./search-documents-for/index.js";
 export {
