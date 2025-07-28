@@ -73,7 +73,7 @@ async function getValidFilesToCommit(
 /**
  * Checks if a file should be excluded from commits based on patterns.
  */
-function shouldExcludeFile(
+export function shouldExcludeFile(
   filePath: string,
   excludePatterns: string[],
 ): boolean {

@@ -1,33 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
-
-function shouldExcludeFile(
-  filePath: string,
-  excludePatterns: string[],
-): boolean {
-  const normalizedPath = filePath.replace(/\\/g, "/");
-
-  return excludePatterns.some((pattern) => {
-    if (pattern.includes("*")) {
-      const escapedPattern = escapeRegExp(pattern);
-      const regexPattern = escapedPattern.replace(/\\\*/g, ".*");
-      const regex = new RegExp(
-        `^${regexPattern}$|/${regexPattern}$|^${regexPattern}/|/${regexPattern}/`,
-      );
-      return regex.test(normalizedPath);
-    }
-
-    return (
-      normalizedPath === pattern ||
-      normalizedPath.startsWith(pattern + "/") ||
-      normalizedPath.includes("/" + pattern + "/") ||
-      normalizedPath.endsWith("/" + pattern)
-    );
-  });
-}
-
-function escapeRegExp(string: string): string {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import { shouldExcludeFile } from "../utils/github/git.js";
+import { DEFAULT_EXCLUDED_PATTERNS } from "../utils/github/constants.js";
 
 function parseGitStatus(gitStatusOutput: string): string[] {
   return gitStatusOutput
@@ -36,25 +9,6 @@ function parseGitStatus(gitStatusOutput: string): string[] {
     .map((line) => line.substring(3))
     .filter(Boolean);
 }
-
-const DEFAULT_EXCLUDED_PATTERNS = [
-  "node_modules",
-  "langgraph_api",
-  ".env",
-  ".env.local",
-  ".env.production",
-  ".env.development",
-  "dist",
-  "build",
-  ".turbo",
-  ".next",
-  "coverage",
-  ".nyc_output",
-  "logs",
-  "*.log",
-  ".DS_Store",
-  "Thumbs.db",
-];
 
 describe("Git File Validation", () => {
   describe("Realistic git status scenarios", () => {
