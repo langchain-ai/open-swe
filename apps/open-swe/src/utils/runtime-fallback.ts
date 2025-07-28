@@ -93,11 +93,26 @@ export class FallbackRunnable<
         let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
           model;
 
-        const tools = this.extractBoundTools();
-        if (tools && "bindTools" in runnableToUse && runnableToUse.bindTools) {
+        // Check if provider-specific tools exist for this provider
+        const providerSpecificTools = this.providerTools?.[modelConfig.provider];
+        let toolsToUse: ExtractedTools | null = null;
+        
+        if (providerSpecificTools) {
+          // Use provider-specific tools if available
+          const extractedTools = this.extractBoundTools();
+          toolsToUse = {
+            tools: providerSpecificTools,
+            kwargs: extractedTools?.kwargs || {},
+          };
+        } else {
+          // Fall back to extracted bound tools from primary model
+          toolsToUse = this.extractBoundTools();
+        }
+
+        if (toolsToUse && "bindTools" in runnableToUse && runnableToUse.bindTools) {
           runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
-            tools.tools,
-            tools.kwargs,
+            toolsToUse.tools,
+            toolsToUse.kwargs,
           );
         }
 
@@ -209,4 +224,5 @@ export class FallbackRunnable<
     return null;
   }
 }
+
 
