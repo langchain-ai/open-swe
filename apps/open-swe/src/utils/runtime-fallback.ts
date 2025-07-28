@@ -94,9 +94,10 @@ export class FallbackRunnable<
           model;
 
         // Check if provider-specific tools exist for this provider
-        const providerSpecificTools = this.providerTools?.[modelConfig.provider];
+        const providerSpecificTools =
+          this.providerTools?.[modelConfig.provider];
         let toolsToUse: ExtractedTools | null = null;
-        
+
         if (providerSpecificTools) {
           // Use provider-specific tools if available
           const extractedTools = this.extractBoundTools();
@@ -109,7 +110,11 @@ export class FallbackRunnable<
           toolsToUse = this.extractBoundTools();
         }
 
-        if (toolsToUse && "bindTools" in runnableToUse && runnableToUse.bindTools) {
+        if (
+          toolsToUse &&
+          "bindTools" in runnableToUse &&
+          runnableToUse.bindTools
+        ) {
           runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
             toolsToUse.tools,
             toolsToUse.kwargs,
@@ -226,5 +231,3 @@ export class FallbackRunnable<
     return null;
   }
 }
-
-

@@ -7,7 +7,7 @@ import { StructuredToolInterface } from "@langchain/core/tools";
 export async function loadModel(
   config: GraphConfig,
   task: Task,
-  providerTools?: Record<Provider, StructuredToolInterface[]>
+  providerTools?: Record<Provider, StructuredToolInterface[]>,
 ) {
   const modelManager = getModelManager();
 
@@ -20,7 +20,7 @@ export async function loadModel(
     config,
     task,
     modelManager,
-    providerTools
+    providerTools,
   );
   return fallbackModel;
 }
@@ -37,4 +37,3 @@ export function supportsParallelToolCallsParam(
 
   return !MODELS_NO_PARALLEL_TOOL_CALLING.some((model) => modelStr === model);
 }
-
