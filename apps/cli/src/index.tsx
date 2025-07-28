@@ -552,7 +552,7 @@ const App: React.FC = () => {
           plannerThreadId,
           selectedRepo,
           setLogs,
-          setPlannerFeedback,
+          setPlannerFeedback: () => setPlannerFeedback(null),
         });
       })();
     }
