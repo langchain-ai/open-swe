@@ -1,6 +1,6 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { Task } from "./llms/index.js";
-import { ModelManager } from "./llms/model-manager.js";
+import { ModelManager, Provider } from "./llms/model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { Runnable, RunnableConfig } from "@langchain/core/runnables";
 import { StructuredToolInterface } from "@langchain/core/tools";
@@ -30,12 +30,14 @@ export class FallbackRunnable<
   private config: GraphConfig;
   private task: Task;
   private modelManager: ModelManager;
+  private providerTools?: Record<Provider, StructuredToolInterface[]>;
 
   constructor(
     primaryRunnable: any,
     config: GraphConfig,
     task: Task,
     modelManager: ModelManager,
+    providerTools?: Record<Provider, StructuredToolInterface[]>,
   ) {
     super({
       configurableFields: "any",
@@ -47,6 +49,7 @@ export class FallbackRunnable<
     this.config = config;
     this.task = task;
     this.modelManager = modelManager;
+    this.providerTools = providerTools;
   }
 
   async _generate(
@@ -206,3 +209,4 @@ export class FallbackRunnable<
     return null;
   }
 }
+
