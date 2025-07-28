@@ -23,6 +23,8 @@ import { formatDisplayLog } from "./logger.js";
 import { submitFeedback } from "./utils.js";
 import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interrupt";
 
+type StreamMode = "values" | "updates" | "messages";
+
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 const GITHUB_LOGIN_URL =
   process.env.GITHUB_LOGIN_URL || "http://localhost:3000/api/auth/github/login";
@@ -227,7 +229,7 @@ const App: React.FC = () => {
           ifNotExists: "create",
           streamResumable: true,
           multitaskStrategy: "enqueue",
-          streamMode: OPEN_SWE_STREAM_MODE,
+          streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
         });
 
         // Just submit the interrupt - existing planner session will pick it up automatically
@@ -431,7 +433,7 @@ const App: React.FC = () => {
             config: { recursion_limit: 400 },
             ifNotExists: "create",
             streamResumable: true,
-            streamMode: OPEN_SWE_STREAM_MODE,
+            streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
           });
 
           let plannerStreamed = false;
@@ -451,7 +453,6 @@ const App: React.FC = () => {
                 });
               }
             }
-
             // Check for plannerSession
             if (
               !plannerStreamed &&
@@ -466,7 +467,7 @@ const App: React.FC = () => {
                 chunk.data.plannerSession.threadId,
                 chunk.data.plannerSession.runId,
                 {
-                  streamMode: OPEN_SWE_STREAM_MODE,
+                  streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
                 },
               )) {
                 if (subChunk.event === "updates") {
@@ -493,7 +494,7 @@ const App: React.FC = () => {
                     subChunk.data.programmerSession.threadId,
                     subChunk.data.programmerSession.runId,
                     {
-                      streamMode: ["updates", "values"],
+                      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
                     },
                   )) {
                     if (programmerChunk.event === "updates") {
