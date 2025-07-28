@@ -51,7 +51,6 @@ import {
 } from "../../../../utils/caching.js";
 import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
 import { HumanMessage } from "@langchain/core/messages";
-import { getModelName } from "../../../../utils/llms/utils.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -154,7 +153,6 @@ export async function generateAction(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const modelName = getModelName(config, Task.PROGRAMMER);
   const model = await loadModel(config, Task.PROGRAMMER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
