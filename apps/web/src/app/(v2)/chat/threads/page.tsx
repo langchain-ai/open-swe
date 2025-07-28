@@ -236,8 +236,8 @@ function AllThreadsPageContent() {
               </div>
             )}
 
-          {(threadsLoading || statusLoading) &&
-            (!threads || threads.length === 0) && (
+          {(threadsLoading || statusLoading || installationsLoading) &&
+            threads.length === 0 && (
               <div>
                 <div className="mb-3 flex items-center gap-2">
                   <h2 className="text-foreground text-base font-semibold capitalize">
@@ -266,4 +266,5 @@ export default function AllThreadsPage() {
     </Suspense>
   );
 }
+
 
