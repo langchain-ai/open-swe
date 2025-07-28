@@ -10,7 +10,7 @@ export async function loadModel(
   task: Task,
   options?: {
     providerTools?: Record<Provider, BindToolsInput[]>;
-    providerSystemPrompt?: Record<Provider, BaseMessageLike>;
+    providerMessages?: Record<Provider, BaseMessageLike[]>;
   },
 ) {
   const modelManager = getModelManager();

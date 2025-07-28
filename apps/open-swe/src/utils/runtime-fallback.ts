@@ -25,56 +25,15 @@ interface ExtractedTools {
   kwargs: Record<string, any>;
 }
 
-function mergeProviderSystemPrompt(
+function useProviderMessages(
   initialInput: BaseLanguageModelInput,
-  providerSystemPrompt?: Record<Provider, BaseMessageLike>,
+  providerMessages?: Record<Provider, BaseMessageLike[]>,
   provider?: Provider,
 ): BaseLanguageModelInput {
-  if (typeof initialInput === "string" || !Array.isArray(initialInput)) {
+  if (!provider || !providerMessages?.[provider]) {
     return initialInput;
   }
-
-  if (!provider || !providerSystemPrompt?.[provider]) {
-    return initialInput;
-  }
-
-  const systemPrompt = initialInput.map((message) => {
-    if (typeof message === "string") {
-      return message;
-    }
-    if (
-      Array.isArray(message) &&
-      typeof message[0] === "string" &&
-      message[0] === "system"
-    ) {
-      return providerSystemPrompt[provider];
-    }
-    if (typeof message === "object") {
-      if ("role" in message && message.role === "system") {
-        return providerSystemPrompt[provider];
-      }
-      if ("type" in message && message.type === "system") {
-        return providerSystemPrompt[provider];
-      }
-      if (
-        "_getType" in message &&
-        typeof message._getType === "function" &&
-        message._getType() === "system"
-      ) {
-        return providerSystemPrompt[provider];
-      }
-      if (
-        "getType" in message &&
-        typeof message.getType === "function" &&
-        message.getType() === "system"
-      ) {
-        return providerSystemPrompt[provider];
-      }
-    }
-    return message;
-  });
-
-  return systemPrompt;
+  return providerMessages[provider];
 }
 
 export class FallbackRunnable<
@@ -87,7 +46,7 @@ export class FallbackRunnable<
   private task: Task;
   private modelManager: ModelManager;
   private providerTools?: Record<Provider, BindToolsInput[]>;
-  private providerSystemPrompt?: Record<Provider, BaseMessageLike>;
+  private providerMessages?: Record<Provider, BaseMessageLike[]>;
 
   constructor(
     primaryRunnable: any,
@@ -96,7 +55,7 @@ export class FallbackRunnable<
     modelManager: ModelManager,
     options?: {
       providerTools?: Record<Provider, BindToolsInput[]>;
-      providerSystemPrompt?: Record<Provider, BaseMessageLike>;
+      providerMessages?: Record<Provider, BaseMessageLike[]>;
     },
   ) {
     super({
@@ -110,7 +69,7 @@ export class FallbackRunnable<
     this.task = task;
     this.modelManager = modelManager;
     this.providerTools = options?.providerTools;
-    this.providerSystemPrompt = options?.providerSystemPrompt;
+    this.providerMessages = options?.providerMessages;
   }
 
   async _generate(
@@ -188,9 +147,9 @@ export class FallbackRunnable<
         }
 
         const result = await runnableToUse.invoke(
-          mergeProviderSystemPrompt(
+          useProviderMessages(
             input,
-            this.providerSystemPrompt,
+            this.providerMessages,
             modelConfig.provider,
           ),
           options,
@@ -224,7 +183,7 @@ export class FallbackRunnable<
       this.modelManager,
       {
         providerTools: this.providerTools,
-        providerSystemPrompt: this.providerSystemPrompt,
+        providerMessages: this.providerMessages,
       },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
@@ -242,7 +201,7 @@ export class FallbackRunnable<
       this.modelManager,
       {
         providerTools: this.providerTools,
-        providerSystemPrompt: this.providerSystemPrompt,
+        providerMessages: this.providerMessages,
       },
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
