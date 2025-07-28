@@ -47,6 +47,7 @@ import {
   createReviewStartedToolFields,
   createScratchpadFields,
   createTextEditorToolFields,
+  createViewToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -114,6 +115,9 @@ const textEditorTool = createTextEditorToolFields({
 });
 type TextEditorToolArgs = z.infer<typeof textEditorTool.schema>;
 
+const viewTool = createViewToolFields(dummyRepo);
+type ViewToolArgs = z.infer<typeof viewTool.schema>;
+
 // Helper function to detect MCP tools by checking if tool name is NOT in known tools
 function isMcpTool(toolName: string): boolean {
   const knownToolNames = [
@@ -125,6 +129,7 @@ function isMcpTool(toolName: string): boolean {
     openPrTool.name,
     diagnoseErrorTool.name,
     textEditorTool.name,
+    viewTool.name,
   ];
   return !knownToolNames.some((t) => t === toolName);
 }
@@ -302,6 +307,18 @@ export function mapToolMessageToActionStepProps(
       output,
       reasoningText,
     };
+  } else if (toolCall?.name === viewTool.name) {
+    const args = toolCall.args as ViewToolArgs;
+    return {
+      actionType: "text_editor",
+      status,
+      success,
+      command: args.command || "view",
+      path: args.path || "",
+      view_range: args.view_range,
+      output,
+      reasoningText,
+    };
   } else if (toolCall && isMcpTool(toolCall.name)) {
     return {
       actionType: "mcp",
@@ -381,6 +398,7 @@ export function AssistantMessage({
           tc.name === scratchpadTool.name ||
           tc.name === getURLContentTool.name ||
           tc.name === textEditorTool.name ||
+          tc.name === viewTool.name ||
           tc.name === searchDocumentForTool.name ||
           isMcpTool(tc.name),
       )
@@ -652,6 +670,7 @@ export function AssistantMessage({
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
       const isTextEditorTool = toolCall.name === textEditorTool.name;
+      const isViewTool = toolCall.name === viewTool.name;
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
@@ -720,6 +739,16 @@ export function AssistantMessage({
           new_str: args?.new_str,
           file_text: args?.file_text,
           insert_line: args?.insert_line,
+          output: "",
+        } as ActionItemProps;
+      } else if (isViewTool) {
+        const args = toolCall.args as ViewToolArgs;
+        return {
+          actionType: "text_editor",
+          status: "generating",
+          command: args?.command || "view",
+          path: args?.path || "",
+          view_range: args?.view_range,
           output: "",
         } as ActionItemProps;
       } else {
