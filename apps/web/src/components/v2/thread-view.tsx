@@ -11,7 +11,7 @@ import { ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState, CacheMetrics } from "@open-swe/shared/open-swe/types";
+import { GraphState, CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import { HumanMessage } from "@langchain/core/messages";
@@ -45,6 +45,25 @@ interface ThreadViewProps {
   displayThread: ThreadMetadata;
   allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
+}
+
+const joinTokenData = (plannerTokenData?: CacheMetrics | ModelTokenData[], programmerTokenData?: CacheMetrics | ModelTokenData[]): ModelTokenData[] | CacheMetrics[] => {
+  if (!plannerTokenData && !programmerTokenData) {
+    return [];
+  }
+  if (plannerTokenData && programmerTokenData) {
+    return [...(Array.isArray(plannerTokenData) ? plannerTokenData : [plannerTokenData]), ...(Array.isArray(programmerTokenData) ? programmerTokenData : [programmerTokenData])];
+  }
+
+  if (plannerTokenData && !programmerTokenData) {
+    return Array.isArray(plannerTokenData) ? plannerTokenData : [plannerTokenData];
+  }
+
+  if (!plannerTokenData && programmerTokenData) {
+    return Array.isArray(programmerTokenData) ? programmerTokenData : [programmerTokenData];
+  }
+
+  return [];
 }
 
 export function ThreadView({
@@ -341,10 +360,7 @@ export function ThreadView({
                       />
                     )}
                   <TokenUsage
-                    tokenData={[
-                      ...(plannerStream.values.tokenData ?? []),
-                      ...(programmerStream.values.tokenData ?? []),
-                    ].filter(Boolean)}
+                    tokenData={joinTokenData(plannerStream.values.tokenData, programmerStream.values.tokenData)}
                   />
                 </div>
               </div>
