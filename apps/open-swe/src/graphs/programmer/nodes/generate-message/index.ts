@@ -80,15 +80,13 @@ const formatStaticInstructionsPrompt = (
   state: GraphState,
   isAnthropicModel: boolean,
 ) => {
-  return isAnthropicModel
-    ? STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS
-    : STATIC_SYSTEM_INSTRUCTIONS.replaceAll(
-        "{REPO_DIRECTORY}",
-        getRepoAbsolutePath(state.targetRepository),
-      ).replaceAll(
-        "{CUSTOM_RULES}",
-        formatCustomRulesPrompt(state.customRules),
-      );
+  return (
+    isAnthropicModel
+      ? STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS
+      : STATIC_SYSTEM_INSTRUCTIONS
+  )
+    .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
 };
 
 const formatCacheablePrompt = (
