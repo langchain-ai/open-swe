@@ -89,6 +89,13 @@ async function getValidFilesToCommit(
 }
 
 /**
+ * Escapes regex metacharacters in a string to treat them as literal characters.
+ */
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * Checks if a file should be excluded from commits based on patterns.
  */
 function shouldExcludeFile(
@@ -99,7 +106,8 @@ function shouldExcludeFile(
 
   return excludePatterns.some((pattern) => {
     if (pattern.includes("*")) {
-      const regexPattern = pattern.replace(/\./g, "\\.").replace(/\*/g, ".*");
+      const escapedPattern = escapeRegExp(pattern);
+      const regexPattern = escapedPattern.replace(/\\\*/g, ".*");
       const regex = new RegExp(
         `^${regexPattern}$|/${regexPattern}$|^${regexPattern}/|/${regexPattern}/`,
       );
