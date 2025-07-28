@@ -1,6 +1,7 @@
 import {
   getModelManager,
   loadModel,
+  Provider,
   supportsParallelToolCallsParam,
   Task,
 } from "../../../../utils/llms/index.js";
@@ -26,7 +27,7 @@ import {
   formatCodeReviewPrompt,
   getCodeReviewFields,
 } from "../../../../utils/review.js";
-import { BaseMessage } from "@langchain/core/messages";
+import { BaseMessage, BaseMessageLike } from "@langchain/core/messages";
 import { getMessageString } from "../../../../utils/message/content.js";
 import {
   CacheablePromptSegment,
@@ -35,6 +36,7 @@ import {
 } from "../../../../utils/caching.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 import { createViewTool } from "../../../../tools/builtin-tools/view.js";
+import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
@@ -66,6 +68,9 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
 
 const formatCacheablePrompt = (
   state: ReviewerGraphState,
+  args?: {
+    excludeCacheControl?: boolean;
+  },
 ): CacheablePromptSegment[] => {
   const codeReview = getCodeReviewFields(state.internalMessages);
 
@@ -73,7 +78,9 @@ const formatCacheablePrompt = (
     {
       type: "text",
       text: formatSystemPrompt(state),
-      cache_control: { type: "ephemeral" },
+      ...(!args?.excludeCacheControl
+        ? { cache_control: { type: "ephemeral" } }
+        : {}),
     },
   ];
 
@@ -85,7 +92,9 @@ const formatCacheablePrompt = (
         review: codeReview.review,
         newActions: codeReview.newActions,
       }),
-      cache_control: { type: "ephemeral" },
+      ...(!args?.excludeCacheControl
+        ? { cache_control: { type: "ephemeral" } }
+        : {}),
     });
   }
 
@@ -94,6 +103,9 @@ const formatCacheablePrompt = (
 
 function formatUserConversationHistoryMessage(
   messages: BaseMessage[],
+  args?: {
+    excludeCacheControl?: boolean;
+  },
 ): CacheablePromptSegment[] {
   return [
     {
@@ -104,22 +116,17 @@ If the history has been truncated, it is because the conversation was too long. 
 <conversation_history>
 ${messages.map(getMessageString).join("\n")}
 </conversation_history>`,
-      cache_control: { type: "ephemeral" },
+      ...(!args?.excludeCacheControl
+        ? { cache_control: { type: "ephemeral" } }
+        : {}),
     },
   ];
 }
 
-export async function generateReviewActions(
-  state: ReviewerGraphState,
-  config: GraphConfig,
-): Promise<ReviewerGraphUpdate> {
-  const model = await loadModel(config, Task.REVIEWER);
-  const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
-  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
-    config,
-    Task.REVIEWER,
-  );
+function createToolsAndPrompt(state: ReviewerGraphState): {
+  providerTools: Record<Provider, BindToolsInput[]>;
+  providerMessages: Record<Provider, BaseMessageLike[]>;
+} {
   const tools = [
     createGrepTool(state),
     createShellTool(state),
@@ -129,34 +136,87 @@ export async function generateReviewActions(
       "when generating a final review, after all context gathering and reviewing is complete",
     ),
   ];
-  tools[tools.length - 1] = {
-    ...tools[tools.length - 1],
+  const anthropicTools = tools;
+  anthropicTools[anthropicTools.length - 1] = {
+    ...anthropicTools[anthropicTools.length - 1],
     cache_control: { type: "ephemeral" },
   } as any;
+  const nonAnthropicTools = tools;
 
-  const modelWithTools = model.bindTools(tools, {
-    tool_choice: "auto",
-    ...(modelSupportsParallelToolCallsParam
-      ? {
-          parallel_tool_calls: true,
-        }
-      : {}),
-  });
-
-  const reviewerMessagesWithCache = convertMessagesToCacheControlledMessages(
-    state.reviewerMessages,
-  );
-  const response = await modelWithTools.invoke([
+  const anthropicMessages = [
     {
       role: "system",
-      content: formatCacheablePrompt(state),
+      content: formatCacheablePrompt(state, { excludeCacheControl: false }),
     },
     {
       role: "user",
-      content: formatUserConversationHistoryMessage(state.internalMessages),
+      content: formatUserConversationHistoryMessage(state.internalMessages, {
+        excludeCacheControl: false,
+      }),
     },
-    ...reviewerMessagesWithCache,
-  ]);
+    ...convertMessagesToCacheControlledMessages(state.reviewerMessages),
+  ];
+  const nonAnthropicMessages = [
+    {
+      role: "system",
+      content: formatCacheablePrompt(state, { excludeCacheControl: true }),
+    },
+    {
+      role: "user",
+      content: formatUserConversationHistoryMessage(state.internalMessages, {
+        excludeCacheControl: true,
+      }),
+    },
+    ...state.reviewerMessages,
+  ];
+
+  return {
+    providerTools: {
+      anthropic: anthropicTools,
+      openai: nonAnthropicTools,
+      "google-genai": nonAnthropicTools,
+    },
+    providerMessages: {
+      anthropic: anthropicMessages,
+      openai: nonAnthropicMessages,
+      "google-genai": nonAnthropicMessages,
+    },
+  };
+}
+
+export async function generateReviewActions(
+  state: ReviewerGraphState,
+  config: GraphConfig,
+): Promise<ReviewerGraphUpdate> {
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
+  const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
+    config,
+    Task.REVIEWER,
+  );
+  const isAnthropicModel = modelName.includes("claude-");
+
+  const { providerTools, providerMessages } = createToolsAndPrompt(state);
+
+  const model = await loadModel(config, Task.REVIEWER, {
+    providerTools,
+    providerMessages,
+  });
+  const modelWithTools = model.bindTools(
+    isAnthropicModel ? providerTools.anthropic : providerTools.openai,
+    {
+      tool_choice: "auto",
+      ...(modelSupportsParallelToolCallsParam
+        ? {
+            parallel_tool_calls: true,
+          }
+        : {}),
+    },
+  );
+
+  const response = await modelWithTools.invoke(
+    isAnthropicModel ? providerMessages.anthropic : providerMessages.openai,
+  );
 
   logger.info("Generated review actions", {
     ...(getMessageContentString(response.content) && {
