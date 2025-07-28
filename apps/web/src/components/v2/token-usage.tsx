@@ -315,7 +315,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                 open={isExpanded}
                 onOpenChange={setIsExpanded}
               >
-                <CollapsibleTrigger className="hover:text-foreground flex w-full items-center justify-between text-sm font-medium">
+                <CollapsibleTrigger className="hover:text-foreground flex w-full items-center justify-between pb-2 text-sm font-medium">
                   <span>Per-Model Breakdown</span>
                   {isExpanded ? (
                     <ChevronDown className="h-4 w-4" />
@@ -323,7 +323,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                     <ChevronRight className="h-4 w-4" />
                   )}
                 </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-3 pt-3">
+                <CollapsibleContent className="scrollbar-pretty-auto max-h-80 space-y-3 pt-1 pr-2">
                   {modelTokenData.map((model, index) => {
                     const modelCost = calculateModelCost(model);
                     const modelTotalTokens =
