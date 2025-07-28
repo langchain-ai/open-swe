@@ -94,7 +94,12 @@ webhooks.on("issues.labeled", async ({ payload }) => {
   if (!process.env.SECRETS_ENCRYPTION_KEY) {
     throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
   }
-  const validOpenSWELabels = [getOpenSWELabel(), getOpenSWEAutoAcceptLabel()];
+  const validOpenSWELabels = [
+    getOpenSWELabel(),
+    getOpenSWEAutoAcceptLabel(),
+    getOpenSWEMaxLabel(),
+    getOpenSWEMaxAutoAcceptLabel(),
+  ];
   if (
     !payload.label?.name ||
     !validOpenSWELabels.some((l) => l === payload.label?.name)
@@ -241,4 +246,5 @@ export async function issueWebhookHandler(
     return c.json({ error: "Webhook processing failed" }, { status: 400 });
   }
 }
+
 
