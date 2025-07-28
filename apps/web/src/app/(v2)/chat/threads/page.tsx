@@ -29,7 +29,7 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
-  const { currentInstallation } = useGitHubAppProvider();
+  const { currentInstallation, installationsLoading } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
@@ -266,3 +266,4 @@ export default function AllThreadsPage() {
     </Suspense>
   );
 }
+
