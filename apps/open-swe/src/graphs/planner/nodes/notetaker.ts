@@ -18,6 +18,7 @@ import { ToolMessage } from "@langchain/core/messages";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
 const SCRATCHPAD_PROMPT = `You've also wrote technical notes to a scratchpad throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
@@ -102,6 +103,8 @@ export async function notetaker(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.SUMMARIZER,
@@ -146,6 +149,6 @@ ${state.messages.map(getMessageString).join("\n")}`;
     contextGatheringNotes: (
       toolCall.args as z.infer<typeof condenseContextTool.schema>
     ).notes,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

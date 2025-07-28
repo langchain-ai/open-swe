@@ -17,6 +17,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -120,6 +121,8 @@ export async function determineNeedsContext(
     getMissingMessages(state, config),
     loadModel(config, Task.ROUTER),
   ]);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.ROUTER);
   if (!missingMessages.length) {
     throw new Error(
       "Can not determine if more context is needed if there are no missing messages.",
@@ -155,7 +158,7 @@ export async function determineNeedsContext(
 
   const commandUpdate: PlannerGraphUpdate = {
     messages: missingMessages,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 
   const shouldGatherContext =

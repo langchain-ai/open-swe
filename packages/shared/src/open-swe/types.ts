@@ -34,6 +34,14 @@ export interface CacheMetrics {
   outputTokens: number;
 }
 
+export interface ModelTokenData extends CacheMetrics {
+  /**
+   * The model name that generated this token usage data
+   * e.g., "anthropic:claude-sonnet-4-0", "openai:gpt-4.1-mini"
+   */
+  model: string;
+}
+
 export type PlanItem = {
   /**
    * The index of the plan item. This is the order in which
@@ -274,9 +282,9 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
-  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+  tokenData: withLangGraph(z.custom<ModelTokenData[]>().optional(), {
     reducer: {
-      schema: z.custom<CacheMetrics>().optional(),
+      schema: z.custom<ModelTokenData[]>().optional(),
       fn: tokenDataReducer,
     },
   }),
