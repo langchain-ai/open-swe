@@ -149,6 +149,7 @@ export class FallbackRunnable<
       this.config,
       this.task,
       this.modelManager,
+      this.providerTools,
     ) as unknown as ConfigurableModel<RunInput, CallOptions>;
   }
 
