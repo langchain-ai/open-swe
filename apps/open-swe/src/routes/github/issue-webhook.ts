@@ -18,6 +18,8 @@ import { HumanMessage } from "@langchain/core/messages";
 import {
   getOpenSWEAutoAcceptLabel,
   getOpenSWELabel,
+  getOpenSWEMaxLabel,
+  getOpenSWEMaxAutoAcceptLabel,
 } from "../../utils/github/label.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
@@ -239,3 +241,4 @@ export async function issueWebhookHandler(
     return c.json({ error: "Webhook processing failed" }, { status: 400 });
   }
 }
+
