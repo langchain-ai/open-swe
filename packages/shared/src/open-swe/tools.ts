@@ -554,10 +554,10 @@ export function createViewToolFields(targetRepository: TargetRepository) {
       .string()
       .describe("The path to the file or directory to operate on"),
     view_range: z
-      .tuple([z.number(), z.number()])
+      .array(z.number())
       .optional()
       .describe(
-        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command.",
+        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command. If this is passed, ensure it is a valid array, containing only two positive integers.",
       ),
   });
 

@@ -1,16 +1,31 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { getModelManager } from "./model-manager.js";
+import { getModelManager, Provider } from "./model-manager.js";
 import { FallbackRunnable } from "../runtime-fallback.js";
 import { Task, TASK_TO_CONFIG_DEFAULTS_MAP } from "./constants.js";
+import { BindToolsInput } from "@langchain/core/language_models/chat_models";
+import { BaseMessageLike } from "@langchain/core/messages";
 
-export async function loadModel(config: GraphConfig, task: Task) {
+export async function loadModel(
+  config: GraphConfig,
+  task: Task,
+  options?: {
+    providerTools?: Record<Provider, BindToolsInput[]>;
+    providerMessages?: Record<Provider, BaseMessageLike[]>;
+  },
+) {
   const modelManager = getModelManager();
 
   const model = await modelManager.loadModel(config, task);
   if (!model) {
     throw new Error(`Model loading returned undefined for task: ${task}`);
   }
-  const fallbackModel = new FallbackRunnable(model, config, task, modelManager);
+  const fallbackModel = new FallbackRunnable(
+    model,
+    config,
+    task,
+    modelManager,
+    options,
+  );
   return fallbackModel;
 }
 
