@@ -17,7 +17,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -31,6 +31,7 @@ import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
+import { createViewTool } from "../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -46,12 +47,14 @@ export async function takeReviewerActions(
   }
 
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
+  const searchTool = createGrepTool(state);
+  const viewTool = createViewTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
   const scratchpadTool = createScratchpadTool("");
   const allTools = [
     shellTool,
     searchTool,
+    viewTool,
     installDependenciesTool,
     scratchpadTool,
   ];
