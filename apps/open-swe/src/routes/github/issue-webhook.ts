@@ -186,7 +186,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       autoAcceptPlan: isAutoAcceptLabel,
     };
     // Create config object with Claude Opus 4 model configuration for max labels
-    const config: any = {
+    const config: Record<string, any> = {
       recursion_limit: 400,
     };
 
