@@ -23,6 +23,18 @@ import { escapeRegExp } from "../string-utils.js";
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
 /**
+ * Parses git status output and returns an array of file paths.
+ * Removes the git status indicators (first 3 characters) from each line.
+ */
+export function parseGitStatusOutput(gitStatusOutput: string): string[] {
+  return gitStatusOutput
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => line.substring(3))
+    .filter(Boolean);
+}
+
+/**
  * Validates and filters files before git add operation.
  * Excludes files/directories that should not be committed.
  */
@@ -45,13 +57,7 @@ async function getValidFilesToCommit(
     throw new Error("Failed to get git status for file validation");
   }
 
-  const allFiles = gitStatusOutput.result
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => {
-      return line.substring(3);
-    })
-    .filter(Boolean);
+  const allFiles = parseGitStatusOutput(gitStatusOutput.result);
 
   const validFiles = allFiles.filter((filePath) => {
     return !shouldExcludeFile(filePath, excludePatterns);
@@ -128,10 +134,7 @@ export async function getChangedFilesStatus(
     return [];
   }
 
-  return gitStatusOutput.result
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
+  return parseGitStatusOutput(gitStatusOutput.result);
 }
 
 export async function stashAndClearChanges(

@@ -1,14 +1,9 @@
 import { describe, it, expect } from "@jest/globals";
-import { shouldExcludeFile } from "../utils/github/git.js";
+import {
+  shouldExcludeFile,
+  parseGitStatusOutput,
+} from "../utils/github/git.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "../utils/github/constants.js";
-
-function parseGitStatus(gitStatusOutput: string): string[] {
-  return gitStatusOutput
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => line.substring(3))
-    .filter(Boolean);
-}
 
 describe("Git File Validation", () => {
   describe("Realistic git status scenarios", () => {
@@ -25,7 +20,7 @@ describe("Git File Validation", () => {
  M README.md
 ?? temp-backup.txt`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -62,7 +57,7 @@ describe("Git File Validation", () => {
  M package.json
 ?? .DS_Store`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -98,7 +93,7 @@ describe("Git File Validation", () => {
 ?? logs/app.log
 ?? .DS_Store`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -133,7 +128,7 @@ describe("Git File Validation", () => {
  M package.json
 ?? .DS_Store`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -158,7 +153,7 @@ describe("Git File Validation", () => {
     it("should handle empty git status", () => {
       const gitStatusOutput = "";
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -176,7 +171,7 @@ describe("Git File Validation", () => {
   
   `;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -205,7 +200,7 @@ U  unmerged-file.txt
  T type-changed.txt
 T  staged-type-changed.txt`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       expect(allFiles).toEqual([
         "modified-file.txt",
         "staged-modified.txt",
@@ -229,7 +224,7 @@ T  staged-type-changed.txt`;
 ?? "another file with spaces.md"
 ?? node_modules/"package with spaces"`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
       );
@@ -274,7 +269,7 @@ T  staged-type-changed.txt`;
 ?? file+plus.txt
 ?? file~tilde.txt`;
 
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       // All should be valid files (no exclusions)
       const validFiles = allFiles.filter(
         (file) => !shouldExcludeFile(file, DEFAULT_EXCLUDED_PATTERNS),
@@ -323,20 +318,20 @@ T  staged-type-changed.txt`;
       const gitStatusOutput = `
   
   `;
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       expect(allFiles).toEqual([]);
     });
 
     it("should handle multiple consecutive spaces", () => {
       const gitStatusOutput = ` M    file-with-many-spaces.txt`;
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       expect(allFiles).toEqual(["   file-with-many-spaces.txt"]);
     });
 
     it("should handle files with leading/trailing spaces", () => {
       const gitStatusOutput = ` M  " file-with-leading-space.txt"
  M  "file-with-trailing-space.txt "`;
-      const allFiles = parseGitStatus(gitStatusOutput);
+      const allFiles = parseGitStatusOutput(gitStatusOutput);
       expect(allFiles).toEqual([
         ' " file-with-leading-space.txt"',
         ' "file-with-trailing-space.txt "',
