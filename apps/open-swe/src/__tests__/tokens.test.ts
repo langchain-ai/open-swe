@@ -633,7 +633,7 @@ describe("getMessagesSinceLastSummary", () => {
 });
 
 describe("MAX_INTERNAL_TOKENS constant", () => {
-  it("should be defined as 60,000", async () => {
-    expect(MAX_INTERNAL_TOKENS).toBe(60_000);
+  it("should be defined as 100,000", async () => {
+    expect(MAX_INTERNAL_TOKENS).toBe(100_000);
   });
 });

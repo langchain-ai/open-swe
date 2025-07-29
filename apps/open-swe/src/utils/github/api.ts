@@ -271,14 +271,41 @@ export async function markPullRequestReadyForReview({
         auth: token,
       });
 
+      // Fetch the PR, as the markReadyForReview mutation requires the PR's node ID, not the pull number
+      const { data: pr } = await octokit.pulls.get({
+        owner,
+        repo,
+        pull_number: pullNumber,
+      });
+
+      await octokit.graphql(
+        `
+        mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+          markPullRequestReadyForReview(input: {
+            pullRequestId: $pullRequestId
+          }) {
+            clientMutationId
+            pullRequest {
+              id
+              number
+              isDraft
+            }
+          }
+        }
+      `,
+        {
+          pullRequestId: pr.node_id,
+        },
+      );
+
       const { data: updatedPR } = await octokit.pulls.update({
         owner,
         repo,
         pull_number: pullNumber,
         title,
         body,
-        draft: false,
       });
+
       logger.info(`Pull request #${pullNumber} marked as ready for review.`);
       return updatedPR;
     },
