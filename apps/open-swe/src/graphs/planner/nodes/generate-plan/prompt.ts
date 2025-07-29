@@ -59,6 +59,8 @@ When ready, call the 'session_plan' tool with your plan. Each plan item should b
 Structure your plan items as clear directives, for example:
 - "Implement function X in file Y that performs Z using the existing pattern from file A"
 - "Modify the authentication middleware in /src/auth.js to add rate limiting using the Express rate-limit package"
+
+Always format your plan items with proper markdown. Avoid large headers, but you may use bold, italics, code blocks/inline code, and other markdown elements to make your plan items more readable.
 </output_format>
 
 {CUSTOM_RULES}

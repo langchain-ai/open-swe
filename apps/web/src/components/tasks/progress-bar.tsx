@@ -20,6 +20,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { InlineMarkdownText } from "../thread/markdown-text";
 
 interface ProgressBarProps {
   taskPlan?: TaskPlan;
@@ -240,7 +241,7 @@ export function ProgressBar({
                             : "Pending"}
                       </span>
                     </div>
-                    <p className="text-xs break-words">{item.plan}</p>
+                    <InlineMarkdownText className="text-xs break-words">{item.plan}</InlineMarkdownText>
                   </div>
                 </HoverCardContent>
               </HoverCard>

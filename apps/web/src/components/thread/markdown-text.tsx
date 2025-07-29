@@ -321,7 +321,7 @@ const InlineMarkdownTextImpl: FC<{ children: string; className?: string }> = ({
       if (match) {
         // If it's a code block, render as plain text to keep it inline
         return (
-          <span className={cn("font-mono text-sm", className)}>
+          <span className={cn("font-mono", className)}>
             {String(children)}
           </span>
         );
@@ -329,7 +329,7 @@ const InlineMarkdownTextImpl: FC<{ children: string; className?: string }> = ({
       return (
         <code
           className={cn(
-            "bg-muted rounded px-1 py-0.5 font-mono text-sm",
+            "bg-muted rounded px-1 py-0.5 font-mono",
             className,
           )}
           {...props}
