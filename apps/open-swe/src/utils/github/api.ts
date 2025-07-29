@@ -271,14 +271,43 @@ export async function markPullRequestReadyForReview({
         auth: token,
       });
 
+      // First, get the PR to obtain its node ID
+      const { data: pr } = await octokit.pulls.get({
+        owner,
+        repo,
+        pull_number: pullNumber,
+      });
+
+      // Use GraphQL to mark the PR as ready for review
+      await octokit.graphql(
+        `
+        mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+          markPullRequestReadyForReview(input: {
+            pullRequestId: $pullRequestId
+          }) {
+            clientMutationId
+            pullRequest {
+              id
+              number
+              isDraft
+            }
+          }
+        }
+      `,
+        {
+          pullRequestId: pr.node_id,
+        },
+      );
+
+      // Update the PR title and body using REST API (this part works fine)
       const { data: updatedPR } = await octokit.pulls.update({
         owner,
         repo,
         pull_number: pullNumber,
         title,
         body,
-        draft: false,
       });
+
       logger.info(`Pull request #${pullNumber} marked as ready for review.`);
       return updatedPR;
     },
