@@ -1,4 +1,4 @@
-import { createLogger, LogLevel } from "../../src/utils/logger.js";
+import { createLogger, LogLevel } from "../src/utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "DeployLangGraph");
 
@@ -43,8 +43,11 @@ function getDeploymentConfig(): DeploymentConfig {
   };
 }
 
-function getHeaders(apiKey: string, includeContentType = false): HeadersInit {
-  const headers: HeadersInit = {
+function getHeaders(
+  apiKey: string,
+  includeContentType = false,
+): Record<string, string> {
+  const headers: Record<string, string> = {
     "X-Api-Key": apiKey,
   };
 
@@ -74,7 +77,7 @@ async function makeRequest<T>(
       return {} as T;
     }
 
-    return await response.json();
+    return (await response.json()) as T;
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`HTTP request failed: ${error.message}`);
