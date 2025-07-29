@@ -91,10 +91,11 @@ async function postGitHubIssueComment(input: {
       repo: targetRepository.repo,
       issueNumber: githubIssueId,
       githubInstallationToken,
+      filterBotComments: false,
     });
 
     const existingOpenSWEComment = existingComments?.findLast((c) =>
-      c.user?.login?.startsWith(githubAppName),
+      c.user?.login?.toLowerCase()?.startsWith(githubAppName.toLowerCase()),
     );
 
     if (!existingOpenSWEComment) {
