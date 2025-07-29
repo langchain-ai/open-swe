@@ -1,10 +1,19 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { describe, it, expect } from "@jest/globals";
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  coerceMessageLikeToMessage,
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
   MAX_INTERNAL_TOKENS,
 } from "../utils/tokens.js";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 
 describe("calculateConversationHistoryTokenCount", () => {
   it("should return 0 for empty messages array", async () => {
@@ -228,14 +237,20 @@ describe("getMessagesSinceLastSummary", () => {
   });
 
   it("should return messages after the last summary message", async () => {
-    const summaryMessage = new AIMessage({
+    const summaryAIMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
 
     const messages = [
       new HumanMessage({ content: "Message 1" }),
-      summaryMessage,
+      summaryAIMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "Message 3" }),
       new AIMessage({ content: "Message 4" }),
     ];
@@ -246,14 +261,59 @@ describe("getMessagesSinceLastSummary", () => {
     expect(result[1].content).toBe("Message 4");
   });
 
+  it("should return messages after the last summary message, when there are multiple", async () => {
+    const summaryAIMessage1 = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage1 = new ToolMessage({
+      tool_call_id: "tool-call-id-1",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const summaryAIMessage2 = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage2 = new ToolMessage({
+      tool_call_id: "tool-call-id-1",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const messages = [
+      new HumanMessage({ content: "Message 1" }),
+      summaryAIMessage1,
+      summaryToolMessage1,
+      new HumanMessage({ content: "Message 4" }),
+      new AIMessage({ content: "Message 5" }),
+      summaryAIMessage2,
+      summaryToolMessage2,
+      new HumanMessage({ content: "Message 8" }),
+      new AIMessage({ content: "Message 9" }),
+    ];
+
+    const result = await getMessagesSinceLastSummary(messages);
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toBe("Message 8");
+    expect(result[1].content).toBe("Message 9");
+  });
+
   it("should exclude hidden messages when option is provided", async () => {
     const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "Visible message" }),
       new HumanMessage({
         content: "Hidden message",
@@ -276,9 +336,15 @@ describe("getMessagesSinceLastSummary", () => {
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "Message 1" }),
       new AIMessage({ content: "Message 2" }),
       new HumanMessage({ content: "Message 3" }),
@@ -298,9 +364,15 @@ describe("getMessagesSinceLastSummary", () => {
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "Message 1" }),
       new HumanMessage({
         content: "Hidden message",
@@ -325,6 +397,11 @@ describe("getMessagesSinceLastSummary", () => {
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
 
     const aiMessageWithToolCalls = new AIMessage({
       content: "I'll help you with that",
@@ -344,6 +421,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithToolCalls,
       toolMessage,
@@ -362,6 +440,11 @@ describe("getMessagesSinceLastSummary", () => {
 
   it("should preserve multiple tool messages following an AI message in getMessagesSinceLastSummary", async () => {
     const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
@@ -394,6 +477,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithToolCalls,
       toolMessage1,
@@ -416,6 +500,11 @@ describe("getMessagesSinceLastSummary", () => {
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
 
     const aiMessageWithToolCalls = new AIMessage({
       content: "I'll use a tool",
@@ -435,6 +524,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithToolCalls,
       toolMessage,
@@ -452,6 +542,11 @@ describe("getMessagesSinceLastSummary", () => {
 
   it("should preserve AI message with multiple tool calls and their corresponding tool messages", async () => {
     const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
@@ -494,6 +589,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithMultipleToolCalls,
       searchToolMessage,
@@ -519,6 +615,11 @@ describe("getMessagesSinceLastSummary", () => {
 
   it("should include complete AI/tool group when exclusion doesn't break the group", async () => {
     const summaryMessage = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
@@ -551,6 +652,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithMultipleToolCalls,
       tool1Message,
@@ -579,6 +681,11 @@ describe("getMessagesSinceLastSummary", () => {
       content: "Summary of conversation",
       additional_kwargs: { summary_message: true },
     });
+    const summaryToolMessage = new ToolMessage({
+      tool_call_id: "tool-call-id",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
 
     const aiMessageWithToolCalls = new AIMessage({
       content: "I'll use a tool",
@@ -598,6 +705,7 @@ describe("getMessagesSinceLastSummary", () => {
 
     const messages = [
       summaryMessage,
+      summaryToolMessage,
       new HumanMessage({ content: "First message" }),
       aiMessageWithToolCalls,
       toolMessage,
@@ -625,10 +733,40 @@ describe("getMessagesSinceLastSummary", () => {
         content: "Summary of conversation",
         additional_kwargs: { summary_message: true },
       }),
+      new ToolMessage({
+        tool_call_id: "tool-call-id",
+        content: "Summary of conversation",
+        additional_kwargs: { summary_message: true },
+      }),
     ];
 
     const result = await getMessagesSinceLastSummary(messages);
     expect(result).toHaveLength(0);
+  });
+
+  it("retains the last summary tool messages from a real trace", async () => {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const basePath = path.join(__dirname, "data");
+    const inputs: GraphState = JSON.parse(
+      fs.readFileSync(
+        path.join(basePath, "summarize-history-input.json"),
+        "utf-8",
+      ),
+    );
+
+    const conversationHistoryToSummarize = await getMessagesSinceLastSummary(
+      inputs.internalMessages.map(coerceMessageLikeToMessage),
+      {
+        excludeHiddenMessages: true,
+        excludeCountFromEnd: 20,
+      },
+    );
+
+    const expectedToolMessageId = "465097e3-3c65-4af1-beb5-c3d9444219fd";
+    const toolMessageExists = conversationHistoryToSummarize.find(
+      (m) => m.id === expectedToolMessageId,
+    );
+    expect(toolMessageExists).not.toBeDefined();
   });
 });
 

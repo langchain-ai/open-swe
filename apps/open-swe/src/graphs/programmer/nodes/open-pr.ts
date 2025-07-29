@@ -10,6 +10,7 @@ import {
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
+  pushEmptyCommit,
 } from "../../../utils/github/git.js";
 import {
   createPullRequest,
@@ -165,6 +166,12 @@ export async function openPullRequest(
     throw new Error(
       "Failed to generate a tool call when opening a pull request.",
     );
+  }
+
+  if (process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true") {
+    await pushEmptyCommit(state.targetRepository, sandbox, {
+      githubInstallationToken,
+    });
   }
 
   const { title, body } = toolCall.args as z.infer<typeof openPrTool.schema>;
