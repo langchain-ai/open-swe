@@ -92,9 +92,6 @@ const formatCacheablePrompt = (
         review: codeReview.review,
         newActions: codeReview.newActions,
       }),
-      ...(!args?.excludeCacheControl
-        ? { cache_control: { type: "ephemeral" } }
-        : {}),
     });
   }
 
