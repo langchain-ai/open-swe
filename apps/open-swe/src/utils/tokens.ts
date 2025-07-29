@@ -139,12 +139,12 @@ export function getMessagesSinceLastSummaryFunc(
     excludeCountFromEnd?: number;
   },
 ): BaseMessage[] {
-  // Find the index of the last summary message
-  const lastSummaryIndex = messages.findIndex(
+  // Find the last summary tool message (summary_messages are AI/tool pairs)
+  const lastSummaryIndex = messages.findLastIndex(
     (m) => m.additional_kwargs?.summary_message && isToolMessage(m),
   );
 
-  // Get all messages after the last summary message
+  // Get all messages after the last summary_message
   let messagesAfterLastSummary =
     lastSummaryIndex >= 0
       ? messages.slice(lastSummaryIndex + 1)

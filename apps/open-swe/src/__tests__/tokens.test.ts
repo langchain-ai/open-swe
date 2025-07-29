@@ -261,6 +261,45 @@ describe("getMessagesSinceLastSummary", () => {
     expect(result[1].content).toBe("Message 4");
   });
 
+  it("should return messages after the last summary message, when there are multiple", async () => {
+    const summaryAIMessage1 = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage1 = new ToolMessage({
+      tool_call_id: "tool-call-id-1",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const summaryAIMessage2 = new AIMessage({
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+    const summaryToolMessage2 = new ToolMessage({
+      tool_call_id: "tool-call-id-1",
+      content: "Summary of conversation",
+      additional_kwargs: { summary_message: true },
+    });
+
+    const messages = [
+      new HumanMessage({ content: "Message 1" }),
+      summaryAIMessage1,
+      summaryToolMessage1,
+      new HumanMessage({ content: "Message 4" }),
+      new AIMessage({ content: "Message 5" }),
+      summaryAIMessage2,
+      summaryToolMessage2,
+      new HumanMessage({ content: "Message 8" }),
+      new AIMessage({ content: "Message 9" }),
+    ];
+
+    const result = await getMessagesSinceLastSummary(messages);
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toBe("Message 8");
+    expect(result[1].content).toBe("Message 9");
+  });
+
   it("should exclude hidden messages when option is provided", async () => {
     const summaryMessage = new AIMessage({
       content: "Summary of conversation",
