@@ -224,6 +224,6 @@ async function deployLangGraph(): Promise<void> {
 }
 
 // Execute deployment if this script is run directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (require.main === module) {
   deployLangGraph();
 }
