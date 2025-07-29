@@ -381,8 +381,10 @@ export async function getIssueComments({
         return comments;
       }
 
-      return comments.filter((comment) => 
-        comment.user?.type !== "Bot" && !comment.user?.login?.includes("[bot]")
+      return comments.filter(
+        (comment) =>
+          comment.user?.type !== "Bot" &&
+          !comment.user?.login?.includes("[bot]"),
       );
     },
     githubInstallationToken,
