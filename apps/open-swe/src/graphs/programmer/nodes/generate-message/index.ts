@@ -119,9 +119,6 @@ const formatCacheablePrompt = (
     {
       type: "text",
       text: formatDynamicContextPrompt(state),
-      ...(!args?.excludeCacheControl
-        ? { cache_control: { type: "ephemeral" } }
-        : {}),
     },
   ];
 
