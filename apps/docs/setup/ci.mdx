@@ -3,19 +3,21 @@ title: "CI Configuration"
 description: "How to configure your CI pipeline for Open SWE"
 ---
 
-## Skip Vercel CI until last commit
+## Skip CI until last commit
 
-Open SWE will push a commit after every change to the repository. Since Vercel creates a new preview deployment for every commit by default, this can cause an unnecessarily large number of preview deployments.
+Open SWE will push a commit after every change to the repository. This will cause your GitHub CI workflows to run for every commit, which is unnecessary.
 
-To prevent this, Open SWE supports adding an environment variable which will cause Vercel to skip CI until the very last commit is made. This ensures that only one preview deployment will be created per Open SWE task.
+To prevent this, Open SWE supports adding an environment variable which will append `[skip ci]` to the commit message. This can be used to make GitHub skip CI for that commit.
+
+Below are instructions showing how to use this to skip creating Vercel CI preview deployments on every commit:
 
 <Steps>
   <Step title="Set the environment variable">
-    Set the environment variable `SKIP_VERCEL_CI_UNTIL_LAST_COMMIT` to `true` in Open SWE's environment variables:
+    Set the environment variable `SKIP_CI_UNTIL_LAST_COMMIT` to `true` in Open SWE's environment variables:
 
     `apps/open-swe/.env`
     ```bash
-    SKIP_VERCEL_CI_UNTIL_LAST_COMMIT="true"
+    SKIP_CI_UNTIL_LAST_COMMIT="true"
     ```
 
   </Step>

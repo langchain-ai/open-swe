@@ -172,7 +172,7 @@ export async function stashAndClearChanges(
 function constructCommitMessage(): string {
   const baseCommitMessage = "Apply patch";
   const skipCiString = "[skip ci]";
-  const vercelSkipCi = process.env.SKIP_VERCEL_CI_UNTIL_LAST_COMMIT === "true";
+  const vercelSkipCi = process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true";
   if (vercelSkipCi) {
     return `${baseCommitMessage} ${skipCiString}`;
   }
