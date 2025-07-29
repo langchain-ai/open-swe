@@ -1,24 +1,14 @@
+import { coerceMessageLikeToMessage, ToolMessage, isAIMessage, isHumanMessage } from "@langchain/core/messages";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+
 interface LogChunk {
   event: string;
   data: any;
   ops?: Array<{ value: string }>;
 }
 
-interface MessageData {
-  id: string;
-  type: "ai" | "tool" | "human";
-  content: Array<{ type: string; text?: string; input?: string }> | string;
-  tool_calls?: Array<ToolCall>;
-  name?: string;
-  tool_call_id?: string;
-  status?: "success" | "error";
-  graph_id?: string;
-  langgraph_node?: string;
-  additional_kwargs?: {
-    reasoning?: string;
-    notes?: string[];
-  };
-}
+
 
 interface ToolCall {
   type: string;
@@ -30,39 +20,32 @@ interface ToolCall {
 /**
  * Format a tool result based on its type and content
  */
-function formatToolResult(message: MessageData): string {
-  const content =
-    typeof message.content === "string"
-      ? message.content
-      : message.content?.[0]?.text || message.content?.[0]?.input || "";
+function formatToolResult(message: ToolMessage): string {
+  const content = getMessageContentString(message.content);
 
   if (!content) return "";
 
   // For successful tool executions, format nicely
-  if (message.status === "success") {
-    switch (message.name?.toLowerCase()) {
-      case "shell":
-      case "grep_search":
-      case "search":
-        return content;
-      case "apply_patch":
-        return content.includes("Error")
-          ? `Error: ${content}`
-          : "Patch applied successfully";
-      case "install_dependencies":
-        return content.includes("Error")
-          ? `Error: ${content}`
-          : "Dependencies installed successfully";
-      default:
-        if (content.length > 200) {
-          return content.slice(0, 200) + "...";
-        }
-        return content;
-    }
+  const toolName = message.name || "tool";
+  switch (toolName.toLowerCase()) {
+    case "shell":
+    case "grep_search":
+    case "search":
+      return content;
+    case "apply_patch":
+      return content.includes("Error")
+        ? `Error: ${content}`
+        : "Patch applied successfully";
+    case "install_dependencies":
+      return content.includes("Error")
+        ? `Error: ${content}`
+        : "Dependencies installed successfully";
+    default:
+      if (content.length > 200) {
+        return content.slice(0, 200) + "...";
+      }
+      return content;
   }
-
-  // For errors, show full message
-  return `Error: ${content}`;
 }
 
 export function formatDisplayLog(chunk: LogChunk | string): string[] {
@@ -127,103 +110,136 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
       ? nestedDataObj.messages
       : [nestedDataObj.messages];
     for (const msg of messages) {
-      // Handle tool results
-      if (msg.type === "tool") {
-        const toolName = msg.name || "tool";
-        const result = formatToolResult(msg);
-        if (result) {
-          // Concatenate long tool results to a single line (truncate if too long)
-          const maxLength = 500;
-          let formattedResult = result.replace(/\s+/g, " ");
-          if (formattedResult.length > maxLength) {
-            formattedResult =
-              formattedResult.slice(0, maxLength) + "... [trunc]";
-          }
-          logs.push(`[TOOL RESULT] ${toolName}: ${formattedResult}`);
-        }
-
-        continue;
-      }
-
-      // Handle AI messages
-      if (msg.type === "ai") {
-        // Handle reasoning if present
-        if (msg.additional_kwargs?.reasoning) {
-          const reasoning = msg.additional_kwargs.reasoning
-            .replace(/\s+/g, " ")
-            .trim();
-          const maxLength = 150;
-          const truncated =
-            reasoning.length > maxLength
-              ? reasoning.slice(0, maxLength) + "... [trunc]"
-              : reasoning;
-          logs.push(`[REASONING] ${truncated}`);
-        }
-
-        // Handle tool calls
-        if (msg.tool_calls && msg.tool_calls.length > 0) {
-          msg.tool_calls.forEach((tool: ToolCall) => {
-            let argsString = "";
-            if (typeof tool.args === "string") {
-              argsString = tool.args;
-            } else if (tool.args !== undefined) {
-              try {
-                argsString = JSON.stringify(tool.args, null, 2);
-              } catch {
-                argsString = String(tool.args);
-              }
+      try {
+        const message = coerceMessageLikeToMessage(msg);
+        
+        // Handle tool messages
+        if (message instanceof ToolMessage) {
+          const toolName = message.name || "tool";
+          const result = formatToolResult(message);
+          if (result) {
+            // Concatenate long tool results to a single line (truncate if too long)
+            const maxLength = 500;
+            let formattedResult = result.replace(/\s+/g, " ");
+            if (formattedResult.length > maxLength) {
+              formattedResult =
+                formattedResult.slice(0, maxLength) + "... [trunc]";
             }
-            // Truncate the string if too long
+            logs.push(`[TOOL RESULT] ${toolName}: ${formattedResult}`);
+          }
+          continue;
+        }
+
+        // Handle AI messages
+        if (isAIMessage(message)) {
+          // Handle reasoning if present
+          if (message.additional_kwargs?.reasoning) {
+            const reasoning = String(message.additional_kwargs.reasoning)
+              .replace(/\s+/g, " ")
+              .trim();
             const maxLength = 150;
-            const truncatedArgs =
-              argsString.length > maxLength
-                ? argsString.slice(0, maxLength) + "... [trunc]"
-                : argsString;
-            const toolName = tool.name || "unknown";
-            logs.push(`[TOOL CALL] ${toolName}: ${truncatedArgs}`);
-          });
+            const truncated =
+              reasoning.length > maxLength
+                ? reasoning.slice(0, maxLength) + "... [trunc]"
+                : reasoning;
+            logs.push(`[REASONING] ${truncated}`);
+          }
+
+          // Handle tool calls
+          if (message.tool_calls && message.tool_calls.length > 0) {
+            const technicalNotesToolName = createWriteTechnicalNotesToolFields().name;
+            
+            message.tool_calls.forEach((tool) => {
+              let argsString = "";
+              if (typeof tool.args === "string") {
+                argsString = tool.args;
+              } else if (tool.args !== undefined) {
+                try {
+                  argsString = JSON.stringify(tool.args, null, 2);
+                } catch {
+                  argsString = String(tool.args);
+                }
+              }
+              // Truncate the string if too long
+              const maxLength = 150;
+              const truncatedArgs =
+                argsString.length > maxLength
+                  ? argsString.slice(0, maxLength) + "... [trunc]"
+                  : argsString;
+              const toolName = tool.name || "unknown";
+              logs.push(`[TOOL CALL] ${toolName}: ${truncatedArgs}`);
+              
+              // Handle technical notes from tool call
+              if (tool.name === technicalNotesToolName && tool.args && typeof tool.args === "object" && "notes" in tool.args) {
+                const notes = (tool.args as any).notes;
+                if (Array.isArray(notes)) {
+                  logs.push(
+                    "[TECHNICAL NOTES]",
+                    ...notes.map((note: string) => `  • ${note}`),
+                  );
+                }
+              }
+            });
+          }
+
+          // Handle regular AI messages
+          const text = getMessageContentString(message.content);
+          if (text) {
+            // Always single line, remove newlines and truncate
+            const cleanText = text.replace(/\s+/g, " ").trim();
+            const maxLength = 200;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[AI] ${truncated}`);
+          }
         }
 
-        // Handle technical notes
-        if (msg.additional_kwargs?.notes) {
-          logs.push(
-            "[TECHNICAL NOTES]",
-            ...msg.additional_kwargs.notes.map((note: string) => `  • ${note}`),
-          );
+        // Handle human messages
+        if (isHumanMessage(message)) {
+          const text = getMessageContentString(message.content);
+          if (text) {
+            // Single line human messages
+            const cleanText = text.replace(/\s+/g, " ").trim();
+            const maxLength = 150;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[HUMAN] ${truncated}`);
+          }
         }
-
-        // Handle regular AI messages
-        const text =
-          typeof msg.content === "string"
-            ? msg.content
-            : msg.content?.[0]?.text || msg.content?.[0]?.input || "";
-        if (text) {
-          // Always single line, remove newlines and truncate
-          const cleanText = text.replace(/\s+/g, " ").trim();
-          const maxLength = 200;
-          const truncated =
-            cleanText.length > maxLength
-              ? cleanText.slice(0, maxLength) + "... [trunc]"
-              : cleanText;
-          logs.push(`[AI] ${truncated}`);
-        }
-      }
-
-      // Handle human messages
-      if (msg.type === "human") {
-        const text =
-          typeof msg.content === "string"
-            ? msg.content
-            : msg.content?.[0]?.text || msg.content?.[0]?.input || "";
-        if (text) {
-          // Single line human messages
-          const cleanText = text.replace(/\s+/g, " ").trim();
-          const maxLength = 150;
-          const truncated =
-            cleanText.length > maxLength
-              ? cleanText.slice(0, maxLength) + "... [trunc]"
-              : cleanText;
-          logs.push(`[HUMAN] ${truncated}`);
+      } catch (error) {
+        // Fallback to original message if conversion fails
+        if (msg.type === "tool") {
+          const toolName = msg.name || "tool";
+          const content = getMessageContentString(msg.content);
+          if (content) {
+            logs.push(`[TOOL RESULT] ${toolName}: ${content}`);
+          }
+        } else if (msg.type === "ai") {
+          const text = getMessageContentString(msg.content);
+          if (text) {
+            const cleanText = text.replace(/\s+/g, " ").trim();
+            const maxLength = 200;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[AI] ${truncated}`);
+          }
+        } else if (msg.type === "human") {
+          const text = getMessageContentString(msg.content);
+          if (text) {
+            const cleanText = text.replace(/\s+/g, " ").trim();
+            const maxLength = 150;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[HUMAN] ${truncated}`);
+          }
         }
       }
     }
