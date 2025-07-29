@@ -35,9 +35,6 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
 
-      - name: Build packages
-        run: yarn build
-
       - name: Execute deployment
         run: |
           cd apps/open-swe
