@@ -157,6 +157,7 @@ export type CustomRules = {
   repositoryStructure?: string;
   dependenciesAndInstallation?: string;
   testingInstructions?: string;
+  pullRequestFormatting?: string;
 };
 
 export const GraphAnnotation = MessagesZodState.extend({
