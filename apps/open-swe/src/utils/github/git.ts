@@ -169,6 +169,16 @@ export async function stashAndClearChanges(
   }
 }
 
+function constructCommitMessage(): string {
+  const baseCommitMessage = "Apply patch";
+  const skipCiString = "[skip ci]";
+  const vercelSkipCi = process.env.SKIP_VERCEL_CI_UNTIL_LAST_COMMIT === "true";
+  if (vercelSkipCi) {
+    return `${baseCommitMessage} ${skipCiString}`;
+  }
+  return baseCommitMessage;
+}
+
 export async function checkoutBranchAndCommit(
   config: GraphConfig,
   targetRepository: TargetRepository,
@@ -203,7 +213,12 @@ export async function checkoutBranchAndCommit(
   }
   const userName = `${botAppName}[bot]`;
   const userEmail = `${botAppName}@users.noreply.github.com`;
-  await sandbox.git.commit(absoluteRepoDir, "Apply patch", userName, userEmail);
+  await sandbox.git.commit(
+    absoluteRepoDir,
+    constructCommitMessage(),
+    userName,
+    userEmail,
+  );
 
   // Push the changes using the git API so it handles authentication for us.
   const pushRes = await withRetry(
