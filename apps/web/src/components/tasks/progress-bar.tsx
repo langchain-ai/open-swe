@@ -241,7 +241,9 @@ export function ProgressBar({
                             : "Pending"}
                       </span>
                     </div>
-                    <InlineMarkdownText className="text-xs break-words">{item.plan}</InlineMarkdownText>
+                    <InlineMarkdownText className="text-xs break-words">
+                      {item.plan}
+                    </InlineMarkdownText>
                   </div>
                 </HoverCardContent>
               </HoverCard>
