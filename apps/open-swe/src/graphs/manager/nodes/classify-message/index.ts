@@ -16,7 +16,7 @@ import {
   supportsParallelToolCallsParam,
   Task,
 } from "../../../../utils/llms/index.js";
-import { Command, END, StreamMode } from "@langchain/langgraph";
+import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import {
   createIssue,
@@ -41,6 +41,7 @@ import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
+import { StreamMode } from "@langchain/langgraph-sdk";
 
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 

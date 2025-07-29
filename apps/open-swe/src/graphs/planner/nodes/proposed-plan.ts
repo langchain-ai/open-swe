@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { Command, END, interrupt, StreamMode } from "@langchain/langgraph";
+import { Command, END, interrupt } from "@langchain/langgraph";
+import { StreamMode } from "@langchain/langgraph-sdk";
 import {
   GraphUpdate,
   GraphConfig,
