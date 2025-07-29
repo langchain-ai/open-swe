@@ -316,6 +316,47 @@ export async function checkoutBranchAndCommit(
   return { branchName, updatedTaskPlan };
 }
 
+export async function pushEmptyCommit(
+  targetRepository: TargetRepository,
+  sandbox: Sandbox,
+  options: {
+    githubInstallationToken: string;
+  },
+) {
+  try {
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+    const executeCommandRes = await sandbox.process.executeCommand(
+      "git commit --allow-empty -m 'Empty commit to trigger CI'",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (executeCommandRes.exitCode !== 0) {
+      logger.error(`Failed to push empty commit`, {
+        exitCode: executeCommandRes.exitCode,
+        result: executeCommandRes.result,
+      });
+      return;
+    }
+
+    await sandbox.git.push(
+      absoluteRepoDir,
+      "git",
+      options.githubInstallationToken,
+    );
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to push empty commit`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+  }
+}
+
 export async function pullLatestChanges(
   absoluteRepoDir: string,
   sandbox: Sandbox,

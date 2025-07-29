@@ -5,11 +5,9 @@ description: "How to configure your CI pipeline for Open SWE"
 
 ## Skip Vercel CI until last commit
 
-Open SWE will push a commit after every change to the repository. Since Vercel will create a new preview deployment for every commit by default, this can cause an unnecessarily large number of preview deployments to be created.
+Open SWE will push a commit after every change to the repository. Since Vercel creates a new preview deployment for every commit by default, this can cause an unnecessarily large number of preview deployments.
 
-To prevent this, Open SWE supports adding an environment variable which will cause Vercel to skip CI until the very last commit is made. This ensures that only one preview deployment will be created, per Open SWE task.
-
-Setting this up is a two part process:
+To prevent this, Open SWE supports adding an environment variable which will cause Vercel to skip CI until the very last commit is made. This ensures that only one preview deployment will be created per Open SWE task.
 
 <Steps>
   <Step title="Set the environment variable">
@@ -25,7 +23,10 @@ Setting this up is a two part process:
   <Step title="Add custom 'Ignored Build Step' in Vercel">
     Add a custom 'Ignored Build Step' in Vercel to skip CI when commit messages contain the string `[skip ci]`.
 
-    Visit the **Git** tab in your Vercel project settings, and add the following script to a new **Custom** behavior:
+    1. Navigate to your Vercel project dashboard
+    2. Go to **Settings** → **Git** tab
+    3. Scroll to **Ignored Build Step** section
+    4. Select **Custom** and add the following script:
 
     ![Vercel Custom Build Step Screenshot](/images/vercel_ignored_build_script_screenshot.png)
 
@@ -36,8 +37,9 @@ Setting this up is a two part process:
   </Step>
 </Steps>
 
-This will cause Vercel to skip creating a preview deployment if the commit message contains the string `[skip ci]`.
+### How it works
 
-In Open SWE, we will automatically include this string in the commit message if the environment variable `SKIP_VERCEL_CI_UNTIL_LAST_COMMIT` is set to `true`. Then, once Open SWE completes the task, it will push up an empty commit without that string to trigger the CI pipeline.
-
-This will ensure that only one preview deployment is created per Open SWE task.
+1. **During task execution**: Open SWE includes `[skip ci]` in commit messages
+2. **Vercel behavior**: Skips creating preview deployments for these commits
+3. **Task completion**: Open SWE pushes a final commit without `[skip ci]` to trigger deployment
+4. **Result**: Only one preview deployment per Open SWE task
