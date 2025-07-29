@@ -4,28 +4,20 @@ import { render, Box, Text, useInput } from "ink";
 import {
   startAuthServer,
   getAccessToken,
-  getInstallationAccessToken,
   getInstallationId,
 } from "./auth-server.js";
 import open from "open";
 import { v4 as uuidv4 } from "uuid";
-import { encryptSecret } from "@open-swe/shared/crypto";
 import {
   MANAGER_GRAPH_ID,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_INSTALLATION_NAME,
-  GITHUB_INSTALLATION_ID,
   OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { Client } from "@langchain/langgraph-sdk";
-import { formatDisplayLog } from "./logger.js";
 import { submitFeedback } from "./utils.js";
-import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interrupt";
+import { StreamingService } from "./streaming.js";
 
 type StreamMode = "values" | "updates" | "messages";
 
-const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 const GITHUB_LOGIN_URL =
   process.env.GITHUB_LOGIN_URL || "http://localhost:3000/api/auth/github/login";
 
@@ -376,164 +368,19 @@ const App: React.FC = () => {
   // Streaming logic: when prompt is set, stream logs
   useEffect(() => {
     if (prompt && selectedRepo && streamingPhase === "streaming") {
-      setLogs([]);
       setPlannerFeedback(null);
-      setLoadingLogs(true);
-      (async () => {
-        try {
-          const userAccessToken = getAccessToken();
-          const installationAccessToken = await getInstallationAccessToken();
-          const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-          if (!userAccessToken || !installationAccessToken || !encryptionKey) {
-            setLogs([
-              `Missing secrets: ${userAccessToken ? "" : "userAccessToken, "}${installationAccessToken ? "" : "installationAccessToken, "}${encryptionKey ? "" : "encryptionKey"}`,
-            ]);
-            return;
-          }
-          const encryptedUserToken = encryptSecret(
-            userAccessToken,
-            encryptionKey,
-          );
-          const encryptedInstallationToken = encryptSecret(
-            installationAccessToken,
-            encryptionKey,
-          );
-          const [owner, repoName] = selectedRepo.full_name.split("/");
-          const runInput = {
-            messages: [
-              {
-                id: uuidv4(),
-                type: "human",
-                content: [{ type: "text", text: prompt }],
-              },
-            ],
-            targetRepository: {
-              owner,
-              repo: repoName,
-              branch: selectedRepo.default_branch || "main",
-            },
-            autoAcceptPlan: false,
-          };
-          const installationId = getInstallationId();
-          const newClient = new Client({
-            apiUrl: LANGGRAPH_URL,
-            defaultHeaders: {
-              [GITHUB_TOKEN_COOKIE]: encryptedUserToken,
-              [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptedInstallationToken,
-              [GITHUB_INSTALLATION_NAME]: owner,
-              [GITHUB_INSTALLATION_ID]: installationId,
-            },
-          });
-          setClient(newClient);
-          const thread = await newClient.threads.create();
-          const threadId = thread.thread_id;
-          setThreadId(threadId);
-          const run = await newClient.runs.create(threadId, MANAGER_GRAPH_ID, {
-            input: runInput,
-            config: { recursion_limit: 400 },
-            ifNotExists: "create",
-            streamResumable: true,
-            streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-          });
 
-          let plannerStreamed = false;
-          let programmerStreamed = false;
-          for await (const chunk of newClient.runs.joinStream(
-            threadId,
-            run.run_id,
-          )) {
-            if (chunk.event === "updates") {
-              const formatted = formatDisplayLog(chunk);
-              if (formatted.length > 0) {
-                setLogs((prev) => {
-                  if (prev.length === 0) {
-                    setLoadingLogs(false);
-                  }
-                  return [...prev, ...formatted];
-                });
-              }
-            }
-            // Check for plannerSession
-            if (
-              !plannerStreamed &&
-              chunk.data &&
-              chunk.data.plannerSession &&
-              typeof chunk.data.plannerSession.threadId === "string" &&
-              typeof chunk.data.plannerSession.runId === "string"
-            ) {
-              plannerStreamed = true;
-              setPlannerThreadId(chunk.data.plannerSession.threadId);
-              for await (const subChunk of newClient.runs.joinStream(
-                chunk.data.plannerSession.threadId,
-                chunk.data.plannerSession.runId,
-                {
-                  streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-                },
-              )) {
-                if (subChunk.event === "updates") {
-                  const formatted = formatDisplayLog(subChunk);
-                  // Filter out human messages from planner stream (already logged in manager)
-                  const filteredFormatted = formatted.filter(
-                    (log) => !log.startsWith("[HUMAN]"),
-                  );
-                  if (filteredFormatted.length > 0) {
-                    setLogs((prev) => [...prev, ...filteredFormatted]);
-                  }
-                }
+      const streamingService = new StreamingService({
+        setLogs,
+        setPlannerThreadId,
+        setStreamingPhase,
+        setLoadingLogs,
+        setClient,
+        setThreadId,
+      });
 
-                // Check for programmer session
-                if (
-                  !programmerStreamed &&
-                  subChunk.data?.programmerSession?.threadId &&
-                  typeof subChunk.data.programmerSession.threadId ===
-                    "string" &&
-                  typeof subChunk.data.programmerSession.runId === "string"
-                ) {
-                  programmerStreamed = true;
-                  for await (const programmerChunk of newClient.runs.joinStream(
-                    subChunk.data.programmerSession.threadId,
-                    subChunk.data.programmerSession.runId,
-                    {
-                      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-                    },
-                  )) {
-                    if (programmerChunk.event === "updates") {
-                      const formatted = formatDisplayLog(programmerChunk);
-                      if (formatted.length > 0) {
-                        setLogs((prev) => [...prev, ...formatted]);
-                      }
-                    }
-                  }
-                }
-
-                // Detect HumanInterrupt in planner stream
-                const interruptArr =
-                  subChunk.data && Array.isArray(subChunk.data["__interrupt__"])
-                    ? subChunk.data["__interrupt__"]
-                    : undefined;
-                const firstInterruptValue =
-                  interruptArr && interruptArr[0] && interruptArr[0].value
-                    ? interruptArr[0].value
-                    : undefined;
-                if (isAgentInboxInterruptSchema(firstInterruptValue)) {
-                  setStreamingPhase("awaitingFeedback");
-                  return; // Pause streaming, let React render feedback prompt
-                }
-              }
-            }
-          }
-          setStreamingPhase("done");
-        } catch (err: any) {
-          setLogs((prev) => [
-            ...prev,
-            `Error during streaming: ${err.message}`,
-          ]);
-          setLoadingLogs(false);
-        } finally {
-          setPrompt("");
-          setLoadingLogs(false);
-        }
-      })();
+      streamingService.startNewSession(prompt, selectedRepo);
+      setPrompt("");
     }
   }, [prompt, selectedRepo, streamingPhase]);
 
