@@ -179,7 +179,7 @@ const App: React.FC = () => {
   const INSTALLATION_CALLBACK_URL = process.env.GITHUB_CALLBACK_URL || "";
   const [pollingForToken, setPollingForToken] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState<string>("");
+
   const [plannerFeedback, setPlannerFeedback] = useState<string | null>(null);
   const [streamingPhase, setStreamingPhase] = useState<
     "streaming" | "awaitingFeedback" | "done"
@@ -383,24 +383,7 @@ const App: React.FC = () => {
     );
   };
 
-  // Streaming logic: when prompt is set, stream logs
-  useEffect(() => {
-    if (prompt && selectedRepo && streamingPhase === "streaming") {
-      setPlannerFeedback(null);
 
-      const streamingService = new StreamingService({
-        setLogs,
-        setPlannerThreadId,
-        setStreamingPhase,
-        setLoadingLogs,
-        setClient,
-        setThreadId,
-      });
-
-      streamingService.startNewSession(prompt, selectedRepo);
-      setPrompt("");
-    }
-  }, [prompt, selectedRepo, streamingPhase]);
 
   // Add this where we handle planner feedback
   useEffect(() => {
@@ -604,7 +587,18 @@ const App: React.FC = () => {
               <CustomInput
                 onSubmit={(value) => {
                   setHasStartedChat(true);
-                  setPrompt(value);
+                  setPlannerFeedback(null);
+                  
+                  const streamingService = new StreamingService({
+                    setLogs,
+                    setPlannerThreadId,
+                    setStreamingPhase,
+                    setLoadingLogs,
+                    setClient,
+                    setThreadId,
+                  });
+
+                  streamingService.startNewSession(value, selectedRepo);
                 }}
               />
             ) : (
