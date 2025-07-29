@@ -106,7 +106,7 @@ export function createUpdatePlanToolFields() {
   };
 }
 
-export function createSearchToolFields(targetRepository: TargetRepository) {
+export function createGrepToolFields(targetRepository: TargetRepository) {
   const repoRoot = getRepoAbsolutePath(targetRepository);
   const searchSchema = z.object({
     query: z
@@ -166,18 +166,18 @@ export function createSearchToolFields(targetRepository: TargetRepository) {
   });
 
   return {
-    name: "search",
+    name: "grep",
     schema: searchSchema,
-    description: `Execute a search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
+    description: `Execute a grep (ripgrep) search in the repository. Should be used to search for content via string matching or regex in the codebase. The working directory this command will be executed in is \`${repoRoot}\`.`,
   };
 }
 
 // Only used for type inference
-const _tmpSearchToolSchema = createSearchToolFields({
+const _tmpSearchToolSchema = createGrepToolFields({
   owner: "x",
   repo: "x",
 }).schema;
-export type SearchCommand = z.infer<typeof _tmpSearchToolSchema>;
+export type GrepCommand = z.infer<typeof _tmpSearchToolSchema>;
 
 function escapeShellArg(arg: string): string {
   // If the string contains a single quote, close the string, escape the single quote, and reopen it
@@ -185,8 +185,8 @@ function escapeShellArg(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-export function formatSearchCommand(
-  cmd: SearchCommand,
+export function formatGrepCommand(
+  cmd: GrepCommand,
   options?: {
     excludeRequiredFlags?: boolean;
   },
@@ -492,5 +492,81 @@ export function createReviewStartedToolFields() {
     description:
       "<not used as an actual tool call. only used as shared types between the client and agent>",
     schema: reviewStartedSchema,
+  };
+}
+
+export function createTextEditorToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const textEditorToolSchema = z.object({
+    command: z
+      .enum(["view", "str_replace", "create", "insert"])
+      .describe("The command to execute: view, str_replace, create, or insert"),
+    path: z
+      .string()
+      .describe("The path to the file or directory to operate on"),
+    view_range: z
+      .tuple([z.number(), z.number()])
+      .optional()
+      .describe(
+        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command.",
+      ),
+    old_str: z
+      .string()
+      .optional()
+      .describe(
+        "The text to replace (must match exactly, including whitespace and indentation). Required for str_replace command.",
+      ),
+    new_str: z
+      .string()
+      .optional()
+      .describe(
+        "The new text to insert. Required for str_replace and insert commands.",
+      ),
+    file_text: z
+      .string()
+      .optional()
+      .describe(
+        "The content to write to the new file. Required for create command.",
+      ),
+    insert_line: z
+      .number()
+      .optional()
+      .describe(
+        "The line number after which to insert the text (0 for beginning of file). Required for insert command.",
+      ),
+  });
+
+  return {
+    name: "str_replace_based_edit_tool",
+    description:
+      "A text editor tool that can view, create, and edit files. " +
+      `The working directory is \`${repoRoot}\`. Ensure file paths are absolute and properly formatted. ` +
+      "Supports commands: view (read file/directory), str_replace (replace text), create (new file), insert (add text at line).",
+    schema: textEditorToolSchema,
+  };
+}
+
+export function createViewToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const viewSchema = z.object({
+    command: z.enum(["view"]).describe("The command to execute: view"),
+    path: z
+      .string()
+      .describe("The path to the file or directory to operate on"),
+    view_range: z
+      .array(z.number())
+      .optional()
+      .describe(
+        "Optional array of two integers [start, end] specifying line numbers to view. Line numbers are 1-indexed. Use -1 for end to read to end of file. Only applies to view command. If this is passed, ensure it is a valid array, containing only two positive integers.",
+      ),
+  });
+
+  return {
+    name: "view",
+    description:
+      "A text editor tool that can view files. " +
+      `The working directory is \`${repoRoot}\`. Ensure file paths are absolute and properly formatted. ` +
+      "Supports commands: view (read file/directory).",
+    schema: viewSchema,
   };
 }

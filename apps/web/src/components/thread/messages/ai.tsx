@@ -34,7 +34,7 @@ import {
   createShellToolFields,
   createMarkTaskCompletedToolFields,
   createMarkTaskNotCompletedToolFields,
-  createSearchToolFields,
+  createGrepToolFields,
   createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createCodeReviewMarkTaskCompletedFields,
@@ -46,6 +46,8 @@ import {
   createConversationHistorySummaryToolFields,
   createReviewStartedToolFields,
   createScratchpadFields,
+  createTextEditorToolFields,
+  createViewToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
@@ -67,8 +69,8 @@ type MarkTaskNotCompletedToolArgs = z.infer<
 >;
 const reviewStartedTool = createReviewStartedToolFields();
 type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
-const searchTool = createSearchToolFields(dummyRepo);
-type SearchToolArgs = z.infer<typeof searchTool.schema>;
+const grepTool = createGrepToolFields(dummyRepo);
+type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const openPrTool = createOpenPrToolFields();
 type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
@@ -107,6 +109,15 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+const textEditorTool = createTextEditorToolFields({
+  owner: "dummy",
+  repo: "dummy",
+});
+type TextEditorToolArgs = z.infer<typeof textEditorTool.schema>;
+
+const viewTool = createViewToolFields(dummyRepo);
+type ViewToolArgs = z.infer<typeof viewTool.schema>;
+
 // Helper function to detect MCP tools by checking if tool name is NOT in known tools
 function isMcpTool(toolName: string): boolean {
   const knownToolNames = [
@@ -117,6 +128,8 @@ function isMcpTool(toolName: string): boolean {
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
+    textEditorTool.name,
+    viewTool.name,
   ];
   return !knownToolNames.some((t) => t === toolName);
 }
@@ -192,7 +205,7 @@ export function mapToolMessageToActionStepProps(
     : undefined;
 
   const status: ActionItemProps["status"] = "done";
-  const success = message.status === "success";
+  const success = message.status !== "error";
 
   const msgContent = getContentString(message.content);
   const output = msgContent === "" ? "Empty string" : msgContent;
@@ -219,10 +232,10 @@ export function mapToolMessageToActionStepProps(
       reasoningText,
       errorMessage: !success ? getContentString(message.content) : undefined,
     };
-  } else if (toolCall?.name === searchTool.name) {
-    const args = toolCall.args as SearchToolArgs;
+  } else if (toolCall?.name === grepTool.name) {
+    const args = toolCall.args as GrepToolArgs;
     return {
-      actionType: "search",
+      actionType: "grep",
       status,
       success,
       query: args.query || "",
@@ -275,6 +288,34 @@ export function mapToolMessageToActionStepProps(
       success,
       url: args.url || "",
       query: args.query || "",
+      output,
+      reasoningText,
+    };
+  } else if (toolCall?.name === textEditorTool.name) {
+    const args = toolCall.args as TextEditorToolArgs;
+    return {
+      actionType: "text_editor",
+      status,
+      success,
+      command: args.command || "view",
+      path: args.path || "",
+      view_range: args.view_range,
+      old_str: args.old_str,
+      new_str: args.new_str,
+      file_text: args.file_text,
+      insert_line: args.insert_line,
+      output,
+      reasoningText,
+    };
+  } else if (toolCall?.name === viewTool.name) {
+    const args = toolCall.args as ViewToolArgs;
+    return {
+      actionType: "text_editor",
+      status,
+      success,
+      command: args.command || "view",
+      path: args.path || "",
+      view_range: args.view_range as [number, number] | undefined,
       output,
       reasoningText,
     };
@@ -352,10 +393,13 @@ export function AssistantMessage({
         (tc) =>
           tc.name === shellTool.name ||
           tc.name === applyPatchTool.name ||
-          tc.name === searchTool.name ||
+          tc.name === grepTool.name ||
           tc.name === installDependenciesTool.name ||
           tc.name === scratchpadTool.name ||
           tc.name === getURLContentTool.name ||
+          tc.name === textEditorTool.name ||
+          tc.name === viewTool.name ||
+          tc.name === searchDocumentForTool.name ||
           isMcpTool(tc.name),
       )
     : [];
@@ -525,9 +569,18 @@ export function AssistantMessage({
 
     // Extract PR URL from the tool message content
     // Format: "Created pull request: https://github.com/owner/repo/pull/123"
+    // or "Marked pull request as ready for review: https://github.com/owner/repo/pull/123"
     let prUrl: string | undefined = undefined;
-    if (content && content.includes("pull request: ")) {
-      prUrl = content.split("pull request: ")[1].trim();
+    if (content) {
+      if (content.includes("pull request: ")) {
+        prUrl = content.split("pull request: ")[1].trim();
+      } else if (
+        content.includes("Marked pull request as ready for review: ")
+      ) {
+        prUrl = content
+          .split("Marked pull request as ready for review: ")[1]
+          .trim();
+      }
     }
 
     // Extract PR number from URL if available
@@ -600,15 +653,24 @@ export function AssistantMessage({
   }
 
   if (actionableToolCalls.length > 0) {
+    if (
+      actionableToolCalls[0].name !== "shell" &&
+      actionableToolCalls[0].name !== "scratchpad" &&
+      actionableToolCalls[0].name !== "grep"
+    ) {
+      console.log("actionableToolCalls", actionableToolCalls[0]);
+    }
     const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
       const correspondingToolResult = toolResults.find(
         (tr) => tr && tr.tool_call_id === toolCall.id,
       );
 
       const isShellTool = toolCall.name === shellTool.name;
-      const isSearchTool = toolCall.name === searchTool.name;
+      const isGrepTool = toolCall.name === grepTool.name;
       const isInstallDependenciesTool =
         toolCall.name === installDependenciesTool.name;
+      const isTextEditorTool = toolCall.name === textEditorTool.name;
+      const isViewTool = toolCall.name === viewTool.name;
 
       if (correspondingToolResult) {
         // If we have a tool result, map it to action props
@@ -616,10 +678,10 @@ export function AssistantMessage({
           correspondingToolResult,
           threadMessages,
         );
-      } else if (isSearchTool) {
-        const args = toolCall.args as SearchToolArgs;
+      } else if (isGrepTool) {
+        const args = toolCall.args as GrepToolArgs;
         return {
-          actionType: "search",
+          actionType: "grep",
           status: "generating",
           query: args?.query || "",
           match_string: args?.match_string || false,
@@ -663,6 +725,30 @@ export function AssistantMessage({
           status: "generating",
           url: args?.url || "",
           query: args?.query || "",
+          output: "",
+        } as ActionItemProps;
+      } else if (isTextEditorTool) {
+        const args = toolCall.args as TextEditorToolArgs;
+        return {
+          actionType: "text_editor",
+          status: "generating",
+          command: args?.command || "view",
+          path: args?.path || "",
+          view_range: args?.view_range,
+          old_str: args?.old_str,
+          new_str: args?.new_str,
+          file_text: args?.file_text,
+          insert_line: args?.insert_line,
+          output: "",
+        } as ActionItemProps;
+      } else if (isViewTool) {
+        const args = toolCall.args as ViewToolArgs;
+        return {
+          actionType: "text_editor",
+          status: "generating",
+          command: args?.command || "view",
+          path: args?.path || "",
+          view_range: args?.view_range,
           output: "",
         } as ActionItemProps;
       } else {

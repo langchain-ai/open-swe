@@ -21,6 +21,7 @@ import { createConversationHistorySummaryToolFields } from "@open-swe/shared/ope
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
 const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
 <user_request>
@@ -148,6 +149,8 @@ export async function summarizeHistory(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
 
   const plan = getActivePlanItems(state.taskPlan);
   const conversationHistoryToSummarize = await getMessagesSinceLastSummary(
@@ -190,6 +193,6 @@ export async function summarizeHistory(
   return {
     messages: summaryMessages,
     internalMessages: newInternalMessages,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

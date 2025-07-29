@@ -1597,12 +1597,12 @@ __metadata:
   linkType: hard
 
 "@eslint/plugin-kit@npm:^0.3.1":
-  version: 0.3.3
-  resolution: "@eslint/plugin-kit@npm:0.3.3"
+  version: 0.3.4
+  resolution: "@eslint/plugin-kit@npm:0.3.4"
   dependencies:
     "@eslint/core": ^0.15.1
     levn: ^0.4.1
-  checksum: c9dc7b83ed011dce35ccc66dc53aaaa87e9fb2bd7c8a11231f7624334d82c9a53552e4b1a1cb60b74073fcc49a2661be874e503aae14cf2f6ac6b1c7faeb7080
+  checksum: 9dd448926e90c9ae0eb4332c5a2e1b80733ceeecb4d487bb131ca26404ad5af706b262e3c76a5b81f7980c0dfc975c5b9e4ef715676e0e4c48e66f0d7bac83b2
   languageName: node
   linkType: hard
 
@@ -2690,15 +2690,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/anthropic@npm:^0.3.20":
-  version: 0.3.24
-  resolution: "@langchain/anthropic@npm:0.3.24"
+"@langchain/anthropic@npm:^0.3.25":
+  version: 0.3.25
+  resolution: "@langchain/anthropic@npm:0.3.25"
   dependencies:
     "@anthropic-ai/sdk": ^0.56.0
     fast-xml-parser: ^4.4.1
   peerDependencies:
     "@langchain/core": ">=0.3.58 <0.4.0"
-  checksum: 682461124e5afeb4ea087704f4b3d2008eca23152a45c1ff12f90002e9f1eeb330e0a4dc74730dfbaf7c04085a306e0d1186a44b3516f8956e81a55de4e41e46
+  checksum: e7a48d130379f7d26b415ac3eb8ee9a9d44c3b51f1333568e2fa97b82c272e18057a8ee10a2bb0d8a0c18c69ee7d8945cf7aebd05198afc0da86540b38bc3dc0
   languageName: node
   linkType: hard
 
@@ -4095,7 +4095,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/anthropic": ^0.3.20
+    "@langchain/anthropic": ^0.3.25
     "@langchain/community": ^0.3.47
     "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
@@ -4181,12 +4181,14 @@ __metadata:
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
+    "@jest/globals": ^29.7.0
     "@langchain/core": ^0.3.65
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
+    "@types/jest": ^29.5.0
     "@types/node": ^22.13.5
     dotenv: ^16.4.7
     eslint: ^9.19.0
@@ -4194,8 +4196,10 @@ __metadata:
     eslint-plugin-import: ^2.27.5
     eslint-plugin-no-instanceof: ^1.0.1
     eslint-plugin-prettier: ^4.2.1
+    jest: ^29.7.0
     jsonwebtoken: ^9.0.2
     prettier: ^3.5.2
+    ts-jest: ^29.1.0
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     zod: ^3.25.32
@@ -4253,7 +4257,7 @@ __metadata:
     katex: ^0.16.21
     langgraph-nextjs-api-passthrough: ^0.1.4
     lodash: ^4.17.21
-    lucide-react: ^0.476.0
+    lucide-react: ^0.532.0
     next: ^15.2.3
     next-themes: ^0.4.4
     nuqs: ^2.4.1
@@ -14590,12 +14594,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lucide-react@npm:^0.476.0":
-  version: 0.476.0
-  resolution: "lucide-react@npm:0.476.0"
+"lucide-react@npm:^0.532.0":
+  version: 0.532.0
+  resolution: "lucide-react@npm:0.532.0"
   peerDependencies:
     react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: fcfb5a4ce7be4d6184cca9cd1641bc9c967b70e8a29d2704d3a71a4c08d58b89aaabfbc436f323e7a93b2d2ef5f46782e99a88118267ed6f0670df70d35805d8
+  checksum: 5d2312b8836f8502f45bf6dbc355c7ab980b9f1f87ad8d12b81bc2f2de51d6176326aecf5bef09f56f65a50bef4d183b6df875a9d0b50777994f1effc27036e8
   languageName: node
   linkType: hard
 

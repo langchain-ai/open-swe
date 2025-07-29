@@ -23,6 +23,7 @@ import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
@@ -53,10 +54,12 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    Task.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {
@@ -125,6 +128,6 @@ export async function generatePlan(
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

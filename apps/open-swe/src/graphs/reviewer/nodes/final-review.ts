@@ -30,6 +30,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
@@ -116,10 +117,12 @@ export async function finalReview(
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.REVIEWER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.REVIEWER,
   );
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",
@@ -206,6 +209,6 @@ export async function finalReview(
     messages: messagesUpdate,
     internalMessages: messagesUpdate,
     reviewsCount: (state.reviewsCount || 0) + 1,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

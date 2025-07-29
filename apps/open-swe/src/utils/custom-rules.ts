@@ -15,6 +15,8 @@ const DEPENDENCIES_AND_INSTALLATION_CLOSE_TAG =
   "</dependencies_and_installation>";
 const TESTING_INSTRUCTIONS_OPEN_TAG = "<testing_instructions>";
 const TESTING_INSTRUCTIONS_CLOSE_TAG = "</testing_instructions>";
+const PULL_REQUEST_FORMATTING_OPEN_TAG = "<pull_request_formatting>";
+const PULL_REQUEST_FORMATTING_CLOSE_TAG = "</pull_request_formatting>";
 const ALL_TAGS = [
   GENERAL_RULES_OPEN_TAG,
   GENERAL_RULES_CLOSE_TAG,
@@ -24,6 +26,8 @@ const ALL_TAGS = [
   DEPENDENCIES_AND_INSTALLATION_CLOSE_TAG,
   TESTING_INSTRUCTIONS_OPEN_TAG,
   TESTING_INSTRUCTIONS_CLOSE_TAG,
+  PULL_REQUEST_FORMATTING_OPEN_TAG,
+  PULL_REQUEST_FORMATTING_CLOSE_TAG,
 ];
 
 export function parseCustomRulesFromString(
@@ -39,6 +43,7 @@ export function parseCustomRulesFromString(
   let repositoryStructure = "";
   let dependenciesAndInstallation = "";
   let testingInstructions = "";
+  let pullRequestFormatting = "";
 
   if (
     contents.includes(GENERAL_RULES_OPEN_TAG) &&
@@ -79,12 +84,23 @@ export function parseCustomRulesFromString(
       contents.indexOf(TESTING_INSTRUCTIONS_CLOSE_TAG),
     );
   }
+  if (
+    contents.includes(PULL_REQUEST_FORMATTING_OPEN_TAG) &&
+    contents.includes(PULL_REQUEST_FORMATTING_CLOSE_TAG)
+  ) {
+    pullRequestFormatting = contents.substring(
+      contents.indexOf(PULL_REQUEST_FORMATTING_OPEN_TAG) +
+        PULL_REQUEST_FORMATTING_OPEN_TAG.length,
+      contents.indexOf(PULL_REQUEST_FORMATTING_CLOSE_TAG),
+    );
+  }
 
   if (
     !generalRules &&
     !repositoryStructure &&
     !dependenciesAndInstallation &&
-    !testingInstructions
+    !testingInstructions &&
+    !pullRequestFormatting
   ) {
     return undefined;
   }
@@ -94,6 +110,7 @@ export function parseCustomRulesFromString(
     repositoryStructure,
     dependenciesAndInstallation,
     testingInstructions,
+    pullRequestFormatting,
   };
 }
 

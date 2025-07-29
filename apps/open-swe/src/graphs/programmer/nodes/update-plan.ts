@@ -27,6 +27,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -124,6 +125,8 @@ export async function updatePlan(
   });
 
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.PROGRAMMER,
@@ -204,6 +207,6 @@ export async function updatePlan(
     messages: [toolMessage],
     internalMessages: [toolMessage],
     taskPlan: newTaskPlan,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

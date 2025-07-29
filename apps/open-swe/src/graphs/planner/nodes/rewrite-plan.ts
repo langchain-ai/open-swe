@@ -265,10 +265,10 @@ export async function rewritePlan(
     throw new Error("No plan change request found.");
   }
 
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.PLANNER,
   );
   const tasksToModify = await identifyTasksToModify(
     state,

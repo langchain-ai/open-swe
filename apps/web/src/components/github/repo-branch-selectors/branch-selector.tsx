@@ -90,7 +90,7 @@ export function BranchSelector({
           }
           setSelectedBranch(findDefaultBranch(branches, defaultBranch));
         });
-      } else if (!selectedBranch || !currentBranchExists) {
+      } else if (!selectedBranch) {
         setSelectedBranch(findDefaultBranch(branches, defaultBranch));
       }
     }
@@ -99,7 +99,6 @@ export function BranchSelector({
     selectedRepository?.repo,
     branchesLoading,
     branchesError,
-    branches.length,
     selectedBranch,
     setSelectedBranch,
     defaultBranch,

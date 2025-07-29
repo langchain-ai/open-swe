@@ -2,8 +2,6 @@ export default {
   preset: "ts-jest/presets/default-esm",
   moduleNameMapper: {
     "^(\\.{1,2}/.*)\\.js$": "$1",
-    "^@open-swe/shared$": "<rootDir>/../../packages/shared/src/index.ts",
-    "^@open-swe/shared/(.*)$": "<rootDir>/../../packages/shared/src/$1",
   },
   transform: {
     "^.+\\.tsx?$": [

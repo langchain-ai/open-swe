@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import {
+  CustomRules,
   GraphConfig,
   GraphState,
   GraphUpdate,
@@ -36,6 +37,7 @@ import {
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 import {
   GitHubPullRequest,
   GitHubPullRequestList,
@@ -53,16 +55,32 @@ Here are all of the tasks you completed:
 
 {USER_REQUEST_PROMPT}
 
+{CUSTOM_RULES}
+
 With all of this in mind, please use the \`open_pr\` tool to open a pull request.`;
+
+const formatCustomRulesPrompt = (pullRequestFormatting: string): string => {
+  return `<custom_formatting_rules>
+The user has provided the following custom rules around how to format the contents of the pull request.
+IMPORTANT: You must follow these instructions exactly when generating the pull request contents. Do not deviate from them in any way.
+
+${pullRequestFormatting}
+</custom_formatting_rules>`;
+};
 
 const formatPrompt = (
   taskPlan: PlanItem[],
   messages: BaseMessage[],
+  customRules?: CustomRules,
 ): string => {
   const completedTasks = taskPlan.filter((task) => task.completed);
+  const customPrFormattingRules = customRules?.pullRequestFormatting
+    ? formatCustomRulesPrompt(customRules.pullRequestFormatting)
+    : "";
   return openPrSysPrompt
     .replace("{COMPLETED_TASKS}", formatPlanPromptWithSummaries(completedTasks))
-    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(messages));
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(messages))
+    .replace("{CUSTOM_RULES}", customPrFormattingRules);
 };
 
 export async function openPullRequest(
@@ -116,6 +134,8 @@ export async function openPullRequest(
   const openPrTool = createOpenPrToolFields();
   // use the router model since this is a simple task that doesn't need an advanced model
   const model = await loadModel(config, Task.ROUTER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.ROUTER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.ROUTER,
@@ -219,7 +239,7 @@ export async function openPullRequest(
     }),
     ...(codebaseTree && { codebaseTree }),
     ...(dependenciesInstalled !== null && { dependenciesInstalled }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
     ...(updatedTaskPlan && { taskPlan: updatedTaskPlan }),
   };
 }

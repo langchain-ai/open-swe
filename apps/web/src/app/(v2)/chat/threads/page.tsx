@@ -11,7 +11,7 @@ import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { InstallationSelector } from "@/components/github/installation-selector";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,7 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
-  const { currentInstallation } = useGitHubAppProvider();
+  const { currentInstallation, installationsLoading } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
@@ -48,40 +48,52 @@ function AllThreadsPageContent() {
     isLoading: statusLoading,
   } = useThreadsStatus(threadIds, threads);
 
-  const filteredThreads = threadsMetadata.filter((thread: ThreadMetadata) => {
-    const matchesSearch =
-      thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredThreads = useMemo(() => {
+    return threadsMetadata.filter((thread: ThreadMetadata) => {
+      const matchesSearch =
+        thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus =
-      statusFilter === "all" || statusMap[thread.id] === statusFilter;
+      const matchesStatus =
+        statusFilter === "all" || statusMap[thread.id] === statusFilter;
 
-    return matchesSearch && matchesStatus;
-  });
+      return matchesSearch && matchesStatus;
+    });
+  }, [threadsMetadata, searchQuery, statusFilter, statusMap]);
 
-  const groupedThreads = {
-    running: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "running",
-    ),
-    completed: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "completed",
-    ),
-    failed: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "failed",
-    ),
-    pending: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "pending",
-    ),
-    idle: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "idle",
-    ),
-    paused: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "paused",
-    ),
-    error: filteredThreads.filter(
-      (thread: ThreadMetadata) => statusMap[thread.id] === "error",
-    ),
-  };
+  const groupedThreads = useMemo(() => {
+    return {
+      running: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "running",
+      ),
+      completed: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "completed",
+      ),
+      failed: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "failed",
+      ),
+      pending: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "pending",
+      ),
+      idle: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "idle",
+      ),
+      paused: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "paused",
+      ),
+      error: filteredThreads.filter(
+        (thread: ThreadMetadata) => statusMap[thread.id] === "error",
+      ),
+    };
+  }, [filteredThreads, statusMap]);
+
+  // Show loading state if threads/status/installation requests are loading, and there are no
+  // threads to display (conditional of the status filter)
+  const showThreadsLoading =
+    (threadsLoading || statusLoading || installationsLoading) &&
+    (statusFilter === "all"
+      ? Object.values(groupedThreads).flat().length === 0
+      : filteredThreads.length === 0);
 
   return (
     <div className="bg-background flex h-screen flex-col">
@@ -236,21 +248,20 @@ function AllThreadsPageContent() {
               </div>
             )}
 
-          {(threadsLoading || statusLoading) &&
-            (!threads || threads.length === 0) && (
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <h2 className="text-foreground text-base font-semibold capitalize">
-                    Loading threads...
-                  </h2>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {Array.from({ length: 9 }).map((_, index) => (
-                    <ThreadCardLoading key={`all-threads-loading-${index}`} />
-                  ))}
-                </div>
+          {showThreadsLoading && (
+            <div>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-foreground text-base font-semibold capitalize">
+                  Loading threads...
+                </h2>
               </div>
-            )}
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {Array.from({ length: 9 }).map((_, index) => (
+                  <ThreadCardLoading key={`all-threads-loading-${index}`} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -260,7 +271,9 @@ function AllThreadsPageContent() {
 export default function AllThreadsPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <AllThreadsPageContent />
+      <GitHubAppProvider>
+        <AllThreadsPageContent />
+      </GitHubAppProvider>
     </Suspense>
   );
 }

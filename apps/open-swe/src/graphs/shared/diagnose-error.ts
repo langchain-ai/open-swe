@@ -7,7 +7,7 @@ import {
 import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
 
 import { z } from "zod";
-import { CacheMetrics, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { ModelTokenData, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
@@ -17,6 +17,7 @@ import {
   Task,
 } from "../../utils/llms/index.js";
 import { trackCachePerformance } from "../../utils/caching.js";
+import { getModelManager } from "../../utils/llms/model-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "SharedDiagnoseError");
 
@@ -76,7 +77,7 @@ const formatUserPrompt = (messages: BaseMessage[]): string => {
 interface DiagnoseErrorInputs {
   messages: BaseMessage[];
   codebaseTree: string;
-  tokenData?: CacheMetrics;
+  tokenData?: ModelTokenData[];
 }
 
 type DiagnoseErrorUpdate = Partial<DiagnoseErrorInputs>;
@@ -95,6 +96,8 @@ export async function diagnoseError(
   logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.SUMMARIZER,
@@ -142,6 +145,6 @@ export async function diagnoseError(
 
   return {
     messages: [response, toolMessage],
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

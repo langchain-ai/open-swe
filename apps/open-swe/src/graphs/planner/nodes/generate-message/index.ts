@@ -1,4 +1,5 @@
 import {
+  getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
   Task,
@@ -23,7 +24,7 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createSearchTool } from "../../../../tools/search.js";
+import { createGrepTool } from "../../../../tools/grep.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
@@ -34,6 +35,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createViewTool } from "../../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -69,16 +71,19 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.PLANNER,
   );
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createSearchTool(state),
+    createGrepTool(state),
     createShellTool(state),
+    createViewTool(state),
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",
     ),
@@ -145,6 +150,6 @@ export async function generateAction(
   return {
     messages: [...missingMessages, response],
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

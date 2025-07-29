@@ -17,8 +17,92 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequest } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
+import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
+import { escapeRegExp } from "../string-utils.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
+
+/**
+ * Parses git status output and returns an array of file paths.
+ * Removes the git status indicators (first 3 characters) from each line.
+ */
+export function parseGitStatusOutput(gitStatusOutput: string): string[] {
+  return gitStatusOutput
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => line.substring(3))
+    .filter(Boolean);
+}
+
+/**
+ * Validates and filters files before git add operation.
+ * Excludes files/directories that should not be committed.
+ */
+async function getValidFilesToCommit(
+  absoluteRepoDir: string,
+  sandbox: Sandbox,
+  excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
+): Promise<string[]> {
+  const gitStatusOutput = await sandbox.process.executeCommand(
+    "git status --porcelain",
+    absoluteRepoDir,
+    undefined,
+    TIMEOUT_SEC,
+  );
+
+  if (gitStatusOutput.exitCode !== 0) {
+    logger.error(`Failed to get git status for file validation`, {
+      gitStatusOutput,
+    });
+    throw new Error("Failed to get git status for file validation");
+  }
+
+  const allFiles = parseGitStatusOutput(gitStatusOutput.result);
+
+  const validFiles = allFiles.filter((filePath) => {
+    return !shouldExcludeFile(filePath, excludePatterns);
+  });
+
+  const excludedFiles = allFiles.filter((filePath) => {
+    return shouldExcludeFile(filePath, excludePatterns);
+  });
+
+  if (excludedFiles.length > 0) {
+    logger.info(`Excluded ${excludedFiles.length} files from commit:`, {
+      excludedFiles: excludedFiles,
+    });
+  }
+
+  return validFiles;
+}
+
+/**
+ * Checks if a file should be excluded from commits based on patterns.
+ */
+export function shouldExcludeFile(
+  filePath: string,
+  excludePatterns: string[],
+): boolean {
+  const normalizedPath = filePath.replace(/\\/g, "/");
+
+  return excludePatterns.some((pattern) => {
+    if (pattern.includes("*")) {
+      const escapedPattern = escapeRegExp(pattern);
+      const regexPattern = escapedPattern.replace(/\\\*/g, ".*");
+      const regex = new RegExp(
+        `^${regexPattern}$|/${regexPattern}$|^${regexPattern}/|/${regexPattern}/`,
+      );
+      return regex.test(normalizedPath);
+    }
+
+    return (
+      normalizedPath === pattern ||
+      normalizedPath.startsWith(pattern + "/") ||
+      normalizedPath.includes("/" + pattern + "/") ||
+      normalizedPath.endsWith("/" + pattern)
+    );
+  });
+}
 
 export function getBranchName(configOrThreadId: GraphConfig | string): string {
   const threadId =
@@ -50,10 +134,7 @@ export async function getChangedFilesStatus(
     return [];
   }
 
-  return gitStatusOutput.result
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "");
+  return parseGitStatusOutput(gitStatusOutput.result);
 }
 
 export async function stashAndClearChanges(
@@ -103,8 +184,17 @@ export async function checkoutBranchAndCommit(
   const branchName = options.branchName || getBranchName(config);
 
   logger.info(`Committing changes to branch ${branchName}`);
-  // Commit the changes. We can use the sandbox executeCommand API for this since it doesn't require a token.
-  await sandbox.git.add(absoluteRepoDir, ["."]);
+
+  // Validate and filter files before committing
+  const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox);
+
+  if (validFiles.length === 0) {
+    logger.info("No valid files to commit after filtering");
+    return { branchName, updatedTaskPlan: options.taskPlan };
+  }
+
+  // Add only validated files instead of adding all files with "."
+  await sandbox.git.add(absoluteRepoDir, validFiles);
 
   const botAppName = process.env.GITHUB_APP_NAME;
   if (!botAppName) {
