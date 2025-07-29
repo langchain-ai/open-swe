@@ -323,18 +323,40 @@ export async function pushEmptyCommit(
     githubInstallationToken: string;
   },
 ) {
+  const botAppName = process.env.GITHUB_APP_NAME;
+  if (!botAppName) {
+    logger.error("GITHUB_APP_NAME environment variable is not set.");
+    throw new Error("GITHUB_APP_NAME environment variable is not set.");
+  }
+  const userName = `${botAppName}[bot]`;
+  const userEmail = `${botAppName}@users.noreply.github.com`;
+
   try {
     const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-    const executeCommandRes = await sandbox.process.executeCommand(
+    const setGitConfigRes = await sandbox.process.executeCommand(
+      `git config user.name "${userName}" && git config user.email "${userEmail}"`,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (setGitConfigRes.exitCode !== 0) {
+      logger.error(`Failed to set git config`, {
+        exitCode: setGitConfigRes.exitCode,
+        result: setGitConfigRes.result,
+      });
+      return;
+    }
+
+    const emptyCommitRes = await sandbox.process.executeCommand(
       "git commit --allow-empty -m 'Empty commit to trigger CI'",
       absoluteRepoDir,
       undefined,
       TIMEOUT_SEC,
     );
-    if (executeCommandRes.exitCode !== 0) {
+    if (emptyCommitRes.exitCode !== 0) {
       logger.error(`Failed to push empty commit`, {
-        exitCode: executeCommandRes.exitCode,
-        result: executeCommandRes.result,
+        exitCode: emptyCommitRes.exitCode,
+        result: emptyCommitRes.result,
       });
       return;
     }
@@ -344,6 +366,8 @@ export async function pushEmptyCommit(
       "git",
       options.githubInstallationToken,
     );
+
+    logger.info("Successfully pushed empty commit");
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error(`Failed to push empty commit`, {
