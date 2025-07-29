@@ -8,6 +8,7 @@ import { Loader2, Send } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
+import { StreamMode } from "@langchain/langgraph-sdk";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GraphState } from "@open-swe/shared/open-swe/types";
@@ -17,6 +18,7 @@ import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import {
   API_KEY_REQUIRED_MESSAGE,
   MANAGER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
@@ -104,7 +106,7 @@ export function TerminalInput({
             },
             ifNotExists: "create",
             streamResumable: true,
-            streamMode: ["values", "messages-tuple", "custom"],
+            streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
           },
         );
 

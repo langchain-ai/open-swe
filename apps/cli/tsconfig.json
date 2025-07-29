@@ -7,6 +7,7 @@
     "outDir": "dist",
     "jsx": "react-jsx",
     "strict": true,
+    "types": ["node"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true

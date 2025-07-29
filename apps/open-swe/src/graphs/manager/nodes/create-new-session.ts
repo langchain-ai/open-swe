@@ -5,7 +5,10 @@ import {
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import {
+  MANAGER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
+} from "@open-swe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
@@ -20,6 +23,7 @@ import {
 import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { StreamMode } from "@langchain/langgraph-sdk";
 
 /**
  * Create new manager session.
@@ -92,7 +96,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     },
     ifNotExists: "create",
     streamResumable: true,
-    streamMode: ["values", "messages-tuple", "custom"],
+    streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
   });
 
   return {

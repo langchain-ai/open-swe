@@ -4143,11 +4143,14 @@ __metadata:
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
+    "@langchain/langgraph-sdk": ^0.0.95
+    "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/express": ^4.17.21
-    "@types/node": ^22.13.5
+    "@types/node": ^24.1.0
     "@types/node-fetch": ^2.6.4
     "@types/react": ^19.1.8
+    "@types/uuid": ^10.0.0
     "@typescript-eslint/eslint-plugin": ^8.38.0
     "@typescript-eslint/parser": ^8.38.0
     dotenv: ^16.6.1
@@ -4165,6 +4168,7 @@ __metadata:
     react: ^19.1.0
     tsx: ^4.20.3
     typescript: ^5.8.3
+    uuid: ^10.0.0
   languageName: unknown
   linkType: soft
 
@@ -7048,6 +7052,15 @@ __metadata:
   dependencies:
     undici-types: ~6.21.0
   checksum: 8a8cb8468187845c77403a41e98fe0fdd148741456382eb01bfaee6431303111eae5f2716ce9069b884518862ab96bcc04adf1c90a10ff35e88db19732b383c0
+  languageName: node
+  linkType: hard
+
+"@types/node@npm:^24.1.0":
+  version: 24.1.0
+  resolution: "@types/node@npm:24.1.0"
+  dependencies:
+    undici-types: ~7.8.0
+  checksum: 01f9a97909eec619d937af3bc00ac49461e1846656b4d060f648145df06508eb6d77c200637a792481ee93a73976ced46cfbbdfe307e79be0f58ccdc415dfcd2
   languageName: node
   linkType: hard
 

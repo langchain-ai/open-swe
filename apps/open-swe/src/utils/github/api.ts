@@ -355,14 +355,14 @@ export async function getIssueComments({
   repo,
   issueNumber,
   githubInstallationToken,
-  filterBotComments = true,
+  filterBotComments,
   numRetries = 1,
 }: {
   owner: string;
   repo: string;
   issueNumber: number;
   githubInstallationToken: string;
-  filterBotComments?: boolean;
+  filterBotComments: boolean;
   numRetries?: number;
 }): Promise<GitHubIssueComment[] | null> {
   return withGitHubRetry(

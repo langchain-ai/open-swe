@@ -12,6 +12,7 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { encryptSecret } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
@@ -24,6 +25,7 @@ import {
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
+import { StreamMode } from "@langchain/langgraph-sdk";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -202,7 +204,7 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       config,
       ifNotExists: "create",
       streamResumable: true,
-      streamMode: ["values", "messages-tuple", "custom"],
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     });
 
     logger.info("Created new run from GitHub issue.", {
