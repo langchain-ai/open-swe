@@ -1,5 +1,8 @@
 # Open SWE CLI
 
+> **⚠️ Under Development**  
+> This CLI is currently under active development and may contain bugs or incomplete features.
+
 A command-line interface for Open SWE that provides a terminal-based chat experience to interact with the autonomous coding agent. Built with React and Ink, it offers real-time streaming of agent logs, repository selection, and GitHub integration directly from your terminal.
 
 ## Documentation
