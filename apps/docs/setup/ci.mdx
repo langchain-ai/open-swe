@@ -31,7 +31,7 @@ To prevent this, Open SWE supports adding an environment variable which will cau
     ![Vercel Custom Build Step Screenshot](/images/vercel_ignored_build_script_screenshot.png)
 
     ```bash
-    git log -1 --pretty=oneline --abbrev-commit | grep "[skip ci]" || exit 1
+    git log -1 --pretty=oneline --abbrev-commit | grep "[skip deploy]" && exit 1 || exit 0
     ```
 
   </Step>
