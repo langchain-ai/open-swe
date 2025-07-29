@@ -169,6 +169,16 @@ export async function stashAndClearChanges(
   }
 }
 
+function constructCommitMessage(): string {
+  const baseCommitMessage = "Apply patch";
+  const skipCiString = "[skip ci]";
+  const vercelSkipCi = process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true";
+  if (vercelSkipCi) {
+    return `${baseCommitMessage} ${skipCiString}`;
+  }
+  return baseCommitMessage;
+}
+
 export async function checkoutBranchAndCommit(
   config: GraphConfig,
   targetRepository: TargetRepository,
@@ -203,7 +213,12 @@ export async function checkoutBranchAndCommit(
   }
   const userName = `${botAppName}[bot]`;
   const userEmail = `${botAppName}@users.noreply.github.com`;
-  await sandbox.git.commit(absoluteRepoDir, "Apply patch", userName, userEmail);
+  await sandbox.git.commit(
+    absoluteRepoDir,
+    constructCommitMessage(),
+    userName,
+    userEmail,
+  );
 
   // Push the changes using the git API so it handles authentication for us.
   const pushRes = await withRetry(
@@ -299,6 +314,71 @@ export async function checkoutBranchAndCommit(
   });
 
   return { branchName, updatedTaskPlan };
+}
+
+export async function pushEmptyCommit(
+  targetRepository: TargetRepository,
+  sandbox: Sandbox,
+  options: {
+    githubInstallationToken: string;
+  },
+) {
+  const botAppName = process.env.GITHUB_APP_NAME;
+  if (!botAppName) {
+    logger.error("GITHUB_APP_NAME environment variable is not set.");
+    throw new Error("GITHUB_APP_NAME environment variable is not set.");
+  }
+  const userName = `${botAppName}[bot]`;
+  const userEmail = `${botAppName}@users.noreply.github.com`;
+
+  try {
+    const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
+    const setGitConfigRes = await sandbox.process.executeCommand(
+      `git config user.name "${userName}" && git config user.email "${userEmail}"`,
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (setGitConfigRes.exitCode !== 0) {
+      logger.error(`Failed to set git config`, {
+        exitCode: setGitConfigRes.exitCode,
+        result: setGitConfigRes.result,
+      });
+      return;
+    }
+
+    const emptyCommitRes = await sandbox.process.executeCommand(
+      "git commit --allow-empty -m 'Empty commit to trigger CI'",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+    if (emptyCommitRes.exitCode !== 0) {
+      logger.error(`Failed to push empty commit`, {
+        exitCode: emptyCommitRes.exitCode,
+        result: emptyCommitRes.result,
+      });
+      return;
+    }
+
+    await sandbox.git.push(
+      absoluteRepoDir,
+      "git",
+      options.githubInstallationToken,
+    );
+
+    logger.info("Successfully pushed empty commit");
+  } catch (e) {
+    const errorFields = getSandboxErrorFields(e);
+    logger.error(`Failed to push empty commit`, {
+      ...(errorFields && { errorFields }),
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+  }
 }
 
 export async function pullLatestChanges(

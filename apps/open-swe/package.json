@@ -24,7 +24,7 @@
     "postinstall": "turbo build"
   },
   "dependencies": {
-    "@daytonaio/sdk": "^0.23.1",
+    "@daytonaio/sdk": "^0.25.0",
     "@langchain/anthropic": "^0.3.25",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",

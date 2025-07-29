@@ -1282,31 +1282,32 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@daytonaio/api-client@npm:0.23.1":
-  version: 0.23.1
-  resolution: "@daytonaio/api-client@npm:0.23.1"
+"@daytonaio/api-client@npm:0.25.0":
+  version: 0.25.0
+  resolution: "@daytonaio/api-client@npm:0.25.0"
   dependencies:
     axios: ^1.6.1
-  checksum: 415ca9369e02c4b64925a834fa076a8b2c841d2bd08205b404b31b5b12f83a0c8b8c2ffb4f678b5cb73b14c013311cd2d81494132917c9e94946c2b55ce2f653
+  checksum: 2a33da02809b28bde1d04a788490e8c098529a87de30c41035eeeabc49ad17f76fda2ff60f91712f2a1258d801c0b6a4794def8b760fd438faf9b449b061937a
   languageName: node
   linkType: hard
 
-"@daytonaio/sdk@npm:^0.23.1":
-  version: 0.23.1
-  resolution: "@daytonaio/sdk@npm:0.23.1"
+"@daytonaio/sdk@npm:^0.25.0":
+  version: 0.25.0
+  resolution: "@daytonaio/sdk@npm:0.25.0"
   dependencies:
     "@aws-sdk/client-s3": ^3.787.0
     "@aws-sdk/lib-storage": ^3.798.0
-    "@daytonaio/api-client": 0.23.1
+    "@daytonaio/api-client": 0.25.0
     "@iarna/toml": ^2.2.5
     axios: ^1.6.1
     dotenv: ^17.0.1
     expand-tilde: ^2.0.2
     fast-glob: ^3.3.0
     form-data: ^4.0.0
+    pathe: ^2.0.3
     shell-quote: ^1.8.2
     tar: ^6.2.0
-  checksum: d78d6048a867eb17233be36810140ecdfd70fe1344e4fdcf2b3d25bbae01ea38102875e9720179ef89338ba5774064f089c5daec10b8af5775bf10e502a58657
+  checksum: 308e4c66138f4a5cedf2ff8796cddc62c87f6f6a5e28ef3f18dc7c3ed80c9b99f0e386d4a99717225f9eee6def9413356f8def62059c8946c5534c6469d9d7e4
   languageName: node
   linkType: hard
 
@@ -4091,7 +4092,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/agent@workspace:apps/open-swe"
   dependencies:
-    "@daytonaio/sdk": ^0.23.1
+    "@daytonaio/sdk": ^0.25.0
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
