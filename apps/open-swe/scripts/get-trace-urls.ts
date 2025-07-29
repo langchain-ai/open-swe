@@ -42,7 +42,13 @@ async function getTraceUrls(managerThreadId: string): Promise<TraceUrls> {
     );
   }
 
-  const client = new Client({ apiUrl: apiUrl!, apiKey: apiKey! });
+  const client = new Client({
+    apiUrl: apiUrl!,
+    apiKey: apiKey!,
+    defaultHeaders: {
+      "x-auth-scheme": "langsmith",
+    },
+  });
   const constructUrl = (runId: string) =>
     `https://smith.langchain.com/o/${orgId}/projects/p/${projectId}/r/${runId}`;
 
