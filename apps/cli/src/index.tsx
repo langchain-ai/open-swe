@@ -351,7 +351,7 @@ const App: React.FC = () => {
     useInput((input: string, key: { [key: string]: any }) => {
       if (streamingPhase !== "awaitingFeedback") return;
       if (isMessage) return;
-      
+
       if (key.return) {
         setIsMessage(true);
         setPlannerFeedback(options[highlighted].value);
@@ -368,8 +368,8 @@ const App: React.FC = () => {
       <Box flexDirection="row" alignItems="center" gap={2}>
         <Text>Plan feedback:</Text>
         {options.map((option, idx) => (
-          <Text 
-            key={option.value} 
+          <Text
+            key={option.value}
             dimColor={idx !== highlighted}
             bold={idx === highlighted}
           >
@@ -382,8 +382,6 @@ const App: React.FC = () => {
       </Box>
     );
   };
-
-
 
   // Add this where we handle planner feedback
   useEffect(() => {
@@ -588,7 +586,7 @@ const App: React.FC = () => {
                 onSubmit={(value) => {
                   setHasStartedChat(true);
                   setPlannerFeedback(null);
-                  
+
                   const streamingService = new StreamingService({
                     setLogs,
                     setPlannerThreadId,

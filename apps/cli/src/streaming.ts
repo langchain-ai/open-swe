@@ -1,4 +1,4 @@
-import { Client } from "@langchain/langgraph-sdk";
+import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import { encryptSecret } from "@open-swe/shared/crypto";
 import {
@@ -18,8 +18,6 @@ import { formatDisplayLog } from "./logger.js";
 import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interrupt";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
-
-type StreamMode = "values" | "updates" | "messages";
 
 interface StreamingCallbacks {
   setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars

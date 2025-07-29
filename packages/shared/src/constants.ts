@@ -43,4 +43,4 @@ export const DEFAULT_MCP_SERVERS = {
 export const API_KEY_REQUIRED_MESSAGE =
   "Unknown users must provide API keys to use the Open SWE demo application";
 
-export const OPEN_SWE_STREAM_MODE = ["values", "updates", "messages"];
+export const OPEN_SWE_STREAM_MODE = ["values", "updates", "messages", "messages-tuple", "custom"];

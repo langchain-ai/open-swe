@@ -16,7 +16,7 @@ import {
   supportsParallelToolCallsParam,
   Task,
 } from "../../../../utils/llms/index.js";
-import { Command, END } from "@langchain/langgraph";
+import { Command, END, StreamMode } from "@langchain/langgraph";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import {
   createIssue,
@@ -33,7 +33,7 @@ import { getDefaultHeaders } from "../../../../utils/default-headers.js";
 import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
+import { OPEN_SWE_STREAM_MODE, PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
@@ -263,7 +263,7 @@ export async function classifyMessage(
           command: {
             resume: plannerResume,
           },
-          streamMode: ["values", "updates", "messages-tuple", "custom"],
+          streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
         },
       );
       newPlannerId = newPlannerRun.run_id;

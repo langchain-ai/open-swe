@@ -2,7 +2,7 @@
  * Utility functions for CLI app
  */
 
-import { Client } from "@langchain/langgraph-sdk";
+import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import { encryptSecret } from "@open-swe/shared/crypto";
 import {
   OPEN_SWE_STREAM_MODE,
@@ -14,8 +14,6 @@ import {
   getInstallationId,
 } from "./auth-server.js";
 import { formatDisplayLog } from "./logger.js";
-
-type StreamMode = "values" | "updates" | "messages";
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 /**

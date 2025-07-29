@@ -1,4 +1,9 @@
-import { coerceMessageLikeToMessage, ToolMessage, isAIMessage, isHumanMessage } from "@langchain/core/messages";
+import {
+  coerceMessageLikeToMessage,
+  ToolMessage,
+  isAIMessage,
+  isHumanMessage,
+} from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 
@@ -8,15 +13,6 @@ interface LogChunk {
   ops?: Array<{ value: string }>;
 }
 
-
-
-interface ToolCall {
-  type: string;
-  args?: string;
-  name?: string;
-  index?: number;
-  id?: string;
-}
 /**
  * Format a tool result based on its type and content
  */
@@ -112,7 +108,7 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
     for (const msg of messages) {
       try {
         const message = coerceMessageLikeToMessage(msg);
-        
+
         // Handle tool messages
         if (message instanceof ToolMessage) {
           const toolName = message.name || "tool";
@@ -147,8 +143,9 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
 
           // Handle tool calls
           if (message.tool_calls && message.tool_calls.length > 0) {
-            const technicalNotesToolName = createWriteTechnicalNotesToolFields().name;
-            
+            const technicalNotesToolName =
+              createWriteTechnicalNotesToolFields().name;
+
             message.tool_calls.forEach((tool) => {
               let argsString = "";
               if (typeof tool.args === "string") {
@@ -168,9 +165,14 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
                   : argsString;
               const toolName = tool.name || "unknown";
               logs.push(`[TOOL CALL] ${toolName}: ${truncatedArgs}`);
-              
+
               // Handle technical notes from tool call
-              if (tool.name === technicalNotesToolName && tool.args && typeof tool.args === "object" && "notes" in tool.args) {
+              if (
+                tool.name === technicalNotesToolName &&
+                tool.args &&
+                typeof tool.args === "object" &&
+                "notes" in tool.args
+              ) {
                 const notes = (tool.args as any).notes;
                 if (Array.isArray(notes)) {
                   logs.push(
@@ -210,7 +212,8 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
             logs.push(`[HUMAN] ${truncated}`);
           }
         }
-      } catch (error) {
+      } catch (error: any) {
+        console.error("Error formatting log:", error.message);
         // Fallback to original message if conversion fails
         if (msg.type === "tool") {
           const toolName = msg.name || "tool";

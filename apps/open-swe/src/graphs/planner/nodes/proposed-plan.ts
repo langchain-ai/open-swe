@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { Command, END, interrupt } from "@langchain/langgraph";
+import { Command, END, interrupt, StreamMode } from "@langchain/langgraph";
 import {
   GraphUpdate,
   GraphConfig,
@@ -23,6 +23,7 @@ import {
   PLAN_INTERRUPT_DELIMITER,
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
@@ -199,7 +200,7 @@ async function startProgrammerRun(input: {
       ifNotExists: "create",
       streamResumable: true,
       streamSubgraphs: true,
-      streamMode: ["values", "updates", "messages-tuple", "custom"],
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     },
   );
 
