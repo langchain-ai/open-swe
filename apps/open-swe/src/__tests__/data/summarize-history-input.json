@@ -3,11 +3,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessage"
-      ],
+      "id": ["langchain_core", "messages", "AIMessage"],
       "kwargs": {
         "id": "do-not-render-bfab355e-40ec-451c-a0a4-fed481a66134",
         "content": "Initialize sandbox",
@@ -139,11 +135,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -211,11 +203,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "6419b628-0f4d-44d3-8dab-6bac8811a216",
         "tool_call_id": "toolu_01THiKkTNARV2PXD99rGaqNP",
@@ -229,11 +217,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -288,10 +272,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                367,
-                420
-              ]
+              "view_range": [367, 420]
             },
             "id": "toolu_01LdWNCAqXUzwwnnxDivW599",
             "type": "tool_call"
@@ -303,11 +284,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "75acbd43-a9dd-4367-9a3f-b35f9e6696dd",
         "tool_call_id": "toolu_01LdWNCAqXUzwwnnxDivW599",
@@ -321,11 +298,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -380,10 +353,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                420,
-                430
-              ]
+              "view_range": [420, 430]
             },
             "id": "toolu_011VKuxUfbXxGzAjniEiM8Kx",
             "type": "tool_call"
@@ -395,11 +365,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "a4634243-2757-4a56-9dfb-d0e6f14e9763",
         "tool_call_id": "toolu_011VKuxUfbXxGzAjniEiM8Kx",
@@ -413,11 +379,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -482,11 +444,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "0bbeb7c9-8be1-4467-92b5-552004a46f4d",
         "tool_call_id": "toolu_01JcqEraTHD7NvDDrU8cJo1f",
@@ -499,11 +457,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -558,10 +512,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                720,
-                780
-              ]
+              "view_range": [720, 780]
             },
             "id": "toolu_018aZK6DidBQiDNfUdBEpSee",
             "type": "tool_call"
@@ -573,11 +524,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "15a486e7-b5b9-4ae4-94f2-38bdc8886d91",
         "tool_call_id": "toolu_018aZK6DidBQiDNfUdBEpSee",
@@ -591,11 +538,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -650,10 +593,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                780,
-                850
-              ]
+              "view_range": [780, 850]
             },
             "id": "toolu_01FMCZ8jDMYYQVcLD8yxdvx5",
             "type": "tool_call"
@@ -665,11 +605,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "d3b5015b-e527-4e1f-89bf-1cf9b0cd76d4",
         "tool_call_id": "toolu_01FMCZ8jDMYYQVcLD8yxdvx5",
@@ -683,11 +619,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -742,10 +674,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                850,
-                900
-              ]
+              "view_range": [850, 900]
             },
             "id": "toolu_01SduPyx4cbaUu54tygWkbXU",
             "type": "tool_call"
@@ -757,11 +686,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "63834fdc-dd3b-4e48-94f4-caadc47463db",
         "tool_call_id": "toolu_01SduPyx4cbaUu54tygWkbXU",
@@ -775,11 +700,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -847,11 +768,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "d630be3f-570d-4937-a5c1-5f7a34c57fcc",
         "tool_call_id": "toolu_016XjhMqN5E6KUSWUuptLRUm",
@@ -865,11 +782,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -924,10 +837,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                428,
-                450
-              ]
+              "view_range": [428, 450]
             },
             "id": "toolu_01KtfM8M1ddVerxKDYFQcQbC",
             "type": "tool_call"
@@ -939,11 +849,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "2865f3c3-dac2-4f77-a704-e21f198a4c55",
         "tool_call_id": "toolu_01KtfM8M1ddVerxKDYFQcQbC",
@@ -957,11 +863,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1026,11 +928,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "556dd498-3fae-4e78-af63-c2a661ecc38a",
         "tool_call_id": "toolu_01C37xj1RVqCpsgmUiSpwkce",
@@ -1043,11 +941,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessage"
-      ],
+      "id": ["langchain_core", "messages", "AIMessage"],
       "kwargs": {
         "id": "6e0a1326-b14e-439b-b9b3-dd1df797789a",
         "content": "Looks like I'm running out of tokens. I'm going to summarize the conversation history to free up space.",
@@ -1070,11 +964,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "465097e3-3c65-4af1-beb5-c3d9444219fd",
         "tool_call_id": "847acf8d-deeb-489f-b146-e3835aeadbd2",
@@ -1088,11 +978,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1146,9 +1032,7 @@
             "name": "grep",
             "args": {
               "query": "generate_structured_response",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 10
             },
@@ -1162,11 +1046,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "30c307db-554e-4adf-b133-d8d8cd146ba6",
         "tool_call_id": "toolu_01GRreZtpDwuGwNJJrW44ppS",
@@ -1180,11 +1060,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1239,10 +1115,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1025,
-                1070
-              ]
+              "view_range": [1025, 1070]
             },
             "id": "toolu_019yCUQXhSeA4STxMpsPq96e",
             "type": "tool_call"
@@ -1254,11 +1127,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "23a05462-acf3-44e4-a661-95c2b7590a50",
         "tool_call_id": "toolu_019yCUQXhSeA4STxMpsPq96e",
@@ -1272,11 +1141,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1331,10 +1196,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                540,
-                550
-              ]
+              "view_range": [540, 550]
             },
             "id": "toolu_01XUmiZNpoPkpy8bxfCKtekT",
             "type": "tool_call"
@@ -1346,11 +1208,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "3dc0800c-a6d4-40f8-a914-b9959c83e87f",
         "tool_call_id": "toolu_01XUmiZNpoPkpy8bxfCKtekT",
@@ -1364,11 +1222,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1423,10 +1277,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                560,
-                570
-              ]
+              "view_range": [560, 570]
             },
             "id": "toolu_0196UMgCTCB3J1hDmohVmEJk",
             "type": "tool_call"
@@ -1438,11 +1289,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "525aea62-715c-4ac9-84a9-5d2401c131d4",
         "tool_call_id": "toolu_0196UMgCTCB3J1hDmohVmEJk",
@@ -1456,11 +1303,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1528,11 +1371,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "ac504d63-17e4-4a86-acea-c188ea0a7465",
         "tool_call_id": "toolu_014WqinUokFwUmBEeJrmtgmE",
@@ -1546,11 +1385,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1605,10 +1440,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                567,
-                590
-              ]
+              "view_range": [567, 590]
             },
             "id": "toolu_01BJe4cVfrbCcV6ft3ypmRQQ",
             "type": "tool_call"
@@ -1620,11 +1452,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "15d8cd0a-1ca6-4d64-a628-73f83c2e986e",
         "tool_call_id": "toolu_01BJe4cVfrbCcV6ft3ypmRQQ",
@@ -1638,11 +1466,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1697,10 +1521,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                590,
-                620
-              ]
+              "view_range": [590, 620]
             },
             "id": "toolu_01X9xRLDHH22vCGweiZAKY1b",
             "type": "tool_call"
@@ -1712,11 +1533,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "4062a4a3-7e6f-408a-9b3e-02784ce8a902",
         "tool_call_id": "toolu_01X9xRLDHH22vCGweiZAKY1b",
@@ -1730,11 +1547,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1789,10 +1602,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                620,
-                635
-              ]
+              "view_range": [620, 635]
             },
             "id": "toolu_01QbhZN6GbgKBbVAjZRYQ9Ev",
             "type": "tool_call"
@@ -1804,11 +1614,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "88f0f48a-61b0-4601-b7ad-0d5d2b79882a",
         "tool_call_id": "toolu_01QbhZN6GbgKBbVAjZRYQ9Ev",
@@ -1822,11 +1628,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1891,11 +1693,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "b766e8fb-6d2f-40c7-9b66-52e267dc91a5",
         "tool_call_id": "toolu_01FP7jqKxQKB9E2vD2Y9orWc",
@@ -1908,11 +1706,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -1966,9 +1760,7 @@
             "name": "grep",
             "args": {
               "query": "should_continue",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 15
             },
@@ -1982,11 +1774,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "a52f404a-2f5d-44d9-824c-71e65a7f96c5",
         "tool_call_id": "toolu_01NsHnrRGZE9RKiPP41BQbZc",
@@ -2000,11 +1788,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2059,10 +1843,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1150,
-                1200
-              ]
+              "view_range": [1150, 1200]
             },
             "id": "toolu_01Agg5464FJEs1Fii3gebei8",
             "type": "tool_call"
@@ -2074,11 +1855,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "8364daae-e4b9-4111-8ca8-d2ad74b172b4",
         "tool_call_id": "toolu_01Agg5464FJEs1Fii3gebei8",
@@ -2092,11 +1869,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2151,10 +1924,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1200,
-                1220
-              ]
+              "view_range": [1200, 1220]
             },
             "id": "toolu_01UVawfkkj64Yfyu7qiZGGjA",
             "type": "tool_call"
@@ -2166,11 +1936,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "e491af45-8548-4fc5-b199-51aa4b578fcc",
         "tool_call_id": "toolu_01UVawfkkj64Yfyu7qiZGGjA",
@@ -2184,11 +1950,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2256,11 +2018,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "6af026db-313d-4dac-aac8-daf34402123d",
         "tool_call_id": "toolu_01DfeWS3YeJZqee7Q6qhu53L",
@@ -2274,11 +2032,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2332,9 +2086,7 @@
             "name": "grep",
             "args": {
               "query": "_create_model_router",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 3
             },
@@ -2348,11 +2100,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "50019133-08fd-4ee1-939a-7e41dc716b8c",
         "tool_call_id": "toolu_011pAd5fw2iXwpCTChghNAc3",
@@ -2366,11 +2114,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2438,11 +2182,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "05f788f7-d358-4163-aa6d-710af50f0fa9",
         "tool_call_id": "toolu_01RpwdUm6s27vH8d21bRwrt5",
@@ -2456,11 +2196,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2515,10 +2251,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                635,
-                670
-              ]
+              "view_range": [635, 670]
             },
             "id": "toolu_01Snfzv8W6NMxV35BY3sA5bn",
             "type": "tool_call"
@@ -2530,11 +2263,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "778e5a92-f7c2-452e-b849-e124bbef81ee",
         "tool_call_id": "toolu_01Snfzv8W6NMxV35BY3sA5bn",
@@ -2548,11 +2277,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2607,10 +2332,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                670,
-                675
-              ]
+              "view_range": [670, 675]
             },
             "id": "toolu_01TcHNDCAvUfBvWdZcZLRfXG",
             "type": "tool_call"
@@ -2622,11 +2344,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "9ae0333a-9def-499e-8971-2b119efee91e",
         "tool_call_id": "toolu_01TcHNDCAvUfBvWdZcZLRfXG",
@@ -2640,11 +2358,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2709,11 +2423,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "147f1afa-a467-41c6-b31c-98ec6e781369",
         "tool_call_id": "toolu_01Rhg4rqMGFyaGE1EfsV2nSM",
@@ -2726,11 +2436,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2784,9 +2490,7 @@
             "name": "grep",
             "args": {
               "query": "route_tool_responses",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 15
             },
@@ -2800,11 +2504,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "921dc12a-4f58-4c01-af58-ca28329c7535",
         "tool_call_id": "toolu_01CEaWv5bcPyp7u7ZQNdoWH2",
@@ -2818,11 +2518,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2877,10 +2573,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1348,
-                1370
-              ]
+              "view_range": [1348, 1370]
             },
             "id": "toolu_01TsFzieV5KQfdoiAuYKJFjL",
             "type": "tool_call"
@@ -2892,11 +2585,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "148acb2e-3f5e-4d16-bfed-2780f66852db",
         "tool_call_id": "toolu_01TsFzieV5KQfdoiAuYKJFjL",
@@ -2910,11 +2599,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -2982,11 +2667,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "07099f84-147d-4e3a-97dd-c8574062883d",
         "tool_call_id": "toolu_01J3tzGnjGEWhThzP2b1c6Js",
@@ -3000,11 +2681,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3059,10 +2736,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                674,
-                700
-              ]
+              "view_range": [674, 700]
             },
             "id": "toolu_01PSywtc3KAo5PkLVP44mp4v",
             "type": "tool_call"
@@ -3074,11 +2748,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "c1ddb92b-1e52-49c5-9faf-566e2716ebb5",
         "tool_call_id": "toolu_01PSywtc3KAo5PkLVP44mp4v",
@@ -3092,11 +2762,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3161,11 +2827,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "1490e90a-58f4-4e0b-96b9-4e8952aa5d86",
         "tool_call_id": "toolu_012Wr7YPbvsFS3dHhdys6Q43",
@@ -3178,11 +2840,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3236,9 +2894,7 @@
             "name": "grep",
             "args": {
               "query": "post_model_hook_router",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 15
             },
@@ -3252,11 +2908,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "acc810d2-cc67-48f7-b6ea-70291943a15f",
         "tool_call_id": "toolu_011KN9z7H2nWy1hwTC5Vi9bx",
@@ -3270,11 +2922,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3329,10 +2977,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1315,
-                1360
-              ]
+              "view_range": [1315, 1360]
             },
             "id": "toolu_01Vcsioo2UQF58SckFWWhgGc",
             "type": "tool_call"
@@ -3344,11 +2989,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "89b44ec5-8fdd-4277-89bf-5148e13b2a12",
         "tool_call_id": "toolu_01Vcsioo2UQF58SckFWWhgGc",
@@ -3362,11 +3003,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3421,10 +3058,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1280,
-                1320
-              ]
+              "view_range": [1280, 1320]
             },
             "id": "toolu_016uRGbrFipjrppA3Yft2DAd",
             "type": "tool_call"
@@ -3436,11 +3070,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "cf2dea44-e2aa-4c45-a43e-65db0993b8a3",
         "tool_call_id": "toolu_016uRGbrFipjrppA3Yft2DAd",
@@ -3454,11 +3084,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3513,10 +3139,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1220,
-                1250
-              ]
+              "view_range": [1220, 1250]
             },
             "id": "toolu_01K9obTNLDDsc5BFbXHcxeCz",
             "type": "tool_call"
@@ -3528,11 +3151,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "bccf5b3e-230e-4796-93bb-e57787aac56d",
         "tool_call_id": "toolu_01K9obTNLDDsc5BFbXHcxeCz",
@@ -3546,11 +3165,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3605,10 +3220,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1270,
-                1290
-              ]
+              "view_range": [1270, 1290]
             },
             "id": "toolu_01GynJ3NoDoseR7frcLRfGKr",
             "type": "tool_call"
@@ -3620,11 +3232,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "7eb10c70-9275-489b-87c8-deb28da0b7cc",
         "tool_call_id": "toolu_01GynJ3NoDoseR7frcLRfGKr",
@@ -3638,11 +3246,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3710,11 +3314,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "89847d03-80d7-491f-a3ad-0a684f8cf06a",
         "tool_call_id": "toolu_012V6ewLfvVQfR1DZ1aaKVjw",
@@ -3728,11 +3328,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3787,10 +3383,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                699,
-                730
-              ]
+              "view_range": [699, 730]
             },
             "id": "toolu_013aTeUh9UQMKbW8vtSn9uuP",
             "type": "tool_call"
@@ -3802,11 +3395,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "4bcdc4a7-d16a-4727-a32d-7ba4b2f2e55a",
         "tool_call_id": "toolu_013aTeUh9UQMKbW8vtSn9uuP",
@@ -3820,11 +3409,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3879,10 +3464,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                730,
-                760
-              ]
+              "view_range": [730, 760]
             },
             "id": "toolu_01Q9YkqQ7BG6q267w8Deg8m1",
             "type": "tool_call"
@@ -3894,11 +3476,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "2dac27f8-e50d-4838-954b-6107449c8ee8",
         "tool_call_id": "toolu_01Q9YkqQ7BG6q267w8Deg8m1",
@@ -3912,11 +3490,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -3981,11 +3555,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "b26aebc9-dbf7-4eb8-ac79-fb7df34e448c",
         "tool_call_id": "toolu_01QHCjuUdHypxLbT9VHh4fXf",
@@ -3998,11 +3568,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4057,10 +3623,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                759,
-                770
-              ]
+              "view_range": [759, 770]
             },
             "id": "toolu_017iCr6LQEyx2jQxR9KRAhV5",
             "type": "tool_call"
@@ -4072,11 +3635,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "a5274f34-8e23-4141-b8e8-a6220f51f12a",
         "tool_call_id": "toolu_017iCr6LQEyx2jQxR9KRAhV5",
@@ -4090,11 +3649,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4149,10 +3704,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1068,
-                1120
-              ]
+              "view_range": [1068, 1120]
             },
             "id": "toolu_01P82vzom5CC4owGEv7SvMnc",
             "type": "tool_call"
@@ -4164,11 +3716,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "6b0b2be6-c339-4eb4-b4a3-4c45a09de0b6",
         "tool_call_id": "toolu_01P82vzom5CC4owGEv7SvMnc",
@@ -4182,11 +3730,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4241,10 +3785,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1200,
-                1280
-              ]
+              "view_range": [1200, 1280]
             },
             "id": "toolu_018F2inrZdzbV8nUkvz77gV5",
             "type": "tool_call"
@@ -4256,11 +3797,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "9eb56a65-8247-42c8-8448-4e98bdb9148c",
         "tool_call_id": "toolu_018F2inrZdzbV8nUkvz77gV5",
@@ -4274,11 +3811,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4333,10 +3866,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1280,
-                1380
-              ]
+              "view_range": [1280, 1380]
             },
             "id": "toolu_01US9nFuJ3WMbDtRFF5YkDjS",
             "type": "tool_call"
@@ -4348,11 +3878,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "eae858c3-0d51-44e9-b488-0277b2632f43",
         "tool_call_id": "toolu_01US9nFuJ3WMbDtRFF5YkDjS",
@@ -4366,11 +3892,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4438,11 +3960,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "533e734e-2732-4a42-92c1-35ef98a90b9a",
         "tool_call_id": "toolu_014PPoc3azxxkjs7hZmWqJFG",
@@ -4456,11 +3974,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4515,10 +4029,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                759,
-                780
-              ]
+              "view_range": [759, 780]
             },
             "id": "toolu_012jwc4vQ4mR7yX4DGHtM5NA",
             "type": "tool_call"
@@ -4530,11 +4041,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "beab573c-188c-4035-b7d6-1dd8604a3298",
         "tool_call_id": "toolu_012jwc4vQ4mR7yX4DGHtM5NA",
@@ -4548,11 +4055,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4607,10 +4110,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                840,
-                870
-              ]
+              "view_range": [840, 870]
             },
             "id": "toolu_011APb8YTVsrT8fFLBpb1Af5",
             "type": "tool_call"
@@ -4622,11 +4122,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "db86b9f8-e1b1-41e0-8dea-bb3791c48a64",
         "tool_call_id": "toolu_011APb8YTVsrT8fFLBpb1Af5",
@@ -4640,11 +4136,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4709,11 +4201,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "d1e68b98-5ec6-44ce-8f75-b57514204c9d",
         "tool_call_id": "toolu_01JmiFU2k9wEX2rM5V1btCKF",
@@ -4726,11 +4214,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4785,10 +4269,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                875,
-                920
-              ]
+              "view_range": [875, 920]
             },
             "id": "toolu_01RuoUjh8ijGWQxeygTYSW8X",
             "type": "tool_call"
@@ -4800,11 +4281,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "3a02b042-1591-4d79-a59a-a4cfd5ddab89",
         "tool_call_id": "toolu_01RuoUjh8ijGWQxeygTYSW8X",
@@ -4818,11 +4295,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4877,10 +4350,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                877,
-                950
-              ]
+              "view_range": [877, 950]
             },
             "id": "toolu_01Ttf9rDstEobR8PqXS5fiq4",
             "type": "tool_call"
@@ -4892,11 +4362,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "d9e8bb80-41ee-411c-920c-92dd0de1c693",
         "tool_call_id": "toolu_01Ttf9rDstEobR8PqXS5fiq4",
@@ -4910,11 +4376,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -4968,9 +4430,7 @@
             "name": "grep",
             "args": {
               "query": "def create_react_agent",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 5
             },
@@ -4984,11 +4444,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "f0a59060-a91d-438e-adde-682cbfe7d289",
         "tool_call_id": "toolu_01NCcwLPcS9fvfYKqNJM2zhE",
@@ -5002,11 +4458,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5061,10 +4513,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1100,
-                1150
-              ]
+              "view_range": [1100, 1150]
             },
             "id": "toolu_01BNMSqnZDKcCKADJ7rJc2hm",
             "type": "tool_call"
@@ -5076,11 +4525,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "30b173ff-6fdf-472e-91e8-3311b2f77990",
         "tool_call_id": "toolu_01BNMSqnZDKcCKADJ7rJc2hm",
@@ -5094,11 +4539,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5153,10 +4594,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1080,
-                1120
-              ]
+              "view_range": [1080, 1120]
             },
             "id": "toolu_016XehJcpMV8D3Md1WFN67GS",
             "type": "tool_call"
@@ -5168,11 +4606,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "279ca25b-53c9-418d-a334-9859e7a3192c",
         "tool_call_id": "toolu_016XehJcpMV8D3Md1WFN67GS",
@@ -5186,11 +4620,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5244,9 +4674,7 @@
             "name": "grep",
             "args": {
               "query": "\"\"\"Creates an agent graph that calls tools in a loop until a stopping condition is met.",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 5
             },
@@ -5260,11 +4688,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "7031246e-dca9-4065-a883-fde7223486a4",
         "tool_call_id": "toolu_013EJR8o3wvFypZa1FcUFDzz",
@@ -5278,11 +4702,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5337,10 +4757,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1080,
-                1090
-              ]
+              "view_range": [1080, 1090]
             },
             "id": "toolu_01KyEwuba5xL2EDNfr6JQ9sx",
             "type": "tool_call"
@@ -5352,11 +4769,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "4633ce95-f467-4072-a3e5-15b23adc2b48",
         "tool_call_id": "toolu_01KyEwuba5xL2EDNfr6JQ9sx",
@@ -5370,11 +4783,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5429,10 +4838,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1480,
-                1490
-              ]
+              "view_range": [1480, 1490]
             },
             "id": "toolu_01T8ae7trWfFGJ1d9s11qNmV",
             "type": "tool_call"
@@ -5444,11 +4850,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "0672f431-4a48-49ac-b6de-99fb1f1b3673",
         "tool_call_id": "toolu_01T8ae7trWfFGJ1d9s11qNmV",
@@ -5462,11 +4864,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5520,9 +4918,7 @@
             "name": "grep",
             "args": {
               "query": "return workflow.compile",
-              "file_types": [
-                ".py"
-              ],
+              "file_types": [".py"],
               "include_files": "*chat_agent_executor.py",
               "context_lines": 5
             },
@@ -5536,11 +4932,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "43430c4f-c989-4cc5-a8a9-fd3d2f46cbb7",
         "tool_call_id": "toolu_01W52Q4CmupJrYx6B1iZ6gFx",
@@ -5554,11 +4946,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5613,10 +5001,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1560,
-                1570
-              ]
+              "view_range": [1560, 1570]
             },
             "id": "toolu_01PYkNuZXRi3B4eJrthoNzsz",
             "type": "tool_call"
@@ -5628,11 +5013,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "6f8c8e6e-b582-42c2-b60d-324c34ac98d5",
         "tool_call_id": "toolu_01PYkNuZXRi3B4eJrthoNzsz",
@@ -5646,11 +5027,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5718,11 +5095,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "71ad7ec3-e97f-4355-bbc1-66cf3b5d479f",
         "tool_call_id": "toolu_01NGeTGWsyunCwGaq17UpEDB",
@@ -5736,11 +5109,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5795,10 +5164,7 @@
             "args": {
               "command": "view",
               "path": "/home/daytona/langgraph/libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py",
-              "view_range": [
-                1083,
-                1110
-              ]
+              "view_range": [1083, 1110]
             },
             "id": "toolu_01UX2xuCoHaFeeKWkPptP5QT",
             "type": "tool_call"
@@ -5810,11 +5176,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "e03e38e2-3e8b-446e-bbb0-f380a39d6bc5",
         "tool_call_id": "toolu_01UX2xuCoHaFeeKWkPptP5QT",
@@ -5828,11 +5190,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "AIMessageChunk"
-      ],
+      "id": ["langchain_core", "messages", "AIMessageChunk"],
       "kwargs": {
         "content": [
           {
@@ -5897,11 +5255,7 @@
     {
       "lc": 1,
       "type": "constructor",
-      "id": [
-        "langchain_core",
-        "messages",
-        "ToolMessage"
-      ],
+      "id": ["langchain_core", "messages", "ToolMessage"],
       "kwargs": {
         "id": "a9ab7b94-8235-422a-ae5e-adf96ce7d953",
         "tool_call_id": "toolu_012XVkG2kMdKbK2oBHr69qK1",

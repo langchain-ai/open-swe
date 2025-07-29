@@ -2,7 +2,12 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { describe, it, expect } from "@jest/globals";
-import { AIMessage, coerceMessageLikeToMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  coerceMessageLikeToMessage,
+  HumanMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
@@ -703,20 +708,27 @@ describe("getMessagesSinceLastSummary", () => {
   it("retains the last summary tool messages from a real trace", async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     const basePath = path.join(__dirname, "data");
-    const inputs: GraphState = JSON.parse(fs.readFileSync(path.join(basePath, "summarize-history-input.json"), "utf-8"));
-  
+    const inputs: GraphState = JSON.parse(
+      fs.readFileSync(
+        path.join(basePath, "summarize-history-input.json"),
+        "utf-8",
+      ),
+    );
+
     const conversationHistoryToSummarize = await getMessagesSinceLastSummary(
-        inputs.internalMessages.map(coerceMessageLikeToMessage),
-        {
-          excludeHiddenMessages: true,
-          excludeCountFromEnd: 20,
-        },
-      );
-  
+      inputs.internalMessages.map(coerceMessageLikeToMessage),
+      {
+        excludeHiddenMessages: true,
+        excludeCountFromEnd: 20,
+      },
+    );
+
     const expectedToolMessageId = "465097e3-3c65-4af1-beb5-c3d9444219fd";
-    const toolMessageExists = conversationHistoryToSummarize.find((m) => m.id === expectedToolMessageId)
+    const toolMessageExists = conversationHistoryToSummarize.find(
+      (m) => m.id === expectedToolMessageId,
+    );
     expect(toolMessageExists).not.toBeDefined();
-  })
+  });
 });
 
 describe("MAX_INTERNAL_TOKENS constant", () => {
