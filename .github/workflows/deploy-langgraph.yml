@@ -38,16 +38,11 @@ jobs:
       - name: Build packages
         run: yarn build
 
-      - name: Compile deployment script
-        run: |
-          cd apps/open-swe
-          yarn tsc --module commonjs --skipLibCheck --outDir ./dist/scripts ./scripts/deploy-langgraph.ts
-          mv ./dist/scripts/deploy-langgraph.js ./dist/scripts/deploy-langgraph.cjs
-
       - name: Execute deployment
         run: |
           cd apps/open-swe
-          node ./dist/scripts/deploy-langgraph.cjs
+          yarn tsx ./scripts/deploy-langgraph.ts
+
         env:
           CONTROL_PLANE_HOST: ${{ secrets.CONTROL_PLANE_HOST }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
