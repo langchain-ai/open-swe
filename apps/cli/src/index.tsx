@@ -339,28 +339,46 @@ const App: React.FC = () => {
   }, [pollingForToken, isLoggedIn]);
 
   // Custom input for planner feedback (must be inside App)
-  const PlannerFeedbackInput: React.FC = () => {
-    const [input, setInput] = useState("");
-    useInput((inputChar: string, key: { [key: string]: any }) => {
+  const PlanFeedbackSelect: React.FC = () => {
+    const [highlighted, setHighlighted] = useState(0);
+    const [isMessage, setIsMessage] = useState(false);
+
+    const options = [
+      { value: "approve", label: "Approve" },
+      { value: "deny", label: "Deny" },
+    ];
+
+    useInput((input: string, key: { [key: string]: any }) => {
       if (streamingPhase !== "awaitingFeedback") return;
+      if (isMessage) return;
+      
       if (key.return) {
-        if (
-          input.trim().toLowerCase() === "approve" ||
-          input.trim().toLowerCase() === "deny"
-        ) {
-          setPlannerFeedback(input.trim().toLowerCase());
-          setInput(""); // Clear input after submitting
-        }
-      } else if (key.backspace || key.delete) {
-        setInput((prev) => prev.slice(0, -1));
-      } else if (inputChar) {
-        setInput((prev) => prev + inputChar);
+        setIsMessage(true);
+        setPlannerFeedback(options[highlighted].value);
+      } else if (key.leftArrow) {
+        setHighlighted((h) => (h - 1 + options.length) % options.length);
+      } else if (key.rightArrow) {
+        setHighlighted((h) => (h + 1) % options.length);
       }
     });
+
     if (streamingPhase !== "awaitingFeedback") return null;
+
     return (
-      <Box>
-        <Text>Plan feedback (approve/deny): {input}</Text>
+      <Box flexDirection="row" alignItems="center" gap={2}>
+        <Text>Plan feedback:</Text>
+        {options.map((option, idx) => (
+          <Text 
+            key={option.value} 
+            dimColor={idx !== highlighted}
+            bold={idx === highlighted}
+          >
+            {idx === highlighted ? "[" : " "}
+            {option.label}
+            {idx === highlighted ? "]" : " "}
+          </Text>
+        ))}
+        <Text dimColor>Use ←/→ to navigate, Enter to select</Text>
       </Box>
     );
   };
@@ -581,27 +599,30 @@ const App: React.FC = () => {
           flexShrink={0}
           justifyContent="center"
         >
-          {streamingPhase === "awaitingFeedback" ? (
-            <PlannerFeedbackInput />
-          ) : (
-            <Box>
-              {!hasStartedChat ? (
-                <CustomInput
-                  onSubmit={(value) => {
-                    setHasStartedChat(true);
-                    setPrompt(value);
-                  }}
-                />
-              ) : (
-                <CustomInput
-                  onSubmit={(value) => {
-                    sendInterruptMessage(value);
-                  }}
-                />
-              )}
-            </Box>
-          )}
+          <Box>
+            {!hasStartedChat ? (
+              <CustomInput
+                onSubmit={(value) => {
+                  setHasStartedChat(true);
+                  setPrompt(value);
+                }}
+              />
+            ) : (
+              <CustomInput
+                onSubmit={(value) => {
+                  sendInterruptMessage(value);
+                }}
+              />
+            )}
+          </Box>
         </Box>
+
+        {/* Plan feedback below the input bar */}
+        {streamingPhase === "awaitingFeedback" && (
+          <Box flexDirection="column" paddingX={2} marginTop={1}>
+            <PlanFeedbackSelect />
+          </Box>
+        )}
       </Box>
     );
   }
