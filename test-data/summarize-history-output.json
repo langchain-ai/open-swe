@@ -1,0 +1,1363 @@
+{
+  "internalMessages": [
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "465097e3-3c65-4af1-beb5-c3d9444219fd",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Ux6UVJbMee5w4HcjffbfhN",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "30c307db-554e-4adf-b133-d8d8cd146ba6",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01N9nMnUcs96UBZUoCAuS1Uh",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "23a05462-acf3-44e4-a661-95c2b7590a50",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01DtTS2fS82eBHF92qUz4Qfa",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "3dc0800c-a6d4-40f8-a914-b9959c83e87f",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Uv7oiSg5GZVjM2BjnKVXTU",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "525aea62-715c-4ac9-84a9-5d2401c131d4",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01KLEXNDQxoxwyC7NLHVBu3d",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "ac504d63-17e4-4a86-acea-c188ea0a7465",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01SZiAXZms2T6uqYjP6Lcjbh",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "15d8cd0a-1ca6-4d64-a628-73f83c2e986e",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_013n8K5vZtSV5U2ijq8CCT3e",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "4062a4a3-7e6f-408a-9b3e-02784ce8a902",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01SfTJYUYiqHbnYxJBn1VfUy",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "88f0f48a-61b0-4601-b7ad-0d5d2b79882a",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01QoPukSq6BtkVx99GVsvL5p",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "b766e8fb-6d2f-40c7-9b66-52e267dc91a5",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01PMN3kB7ESpJ1djdMEjafDs",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "a52f404a-2f5d-44d9-824c-71e65a7f96c5",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01D6eBdCLZXsiHkDCxuDVvkU",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "8364daae-e4b9-4111-8ca8-d2ad74b172b4",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01PvUs6FZr79GMnRfZJj21Ht",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "e491af45-8548-4fc5-b199-51aa4b578fcc",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01NMqDR2NAocJBBmbtPzE928",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "6af026db-313d-4dac-aac8-daf34402123d",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01FiXk4EvX5rU1BpeVzRUzSp",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "50019133-08fd-4ee1-939a-7e41dc716b8c",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01TkR94nC8no1W4q3XhXeq9f",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "05f788f7-d358-4163-aa6d-710af50f0fa9",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Febkpa8UtT2qQZuTmzDFpy",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "778e5a92-f7c2-452e-b849-e124bbef81ee",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_017zatSwEG6dYgpfZoJoiEMb",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "9ae0333a-9def-499e-8971-2b119efee91e",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01S4Q71LddhAkiNci4QD5S3E",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "147f1afa-a467-41c6-b31c-98ec6e781369",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_017z6AvF8Ju7Nr4mHfXi7BDD",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "921dc12a-4f58-4c01-af58-ca28329c7535",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_013TCP821BHNTggL7wXd97sE",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "148acb2e-3f5e-4d16-bfed-2780f66852db",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Gxw4dawbRWAVF4gEYM4SF1",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "07099f84-147d-4e3a-97dd-c8574062883d",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_015YH8T1HTfsZi73bKK6wVAs",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "c1ddb92b-1e52-49c5-9faf-566e2716ebb5",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01WAWE6AQGBxqsNFY5XNaHv8",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "1490e90a-58f4-4e0b-96b9-4e8952aa5d86",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_011icBF7X3hu7NDvnubEZSfz",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "acc810d2-cc67-48f7-b6ea-70291943a15f",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01GW2six7SCzA1Wkr7tyaiGo",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "89b44ec5-8fdd-4277-89bf-5148e13b2a12",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Nh8gg4NV4nEk9gU4c6zQzc",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "cf2dea44-e2aa-4c45-a43e-65db0993b8a3",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01CTA2k8aySyJXcGYf1UCdC7",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "bccf5b3e-230e-4796-93bb-e57787aac56d",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_014GoS31EJ1B4KczHQxABVgE",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "7eb10c70-9275-489b-87c8-deb28da0b7cc",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01VmqPrK9527gqtVNPc3m7JB",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "89847d03-80d7-491f-a3ad-0a684f8cf06a",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_013TSUvR9hDWRnNoL8Ky3jGc",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "4bcdc4a7-d16a-4727-a32d-7ba4b2f2e55a",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_012Gdf5msESizgrstimJhnzm",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "2dac27f8-e50d-4838-954b-6107449c8ee8",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_017QgxsxV1JT4eoCj4NRhf8P",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "b26aebc9-dbf7-4eb8-ac79-fb7df34e448c",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01NwciWWcg78DMKZx1MkUXau",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "a5274f34-8e23-4141-b8e8-a6220f51f12a",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01JMR2cECF25kZvfXQYexpkC",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "6b0b2be6-c339-4eb4-b4a3-4c45a09de0b6",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01RsSEU3ixfNWmZPKRHC6Roo",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "9eb56a65-8247-42c8-8448-4e98bdb9148c",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01UxyDBjM1rbm8cnpqgoDGPi",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "eae858c3-0d51-44e9-b488-0277b2632f43",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01Qb93tPaCrHSjT1assUDNZh",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "533e734e-2732-4a42-92c1-35ef98a90b9a",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01SzcSpwEuTPBJfkJAgKdpC7",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "beab573c-188c-4035-b7d6-1dd8604a3298",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01GSSnaT6Wndgo5mFPsKAK8T",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "db86b9f8-e1b1-41e0-8dea-bb3791c48a64",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01DEXVdQFjaBAmte4Pf4QPxe",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "d1e68b98-5ec6-44ce-8f75-b57514204c9d",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_01LZdcNbiXKVmF23b25sDAY2",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "3a02b042-1591-4d79-a59a-a4cfd5ddab89",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_017M8YtEEivJgb9ipgCpzXwS",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "d9e8bb80-41ee-411c-920c-92dd0de1c693",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "msg_017QUKkJQHrofzuTzgMTd6iS",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "RemoveMessage"
+      ],
+      "kwargs": {
+        "id": "f0a59060-a91d-438e-adde-682cbfe7d289",
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "AIMessage"
+      ],
+      "kwargs": {
+        "id": "48ce530a-e6cc-47e9-b87b-c9d0639698c9",
+        "content": "Looks like I'm running out of tokens. I'm going to summarize the conversation history to free up space.",
+        "tool_calls": [
+          {
+            "id": "3fda18b5-4f8f-4984-a433-9e68f7739770",
+            "name": "summarize_conversation_history",
+            "args": {
+              "reasoning": "I'm running out of tokens. I'm going to summarize all of the messages since my last summary message to free up space."
+            }
+          }
+        ],
+        "additional_kwargs": {
+          "summary_message": true
+        },
+        "invalid_tool_calls": [],
+        "response_metadata": {}
+      }
+    },
+    {
+      "lc": 1,
+      "type": "constructor",
+      "id": [
+        "langchain_core",
+        "messages",
+        "ToolMessage"
+      ],
+      "kwargs": {
+        "id": "ec8b0ee5-cb26-42fb-8f9e-4bd38ea57180",
+        "tool_call_id": "3fda18b5-4f8f-4984-a433-9e68f7739770",
+        "content": "- User requests refactor of `create_react_agent` in `libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py` to use internal helper class `_AgentBuilder` for maintainability and readability without unnecessary abstractions.\n\n- `_AgentBuilder` is an internal scaffolding utility that constructs a configurable ReAct-style agent graph using LangGraph and LangChain components. It encapsulates configuration logic, validation, and dynamic construction of nodes and edges based on user input.\n\n- Core responsibilities of `_AgentBuilder`:\n  1. Model & Tool Integration: Accepts a language model (`BaseChatModel`, `Runnable`, or string reference) and optionally binds it to tool definitions (`BaseTool`, `ToolNode`, callable, or dict schema). Determines if tool binding is needed and wraps model invocation with a prompt handling mechanism.\n  2. State Schema Management: Dynamically sets the graph's state schema, defaulting to built-in `AgentState` variants. Validates custom state schemas to ensure required fields (`messages`, `remaining_steps`, `structured_response` if needed) are present.\n  3. Prompt Handling: Supports various prompt formats (`str`, `SystemMessage`, `Callable`, or `Runnable`). Wraps them as a `RunnableCallable` for use in the graph.\n  4. Model Node Construction: Creates the `agent` node that calls the LLM, validates chat history, invokes the model, and decides whether to continue (based on remaining steps, tool calls, etc.).\n  5. Optional Structured Output: If `response_format` is provided, adds a final node to generate a structured output using `.with_structured_output()` on the model.\n  6. Hooks: Supports `pre_model_hook` (for message pruning/summarization before LLM call) and `post_model_hook` (for human-in-the-loop, validation, or guardrails after LLM response). Each hook becomes a node in the workflow graph if defined.\n  7. Routing Logic: Defines conditional logic to route execution to tools (if tool calls exist), structured output generation (if enabled), or termination (if no further action is needed). Supports both v1 (single batched tool call) and v2 (distributed tool call routing via `Send` API).\n  8. Graph Assembly: Constructs a `StateGraph` with all configured nodes and conditional edges. Supports entry/exit customization and debugging features.\n\n- Key methods implemented in `_AgentBuilder`:\n  - `__init__`: Stores all parameters as instance variables, validates `version`, handles deprecated `config_schema` with warning, validates `state_schema` keys, sets default `state_schema` based on `response_format`, processes tools (handles `ToolNode` vs sequence), determines model characteristics (`is_dynamic_model`, `is_async_dynamic_model`), identifies tools with `return_direct` behavior, sets `tool_calling_enabled`.\n  - `_setup_model_and_tools`: Handles static model initialization (string to `BaseChatModel` via `init_chat_model`), tool binding with `_should_bind_tools`, prompt runnable creation, dynamic model setup, and creates `_resolve_model`/`_aresolve_model` functions for runtime model resolution.\n  - `_create_model_node`: Creates sync and async callables (`call_model`, `acall_model`) that validate chat history, resolve model, manage remaining steps and tool call logic, and return a `RunnableCallable` with proper input schema.\n  - `_create_structured_response_node`: Returns None if no `response_format`. Otherwise creates sync and async functions that handle system prompt injection for tuple `response_format`, resolve model, generate structured output using `.with_structured_output()`, and return `structured_response` in state. Returns a `RunnableCallable` with correct input schema.\n  - `_create_model_router`: Defines `should_continue` function that routes based on last message type: if no tool calls, routes to `post_model_hook`/`generate_structured_response`/`END`; if tool calls present, routes to `\"tools\"` (v1) or list of `Send` for parallel execution (v2) using `ToolCallWithContext`. Integrates `post_model_hook` properly.\n  - `_create_tools_router`: Returns None if no `return_direct` tools. Otherwise creates `route_tool_responses` function that checks for `return_direct` tools in reversed message order, handles parallel tool call scenarios with `return_direct`, and routes to `END` or entrypoint accordingly.\n  - `_setup_hooks`: Adds `pre_model_hook` node with edge to `agent` if provided, sets entrypoint accordingly. Adds `post_model_hook` node with conditional routing (`post_model_hook_router`) that handles pending tool calls (returns list of `Send`), structured response generation, and `END` routing. Stores router function for use in `build`.\n  - `build`: Calls `_setup_model_and_tools()`. Handles tool-calling vs non-tool-calling workflows separately. Creates `StateGraph` with proper schema, adds `agent` node, optionally adds `tools` node. Sets up hooks and entrypoint. Adds structured response node if needed. Sets up conditional edges for agent routing (`should_continue`), post model hook routing, and tools routing based on `return_direct`. Compiles graph with all provided options (`checkpointer`, `store`, `interrupt_before`, `interrupt_after`, `debug`, `name`) and returns `CompiledStateGraph`.\n\n- The public API `create_react_agent` function in `libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py` (lines ~877-950) has been refactored to:\n  - Preserve exact function signature and docstring.\n  - Validate deprecated kwargs.\n  - Instantiate `_AgentBuilder` with all parameters (model, tools, prompt, response_format, pre_model_hook, post_model_hook, state_schema, context_schema, checkpointer, store, interrupt_before, interrupt_after, debug, version, name).\n  - Return `builder.build()`.\n\n- Relevant file paths:\n  - `libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py` (main implementation and refactor)\n  - `libs/prebuilt/langgraph/prebuilt/_internal.py` (defines `ToolCallWithContext`)\n  - `libs/prebuilt/tests/test_react_agent.py` and `test_react_agent_graph.py` (tests)\n\n- Key imports and components used:\n  - LangChain core: `BaseChatModel`, `Runnable`, `RunnableBinding`, `RunnableSequence`, `BaseTool`, `SystemMessage`, `AIMessage`, `ToolMessage`\n  - LangGraph internal: `RunnableCallable`, `StateGraph`, `END`, `ToolNode`, `Runtime`, `Checkpointer`, `Send`\n  - Pydantic for state schemas\n  - Python standard: `inspect`, `warnings`, `typing` (e.g., `Union`, `Callable`, `Optional`, `Sequence`, `TypeVar`, `cast`, `get_type_hints`)\n\n- Edge case handling:\n  - Validates message-tool call consistency to prevent misaligned tool invocations.\n  - Handles tool `return_direct` behavior carefully to skip further LLM calls if needed.\n  - Automatically derives tool call context in v2 via `ToolCallWithContext`.\n\n- Tests cover:\n  - Various prompt types and usage.\n  - Pre-model and post-model hooks.\n  - Tool calling and `return_direct` behavior.\n  - Structured response generation.\n  - Version differences (v1 vs v2).\n\nThis context captures the essential information, design, and implementation details needed to proceed with the refactor of `create_react_agent` using the `_AgentBuilder` helper class.",
+        "additional_kwargs": {
+          "summary_message": true
+        },
+        "response_metadata": {}
+      }
+    }
+  ],
+  "tokenData": [
+    {
+      "cacheCreationInputTokens": 0,
+      "cacheReadInputTokens": 0,
+      "inputTokens": 36431,
+      "outputTokens": 1571,
+      "model": "gpt-4.1-mini"
+    }
+  ]
+}

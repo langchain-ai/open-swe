@@ -141,7 +141,7 @@ export function getMessagesSinceLastSummaryFunc(
 ): BaseMessage[] {
   // Find the index of the last summary message
   const lastSummaryIndex = messages.findIndex(
-    (m) => m.additional_kwargs?.summary_message,
+    (m) => m.additional_kwargs?.summary_message && isToolMessage(m),
   );
 
   // Get all messages after the last summary message
