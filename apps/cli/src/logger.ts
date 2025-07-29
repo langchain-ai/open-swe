@@ -3,6 +3,7 @@ import {
   ToolMessage,
   isAIMessage,
   isHumanMessage,
+  isToolMessage,
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
@@ -110,7 +111,7 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
         const message = coerceMessageLikeToMessage(msg);
 
         // Handle tool messages
-        if (message instanceof ToolMessage) {
+        if (isToolMessage(message)) {
           const toolName = message.name || "tool";
           const result = formatToolResult(message);
           if (result) {
