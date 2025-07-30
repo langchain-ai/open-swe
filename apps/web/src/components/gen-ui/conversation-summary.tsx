@@ -74,4 +74,3 @@ export function ConversationHistorySummary({ summary }: { summary: string }) {
     </div>
   );
 }
-

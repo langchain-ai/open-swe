@@ -167,11 +167,11 @@ export function PullRequestOpened({
       {/* Content */}
       {expanded && description && status === "done" && (
         <div className="border-t p-4">
-          <div className="rounded-lg bg-muted/30 p-3">
-            <h4 className="mb-2 text-xs font-medium text-muted-foreground">
+          <div className="bg-muted/30 rounded-lg p-3">
+            <h4 className="text-muted-foreground mb-2 text-xs font-medium">
               Description
             </h4>
-            <pre className="text-sm whitespace-pre-wrap text-foreground">
+            <pre className="text-foreground text-sm whitespace-pre-wrap">
               {description}
             </pre>
           </div>
@@ -180,5 +180,3 @@ export function PullRequestOpened({
     </div>
   );
 }
-
-
