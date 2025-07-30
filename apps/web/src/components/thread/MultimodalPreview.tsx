@@ -26,9 +26,14 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
     block.mime_type.startsWith("image/")
   ) {
     const url = `data:${block.mime_type};base64,${block.data}`;
-    let imgClass: string = "rounded-md object-cover h-16 w-16 text-lg";
-    if (size === "sm") imgClass = "rounded-md object-cover h-10 w-10 text-base";
-    if (size === "lg") imgClass = "rounded-md object-cover h-24 w-24 text-xl";
+    let imgClass: string =
+      "rounded-md object-cover h-16 w-16 text-lg shadow-sm ring-1 ring-border";
+    if (size === "sm")
+      imgClass =
+        "rounded-md object-cover h-10 w-10 text-base shadow-sm ring-1 ring-border";
+    if (size === "lg")
+      imgClass =
+        "rounded-md object-cover h-24 w-24 text-xl shadow-sm ring-1 ring-border";
     return (
       <div className={cn("relative inline-block", className)}>
         <Image
@@ -41,11 +46,11 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
         {removable && (
           <button
             type="button"
-            className="absolute top-1 right-1 z-10 cursor-pointer rounded-full p-1 text-white hover:bg-gray-800"
+            className="bg-destructive/90 text-destructive-foreground hover:bg-destructive absolute -top-2 -right-2 z-10 cursor-pointer rounded-full p-1 shadow-sm"
             onClick={onRemove}
             aria-label="Remove image"
           >
-            <XIcon className="h-4 w-4" />
+            <XIcon className="h-3 w-3" />
           </button>
         )}
       </div>
@@ -63,20 +68,20 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
     return (
       <div
         className={cn(
-          "relative flex items-center justify-start gap-2 rounded-md border-[1px] border-gray-800 bg-inherit px-3 py-2",
+          "border-border bg-card/50 relative flex items-center justify-start gap-2 rounded-md border px-3 py-2",
           className,
         )}
       >
         <div className="flex flex-shrink-0 flex-col items-start justify-start">
           <File
             className={cn(
-              "text-teal-700",
+              "text-primary",
               size === "sm" ? "h-5 w-5" : "h-7 w-7",
             )}
           />
         </div>
         <span
-          className={cn("min-w-0 flex-1 text-sm break-all text-gray-300")}
+          className={cn("text-foreground min-w-0 flex-1 text-sm break-all")}
           style={{ wordBreak: "break-all", whiteSpace: "pre-wrap" }}
         >
           {String(filename)}
@@ -84,7 +89,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
         {removable && (
           <button
             type="button"
-            className="cursor-pointer self-start rounded-full p-1 text-teal-700 hover:bg-gray-800"
+            className="text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer self-start rounded-full p-1"
             onClick={onRemove}
             aria-label="Remove PDF"
           >
@@ -99,7 +104,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-md border-[1px] border-gray-800 bg-inherit px-3 py-2 text-gray-500",
+        "border-border bg-card/50 text-muted-foreground flex items-center gap-2 rounded-md border px-3 py-2",
         className,
       )}
     >
@@ -108,7 +113,7 @@ export const MultimodalPreview: React.FC<MultimodalPreviewProps> = ({
       {removable && (
         <button
           type="button"
-          className="cursor-pointer self-start rounded-full p-1 text-gray-500 hover:bg-gray-800"
+          className="text-muted-foreground hover:bg-accent hover:text-accent-foreground cursor-pointer self-start rounded-full p-1"
           onClick={onRemove}
           aria-label="Remove file"
         >

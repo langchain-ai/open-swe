@@ -200,23 +200,18 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     </Tooltip>
                   </TooltipProvider>
                   <TooltipIconButton
-                    variant={autoAccept ? "brand" : "ghost"}
+                    variant={autoAccept ? "default" : "ghost"}
                     tooltip="Automatically accept the plan"
                     className={cn(
-                      "transition-all duration-200 hover:scale-110 active:scale-95",
+                      "transition-colors duration-200",
                       autoAccept
-                        ? "text-secondary"
+                        ? "bg-primary hover:bg-primary/90"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                     onClick={() => setAutoAccept((prev) => !prev)}
                     side="bottom"
                   >
-                    <ListChecks
-                      className={cn(
-                        "size-4 transition-all duration-200",
-                        autoAccept && "animate-pulse",
-                      )}
-                    />
+                    <ListChecks className="size-4" />
                   </TooltipIconButton>
                 </div>
               </div>
