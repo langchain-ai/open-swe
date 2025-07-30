@@ -214,7 +214,7 @@ export async function updatePlan(
     newPlanItems,
     "agent",
   );
-  // Update the github issue to reflect this task as completed.
+  // Update the github issue to reflect the changes in the plan
   await addTaskPlanToIssue(
     {
       githubIssueId: state.githubIssueId,
