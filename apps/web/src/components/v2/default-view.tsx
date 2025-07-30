@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { FilePlus2, Archive, ListChecks } from "lucide-react";
+import { Paperclip, Archive, ListChecks } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -191,11 +191,11 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                           htmlFor="file-input"
                           className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center justify-center rounded-full bg-inherit"
                         >
-                          <FilePlus2 className="size-4" />
+                          <Paperclip className="size-4" />
                         </Label>
                       </TooltipTrigger>
                       <TooltipContent side="bottom">
-                        Attach files
+                        Attachments
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
