@@ -32,7 +32,6 @@ export function RequestHumanHelp({
   onSubmitResponse,
   requestHelpEvents,
 }: RequestHumanHelpProps) {
-  console.log("requestHelpEvents", requestHelpEvents);
   const [expanded, setExpanded] = useState(true);
   const [userResponse, setUserResponse] = useState("");
   const [submittedResponse, setSubmittedResponse] = useState<string | null>(

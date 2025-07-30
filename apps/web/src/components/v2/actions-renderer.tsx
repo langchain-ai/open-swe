@@ -160,7 +160,6 @@ export function ActionsRenderer<
     if (!allCustomEvents?.length) {
       return;
     }
-    console.log("found new events from msgs!", allCustomEvents);
 
     setCustomNodeEvents((prev) => {
       // If no existing events, set all new events
