@@ -9,21 +9,22 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/index.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
-import { getPlannerNotes } from "../utils/get-notes.js";
+import { getScratchpad } from "../utils/scratchpad-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
-const PLANNER_NOTES_PROMPT = `You've also taken technical notes throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
+const SCRATCHPAD_PROMPT = `You've also wrote technical notes to a scratchpad throughout the context gathering process. Ensure you include/incorporate these notes, or the highest quality parts of these notes in your conclusion notes.
 
-<planner_notes>
-{PLANNER_NOTES}
-</planner_notes>`;
+<scratchpad>
+{SCRATCHPAD}
+</scratchpad>`;
 const CUSTOM_RULES_EXTRA_CONTEXT =
   "- Carefully read over the user's custom rules to ensure you don't duplicate or repeat information found in that section, as you will always have access to it (even after the planning step!).";
 
@@ -38,7 +39,7 @@ Your goal is to generate notes on all of the low-hanging fruit from the conversa
 
 {CUSTOM_RULES}
 
-{PLANNER_NOTES}
+{SCRATCHPAD}
 
 You MUST adhere to the following criteria when generating your notes:
 - Do not retain any full code snippets.
@@ -62,7 +63,7 @@ With all of this in mind, please carefully inspect the conversation history, and
 `;
 
 const formatPrompt = (state: PlannerGraphState): string => {
-  const plannerNotes = getPlannerNotes(state.messages)
+  const scratchpad = getScratchpad(state.messages)
     .map((n) => `  - ${n}`)
     .join("\n");
 
@@ -84,9 +85,9 @@ const formatPrompt = (state: PlannerGraphState): string => {
       ),
     )
     .replaceAll(
-      "{PLANNER_NOTES}",
-      plannerNotes.length
-        ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
+      "{SCRATCHPAD}",
+      scratchpad.length
+        ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
     )
     .replaceAll(
@@ -102,6 +103,8 @@ export async function notetaker(
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.SUMMARIZER,
@@ -146,6 +149,6 @@ ${state.messages.map(getMessageString).join("\n")}`;
     contextGatheringNotes: (
       toolCall.args as z.infer<typeof condenseContextTool.schema>
     ).notes,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

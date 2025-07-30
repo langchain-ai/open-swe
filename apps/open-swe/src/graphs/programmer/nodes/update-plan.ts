@@ -10,13 +10,14 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/index.js";
 import { z } from "zod";
 import {
   getActiveTask,
   updateTaskPlanItems,
 } from "@open-swe/shared/open-swe/tasks";
 import {
+  AIMessage,
   BaseMessage,
   isAIMessage,
   ToolMessage,
@@ -27,6 +28,8 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 
@@ -78,6 +81,8 @@ const updatePlanTool = {
   schema: updatePlanToolSchema,
 };
 
+const updatePlanReasoningTool = createUpdatePlanToolFields();
+
 const formatSystemPrompt = (
   userRequest: string,
   reasoning: string,
@@ -97,14 +102,34 @@ const formatUserMessage = (messages: BaseMessage[]): string => {
 ${messages.map(getMessageString).join("\n")}`;
 };
 
+function removeUncalledTools(lastMessage: AIMessage): AIMessage {
+  if (!lastMessage.tool_calls?.length || lastMessage.tool_calls?.length === 1) {
+    // check for no tool calls. will never happen, but need for type safety
+    // only one tool call, this is the update plan tool call. no-op
+    return lastMessage;
+  }
+
+  const updatePlanReasoningToolCall = lastMessage.tool_calls?.find(
+    (tc) => tc.name === updatePlanReasoningTool.name,
+  );
+  if (!updatePlanReasoningToolCall) {
+    throw new Error("Update plan reasoning tool call not found.");
+  }
+
+  // Return the last message, only changing the tool calls to only include the update plan reasoning tool call.
+  return new AIMessage({
+    ...lastMessage,
+    tool_calls: [updatePlanReasoningToolCall],
+  });
+}
+
 export async function updatePlan(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const lastMessage = state.internalMessages[state.internalMessages.length - 1];
-  const updatePlanReasoningTool = createUpdatePlanToolFields();
 
-  if (!lastMessage || !isAIMessage(lastMessage)) {
+  if (!lastMessage || !isAIMessage(lastMessage) || !lastMessage.id) {
     throw new Error("Last message was not an AI message");
   }
 
@@ -124,6 +149,8 @@ export async function updatePlan(
   });
 
   const model = await loadModel(config, Task.PROGRAMMER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     Task.PROGRAMMER,
@@ -187,6 +214,16 @@ export async function updatePlan(
     newPlanItems,
     "agent",
   );
+  // Update the github issue to reflect the changes in the plan
+  await addTaskPlanToIssue(
+    {
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+    },
+    config,
+    newTaskPlan,
+  );
+
   const toolMessage = new ToolMessage({
     id: uuidv4(),
     tool_call_id: updatePlanToolCallId,
@@ -201,9 +238,9 @@ export async function updatePlan(
   });
 
   return {
-    messages: [toolMessage],
-    internalMessages: [toolMessage],
+    messages: [removeUncalledTools(lastMessage), toolMessage],
+    internalMessages: [removeUncalledTools(lastMessage), toolMessage],
     taskPlan: newTaskPlan,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

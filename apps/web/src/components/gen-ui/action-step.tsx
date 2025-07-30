@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { JSX, useState } from "react";
 import {
   Terminal,
   FileText,
@@ -21,10 +21,11 @@ import {
   createApplyPatchToolFields,
   createShellToolFields,
   createInstallDependenciesToolFields,
-  createTakePlannerNotesFields,
+  createScratchpadFields,
   createGetURLContentToolFields,
-  createSearchToolFields,
+  createGrepToolFields,
   createSearchDocumentForToolFields,
+  createTextEditorToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { z } from "zod";
 import {
@@ -46,14 +47,16 @@ const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
 >;
-const plannerNotesTool = createTakePlannerNotesFields();
-type PlannerNotesToolArgs = z.infer<typeof plannerNotesTool.schema>;
+const scratchpadTool = createScratchpadFields("");
+type ScratchpadToolArgs = z.infer<typeof scratchpadTool.schema>;
 const getURLContentTool = createGetURLContentToolFields();
 type GetURLContentToolArgs = z.infer<typeof getURLContentTool.schema>;
-const searchTool = createSearchToolFields(dummyRepo);
-type SearchToolArgs = z.infer<typeof searchTool.schema>;
+const grepTool = createGrepToolFields(dummyRepo);
+type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
+const textEditorTool = createTextEditorToolFields(dummyRepo);
+type TextEditorToolArgs = z.infer<typeof textEditorTool.schema>;
 
 // Common props for all action types
 type BaseActionProps = {
@@ -87,9 +90,9 @@ type InstallDependenciesActionProps = BaseActionProps &
     errorCode?: number;
   };
 
-type PlannerNotesActionProps = BaseActionProps &
-  Partial<PlannerNotesToolArgs> & {
-    actionType: "planner_notes";
+type ScratchpadActionProps = BaseActionProps &
+  Partial<ScratchpadToolArgs> & {
+    actionType: "scratchpad";
   };
 
 type GetURLContentActionProps = BaseActionProps &
@@ -99,8 +102,8 @@ type GetURLContentActionProps = BaseActionProps &
   };
 
 type SearchActionProps = BaseActionProps &
-  Partial<SearchToolArgs> & {
-    actionType: "search";
+  Partial<GrepToolArgs> & {
+    actionType: "grep";
     output?: string;
     errorCode?: number;
   };
@@ -108,6 +111,12 @@ type SearchActionProps = BaseActionProps &
 type SearchDocumentForActionProps = BaseActionProps &
   Partial<SearchDocumentForToolArgs> & {
     actionType: "search_document_for";
+    output?: string;
+  };
+
+type TextEditorActionProps = BaseActionProps &
+  Partial<TextEditorToolArgs> & {
+    actionType: "text_editor";
     output?: string;
   };
 
@@ -123,11 +132,12 @@ export type ActionItemProps =
   | ShellActionProps
   | PatchActionProps
   | InstallDependenciesActionProps
-  | PlannerNotesActionProps
+  | ScratchpadActionProps
   | GetURLContentActionProps
   | McpActionProps
   | SearchActionProps
-  | SearchDocumentForActionProps;
+  | SearchDocumentForActionProps
+  | TextEditorActionProps;
 
 export type ActionStepProps = {
   actions: ActionItemProps[];
@@ -139,10 +149,11 @@ const ACTION_GENERATING_TEXT_MAP = {
   [shellTool.name]: "Executing...",
   [applyPatchTool.name]: "Applying patch...",
   [installDependenciesTool.name]: "Installing dependencies...",
-  [plannerNotesTool.name]: "Saving notes...",
+  [scratchpadTool.name]: "Saving notes...",
   [getURLContentTool.name]: "Fetching URL content...",
   [searchDocumentForTool.name]: "Searching document...",
-  [searchTool.name]: "Searching...",
+  [grepTool.name]: "Searching...",
+  [textEditorTool.name]: "Editing file...",
 };
 
 function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
@@ -196,7 +207,7 @@ function ActionItem(props: ActionItemProps) {
     }
   };
 
-  const getStatusText = () => {
+  const getStatusText = (): string | JSX.Element => {
     if (props.status === "loading") {
       return "Preparing action...";
     }
@@ -212,8 +223,10 @@ function ActionItem(props: ActionItemProps) {
         return props.success ? "Patch applied" : "Patch failed";
       } else if (props.actionType === "install_dependencies") {
         return props.success ? "Dependencies installed" : "Installation failed";
-      } else if (props.actionType === "planner_notes") {
-        return props.success ? "Notes saved" : "Failed to save notes";
+      } else if (props.actionType === "scratchpad") {
+        return props.success
+          ? "Scratchpad updated"
+          : "Failed to update scratchpad";
       } else if (props.actionType === "get_url_content") {
         return props.success
           ? "URL content fetched"
@@ -222,8 +235,25 @@ function ActionItem(props: ActionItemProps) {
         return props.success
           ? "Document search completed"
           : "Document search failed";
-      } else if (props.actionType === "search") {
+      } else if (props.actionType === "grep") {
         return props.success ? "Search completed" : "Search failed";
+      } else if (props.actionType === "text_editor") {
+        const command = props.command || "unknown";
+        return props.success ? (
+          <span className="flex items-center gap-1">
+            <p className="text-muted-foreground bg-muted rounded px-1 font-mono text-xs">
+              {command}
+            </p>{" "}
+            command completed
+          </span>
+        ) : (
+          <span className="flex items-center gap-1">
+            <p className="text-muted-foreground bg-muted rounded px-1 font-mono text-xs">
+              {command}
+            </p>{" "}
+            command failed
+          </span>
+        );
       } else if (props.actionType === "mcp") {
         return props.success
           ? `${props.toolName} completed`
@@ -242,13 +272,14 @@ function ActionItem(props: ActionItemProps) {
       props.actionType === "install_dependencies" ||
       props.actionType === "get_url_content" ||
       props.actionType === "search_document_for" ||
-      props.actionType === "search"
+      props.actionType === "grep" ||
+      props.actionType === "text_editor"
     ) {
       return !!props.output;
     } else if (props.actionType === "apply-patch") {
       return !!props.diff;
-    } else if (props.actionType === "planner_notes") {
-      return !!(props.notes && props.notes.length > 0);
+    } else if (props.actionType === "scratchpad") {
+      return !!(props.scratchpad && props.scratchpad.length > 0);
     } else if (props.actionType === "mcp") {
       const hasArgs = props.args && Object.keys(props.args).length > 0;
       const hasOutput = !!props.output;
@@ -271,10 +302,10 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "planner_notes") {
+    if (props.actionType === "scratchpad") {
       return (
         <ToolIconWithTooltip
-          toolNamePretty="Planner Notes"
+          toolNamePretty="Scratchpad"
           icon={<FileText className={cn(defaultIconStyling)} />}
         />
       );
@@ -313,11 +344,18 @@ function ActionItem(props: ActionItemProps) {
           icon={<Zap className={cn(defaultIconStyling)} />}
         />
       );
-    } else if (props.actionType === "search") {
+    } else if (props.actionType === "grep") {
       return (
         <ToolIconWithTooltip
           toolNamePretty="Search"
           icon={<Search className={cn(defaultIconStyling)} />}
+        />
+      );
+    } else if (props.actionType === "text_editor") {
+      return (
+        <ToolIconWithTooltip
+          toolNamePretty="Text Editor"
+          icon={<FileCode className={cn(defaultIconStyling)} />}
         />
       );
     } else {
@@ -340,11 +378,11 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "planner_notes") {
+    if (props.actionType === "scratchpad") {
       return (
         <div className="flex items-center">
           <span className="text-foreground/80 text-xs font-normal">
-            Planner Notes
+            Scratchpad
           </span>
         </div>
       );
@@ -360,7 +398,7 @@ function ActionItem(props: ActionItemProps) {
       );
     }
 
-    if (props.actionType === "search") {
+    if (props.actionType === "grep") {
       const castProps = props as SearchActionProps;
       return (
         <div className="flex flex-col">
@@ -409,26 +447,29 @@ function ActionItem(props: ActionItemProps) {
       props.actionType === "shell" ||
       props.actionType === "install_dependencies"
     ) {
+      const shellProps = props as
+        | ShellActionProps
+        | InstallDependenciesActionProps;
       let commandStr = "";
-      if (props.command) {
-        if (Array.isArray(props.command)) {
-          commandStr = props.command.join(" ");
+      if (shellProps.command) {
+        if (Array.isArray(shellProps.command)) {
+          commandStr = shellProps.command.join(" ");
         } else if (
-          typeof props.command === "string" &&
-          (props.command as string).length > 0
+          typeof shellProps.command === "string" &&
+          (shellProps.command as string).length > 0
         ) {
           try {
-            commandStr = JSON.parse(props.command);
+            commandStr = JSON.parse(shellProps.command);
           } catch {
-            commandStr = props.command;
+            commandStr = shellProps.command;
           }
         }
       }
       return (
         <div className="flex items-center">
-          {props.workdir && (
+          {shellProps.workdir && (
             <div className="text-muted-foreground mb-0.5 text-xs font-normal">
-              {props.workdir}
+              {shellProps.workdir}
             </div>
           )}
           <code className="text-foreground/80 text-xs font-normal">
@@ -447,6 +488,38 @@ function ActionItem(props: ActionItemProps) {
           </div>
         </div>
       );
+    } else if (props.actionType === "text_editor") {
+      const command = props.command || "unknown";
+      const path = props.path || "";
+      return (
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground bg-muted/50 rounded px-1 text-xs font-normal">
+              {command}
+            </span>
+            <code className="text-foreground/80 text-xs font-normal">
+              {path}
+            </code>
+          </div>
+          {command === "view" && props.view_range && (
+            <div className="text-muted-foreground mt-1 text-xs font-normal">
+              Lines {props.view_range[0]}-
+              {props.view_range[1] === -1 ? "end" : props.view_range[1]}
+            </div>
+          )}
+          {command === "str_replace" && props.old_str && (
+            <div className="text-muted-foreground mt-1 truncate text-xs font-normal">
+              Replace: {props.old_str.substring(0, 50)}
+              {props.old_str.length > 50 ? "..." : ""}
+            </div>
+          )}
+          {command === "insert" && props.insert_line !== undefined && (
+            <div className="text-muted-foreground mt-1 text-xs font-normal">
+              Insert at line {props.insert_line}
+            </div>
+          )}
+        </div>
+      );
     } else if (props.actionType === "mcp") {
       return (
         <div className="flex items-center">
@@ -458,7 +531,9 @@ function ActionItem(props: ActionItemProps) {
     } else {
       return (
         <code className="text-foreground/80 flex items-center text-xs font-normal">
-          {props.file_path}
+          {props.actionType === "apply-patch" && "file_path" in props
+            ? props.file_path
+            : ""}
         </code>
       );
     }
@@ -472,9 +547,10 @@ function ActionItem(props: ActionItemProps) {
 
     if (
       (props.actionType === "shell" ||
-        props.actionType === "search" ||
+        props.actionType === "grep" ||
         props.actionType === "search_document_for" ||
-        props.actionType === "install_dependencies") &&
+        props.actionType === "install_dependencies" ||
+        props.actionType === "text_editor") &&
       props.output
     ) {
       return (
@@ -482,7 +558,7 @@ function ActionItem(props: ActionItemProps) {
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
-          {(props.actionType === "shell" || props.actionType === "search") &&
+          {(props.actionType === "shell" || props.actionType === "grep") &&
             "errorCode" in props &&
             props.errorCode !== undefined &&
             !props.success && (
@@ -583,14 +659,14 @@ function ActionItem(props: ActionItemProps) {
         </div>
       );
     } else if (
-      props.actionType === "planner_notes" &&
-      props.notes &&
-      props.notes.length > 0
+      props.actionType === "scratchpad" &&
+      props.scratchpad &&
+      props.scratchpad.length > 0
     ) {
       return (
         <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
           <ul className="list-disc pl-5 text-xs font-normal">
-            {props.notes.map((note, i) => (
+            {props.scratchpad.map((note, i) => (
               <li
                 key={i}
                 className="text-foreground/90 mb-1 whitespace-pre-wrap"

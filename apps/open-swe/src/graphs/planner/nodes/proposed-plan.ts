@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { Command, END, interrupt } from "@langchain/langgraph";
+import { StreamMode } from "@langchain/langgraph-sdk";
 import {
   GraphUpdate,
   GraphConfig,
@@ -23,6 +24,7 @@ import {
   PLAN_INTERRUPT_DELIMITER,
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
@@ -89,10 +91,11 @@ export async function postGitHubIssueComment(input: {
       repo: targetRepository.repo,
       issueNumber: githubIssueId,
       githubInstallationToken,
+      filterBotComments: false,
     });
 
     const existingOpenSWEComment = existingComments?.findLast((c) =>
-      c.user?.login?.startsWith(githubAppName),
+      c.user?.login?.toLowerCase()?.startsWith(githubAppName.toLowerCase()),
     );
 
     if (!existingOpenSWEComment) {
@@ -199,7 +202,7 @@ async function startProgrammerRun(input: {
       ifNotExists: "create",
       streamResumable: true,
       streamSubgraphs: true,
-      streamMode: ["values", "messages-tuple", "custom"],
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     },
   );
 

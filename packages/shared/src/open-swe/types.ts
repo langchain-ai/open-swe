@@ -34,6 +34,14 @@ export interface CacheMetrics {
   outputTokens: number;
 }
 
+export interface ModelTokenData extends CacheMetrics {
+  /**
+   * The model name that generated this token usage data
+   * e.g., "anthropic:claude-sonnet-4-0", "openai:gpt-4.1-mini"
+   */
+  model: string;
+}
+
 export type PlanItem = {
   /**
    * The index of the plan item. This is the order in which
@@ -149,6 +157,7 @@ export type CustomRules = {
   repositoryStructure?: string;
   dependenciesAndInstallation?: string;
   testingInstructions?: string;
+  pullRequestFormatting?: string;
 };
 
 export const GraphAnnotation = MessagesZodState.extend({
@@ -178,7 +187,7 @@ export const GraphAnnotation = MessagesZodState.extend({
     },
   }),
   /**
-   * Notes taken based on the actions preformed by the planning agent.
+   * Notes taken based on the actions performed by the planning agent.
    */
   contextGatheringNotes: withLangGraph(z.custom<string>(), {
     reducer: {
@@ -274,9 +283,9 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => 0,
   }),
 
-  tokenData: withLangGraph(z.custom<CacheMetrics>().optional(), {
+  tokenData: withLangGraph(z.custom<ModelTokenData[]>().optional(), {
     reducer: {
-      schema: z.custom<CacheMetrics>().optional(),
+      schema: z.custom<ModelTokenData[]>().optional(),
       fn: tokenDataReducer,
     },
   }),
@@ -327,6 +336,25 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  plannerModelName: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "anthropic:claude-sonnet-4-0",
+      description:
+        "The model to use for planning tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
+      options: MODEL_OPTIONS_NO_THINKING,
+    },
+  },
+  plannerTemperature: {
+    x_open_swe_ui_config: {
+      type: "slider",
+      default: 0,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
   programmerModelName: {
     x_open_swe_ui_config: {
       type: "select",
@@ -337,6 +365,25 @@ export const GraphConfigurationMetadata: {
     },
   },
   programmerTemperature: {
+    x_open_swe_ui_config: {
+      type: "slider",
+      default: 0,
+      min: 0,
+      max: 2,
+      step: 0.1,
+      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
+  reviewerModelName: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "anthropic:claude-sonnet-4-0",
+      description:
+        "The model to use for reviewer tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
+      options: MODEL_OPTIONS_NO_THINKING,
+    },
+  },
+  reviewerTemperature: {
     x_open_swe_ui_config: {
       type: "slider",
       default: 0,
@@ -490,6 +537,21 @@ export const GraphConfiguration = z.object({
    * The model ID to use for programming/other advanced technical tasks.
    * @default "anthropic:claude-sonnet-4-0"
    */
+  plannerModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.plannerModelName,
+  }),
+  /**
+   * The temperature to use for programming/other advanced technical tasks.
+   * @default 0
+   */
+  plannerTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.plannerTemperature,
+  }),
+
+  /**
+   * The model ID to use for programming/other advanced technical tasks.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
   programmerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.programmerModelName,
   }),
@@ -500,6 +562,22 @@ export const GraphConfiguration = z.object({
   programmerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.programmerTemperature,
   }),
+
+  /**
+   * The model ID to use for programming/other advanced technical tasks.
+   * @default "anthropic:claude-sonnet-4-0"
+   */
+  reviewerModelName: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.reviewerModelName,
+  }),
+  /**
+   * The temperature to use for programming/other advanced technical tasks.
+   * @default 0
+   */
+  reviewerTemperature: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.reviewerTemperature,
+  }),
+
   /**
    * The model ID to use for routing tasks.
    * @default "anthropic:claude-3-5-haiku-latest"

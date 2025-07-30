@@ -1282,31 +1282,32 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@daytonaio/api-client@npm:0.23.1":
-  version: 0.23.1
-  resolution: "@daytonaio/api-client@npm:0.23.1"
+"@daytonaio/api-client@npm:0.25.0":
+  version: 0.25.0
+  resolution: "@daytonaio/api-client@npm:0.25.0"
   dependencies:
     axios: ^1.6.1
-  checksum: 415ca9369e02c4b64925a834fa076a8b2c841d2bd08205b404b31b5b12f83a0c8b8c2ffb4f678b5cb73b14c013311cd2d81494132917c9e94946c2b55ce2f653
+  checksum: 2a33da02809b28bde1d04a788490e8c098529a87de30c41035eeeabc49ad17f76fda2ff60f91712f2a1258d801c0b6a4794def8b760fd438faf9b449b061937a
   languageName: node
   linkType: hard
 
-"@daytonaio/sdk@npm:^0.23.1":
-  version: 0.23.1
-  resolution: "@daytonaio/sdk@npm:0.23.1"
+"@daytonaio/sdk@npm:^0.25.0":
+  version: 0.25.0
+  resolution: "@daytonaio/sdk@npm:0.25.0"
   dependencies:
     "@aws-sdk/client-s3": ^3.787.0
     "@aws-sdk/lib-storage": ^3.798.0
-    "@daytonaio/api-client": 0.23.1
+    "@daytonaio/api-client": 0.25.0
     "@iarna/toml": ^2.2.5
     axios: ^1.6.1
     dotenv: ^17.0.1
     expand-tilde: ^2.0.2
     fast-glob: ^3.3.0
     form-data: ^4.0.0
+    pathe: ^2.0.3
     shell-quote: ^1.8.2
     tar: ^6.2.0
-  checksum: d78d6048a867eb17233be36810140ecdfd70fe1344e4fdcf2b3d25bbae01ea38102875e9720179ef89338ba5774064f089c5daec10b8af5775bf10e502a58657
+  checksum: 308e4c66138f4a5cedf2ff8796cddc62c87f6f6a5e28ef3f18dc7c3ed80c9b99f0e386d4a99717225f9eee6def9413356f8def62059c8946c5534c6469d9d7e4
   languageName: node
   linkType: hard
 
@@ -1597,12 +1598,12 @@ __metadata:
   linkType: hard
 
 "@eslint/plugin-kit@npm:^0.3.1":
-  version: 0.3.3
-  resolution: "@eslint/plugin-kit@npm:0.3.3"
+  version: 0.3.4
+  resolution: "@eslint/plugin-kit@npm:0.3.4"
   dependencies:
     "@eslint/core": ^0.15.1
     levn: ^0.4.1
-  checksum: c9dc7b83ed011dce35ccc66dc53aaaa87e9fb2bd7c8a11231f7624334d82c9a53552e4b1a1cb60b74073fcc49a2661be874e503aae14cf2f6ac6b1c7faeb7080
+  checksum: 9dd448926e90c9ae0eb4332c5a2e1b80733ceeecb4d487bb131ca26404ad5af706b262e3c76a5b81f7980c0dfc975c5b9e4ef715676e0e4c48e66f0d7bac83b2
   languageName: node
   linkType: hard
 
@@ -2690,15 +2691,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/anthropic@npm:^0.3.20":
-  version: 0.3.24
-  resolution: "@langchain/anthropic@npm:0.3.24"
+"@langchain/anthropic@npm:^0.3.25":
+  version: 0.3.25
+  resolution: "@langchain/anthropic@npm:0.3.25"
   dependencies:
     "@anthropic-ai/sdk": ^0.56.0
     fast-xml-parser: ^4.4.1
   peerDependencies:
     "@langchain/core": ">=0.3.58 <0.4.0"
-  checksum: 682461124e5afeb4ea087704f4b3d2008eca23152a45c1ff12f90002e9f1eeb330e0a4dc74730dfbaf7c04085a306e0d1186a44b3516f8956e81a55de4e41e46
+  checksum: e7a48d130379f7d26b415ac3eb8ee9a9d44c3b51f1333568e2fa97b82c272e18057a8ee10a2bb0d8a0c18c69ee7d8945cf7aebd05198afc0da86540b38bc3dc0
   languageName: node
   linkType: hard
 
@@ -4091,11 +4092,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/agent@workspace:apps/open-swe"
   dependencies:
-    "@daytonaio/sdk": ^0.23.1
+    "@daytonaio/sdk": ^0.25.0
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/anthropic": ^0.3.20
+    "@langchain/anthropic": ^0.3.25
     "@langchain/community": ^0.3.47
     "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
@@ -4126,6 +4127,7 @@ __metadata:
     langsmith: ^0.3.29
     prettier: ^3.5.2
     ts-jest: ^29.1.0
+    tsx: ^4.20.3
     turbo: ^2.5.0
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
@@ -4141,11 +4143,14 @@ __metadata:
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
+    "@langchain/langgraph-sdk": ^0.0.95
+    "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/express": ^4.17.21
-    "@types/node": ^22.13.5
+    "@types/node": ^24.1.0
     "@types/node-fetch": ^2.6.4
     "@types/react": ^19.1.8
+    "@types/uuid": ^10.0.0
     "@typescript-eslint/eslint-plugin": ^8.38.0
     "@typescript-eslint/parser": ^8.38.0
     dotenv: ^16.6.1
@@ -4163,6 +4168,7 @@ __metadata:
     react: ^19.1.0
     tsx: ^4.20.3
     typescript: ^5.8.3
+    uuid: ^10.0.0
   languageName: unknown
   linkType: soft
 
@@ -4181,12 +4187,14 @@ __metadata:
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
+    "@jest/globals": ^29.7.0
     "@langchain/core": ^0.3.65
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
+    "@types/jest": ^29.5.0
     "@types/node": ^22.13.5
     dotenv: ^16.4.7
     eslint: ^9.19.0
@@ -4194,8 +4202,10 @@ __metadata:
     eslint-plugin-import: ^2.27.5
     eslint-plugin-no-instanceof: ^1.0.1
     eslint-plugin-prettier: ^4.2.1
+    jest: ^29.7.0
     jsonwebtoken: ^9.0.2
     prettier: ^3.5.2
+    ts-jest: ^29.1.0
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
     zod: ^3.25.32
@@ -4253,7 +4263,7 @@ __metadata:
     katex: ^0.16.21
     langgraph-nextjs-api-passthrough: ^0.1.4
     lodash: ^4.17.21
-    lucide-react: ^0.476.0
+    lucide-react: ^0.532.0
     next: ^15.2.3
     next-themes: ^0.4.4
     nuqs: ^2.4.1
@@ -7042,6 +7052,15 @@ __metadata:
   dependencies:
     undici-types: ~6.21.0
   checksum: 8a8cb8468187845c77403a41e98fe0fdd148741456382eb01bfaee6431303111eae5f2716ce9069b884518862ab96bcc04adf1c90a10ff35e88db19732b383c0
+  languageName: node
+  linkType: hard
+
+"@types/node@npm:^24.1.0":
+  version: 24.1.0
+  resolution: "@types/node@npm:24.1.0"
+  dependencies:
+    undici-types: ~7.8.0
+  checksum: 01f9a97909eec619d937af3bc00ac49461e1846656b4d060f648145df06508eb6d77c200637a792481ee93a73976ced46cfbbdfe307e79be0f58ccdc415dfcd2
   languageName: node
   linkType: hard
 
@@ -14590,12 +14609,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lucide-react@npm:^0.476.0":
-  version: 0.476.0
-  resolution: "lucide-react@npm:0.476.0"
+"lucide-react@npm:^0.532.0":
+  version: 0.532.0
+  resolution: "lucide-react@npm:0.532.0"
   peerDependencies:
     react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: fcfb5a4ce7be4d6184cca9cd1641bc9c967b70e8a29d2704d3a71a4c08d58b89aaabfbc436f323e7a93b2d2ef5f46782e99a88118267ed6f0670df70d35805d8
+  checksum: 5d2312b8836f8502f45bf6dbc355c7ab980b9f1f87ad8d12b81bc2f2de51d6176326aecf5bef09f56f65a50bef4d183b6df875a9d0b50777994f1effc27036e8
   languageName: node
   linkType: hard
 

@@ -1,8 +1,9 @@
 import {
+  getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/index.js";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -23,24 +24,25 @@ import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
-import { createSearchTool } from "../../../../tools/search.js";
+import { createGrepTool } from "../../../../tools/grep.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { createPlannerNotesTool } from "../../../../tools/planner-notes.js";
+import { createScratchpadTool } from "../../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../../utils/mcp-client.js";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
-import { getPlannerNotes } from "../../utils/get-notes.js";
+import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
+import { createViewTool } from "../../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  const plannerNotes = getPlannerNotes(state.messages)
+  const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
   return SYSTEM_PROMPT.replace(
@@ -49,7 +51,7 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       ? formatFollowupMessagePrompt(
           state.taskPlan,
           state.proposedPlan,
-          plannerNotes,
+          scratchpad,
         )
       : "",
   )
@@ -69,17 +71,22 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.PLANNER,
   );
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createSearchTool(state),
+    createGrepTool(state),
     createShellTool(state),
-    createPlannerNotesTool(),
+    createViewTool(state),
+    createScratchpadTool(
+      "when generating a final plan, after all context gathering is complete",
+    ),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
     ...mcpTools,
@@ -143,6 +150,6 @@ export async function generateAction(
   return {
     messages: [...missingMessages, response],
     ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

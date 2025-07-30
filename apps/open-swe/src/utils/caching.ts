@@ -9,7 +9,7 @@ import {
   MessageContent,
   ToolMessage,
 } from "@langchain/core/messages";
-import { CacheMetrics } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
 import { calculateCostSavings } from "@open-swe/shared/caching";
 
@@ -21,7 +21,10 @@ export interface CacheablePromptSegment {
   cache_control?: { type: "ephemeral" };
 }
 
-export function trackCachePerformance(response: AIMessageChunk): CacheMetrics {
+export function trackCachePerformance(
+  response: AIMessageChunk,
+  model: string,
+): ModelTokenData[] {
   const metrics: CacheMetrics = {
     cacheCreationInputTokens:
       response.usage_metadata?.input_token_details?.cache_creation || 0,
@@ -41,12 +44,18 @@ export function trackCachePerformance(response: AIMessageChunk): CacheMetrics {
   const costSavings = calculateCostSavings(metrics).totalSavings;
 
   logger.info("Cache Performance", {
+    model,
     cacheHitRate: `${(cacheHitRate * 100).toFixed(2)}%`,
     costSavings: `$${costSavings.toFixed(4)}`,
     ...metrics,
   });
 
-  return metrics;
+  return [
+    {
+      ...metrics,
+      model,
+    },
+  ];
 }
 
 function addCacheControlToMessageContent(

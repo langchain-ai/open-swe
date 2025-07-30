@@ -4,14 +4,14 @@ import { TaskPlan } from "@open-swe/shared/open-swe/types";
 const previousCompletedPlanPrompt = `Here is the list of tasks from the previous session. You've already completed all of these tasks. Use the tasks, and task summaries as context when generating a new plan:
 {PREVIOUS_PLAN}
 
-Here are the notes you took while gathering context for these tasks:
-{PLANNER_NOTES}`;
+Here are the notes you wrote to a scratchpad while gathering context for these tasks:
+{SCRATCHPAD}`;
 
 const previousProposedPlanPrompt = `Here is the complete list of the proposed plan you generated before the user sent their followup request:
 {PREVIOUS_PROPOSED_PLAN}
 
-Here are the notes you took while gathering context for these tasks:
-{PLANNER_NOTES}`;
+Here are the notes you wrote to a scratchpad while gathering context for these tasks:
+{SCRATCHPAD}`;
 
 const followupMessagePrompt = `<followup_message_instructions>
 The user is sending a followup request for you to generate a plan for. You are provided with the following context to aid in your new plan context gathering steps:
@@ -23,10 +23,7 @@ The user is sending a followup request for you to generate a plan for. You are p
 {PREVIOUS_PLAN}
 </followup_message_instructions>`;
 
-const formatPreviousPlans = (
-  tasks: TaskPlan,
-  plannerNotes?: string,
-): string => {
+const formatPreviousPlans = (tasks: TaskPlan, scratchpad?: string): string => {
   const formattedTasksAndRequests = tasks.tasks
     .map((task) => {
       const activePlanItems =
@@ -53,25 +50,25 @@ ${activePlanItems
 
   return previousCompletedPlanPrompt
     .replace("{PREVIOUS_PLAN}", formattedTasksAndRequests)
-    .replace("{PLANNER_NOTES}", plannerNotes || "");
+    .replace("{SCRATCHPAD}", scratchpad || "");
 };
 
 const formatPreviousProposedPlan = (
   proposedPlan: string[],
-  plannerNotes?: string,
+  scratchpad?: string,
 ): string => {
   const formattedProposedPlan = proposedPlan
     .map((p) => `<proposed-plan-item>${p}</proposed-plan-item>`)
     .join("\n");
   return previousProposedPlanPrompt
     .replace("{PREVIOUS_PROPOSED_PLAN}", formattedProposedPlan)
-    .replace("{PLANNER_NOTES}", plannerNotes || "");
+    .replace("{SCRATCHPAD}", scratchpad || "");
 };
 
 export function formatFollowupMessagePrompt(
   tasks: TaskPlan,
   proposedPlan: string[],
-  plannerNotes?: string,
+  scratchpad?: string,
 ): string {
   let isGeneratingNewPlan = false;
   if (tasks && tasks.tasks?.length) {
@@ -86,8 +83,8 @@ export function formatFollowupMessagePrompt(
   return followupMessagePrompt.replace(
     "{PREVIOUS_PLAN}",
     isGeneratingNewPlan
-      ? formatPreviousPlans(tasks, plannerNotes)
-      : formatPreviousProposedPlan(proposedPlan, plannerNotes),
+      ? formatPreviousPlans(tasks, scratchpad)
+      : formatPreviousProposedPlan(proposedPlan, scratchpad),
   );
 }
 

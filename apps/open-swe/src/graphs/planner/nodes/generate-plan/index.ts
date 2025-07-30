@@ -6,7 +6,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../../utils/load-model.js";
+} from "../../../../utils/llms/index.js";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -19,16 +19,17 @@ import {
 import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
-import { getPlannerNotes } from "../../utils/get-notes.js";
-import { PLANNER_NOTES_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import { getScratchpad } from "../../utils/scratchpad-notes.js";
+import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
+import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
-  const plannerNotes = getPlannerNotes(state.messages)
+  const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
   return SYSTEM_PROMPT.replace(
@@ -42,9 +43,9 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll(
-      "{PLANNER_NOTES}",
-      plannerNotes.length
-        ? PLANNER_NOTES_PROMPT.replace("{PLANNER_NOTES}", plannerNotes)
+      "{SCRATCHPAD}",
+      scratchpad.length
+        ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
     );
 }
@@ -53,10 +54,12 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.PLANNER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    Task.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {
@@ -125,6 +128,6 @@ export async function generatePlan(
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

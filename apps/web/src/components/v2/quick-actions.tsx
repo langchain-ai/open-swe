@@ -7,6 +7,7 @@ const GENERATE_RULES_PROMPT = `You're given a task to write a collection of rule
 - **Repository Structure**: This section is where you'll include high level context about how the repository is laid out, any highly useful and not overly obvious information about how the directories/files are structured, different apps/packages/services inside the repository, etc. Do not include every last detail about the repository contents, only a high level technical overview on the repository structure.
 - **Dependencies and Installation**: This section should include high level context about how to install dependencies, where to install them, package managers, etc. Do not include overly verbose context in this section as most repositories typically have straightforward dependency management. 
 - **Testing Instructions**: A general guide on testing in this repository. It should include context such as testing frameworks, roughly what types of modules should be tested, how to run tests, and any other context a developer wouldn't be able to infer by looking at test files on how to write & run tests. Do not include every last detail about testing in this section, only the most used/important context necessary to run tests.
+- **Pull request formatting**: Rules and guidelines around how to format pull request titles and descriptions. This should only be populated if you find specific instructions in the repository around how to format pull request titles and descriptions. If the repository does not have specific instructions, leave this section empty. The agent will already generate well thought out titles and descriptions, so unless there are special rules specific to this repository, leave this section empty.
 
 Ensure each category is properly wrapped in opening and closing XML tags. The tags to use are as follows:
 <general_rules>
@@ -17,6 +18,8 @@ Ensure each category is properly wrapped in opening and closing XML tags. The ta
 </dependencies_and_installation>
 <testing_instructions>
 </testing_instructions>
+<pull_request_formatting>
+</pull_request_formatting>
 
 It is incredibly important that you ALWAYS wrap your sections in the opening and closing XML tags. Failure to do so will result in an invalid file and will not be accepted.
 

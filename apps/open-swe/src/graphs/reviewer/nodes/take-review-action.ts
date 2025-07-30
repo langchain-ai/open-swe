@@ -17,7 +17,7 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -28,8 +28,10 @@ import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
+import { createViewTool } from "../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -45,9 +47,17 @@ export async function takeReviewerActions(
   }
 
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
+  const searchTool = createGrepTool(state);
+  const viewTool = createViewTool(state);
   const installDependenciesTool = createInstallDependenciesTool(state);
-  const allTools = [shellTool, searchTool, installDependenciesTool];
+  const scratchpadTool = createScratchpadTool("");
+  const allTools = [
+    shellTool,
+    searchTool,
+    viewTool,
+    installDependenciesTool,
+    scratchpadTool,
+  ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
   );
@@ -98,11 +108,16 @@ export async function takeReviewerActions(
           result: string;
           status: "success" | "error";
         };
+
       result = toolResult.result;
-      if (!result) {
-        result = toolResult.status;
-      }
       toolCallStatus = toolResult.status;
+
+      if (!result) {
+        result =
+          toolCallStatus === "success"
+            ? "Tool call returned no result"
+            : "Tool call failed";
+      }
     } catch (e) {
       toolCallStatus = "error";
       if (

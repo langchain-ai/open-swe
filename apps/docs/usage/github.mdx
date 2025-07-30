@@ -13,7 +13,7 @@ Open SWE monitors GitHub issues for specific labels that trigger automated runs.
 
 ### Label Types
 
-Open SWE supports two types of labels that control how the agent operates:
+Open SWE supports three types of labels that control how the agent operates:
 
 **Manual Mode (`open-swe`)**
 
@@ -27,10 +27,19 @@ Open SWE supports two types of labels that control how the agent operates:
 - Provides faster turnaround for straightforward requests
 - Best for simple changes or when you trust the agent to proceed autonomously
 
+**Max Mode (`open-swe-max` and `open-swe-max-auto`)**
+
+- Uses Claude Opus 4 for both planning and programming tasks
+- Provides enhanced performance and reasoning capabilities for complex problems
+- `open-swe-max`: Requires manual plan approval with premium model performance
+- `open-swe-max-auto`: Combines automatic execution with premium model capabilities
+- Ideal for challenging tasks that benefit from the most advanced AI reasoning
+
 <Note>
-  In development environments, the labels are `open-swe-dev` and
-  `open-swe-auto-dev` respectively. The system automatically uses the
-  appropriate labels based on the `NODE_ENV` environment variable.
+  In development environments, the labels are `open-swe-dev`,
+  `open-swe-auto-dev`, `open-swe-max-dev`, and `open-swe-max-auto-dev`
+  respectively. The system automatically uses the appropriate labels based on
+  the `NODE_ENV` environment variable.
 </Note>
 
 ## Automatic Run Creation
@@ -114,4 +123,4 @@ To start using Open SWE with webhooks:
 4. **Monitor the issue comments** for the run link and status updates
 5. **Review and merge the PR** when Open SWE completes the changes
 
-For setup instructions, see the [Development Setup](/setup/development) guide.
+For setup instructions, see the [Development Setup](/labs/swe/setup/development) guide.

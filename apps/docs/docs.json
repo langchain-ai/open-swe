@@ -27,7 +27,8 @@
               "setup/intro",
               "setup/development",
               "setup/authentication",
-              "setup/monorepo"
+              "setup/monorepo",
+              "setup/ci"
             ]
           }
         ]

@@ -18,13 +18,20 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
   Task,
-} from "../../../utils/load-model.js";
+} from "../../../utils/llms/index.js";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { ToolMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  BaseMessage,
+  isAIMessage,
+  ToolMessage,
+} from "@langchain/core/messages";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { createScratchpadTool } from "../../../tools/scratchpad.js";
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -46,6 +53,9 @@ Here is the full list of actions you took during your review:
 
 And here are the tasks which were outlined in the plan, and completed by the Programmer Assistant:
 {PLANNED_TASKS}
+
+Here are all of the notes you wrote to your scratchpad during the review:
+{SCRATCHPAD_NOTES}
 </context>
 
 <review-guidelines>
@@ -56,6 +66,26 @@ Carefully read over all of the provided context above, and if you determine that
 Otherwise, if you determine that the task has been successfully completed, call the \`{COMPLETE_TOOL_NAME}\` tool.
 </review-guidelines>`;
 
+const getScratchpadNotesString = (messages: BaseMessage[]) => {
+  return messages
+    .filter(
+      (m) =>
+        isAIMessage(m) &&
+        m.tool_calls?.length &&
+        m.tool_calls?.some((tc) => tc.name === createScratchpadTool("").name),
+    )
+    .map((m) => {
+      const scratchpadTool = (m as AIMessage).tool_calls?.find(
+        (tc) => tc.name === createScratchpadTool("").name,
+      );
+      if (!scratchpadTool) {
+        return "";
+      }
+      return `<scratchpad_entry>\n${scratchpadTool.args.scratchpad}\n</scratchpad_entry>`;
+    })
+    .join("\n");
+};
+
 const formatSystemPrompt = (state: ReviewerGraphState) => {
   const markCompletedToolName = createCodeReviewMarkTaskCompletedFields().name;
   const markNotCompleteToolName =
@@ -65,6 +95,9 @@ const formatSystemPrompt = (state: ReviewerGraphState) => {
   const messagesString = state.reviewerMessages
     .map(getMessageString)
     .join("\n");
+  const scratchpadNotesString = getScratchpadNotesString(
+    state.reviewerMessages,
+  );
 
   return SYSTEM_PROMPT.replaceAll("{REVIEW_ACTIONS}", messagesString)
     .replaceAll(
@@ -73,7 +106,8 @@ const formatSystemPrompt = (state: ReviewerGraphState) => {
     )
     .replaceAll("{PLANNED_TASKS}", tasksString)
     .replaceAll("{COMPLETE_TOOL_NAME}", markCompletedToolName)
-    .replaceAll("{NOT_COMPLETE_TOOL_NAME}", markNotCompleteToolName);
+    .replaceAll("{NOT_COMPLETE_TOOL_NAME}", markNotCompleteToolName)
+    .replaceAll("{SCRATCHPAD_NOTES}", scratchpadNotesString);
 };
 
 export async function finalReview(
@@ -83,10 +117,12 @@ export async function finalReview(
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, Task.REVIEWER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    Task.REVIEWER,
   );
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",
@@ -173,6 +209,6 @@ export async function finalReview(
     messages: messagesUpdate,
     internalMessages: messagesUpdate,
     reviewsCount: (state.reviewsCount || 0) + 1,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

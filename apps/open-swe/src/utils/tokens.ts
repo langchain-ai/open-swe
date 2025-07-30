@@ -7,8 +7,8 @@ import {
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { traceable } from "langsmith/traceable";
 
-// After 60k tokens, summarize the conversation history.
-export const MAX_INTERNAL_TOKENS = 60_000;
+// After 80k tokens, summarize the conversation history.
+export const MAX_INTERNAL_TOKENS = 80_000;
 
 export function calculateConversationHistoryTokenCount(
   messages: BaseMessage[],
@@ -17,7 +17,7 @@ export function calculateConversationHistoryTokenCount(
     excludeCountFromEnd?: number;
   },
 ) {
-  let totalChars = 0;
+  let totalTokens = 0;
   let messagesToCount = messages;
 
   if (options?.excludeCountFromEnd && options.excludeCountFromEnd > 0) {
@@ -33,25 +33,25 @@ export function calculateConversationHistoryTokenCount(
     if (isHumanMessage(m) || isToolMessage(m)) {
       const contentString = getMessageContentString(m.content);
       // Divide each char by 4 as it's roughly one token per 4 characters.
-      totalChars += contentString.length / 4;
+      totalTokens += Math.ceil(contentString.length / 4);
     }
 
     if (isAIMessage(m)) {
       const usageMetadata = m.usage_metadata;
       if (usageMetadata) {
-        totalChars += usageMetadata.output_tokens;
+        totalTokens += usageMetadata.total_tokens;
       } else {
         const contentString = getMessageContentString(m.content);
-        totalChars += contentString.length / 4;
+        totalTokens += Math.ceil(contentString.length / 4);
         m.tool_calls?.forEach((tc) => {
           const nameAndArgs = tc.name + JSON.stringify(tc.args);
-          totalChars += nameAndArgs.length / 4;
+          totalTokens += Math.ceil(nameAndArgs.length / 4);
         });
       }
     }
   });
 
-  return totalChars;
+  return totalTokens;
 }
 
 /**
@@ -139,12 +139,12 @@ export function getMessagesSinceLastSummaryFunc(
     excludeCountFromEnd?: number;
   },
 ): BaseMessage[] {
-  // Find the index of the last summary message
-  const lastSummaryIndex = messages.findIndex(
-    (m) => m.additional_kwargs?.summary_message,
+  // Find the last summary tool message (summary_messages are AI/tool pairs)
+  const lastSummaryIndex = messages.findLastIndex(
+    (m) => m.additional_kwargs?.summary_message && isToolMessage(m),
   );
 
-  // Get all messages after the last summary message
+  // Get all messages after the last summary_message
   let messagesAfterLastSummary =
     lastSummaryIndex >= 0
       ? messages.slice(lastSummaryIndex + 1)

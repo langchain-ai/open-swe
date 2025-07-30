@@ -5,13 +5,17 @@ import {
   ManagerGraphUpdate,
 } from "@open-swe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import { PLANNER_GRAPH_ID } from "@open-swe/shared/constants";
+import {
+  OPEN_SWE_STREAM_MODE,
+  PLANNER_GRAPH_ID,
+} from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
 import { getRecentUserRequest } from "../../../utils/user-request.js";
+import { StreamMode } from "@langchain/langgraph-sdk";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -54,7 +58,7 @@ export async function startPlanner(
         ifNotExists: "create",
         multitaskStrategy: "enqueue",
         streamResumable: true,
-        streamMode: ["values", "messages-tuple", "custom"],
+        streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
       },
     );
 

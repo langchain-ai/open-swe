@@ -4,7 +4,7 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/load-model.js";
+import { loadModel, Task } from "../../../utils/llms/index.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
@@ -16,6 +16,7 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
+import { getModelManager } from "../../../utils/llms/model-manager.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -40,6 +41,8 @@ export async function generateConclusion(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const model = await loadModel(config, Task.SUMMARIZER);
+  const modelManager = getModelManager();
+  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
 
   const userRequestPrompt = formatUserRequestPrompt(state.messages);
   const userMessage = `${userRequestPrompt}
@@ -83,6 +86,6 @@ Given all of this, please respond with the concise conclusion. Do not include an
     messages: [response],
     internalMessages: [response],
     taskPlan: updatedTaskPlan,
-    tokenData: trackCachePerformance(response),
+    tokenData: trackCachePerformance(response, modelName),
   };
 }

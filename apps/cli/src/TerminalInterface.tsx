@@ -5,12 +5,14 @@ interface TerminalInterfaceProps {
   message: string | null;
   setMessage: () => void;
   CustomInput: React.FC<{ onSubmit: () => void }>;
+  repoName: string;
 }
 
 const TerminalInterface: React.FC<TerminalInterfaceProps> = ({
   message,
   setMessage,
   CustomInput,
+  repoName,
 }) => {
   return (
     <Box flexDirection="column" padding={1}>
@@ -28,11 +30,16 @@ const TerminalInterface: React.FC<TerminalInterfaceProps> = ({
         marginTop={0}
         marginBottom={0}
       >
-        <CustomInput onSubmit={setMessage} />
+        <CustomInput onSubmit={() => setMessage()} />
       </Box>
       {message && (
         <Box marginTop={1}>
           <Text color="green">You typed: {message}</Text>
+        </Box>
+      )}
+      {repoName && (
+        <Box marginTop={0} marginBottom={0}>
+          <Text color="gray">Repository: {repoName}</Text>
         </Box>
       )}
     </Box>

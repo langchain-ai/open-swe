@@ -20,13 +20,13 @@ import {
   safeBadArgsError,
 } from "../../../utils/zod-to-string.js";
 
-import { createSearchTool } from "../../../tools/search.js";
+import { createGrepTool } from "../../../tools/grep.js";
 import {
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { createPlannerNotesTool } from "../../../tools/planner-notes.js";
+import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -34,6 +34,7 @@ import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
+import { createViewTool } from "../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -48,9 +49,10 @@ export async function takeActions(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
+  const viewTool = createViewTool(state);
   const shellTool = createShellTool(state);
-  const searchTool = createSearchTool(state);
-  const plannerNotesTool = createPlannerNotesTool();
+  const searchTool = createGrepTool(state);
+  const scratchpadTool = createScratchpadTool("");
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
@@ -62,9 +64,10 @@ export async function takeActions(
   ];
 
   const allTools = [
+    viewTool,
     shellTool,
     searchTool,
-    plannerNotesTool,
+    scratchpadTool,
     getURLContentTool,
     searchDocumentForTool,
     ...mcpTools,
@@ -128,7 +131,10 @@ export async function takeActions(
       }
 
       if (!result) {
-        result = toolCallStatus;
+        result =
+          toolCallStatus === "success"
+            ? "Tool call returned no result"
+            : "Tool call failed";
       }
     } catch (e) {
       toolCallStatus = "error";

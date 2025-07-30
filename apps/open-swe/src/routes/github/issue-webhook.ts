@@ -12,17 +12,21 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
+  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { encryptSecret } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   getOpenSWEAutoAcceptLabel,
   getOpenSWELabel,
+  getOpenSWEMaxLabel,
+  getOpenSWEMaxAutoAcceptLabel,
 } from "../../utils/github/label.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
+import { StreamMode } from "@langchain/langgraph-sdk";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
 
@@ -80,19 +84,31 @@ webhooks.on("issues.labeled", async ({ payload }) => {
   if (!process.env.SECRETS_ENCRYPTION_KEY) {
     throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
   }
-  const validOpenSWELabels = [getOpenSWELabel(), getOpenSWEAutoAcceptLabel()];
+  const validOpenSWELabels = [
+    getOpenSWELabel(),
+    getOpenSWEAutoAcceptLabel(),
+    getOpenSWEMaxLabel(),
+    getOpenSWEMaxAutoAcceptLabel(),
+  ];
   if (
     !payload.label?.name ||
     !validOpenSWELabels.some((l) => l === payload.label?.name)
   ) {
     return;
   }
-  const isAutoAcceptLabel = payload.label.name === getOpenSWEAutoAcceptLabel();
+  const isAutoAcceptLabel =
+    payload.label.name === getOpenSWEAutoAcceptLabel() ||
+    payload.label.name === getOpenSWEMaxAutoAcceptLabel();
+
+  const isMaxLabel =
+    payload.label.name === getOpenSWEMaxLabel() ||
+    payload.label.name === getOpenSWEMaxAutoAcceptLabel();
 
   logger.info(
     `'${payload.label.name}' label added to issue #${payload.issue.number}`,
     {
       isAutoAcceptLabel,
+      isMaxLabel,
     },
   );
 
@@ -159,14 +175,24 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       },
       autoAcceptPlan: isAutoAcceptLabel,
     };
+    // Create config object with Claude Opus 4 model configuration for max labels
+    const config: Record<string, any> = {
+      recursion_limit: 400,
+    };
+
+    if (isMaxLabel) {
+      config.configurable = {
+        plannerModelName: "anthropic:claude-opus-4-0",
+        programmerModelName: "anthropic:claude-opus-4-0",
+      };
+    }
+
     const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
       input: runInput,
-      config: {
-        recursion_limit: 400,
-      },
+      config,
       ifNotExists: "create",
       streamResumable: true,
-      streamMode: ["values", "messages-tuple", "custom"],
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     });
 
     logger.info("Created new run from GitHub issue.", {

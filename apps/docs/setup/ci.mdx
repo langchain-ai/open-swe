@@ -1,0 +1,69 @@
+---
+title: "CI Configuration"
+description: "How to configure your CI pipeline for Open SWE"
+---
+
+## Skip CI until last commit
+
+Open SWE will push a commit after every change to the repository. This will cause your GitHub CI workflows to run for every commit, which is unnecessary.
+
+To prevent this, Open SWE supports adding an environment variable which will append `[skip ci]` to the commit message. This can be used to make GitHub skip CI for that commit.
+
+Below are instructions showing how to use this to skip creating Vercel CI preview deployments on every commit:
+
+<Steps>
+  <Step title="Set the environment variable">
+    Set the environment variable `SKIP_CI_UNTIL_LAST_COMMIT` to `true` in Open SWE's environment variables:
+
+    `apps/open-swe/.env`
+    ```bash
+    SKIP_CI_UNTIL_LAST_COMMIT="true"
+    ```
+
+  </Step>
+
+  <Step title="Add custom 'Ignored Build Step' in Vercel">
+    Add a custom 'Ignored Build Step' in Vercel to skip CI when commit messages contain the string `[skip ci]`.
+
+    1. Navigate to your Vercel project dashboard
+    2. Go to **Settings** → **Git** tab
+    3. Scroll to **Ignored Build Step** section
+    4. Select **Custom** and add the following script:
+
+    ![Vercel Custom Build Step Screenshot](/images/vercel_ignored_build_script_screenshot.png)
+
+    ```bash
+    git log -1 --pretty=oneline --abbrev-commit | grep -w "\[skip ci\]" && exit 0 || exit 1
+    ```
+
+    <Callout type="warning">
+      **Do not test this command locally** as it will close your terminal. Use the testing method below instead.
+    </Callout>
+
+  </Step>
+
+  <Step title="Test the configuration (optional)">
+    To verify your setup works without closing your terminal, use this safe testing command:
+
+    ```bash
+    # Safe local testing - won't close your terminal
+    if git log -1 --pretty=oneline --abbrev-commit | grep -w "\[skip ci\]"; then
+        echo "Found [skip ci] - Vercel would skip this build"
+    else
+        echo "No [skip ci] found - Vercel would proceed with build"
+    fi
+    ```
+
+    Test with both types of commits:
+    - Commits with `[skip ci]` should show "Vercel would skip this build"
+    - Commits without `[skip ci]` should show "Vercel would proceed with build"
+
+  </Step>
+</Steps>
+
+### How it works
+
+1. **During task execution**: Open SWE includes `[skip ci]` in commit messages
+2. **Vercel behavior**: Skips creating preview deployments for these commits (script exits with code 1)
+3. **Task completion**: Open SWE pushes a final commit without `[skip ci]` to trigger deployment (script exits with code 0)
+4. **Result**: Only one preview deployment per Open SWE task

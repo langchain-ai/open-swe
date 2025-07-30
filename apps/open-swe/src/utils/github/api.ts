@@ -271,14 +271,41 @@ export async function markPullRequestReadyForReview({
         auth: token,
       });
 
+      // Fetch the PR, as the markReadyForReview mutation requires the PR's node ID, not the pull number
+      const { data: pr } = await octokit.pulls.get({
+        owner,
+        repo,
+        pull_number: pullNumber,
+      });
+
+      await octokit.graphql(
+        `
+        mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+          markPullRequestReadyForReview(input: {
+            pullRequestId: $pullRequestId
+          }) {
+            clientMutationId
+            pullRequest {
+              id
+              number
+              isDraft
+            }
+          }
+        }
+      `,
+        {
+          pullRequestId: pr.node_id,
+        },
+      );
+
       const { data: updatedPR } = await octokit.pulls.update({
         owner,
         repo,
         pull_number: pullNumber,
         title,
         body,
-        draft: false,
       });
+
       logger.info(`Pull request #${pullNumber} marked as ready for review.`);
       return updatedPR;
     },
@@ -328,14 +355,14 @@ export async function getIssueComments({
   repo,
   issueNumber,
   githubInstallationToken,
-  filterBotComments = true,
+  filterBotComments,
   numRetries = 1,
 }: {
   owner: string;
   repo: string;
   issueNumber: number;
   githubInstallationToken: string;
-  filterBotComments?: boolean;
+  filterBotComments: boolean;
   numRetries?: number;
 }): Promise<GitHubIssueComment[] | null> {
   return withGitHubRetry(
@@ -354,11 +381,11 @@ export async function getIssueComments({
         return comments;
       }
 
-      return comments.filter((comment) => {
-        return (
-          comment.user?.type !== "Bot" || !comment.user?.name?.includes("[bot]")
-        );
-      });
+      return comments.filter(
+        (comment) =>
+          comment.user?.type !== "Bot" &&
+          !comment.user?.login?.includes("[bot]"),
+      );
     },
     githubInstallationToken,
     "Failed to get issue comments",
