@@ -37,9 +37,11 @@ export function ProposedPlan({
             <div className="rounded-full border-2 border-dashed border-red-500 p-3 transition-all group-hover:border-solid group-hover:bg-red-50 dark:group-hover:bg-red-950/50">
               <X className="h-5 w-5 text-red-500" />
             </div>
-            <span className="text-xs text-muted-foreground group-hover:text-red-600 dark:group-hover:text-red-400">Reject</span>
+            <span className="text-muted-foreground text-xs group-hover:text-red-600 dark:group-hover:text-red-400">
+              Reject
+            </span>
           </button>
-          
+
           <button
             onClick={handleResumePlan}
             className="group flex flex-col items-center gap-2 transition-all"
@@ -47,7 +49,7 @@ export function ProposedPlan({
             <div className="rounded-full border-2 border-dashed border-green-500 p-3 transition-all group-hover:border-solid group-hover:bg-green-50 dark:group-hover:bg-green-950/50">
               <ArrowDown className="h-5 w-5 text-green-500" />
             </div>
-            <span className="text-xs text-muted-foreground group-hover:text-green-600 dark:group-hover:text-green-400">
+            <span className="text-muted-foreground text-xs group-hover:text-green-600 dark:group-hover:text-green-400">
               {changesMade ? "Submit changes" : "Continue"}
             </span>
           </button>

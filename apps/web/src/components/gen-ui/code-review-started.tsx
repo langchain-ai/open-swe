@@ -13,14 +13,14 @@ export function CodeReviewStarted({ status = "done" }: CodeReviewStartedProps) {
   return (
     <div
       className={cn(
-        "rounded-lg border border-blue-200/60 bg-blue-50/30 transition-shadow shadow-sm dark:border-muted-foreground/20 dark:bg-muted/30",
+        "dark:border-muted-foreground/20 dark:bg-muted/30 rounded-lg border border-blue-200/60 bg-blue-50/30 shadow-sm transition-shadow",
         "shadow-sm hover:shadow-md",
       )}
     >
       {/* Header */}
       <div
         className={cn(
-          "relative flex items-center bg-blue-50/50 p-3 dark:bg-muted/40",
+          "dark:bg-muted/40 relative flex items-center bg-blue-50/50 p-3",
           "rounded-lg",
         )}
       >
@@ -30,12 +30,10 @@ export function CodeReviewStarted({ status = "done" }: CodeReviewStartedProps) {
 
         <div className="ml-3 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-foreground text-sm font-medium">
-              Code review
-            </h3>
+            <h3 className="text-foreground text-sm font-medium">Code review</h3>
             <Badge
               variant="secondary"
-              className="bg-blue-100/80 text-blue-700 border-blue-200/60 dark:bg-blue-900/50 dark:text-blue-300 dark:border-blue-700/40"
+              className="border-blue-200/60 bg-blue-100/80 text-blue-700 dark:border-blue-700/40 dark:bg-blue-900/50 dark:text-blue-300"
             >
               <Clock className="h-3 w-3" />
               In progress

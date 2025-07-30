@@ -115,7 +115,7 @@ export function ProgressBar({
   return (
     <div
       className={cn(
-        "bg-gray-50 w-full overflow-hidden rounded-lg px-1 py-1.5 sm:px-3 dark:bg-muted",
+        "dark:bg-muted w-full overflow-hidden rounded-lg bg-gray-50 px-1 py-1.5 sm:px-3",
         className,
       )}
     >
@@ -164,7 +164,7 @@ export function ProgressBar({
               variant="outline"
               size="sm"
               onClick={onOpenSidebar}
-              className="h-6 text-xs hover:bg-muted/80 hover:border-muted-foreground/50"
+              className="hover:bg-muted/80 hover:border-muted-foreground/50 h-6 text-xs"
             >
               <List className="size-3" />
               <span className="hidden sm:inline">Tasks</span>

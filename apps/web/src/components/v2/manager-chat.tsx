@@ -112,7 +112,7 @@ export function ManagerChat({
                   return (
                     <div
                       key={message.id}
-                      className="group flex gap-3 rounded-lg bg-muted p-3"
+                      className="group bg-muted flex gap-3 rounded-lg p-3"
                     >
                       <div className="flex-shrink-0">
                         {message.type === "human" ? (

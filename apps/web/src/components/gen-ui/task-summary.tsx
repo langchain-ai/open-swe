@@ -2,12 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  CheckCircle,
-  Loader2,
-  ChevronDown,
-  MinusCircle,
-} from "lucide-react";
+import { CheckCircle, Loader2, ChevronDown, MinusCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BasicMarkdownText } from "../thread/markdown-text";
 
@@ -35,7 +30,9 @@ export function TaskSummary({
         );
       case "done":
         if (completed === false) {
-          return <MinusCircle className="size-3.5 text-amber-500 dark:text-amber-400" />;
+          return (
+            <MinusCircle className="size-3.5 text-amber-500 dark:text-amber-400" />
+          );
         }
         return (
           <CheckCircle className="size-3.5 text-green-600 dark:text-green-400" />
@@ -91,13 +88,13 @@ export function TaskSummary({
                 : "text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300",
             )}
           >
-            <ChevronDown className={cn(
-              "h-3 w-3 transition-transform duration-200",
-              showSummary && "rotate-180"
-            )} />
-            <span>
-              {showSummary ? "Hide reflection" : "Show reflection"}
-            </span>
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                showSummary && "rotate-180",
+              )}
+            />
+            <span>{showSummary ? "Hide reflection" : "Show reflection"}</span>
           </button>
           <AnimatePresence>
             {showSummary && (
@@ -108,12 +105,14 @@ export function TaskSummary({
                 transition={{ duration: 0.2, ease: "easeInOut" }}
                 className="overflow-hidden"
               >
-                <div className={cn(
-                  "mt-3 rounded-md px-3 py-2",
-                  completed === false
-                    ? "bg-amber-50/50 dark:bg-amber-900/20"
-                    : "bg-green-50/50 dark:bg-green-900/20",
-                )}>
+                <div
+                  className={cn(
+                    "mt-3 rounded-md px-3 py-2",
+                    completed === false
+                      ? "bg-amber-50/50 dark:bg-amber-900/20"
+                      : "bg-green-50/50 dark:bg-green-900/20",
+                  )}
+                >
                   <BasicMarkdownText
                     className={cn(
                       "text-xs leading-relaxed",

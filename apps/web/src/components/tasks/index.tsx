@@ -142,7 +142,7 @@ export function TasksSidebar({
   return (
     <div
       className={cn(
-        "fixed top-0 right-0 z-10 h-screen bg-white shadow-lg transition-all duration-300 dark:bg-background",
+        "dark:bg-background fixed top-0 right-0 z-10 h-screen bg-white shadow-lg transition-all duration-300",
         isOpen ? "w-80 md:w-xl" : "w-0 overflow-hidden border-l-0",
       )}
     >
@@ -176,7 +176,7 @@ export function TasksSidebar({
                 Task
               </label>
               <select
-                className="w-full rounded border border-gray-200 bg-muted px-2 py-1 text-sm dark:border-gray-600 dark:bg-muted dark:text-gray-200"
+                className="bg-muted dark:bg-muted w-full rounded border border-gray-200 px-2 py-1 text-sm dark:border-gray-600 dark:text-gray-200"
                 value={currentTask.id}
                 onChange={(e) => {
                   const newTaskIndex = taskPlan.tasks.findIndex(
@@ -207,7 +207,7 @@ export function TasksSidebar({
               Plan Revision
             </label>
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-1 rounded border border-gray-200 bg-muted px-2 py-1 dark:border-gray-600 dark:bg-muted">
+              <div className="bg-muted dark:bg-muted flex flex-1 items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-gray-600">
                 <div className="flex items-center gap-1">
                   {currentRevision?.createdBy === "agent" ? (
                     <Bot className="h-3 w-3 text-gray-600 dark:text-gray-400" />
@@ -280,7 +280,7 @@ export function TasksSidebar({
 
           {/* Filter controls */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded border border-gray-200 bg-muted px-2 py-1 dark:border-gray-600 dark:bg-muted">
+            <div className="bg-muted dark:bg-muted flex items-center gap-1 rounded border border-gray-200 px-2 py-1 dark:border-gray-600">
               <Filter className="h-3 w-3 text-gray-500 dark:text-gray-400" />
               <select
                 className="border-none bg-transparent text-xs outline-none dark:text-gray-300"
@@ -318,7 +318,7 @@ export function TasksSidebar({
                       state === "completed" &&
                         "border-green-200/80 bg-green-50/60 dark:border-green-800/30 dark:bg-green-950/15",
                       state === "remaining" &&
-                        "border-gray-200 bg-muted dark:border-gray-700 dark:bg-muted",
+                        "bg-muted dark:bg-muted border-gray-200 dark:border-gray-700",
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -346,7 +346,7 @@ export function TasksSidebar({
                                 state === "current" &&
                                   "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
                                 state === "remaining" &&
-                                  "bg-muted text-gray-700 dark:bg-muted dark:text-gray-300",
+                                  "bg-muted dark:bg-muted text-gray-700 dark:text-gray-300",
                               )}
                             >
                               {state === "completed"
@@ -414,7 +414,7 @@ export function TaskPlanView({ taskPlan, onTaskChange }: TaskPlanViewProps) {
 
   if (taskPlan.tasks.length === 0) {
     return (
-      <div className="w-full rounded border border-gray-200 bg-muted p-2 dark:border-gray-700 dark:bg-muted">
+      <div className="bg-muted dark:bg-muted w-full rounded border border-gray-200 p-2 dark:border-gray-700">
         <div className="text-center text-xs text-gray-500 dark:text-gray-400">
           No tasks available
         </div>

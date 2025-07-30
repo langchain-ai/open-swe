@@ -57,15 +57,15 @@ export function DiagnoseErrorAction({
         <div className="border-b border-l-4 border-blue-200 border-l-blue-500 bg-blue-50 p-2 dark:border-blue-800/50 dark:border-l-blue-400 dark:bg-blue-950/20">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex cursor-pointer items-center gap-1.5 text-xs font-medium transition-colors duration-200 text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+            className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-blue-700 transition-colors duration-200 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
           >
-            <ChevronDown className={cn(
-              "h-3 w-3 transition-transform duration-200",
-              showReasoning && "rotate-180"
-            )} />
-            <span>
-              {showReasoning ? "Hide reasoning" : "Show reasoning"}
-            </span>
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                showReasoning && "rotate-180",
+              )}
+            />
+            <span>{showReasoning ? "Hide reasoning" : "Show reasoning"}</span>
           </button>
           <AnimatePresence>
             {showReasoning && (

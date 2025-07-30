@@ -737,19 +737,19 @@ export function ActionStep(props: ActionStepProps) {
   );
 
   return (
-    <div className="border-border overflow-hidden rounded-md border bg-muted">
-      <div className="border-b border-l-4 border-gray-200 border-l-gray-500 bg-muted p-2 dark:border-gray-600 dark:border-l-gray-400 dark:bg-muted">
+    <div className="border-border bg-muted overflow-hidden rounded-md border">
+      <div className="bg-muted dark:bg-muted border-b border-l-4 border-gray-200 border-l-gray-500 p-2 dark:border-gray-600 dark:border-l-gray-400">
         <button
           onClick={() => setShowReasoning(!showReasoning)}
-          className="flex cursor-pointer items-center gap-1.5 text-xs font-medium transition-colors duration-200 text-gray-700 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-200"
+          className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-700 transition-colors duration-200 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-200"
         >
-          <ChevronDown className={cn(
-            "h-3 w-3 transition-transform duration-200",
-            showReasoning && "rotate-180"
-          )} />
-          <span>
-            {showReasoning ? "Hide reasoning" : "Show reasoning"}
-          </span>
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform duration-200",
+              showReasoning && "rotate-180",
+            )}
+          />
+          <span>{showReasoning ? "Hide reasoning" : "Show reasoning"}</span>
         </button>
         <AnimatePresence>
           {showReasoning && (
@@ -780,18 +780,18 @@ export function ActionStep(props: ActionStepProps) {
       </div>
 
       {summaryText && anyActionDone && (
-        <div className="border-t border-gray-300 bg-muted p-2 dark:border-gray-600 dark:bg-muted">
+        <div className="bg-muted dark:bg-muted border-t border-gray-300 p-2 dark:border-gray-600">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex cursor-pointer items-center gap-1.5 text-xs font-medium transition-colors duration-200 text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors duration-200 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           >
-            <ChevronDown className={cn(
-              "h-3 w-3 transition-transform duration-200",
-              showSummary && "rotate-180"
-            )} />
-            <span>
-              {showSummary ? "Hide summary" : "Show summary"}
-            </span>
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                showSummary && "rotate-180",
+              )}
+            />
+            <span>{showSummary ? "Hide summary" : "Show summary"}</span>
           </button>
           <AnimatePresence>
             {showSummary && (
