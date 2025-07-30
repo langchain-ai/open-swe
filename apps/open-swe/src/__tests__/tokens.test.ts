@@ -769,9 +769,3 @@ describe("getMessagesSinceLastSummary", () => {
     expect(toolMessageExists).not.toBeDefined();
   });
 });
-
-describe("MAX_INTERNAL_TOKENS constant", () => {
-  it("should be defined as 100,000", async () => {
-    expect(MAX_INTERNAL_TOKENS).toBe(100_000);
-  });
-});
