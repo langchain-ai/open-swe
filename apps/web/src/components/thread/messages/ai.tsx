@@ -3,6 +3,7 @@ import {
   AIMessage,
   Checkpoint,
   Message,
+  StreamMode,
   ToolMessage,
 } from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
@@ -57,6 +58,8 @@ import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { OPEN_SWE_STREAM_MODE } from "@open-swe/shared/constants";
+import { CustomNodeEvent } from "@open-swe/shared/open-swe/custom-node-events";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -197,7 +200,6 @@ function parseAnthropicStreamedToolCalls(
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   threadMessages: Message[],
-  onSubmitHumanHelpResponse?: (response: string) => void,
 ): ActionItemProps {
   const toolCall: ToolCall | undefined = threadMessages
     .filter(isAIMessageSDK)
@@ -345,22 +347,26 @@ export function mapToolMessageToActionStepProps(
 
 export function AssistantMessage({
   message,
-  isLoading,
-  handleRegenerate,
+  threadId,
+  assistantId,
   forceRenderInterrupt = false,
   thread,
   threadMessages,
+  modifyRunId,
+  requestHelpEvents,
 }: {
   message: Message | undefined;
-  isLoading: boolean;
-  handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+  threadId: string;
+  assistantId: string;
   forceRenderInterrupt?: boolean;
   thread: ReturnType<typeof useStream<Record<string, unknown>>>;
   threadMessages: Message[];
+  modifyRunId?: (runId: string) => Promise<void>;
+  requestHelpEvents?: CustomNodeEvent[];
 }) {
   const content = message?.content ?? [];
 
-  const handleHumanHelpResponse = (response: string) => {
+  const handleHumanHelpResponse = async (response: string) => {
     const humanResponse: HumanResponse[] = [
       {
         type: "response",
@@ -368,17 +374,21 @@ export function AssistantMessage({
       },
     ];
 
-    thread.submit(
-      {},
+    const newRun = await thread.client.runs.create(
+      threadId,
+      assistantId,
       {
         command: { resume: humanResponse },
         config: {
           recursion_limit: 400,
         },
         streamResumable: true,
+        streamMode: OPEN_SWE_STREAM_MODE as StreamMode[]
       },
     );
+    await modifyRunId?.(newRun.run_id);
   };
+
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
@@ -505,7 +515,7 @@ export function AssistantMessage({
     );
   }
 
-  if (requestHumanHelpToolCall && aiToolCalls.length === 1) {
+  if (requestHumanHelpToolCall) {
     const correspondingToolResult = toolResults.find(
       (tr) => tr && tr.tool_call_id === requestHumanHelpToolCall.id,
     );
@@ -520,6 +530,7 @@ export function AssistantMessage({
           helpRequest={args.help_request}
           reasoningText={reasoningText}
           onSubmitResponse={handleHumanHelpResponse}
+          requestHelpEvents={requestHelpEvents}
         />
       </div>
     );
@@ -719,7 +730,6 @@ export function AssistantMessage({
         return mapToolMessageToActionStepProps(
           correspondingToolResult,
           threadMessages,
-          handleHumanHelpResponse,
         );
       } else if (isGrepTool) {
         const args = toolCall.args as GrepToolArgs;
