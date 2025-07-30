@@ -3,11 +3,11 @@ import {
   CheckCircle,
   GitBranch,
   GitPullRequest,
-  Loader2,
   AlertCircle,
   Pause,
   XCircle,
   Clock,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { useRouter } from "next/navigation";
@@ -76,19 +76,19 @@ export function ThreadCard({
   const getStatusColor = (status: ThreadUIStatus) => {
     switch (status) {
       case "running":
-        return "dark:bg-blue-950 bg-blue-100 dark:text-blue-400 text-blue-700";
+        return "bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300";
       case "completed":
-        return "dark:bg-green-950 bg-green-100 dark:text-green-400 text-green-700";
+        return "bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-300";
       case "error":
-        return "dark:bg-red-950 bg-red-100 dark:text-red-400 text-red-700";
+        return "bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300";
       case "paused":
-        return "dark:bg-yellow-950 bg-yellow-100 dark:text-yellow-400 text-yellow-700";
+        return "bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300";
       case "failed":
-        return "dark:bg-red-950 bg-red-100 dark:text-red-400 text-red-700";
+        return "bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300";
       case "pending":
-        return "dark:bg-yellow-950 bg-yellow-100 dark:text-yellow-400 text-yellow-700";
+        return "bg-yellow-100 dark:bg-yellow-950/50 text-yellow-700 dark:text-yellow-300";
       default:
-        return "dark:bg-gray-800 bg-gray-200 dark:text-gray-400 text-gray-700";
+        return "bg-gray-200 dark:bg-muted text-gray-700 dark:text-muted-foreground";
     }
   };
 
@@ -129,7 +129,7 @@ export function ThreadCard({
   return (
     <Card
       key={thread.id}
-      className="border-border bg-card hover:bg-muted cursor-pointer px-0 py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
+      className="border-border bg-card hover:bg-muted/50 hover:shadow-primary/3 hover:border-primary/10 group cursor-pointer px-0 py-3 transition-all duration-200 hover:shadow-md"
       onClick={() => {
         router.push(`/chat/${thread.id}`);
       }}
@@ -150,9 +150,9 @@ export function ThreadCard({
           <Badge
             variant="secondary"
             className={cn(
-              "text-xs",
+              "text-xs transition-all duration-300 group-hover:scale-105",
               isStatusLoading
-                ? "bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                ? "dark:bg-muted dark:text-muted-foreground bg-gray-200 text-gray-600"
                 : getStatusColor(displayStatus),
             )}
           >
@@ -160,7 +160,9 @@ export function ThreadCard({
               {isStatusLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                getStatusIcon(displayStatus)
+                <div className="transition-transform duration-300 group-hover:rotate-12">
+                  {getStatusIcon(displayStatus)}
+                </div>
               )}
               <span className="capitalize">
                 {isStatusLoading ? "Loading..." : displayStatus}
@@ -187,13 +189,13 @@ export function ThreadCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-foreground h-5 w-5 p-0"
+                className="text-muted-foreground hover:text-foreground h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:bg-orange-100 dark:hover:bg-orange-950"
                 onClick={(e) => {
                   e.stopPropagation();
                   window.open(thread.githubIssue!.url, "_blank");
                 }}
               >
-                <Bug className="h-3 w-3" />
+                <Bug className="h-3 w-3 transition-colors duration-200" />
               </Button>
             )}
             {thread.pullRequest && (
@@ -201,15 +203,21 @@ export function ThreadCard({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "h-5 w-5 p-0 hover:text-gray-300",
+                  "h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:text-gray-300",
                   getPRStatusColor(thread.pullRequest.status),
+                  thread.pullRequest.status === "merged" &&
+                    "hover:bg-purple-100 dark:hover:bg-purple-950",
+                  thread.pullRequest.status === "open" &&
+                    "hover:bg-green-100 dark:hover:bg-green-950",
+                  thread.pullRequest.status === "closed" &&
+                    "hover:bg-red-100 dark:hover:bg-red-950",
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.open(thread.pullRequest!.url, "_blank");
                 }}
               >
-                <GitPullRequest className="h-3 w-3" />
+                <GitPullRequest className="h-3 w-3 transition-colors duration-200" />
               </Button>
             )}
           </div>
@@ -221,7 +229,7 @@ export function ThreadCard({
 
 export function ThreadCardLoading() {
   return (
-    <Card className="border-border bg-card px-0 py-3 dark:bg-gray-950">
+    <Card className="border-border bg-card px-0 py-3">
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">

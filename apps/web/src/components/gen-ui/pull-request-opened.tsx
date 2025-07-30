@@ -4,15 +4,19 @@ import { useState } from "react";
 import {
   GitPullRequest,
   Loader2,
+  CheckCircle,
   ChevronDown,
+  ChevronUp,
   ExternalLink,
   GitPullRequestDraft,
-  Clock,
-  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../ui/tooltip";
 
 type PullRequestOpenedProps = {
   status: "loading" | "generating" | "done";
@@ -37,69 +41,31 @@ export function PullRequestOpened({
 }: PullRequestOpenedProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const getStatusBadge = () => {
+  const getStatusIcon = () => {
     switch (status) {
       case "loading":
         return (
-          <Badge
-            variant="secondary"
-            className="border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300"
-          >
-            <Clock className="h-3 w-3" />
-            Preparing
-          </Badge>
+          <div className="h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600" />
         );
       case "generating":
         return (
-          <Badge
-            variant="secondary"
-            className="border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300"
-          >
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Opening
-          </Badge>
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500 dark:text-gray-400" />
         );
       case "done":
-        if (isDraft) {
-          return (
-            <Badge
-              variant="secondary"
-              className="border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-            >
-              <GitPullRequestDraft className="h-3 w-3" />
-              Draft
-            </Badge>
-          );
-        }
-        return (
-          <Badge
-            variant="secondary"
-            className="border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-          >
-            <Check className="h-3 w-3" />
-            Opened
-          </Badge>
-        );
+        return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
     }
   };
 
   const getStatusText = () => {
-    if (status === "done" && prNumber && !isDraft) {
-      return `Pull request #${prNumber}`;
-    }
-    return isDraft
-      ? `Draft pull request${prNumber ? ` #${prNumber}` : ""}`
-      : `Pull request${prNumber ? ` #${prNumber}` : ""}`;
-  };
-
-  const getSubtitleText = () => {
     switch (status) {
       case "loading":
-        return "Preparing to open pull request...";
+        return "Preparing pull request...";
       case "generating":
-        return "Opening pull request on GitHub...";
+        return "Opening pull request...";
       case "done":
-        return branch ? `${branch} → ${targetBranch}` : "Successfully opened";
+        return prNumber
+          ? `Pull request #${prNumber} opened`
+          : "Pull request opened";
     }
   };
 
@@ -107,87 +73,98 @@ export function PullRequestOpened({
     return status === "done" && description;
   };
 
-  return (
-    <div
-      className={cn(
-        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-purple-50/50 transition-shadow dark:from-purple-950/20",
-        "shadow-sm hover:shadow-md",
-      )}
-    >
-      {/* Header */}
-      <div
-        className={cn(
-          "relative flex items-center bg-gradient-to-r from-purple-50 to-purple-50/50 p-4 backdrop-blur-sm dark:from-purple-950/30 dark:to-purple-950/10",
-          "rounded-xl",
-        )}
-      >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500 shadow-md dark:bg-purple-600">
-          {isDraft ? (
-            <GitPullRequestDraft className="h-4 w-4 text-white" />
-          ) : (
-            <GitPullRequest className="h-4 w-4 text-white" />
-          )}
-        </div>
+  const iconClassName = "mr-2 h-3.5 w-3.5";
 
-        <div className="ml-3 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="text-foreground text-sm font-semibold">
-              {title || getStatusText()}
-            </h3>
-            {getStatusBadge()}
-          </div>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {getSubtitleText()}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {url && status === "done" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              asChild
-            >
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open pull request on GitHub"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            </Button>
-          )}
-          {shouldShowToggle() && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setExpanded(!expanded)}
-              className="h-8 px-2"
-            >
-              <ChevronDown
+  const getIconWithTooltip = () => {
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger>
+            {isDraft && (
+              <GitPullRequestDraft
                 className={cn(
-                  "h-4 w-4 transition-transform duration-200",
-                  !expanded && "-rotate-90",
+                  iconClassName,
+                  "text-gray-500 dark:text-gray-400",
                 )}
               />
-            </Button>
+            )}
+            {!isDraft && (
+              <GitPullRequest
+                className={cn(
+                  iconClassName,
+                  "text-green-500 dark:text-green-400",
+                )}
+              />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>
+            {isDraft ? "Opened draft pull request" : "Opened pull request"}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+
+  return (
+    <div className="overflow-hidden rounded-md border border-gray-200 dark:border-gray-700">
+      <div className="flex items-center border-b border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+        {getIconWithTooltip()}
+        <div className="flex-1">
+          {title && status === "done" && (
+            <div className="mb-0.5 text-xs font-normal text-gray-800 dark:text-gray-200">
+              {title}
+            </div>
+          )}
+          {branch && status === "done" && (
+            <div className="text-xs font-normal text-gray-500 dark:text-gray-400">
+              {branch} → {targetBranch}
+            </div>
+          )}
+          {!title && (
+            <span className="text-xs font-normal text-gray-800 dark:text-gray-200">
+              {getStatusText()}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+            {getStatusText()}
+          </span>
+          {getStatusIcon()}
+          {url && status === "done" && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+              title="Open pull request"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+          {shouldShowToggle() && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            >
+              {expanded ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+            </button>
           )}
         </div>
       </div>
 
-      {/* Content */}
       {expanded && description && status === "done" && (
-        <div className="border-t p-4">
-          <div className="bg-muted/30 rounded-lg p-3">
-            <h4 className="text-muted-foreground mb-2 text-xs font-medium">
-              Description
-            </h4>
-            <pre className="text-foreground text-sm whitespace-pre-wrap">
-              {description}
-            </pre>
-          </div>
+        <div className="border-t border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
+          <h3 className="mb-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+            Description
+          </h3>
+          <pre className="text-xs font-normal whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+            {description}
+          </pre>
         </div>
       )}
     </div>

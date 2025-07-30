@@ -315,7 +315,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range: args.view_range as [number, number] | undefined,
+      view_range: args.view_range,
       output,
       reasoningText,
     };
@@ -653,6 +653,13 @@ export function AssistantMessage({
   }
 
   if (actionableToolCalls.length > 0) {
+    if (
+      actionableToolCalls[0].name !== "shell" &&
+      actionableToolCalls[0].name !== "scratchpad" &&
+      actionableToolCalls[0].name !== "grep"
+    ) {
+      console.log("actionableToolCalls", actionableToolCalls[0]);
+    }
     const actionItems = actionableToolCalls.map((toolCall): ActionItemProps => {
       const correspondingToolResult = toolResults.find(
         (tr) => tr && tr.tool_call_id === toolCall.id,

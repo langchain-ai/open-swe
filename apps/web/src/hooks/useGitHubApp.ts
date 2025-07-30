@@ -230,8 +230,8 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setError("Failed to check GitHub App installation status");
       setIsInstalled(false);
     } finally {
-      setIsLoading(false);
-      setRepositoriesLoadingMore(false);
+      if (!append) setIsLoading(false);
+      if (append) setRepositoriesLoadingMore(false);
     }
   };
 
@@ -352,9 +352,9 @@ export function useGitHubApp(): UseGitHubAppReturn {
       }
 
       previousInstallationIdRef.current = currentInstallationId;
-    }
 
-    checkInstallation();
+      checkInstallation();
+    }
   }, [currentInstallationId]);
 
   useEffect(() => {

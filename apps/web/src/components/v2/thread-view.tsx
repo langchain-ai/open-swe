@@ -346,7 +346,7 @@ export function ThreadView({
               }
             >
               <div className="flex flex-shrink-0 items-center gap-3">
-                <TabsList className="bg-muted/70 dark:bg-gray-800">
+                <TabsList className="bg-muted/70">
                   <TabsTrigger value="planner">Planner</TabsTrigger>
                   <TabsTrigger value="programmer">Programmer</TabsTrigger>
                 </TabsList>
@@ -390,7 +390,7 @@ export function ThreadView({
                 value="planner"
                 className="mb-2"
               >
-                <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
+                <Card className="border-border bg-card relative h-full p-0">
                   <CardContent className="h-full p-0">
                     <StickToBottom
                       className="absolute inset-0 h-full"
@@ -403,7 +403,6 @@ export function ThreadView({
                             {plannerSession ? (
                               <div className="scrollbar-pretty-auto overflow-y-auto px-2">
                                 <ActionsRenderer<PlannerGraphState>
-                                  taskPlan={programmerTaskPlan}
                                   runId={plannerSession.runId}
                                   customNodeEvents={customPlannerNodeEvents}
                                   setCustomNodeEvents={
@@ -436,7 +435,7 @@ export function ThreadView({
                 value="programmer"
                 className="mb-2"
               >
-                <Card className="border-border bg-card relative h-full p-0 dark:bg-gray-950">
+                <Card className="border-border bg-card relative h-full p-0">
                   <CardContent className="h-full p-0">
                     <StickToBottom
                       className="absolute inset-0 h-full"

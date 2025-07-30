@@ -204,6 +204,12 @@ export function APIKeysTab() {
                       </div>
                     </div>
                   </div>
+
+                  <div className="flex items-center justify-between">
+                    <p className="text-muted-foreground text-xs">
+                      Your API key is stored
+                    </p>
+                  </div>
                 </div>
               </div>
             ))}

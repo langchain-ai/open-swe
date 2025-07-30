@@ -16,6 +16,7 @@ import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
 import { threadsToMetadata } from "@/lib/thread-utils";
+import { OpenSWELogoSVG } from "@/components/icons/openswe";
 
 type FilterStatus =
   | "all"
@@ -29,7 +30,7 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
-  const { currentInstallation, installationsLoading } = useGitHubAppProvider();
+  const { currentInstallation } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
@@ -48,52 +49,40 @@ function AllThreadsPageContent() {
     isLoading: statusLoading,
   } = useThreadsStatus(threadIds, threads);
 
-  const filteredThreads = useMemo(() => {
-    return threadsMetadata.filter((thread: ThreadMetadata) => {
-      const matchesSearch =
-        thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredThreads = threadsMetadata.filter((thread: ThreadMetadata) => {
+    const matchesSearch =
+      thread.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      thread.repository.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const matchesStatus =
-        statusFilter === "all" || statusMap[thread.id] === statusFilter;
+    const matchesStatus =
+      statusFilter === "all" || statusMap[thread.id] === statusFilter;
 
-      return matchesSearch && matchesStatus;
-    });
-  }, [threadsMetadata, searchQuery, statusFilter, statusMap]);
+    return matchesSearch && matchesStatus;
+  });
 
-  const groupedThreads = useMemo(() => {
-    return {
-      running: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "running",
-      ),
-      completed: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "completed",
-      ),
-      failed: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "failed",
-      ),
-      pending: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "pending",
-      ),
-      idle: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "idle",
-      ),
-      paused: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "paused",
-      ),
-      error: filteredThreads.filter(
-        (thread: ThreadMetadata) => statusMap[thread.id] === "error",
-      ),
-    };
-  }, [filteredThreads, statusMap]);
-
-  // Show loading state if threads/status/installation requests are loading, and there are no
-  // threads to display (conditional of the status filter)
-  const showThreadsLoading =
-    (threadsLoading || statusLoading || installationsLoading) &&
-    (statusFilter === "all"
-      ? Object.values(groupedThreads).flat().length === 0
-      : filteredThreads.length === 0);
+  const groupedThreads = {
+    running: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "running",
+    ),
+    completed: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "completed",
+    ),
+    failed: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "failed",
+    ),
+    pending: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "pending",
+    ),
+    idle: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "idle",
+    ),
+    paused: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "paused",
+    ),
+    error: filteredThreads.filter(
+      (thread: ThreadMetadata) => statusMap[thread.id] === "error",
+    ),
+  };
 
   return (
     <div className="bg-background flex h-screen flex-col">
@@ -109,10 +98,10 @@ function AllThreadsPageContent() {
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="text-muted-foreground font-mono text-sm">
-              All Threads
-            </span>
+            <OpenSWELogoSVG
+              width={120}
+              height={18}
+            />
           </div>
           <div className="ml-auto flex items-center gap-4">
             <div className="flex items-center gap-2">
@@ -129,7 +118,7 @@ function AllThreadsPageContent() {
       </div>
 
       {/* Search and Filters */}
-      <div className="border-border bg-muted/50 border-b px-4 py-3 dark:bg-gray-950">
+      <div className="border-border bg-muted/50 border-b px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="relative max-w-md flex-1">
             <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform" />
@@ -137,7 +126,7 @@ function AllThreadsPageContent() {
               placeholder="Search threads..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="border-border bg-background text-foreground placeholder:text-muted-foreground pl-10 dark:bg-gray-900"
+              className="border-border bg-background text-foreground placeholder:text-muted-foreground pl-10"
             />
           </div>
           <div className="flex items-center gap-1">
@@ -162,7 +151,7 @@ function AllThreadsPageContent() {
                 className={cn(
                   "h-7 text-xs",
                   statusFilter === status
-                    ? "bg-muted text-foreground dark:bg-gray-700"
+                    ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
                 onClick={() => setStatusFilter(status)}
@@ -172,7 +161,7 @@ function AllThreadsPageContent() {
                   : status.charAt(0).toUpperCase() + status.slice(1)}
                 <Badge
                   variant="secondary"
-                  className="bg-muted/70 text-muted-foreground ml-1 text-xs dark:bg-gray-800"
+                  className="bg-muted/70 text-muted-foreground ml-1 text-xs"
                 >
                   {statusCounts[status]}
                 </Badge>
@@ -197,7 +186,7 @@ function AllThreadsPageContent() {
                       </h2>
                       <Badge
                         variant="secondary"
-                        className="bg-muted/70 text-muted-foreground text-xs dark:bg-gray-800"
+                        className="bg-muted/70 text-muted-foreground text-xs"
                       >
                         {threads.length}
                       </Badge>
@@ -248,20 +237,21 @@ function AllThreadsPageContent() {
               </div>
             )}
 
-          {showThreadsLoading && (
-            <div>
-              <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-foreground text-base font-semibold capitalize">
-                  Loading threads...
-                </h2>
+          {(threadsLoading || statusLoading) &&
+            (!threads || threads.length === 0) && (
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <h2 className="text-foreground text-base font-semibold capitalize">
+                    Loading threads...
+                  </h2>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 9 }).map((_, index) => (
+                    <ThreadCardLoading key={`all-threads-loading-${index}`} />
+                  ))}
+                </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <ThreadCardLoading key={`all-threads-loading-${index}`} />
-                ))}
-              </div>
-            </div>
-          )}
+            )}
         </div>
       </div>
     </div>

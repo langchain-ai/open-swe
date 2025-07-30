@@ -20,7 +20,6 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { InlineMarkdownText } from "../thread/markdown-text";
 
 interface ProgressBarProps {
   taskPlan?: TaskPlan;
@@ -39,7 +38,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-600/50 dark:bg-gray-700/30",
           className,
         )}
       >
@@ -73,7 +72,7 @@ export function ProgressBar({
     return (
       <div
         className={cn(
-          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-700 dark:bg-gray-800",
+          "w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 sm:mt-4 dark:border-gray-600/50 dark:bg-gray-700/30",
           className,
         )}
       >
@@ -105,7 +104,7 @@ export function ProgressBar({
   const getSegmentColor = (state: string) => {
     switch (state) {
       case "completed":
-        return "bg-green-400 dark:bg-green-500";
+        return "bg-green-500/90 dark:bg-green-400/80";
       case "current":
         return "bg-blue-400 dark:bg-blue-500";
       default:
@@ -116,7 +115,7 @@ export function ProgressBar({
   return (
     <div
       className={cn(
-        "bg-muted/70 w-full overflow-hidden rounded-lg px-1 py-1.5 sm:px-3 dark:bg-gray-800",
+        "bg-gray-50 w-full overflow-hidden rounded-lg px-1 py-1.5 sm:px-3 dark:bg-muted",
         className,
       )}
     >
@@ -165,7 +164,7 @@ export function ProgressBar({
               variant="outline"
               size="sm"
               onClick={onOpenSidebar}
-              className="h-6 border-blue-200 text-xs hover:bg-blue-50 dark:border-blue-700 dark:hover:bg-blue-900/20"
+              className="h-6 text-xs hover:bg-muted/80 hover:border-muted-foreground/50"
             >
               <List className="size-3" />
               <span className="hidden sm:inline">Tasks</span>
@@ -176,9 +175,9 @@ export function ProgressBar({
       </div>
 
       {showLegend && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs sm:gap-3 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs sm:gap-3 dark:border-gray-600/50 dark:bg-gray-700/30 dark:text-gray-200">
           <div className="flex items-center gap-1">
-            <div className="h-2 w-2 rounded-full bg-green-400 dark:bg-green-500"></div>
+            <div className="h-2 w-2 rounded-full bg-green-500/90 dark:bg-green-400/80"></div>
             <span>Completed</span>
           </div>
           <div className="flex items-center gap-1">
@@ -241,9 +240,7 @@ export function ProgressBar({
                             : "Pending"}
                       </span>
                     </div>
-                    <InlineMarkdownText className="text-xs break-words">
-                      {item.plan}
-                    </InlineMarkdownText>
+                    <p className="text-xs break-words">{item.plan}</p>
                   </div>
                 </HoverCardContent>
               </HoverCard>

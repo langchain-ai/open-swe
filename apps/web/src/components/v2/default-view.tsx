@@ -32,6 +32,7 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
+import { OpenSWELogoSVG } from "../icons/openswe";
 
 function OpenSettingsButton() {
   return (
@@ -121,10 +122,10 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="border-border bg-card border-b px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="text-muted-foreground font-mono text-sm">
-              Open SWE
-            </span>
+            <OpenSWELogoSVG
+              width={120}
+              height={18}
+            />
           </div>
           <div className="flex items-center gap-4">
             <InstallationSelector />
@@ -148,7 +149,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
           {/* Terminal Chat Input */}
           <Card
             className={cn(
-              "border-border bg-card py-0 dark:bg-gray-950",
+              "border-border bg-card py-0",
               dragOver
                 ? "border-primary border-2 border-dotted"
                 : "border border-solid",
@@ -202,6 +203,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     variant={autoAccept ? "brand" : "ghost"}
                     tooltip="Automatically accept the plan"
                     className={cn(
+                      "transition-all duration-200 hover:scale-110 active:scale-95",
                       autoAccept
                         ? "text-secondary"
                         : "text-muted-foreground hover:text-foreground",
@@ -209,7 +211,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     onClick={() => setAutoAccept((prev) => !prev)}
                     side="bottom"
                   >
-                    <Zap className="size-4" />
+                    <Zap
+                      className={cn(
+                        "size-4 transition-all duration-200",
+                        autoAccept && "animate-pulse",
+                      )}
+                    />
                   </TooltipIconButton>
                 </div>
               </div>

@@ -12,9 +12,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { InlineMarkdownText } from "../thread/markdown-text";
 
 type PlanItem = {
   index: number;
@@ -23,7 +20,6 @@ type PlanItem = {
 };
 
 type AcceptedPlanStepProps = {
-  taskPlan?: TaskPlan;
   planTitle?: string;
   planItems?: PlanItem[];
   interruptType?: HumanResponse["type"];
@@ -31,14 +27,12 @@ type AcceptedPlanStepProps = {
 };
 
 export function AcceptedPlanStep({
-  taskPlan,
   planTitle,
   planItems = [],
   interruptType,
   collapse: collapseProp = true,
 }: AcceptedPlanStepProps) {
   const [collapsed, setCollapsed] = useState(collapseProp);
-  const activeTaskPlan = taskPlan ? getActivePlanItems(taskPlan) : planItems;
 
   const getStatusText = () => {
     if (interruptType === "edit") {
@@ -74,7 +68,7 @@ export function AcceptedPlanStep({
     );
   };
 
-  const totalCount = activeTaskPlan.length;
+  const totalCount = planItems.length;
 
   return (
     <div
@@ -103,7 +97,7 @@ export function AcceptedPlanStep({
           </div>
           {totalCount > 0 && (
             <p className="text-muted-foreground mt-1 text-xs">
-              {totalCount} step{totalCount === 1 ? "" : "s"}
+              {totalCount} steps
             </p>
           )}
         </div>
@@ -145,7 +139,7 @@ export function AcceptedPlanStep({
             </div>
           )}
 
-          {activeTaskPlan.length > 0 && (
+          {planItems.length > 0 && (
             <div className="space-y-3">
               <h4 className="text-foreground flex items-center gap-2 text-sm font-medium">
                 Execution Steps
@@ -158,7 +152,7 @@ export function AcceptedPlanStep({
               </h4>
 
               <div className="space-y-3">
-                {activeTaskPlan
+                {planItems
                   .sort((a, b) => a.index - b.index)
                   .map((item, idx) => (
                     <div
@@ -176,7 +170,7 @@ export function AcceptedPlanStep({
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-2">
-                          <InlineMarkdownText
+                          <p
                             className={cn(
                               "text-sm leading-relaxed",
                               item.completed
@@ -185,7 +179,7 @@ export function AcceptedPlanStep({
                             )}
                           >
                             {item.plan}
-                          </InlineMarkdownText>
+                          </p>
                           <Badge
                             variant="outline"
                             className={cn(

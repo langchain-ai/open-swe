@@ -102,10 +102,12 @@ export function TasksSidebar({
     switch (state) {
       case "completed":
         return (
-          <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
+          <CheckCircle2 className="h-4 w-4 text-green-500 dark:text-green-400/80" />
         );
       case "current":
-        return <Play className="h-4 w-4 text-blue-500 dark:text-blue-400" />;
+        return (
+          <Play className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+        );
       default:
         return <Circle className="h-4 w-4 text-gray-400 dark:text-gray-500" />;
     }
@@ -140,7 +142,7 @@ export function TasksSidebar({
   return (
     <div
       className={cn(
-        "fixed top-0 right-0 z-10 h-screen border-l border-gray-200 bg-white shadow-lg transition-all duration-300 dark:border-gray-700 dark:bg-gray-900",
+        "fixed top-0 right-0 z-10 h-screen bg-white shadow-lg transition-all duration-300 dark:bg-background",
         isOpen ? "w-80 md:w-xl" : "w-0 overflow-hidden border-l-0",
       )}
     >
@@ -161,7 +163,7 @@ export function TasksSidebar({
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-800"
+              className="h-8 w-8 p-0 hover:bg-gray-100 dark:hover:bg-gray-700/50"
             >
               <PanelLeftClose className="h-4 w-4" />
             </Button>
@@ -174,7 +176,7 @@ export function TasksSidebar({
                 Task
               </label>
               <select
-                className="w-full rounded border border-gray-200 px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+                className="w-full rounded border border-gray-200 bg-muted px-2 py-1 text-sm dark:border-gray-600 dark:bg-muted dark:text-gray-200"
                 value={currentTask.id}
                 onChange={(e) => {
                   const newTaskIndex = taskPlan.tasks.findIndex(
@@ -205,12 +207,12 @@ export function TasksSidebar({
               Plan Revision
             </label>
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-600 dark:bg-gray-800">
+              <div className="flex flex-1 items-center gap-1 rounded border border-gray-200 bg-muted px-2 py-1 dark:border-gray-600 dark:bg-muted">
                 <div className="flex items-center gap-1">
                   {currentRevision?.createdBy === "agent" ? (
-                    <Bot className="h-3 w-3 text-blue-500" />
+                    <Bot className="h-3 w-3 text-gray-600 dark:text-gray-400" />
                   ) : (
-                    <User className="h-3 w-3 text-green-500" />
+                    <User className="h-3 w-3 text-green-500 dark:text-green-400/80" />
                   )}
                   <Clock className="h-3 w-3 text-gray-500 dark:text-gray-400" />
                 </div>
@@ -278,7 +280,7 @@ export function TasksSidebar({
 
           {/* Filter controls */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-1 dark:border-gray-600 dark:bg-gray-800">
+            <div className="flex items-center gap-1 rounded border border-gray-200 bg-muted px-2 py-1 dark:border-gray-600 dark:bg-muted">
               <Filter className="h-3 w-3 text-gray-500 dark:text-gray-400" />
               <select
                 className="border-none bg-transparent text-xs outline-none dark:text-gray-300"
@@ -312,11 +314,11 @@ export function TasksSidebar({
                     className={cn(
                       "rounded-lg border p-3",
                       state === "current" &&
-                        "border-blue-200 bg-blue-50 dark:border-blue-700 dark:bg-blue-900/20",
+                        "border-orange-200 bg-orange-50 dark:border-orange-800/50 dark:bg-orange-950/20",
                       state === "completed" &&
-                        "border-green-200 bg-green-50 dark:border-green-700 dark:bg-green-900/20",
+                        "border-green-200/80 bg-green-50/60 dark:border-green-800/30 dark:bg-green-950/15",
                       state === "remaining" &&
-                        "border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800",
+                        "border-gray-200 bg-muted dark:border-gray-700 dark:bg-muted",
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -340,11 +342,11 @@ export function TasksSidebar({
                               className={cn(
                                 "rounded-full px-2 py-1 text-xs",
                                 state === "completed" &&
-                                  "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                                  "bg-green-100/70 text-green-600 dark:bg-green-900/20 dark:text-green-300/90",
                                 state === "current" &&
-                                  "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+                                  "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
                                 state === "remaining" &&
-                                  "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300",
+                                  "bg-muted text-gray-700 dark:bg-muted dark:text-gray-300",
                               )}
                             >
                               {state === "completed"
@@ -373,7 +375,7 @@ export function TasksSidebar({
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 p-0 text-xs text-green-700 dark:text-green-400"
+                                  className="h-6 p-0 text-xs text-green-600 dark:text-green-300/90"
                                 >
                                   {isExpanded ? (
                                     <ChevronDown className="mr-1 h-3 w-3" />
@@ -384,7 +386,7 @@ export function TasksSidebar({
                                 </Button>
                               </CollapsibleTrigger>
                               <CollapsibleContent className="mt-2">
-                                <div className="rounded border border-green-200 bg-green-50 p-2 text-xs text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                <div className="rounded border border-green-200/80 bg-green-50/60 p-2 text-xs text-green-700 dark:border-green-800/30 dark:bg-green-950/15 dark:text-green-300/90">
                                   <BasicMarkdownText>
                                     {item.summary}
                                   </BasicMarkdownText>
@@ -412,7 +414,7 @@ export function TaskPlanView({ taskPlan, onTaskChange }: TaskPlanViewProps) {
 
   if (taskPlan.tasks.length === 0) {
     return (
-      <div className="w-full rounded border border-gray-200 bg-gray-50 p-2 dark:border-gray-700 dark:bg-gray-800">
+      <div className="w-full rounded border border-gray-200 bg-muted p-2 dark:border-gray-700 dark:bg-muted">
         <div className="text-center text-xs text-gray-500 dark:text-gray-400">
           No tasks available
         </div>

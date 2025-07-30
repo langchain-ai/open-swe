@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Loader2, SquareStop } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { UseStream } from "@langchain/langgraph-sdk/react";
 import { useCancelStream } from "@/hooks/useCancelStream";
 
@@ -16,7 +16,7 @@ export function CancelStreamButton({
   runId,
   streamName,
 }: CancelStreamButtonProps) {
-  const { cancelRun, cancelLoading } = useCancelStream({
+  const { cancelRun } = useCancelStream({
     stream,
     threadId,
     runId,
@@ -35,19 +35,9 @@ export function CancelStreamButton({
       size="sm"
       variant="destructive"
       className="h-8 px-3 text-xs"
-      disabled={cancelLoading}
     >
-      {cancelLoading ? (
-        <>
-          <SquareStop className="mr-1 h-3 w-3 animate-pulse" />
-          <p className="animate-pulse">Stopping {streamName}</p>
-        </>
-      ) : (
-        <>
-          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          Stop {streamName}
-        </>
-      )}
+      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+      Stop {streamName}
     </Button>
   );
 }

@@ -7,10 +7,8 @@ import { LangGraphLogoSVG } from "../icons/langgraph";
 import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
-import { useRouter } from "next/navigation";
 
 function AuthStatusContent() {
-  const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -63,18 +61,7 @@ function AuthStatusContent() {
     window.location.href = "/api/github/installation";
   };
 
-  const showGetStarted = !isAuth;
-  const showInstallApp =
-    !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !showGetStarted && !showInstallApp && !githubToken;
-
-  useEffect(() => {
-    if (!showGetStarted && !showInstallApp && !showLoading) {
-      router.push("/chat");
-    }
-  }, [showGetStarted, showInstallApp, showLoading]);
-
-  if (showGetStarted) {
+  if (!isAuth) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -104,7 +91,7 @@ function AuthStatusContent() {
     );
   }
 
-  if (showInstallApp) {
+  if (isAuth && hasGitHubAppInstalled === false && !isTokenLoading) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
@@ -137,7 +124,7 @@ function AuthStatusContent() {
             <Button
               onClick={handleInstallGitHubApp}
               disabled={isLoading || isCheckingAppInstallation}
-              className="bg-black hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200"
+              className="bg-black hover:bg-gray-800"
             >
               <GitHubSVG
                 width="16"
@@ -153,7 +140,7 @@ function AuthStatusContent() {
     );
   }
 
-  if (showLoading) {
+  if (!githubToken) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-4">
         <div className="animate-in fade-in-0 zoom-in-95 flex w-full max-w-3xl flex-col rounded-lg border shadow-lg">
