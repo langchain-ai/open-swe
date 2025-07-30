@@ -60,6 +60,17 @@ export function PullRequestOpened({
           </Badge>
         );
       case "done":
+        if (isDraft) {
+          return (
+            <Badge
+              variant="secondary"
+              className="border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              <GitPullRequestDraft className="h-3 w-3" />
+              Draft
+            </Badge>
+          );
+        }
         return (
           <Badge
             variant="secondary"
@@ -73,10 +84,12 @@ export function PullRequestOpened({
   };
 
   const getStatusText = () => {
-    if (status === "done" && prNumber) {
+    if (status === "done" && prNumber && !isDraft) {
       return `Pull request #${prNumber}`;
     }
-    return isDraft ? "Draft pull request" : "Pull request";
+    return isDraft
+      ? `Draft pull request${prNumber ? ` #${prNumber}` : ""}`
+      : `Pull request${prNumber ? ` #${prNumber}` : ""}`;
   };
 
   const getSubtitleText = () => {
