@@ -299,7 +299,10 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range: args.view_range,
+      view_range:
+        args.view_range && args.view_range.length === 2
+          ? [args.view_range[0], args.view_range[1]]
+          : undefined,
       old_str: args.old_str,
       new_str: args.new_str,
       file_text: args.file_text,
@@ -315,7 +318,10 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range: args.view_range,
+      view_range:
+        args.view_range && args.view_range.length === 2
+          ? [args.view_range[0], args.view_range[1]]
+          : undefined,
       output,
       reasoningText,
     };
@@ -734,7 +740,10 @@ export function AssistantMessage({
           status: "generating",
           command: args?.command || "view",
           path: args?.path || "",
-          view_range: args?.view_range,
+          view_range:
+            args.view_range && args.view_range.length === 2
+              ? [args.view_range[0], args.view_range[1]]
+              : undefined,
           old_str: args?.old_str,
           new_str: args?.new_str,
           file_text: args?.file_text,
@@ -748,7 +757,10 @@ export function AssistantMessage({
           status: "generating",
           command: args?.command || "view",
           path: args?.path || "",
-          view_range: args?.view_range,
+          view_range:
+            args.view_range && args.view_range.length === 2
+              ? [args.view_range[0], args.view_range[1]]
+              : undefined,
           output: "",
         } as ActionItemProps;
       } else {
