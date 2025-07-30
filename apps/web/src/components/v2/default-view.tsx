@@ -209,7 +209,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     onClick={() => setAutoAccept((prev) => !prev)}
                     side="bottom"
                   >
-                    <Zap className="size-4" />
+                    <ListChecks className="size-4" />
                   </TooltipIconButton>
                 </div>
               </div>
@@ -269,4 +269,5 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
