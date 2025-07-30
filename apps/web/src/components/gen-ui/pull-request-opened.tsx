@@ -4,42 +4,15 @@ import { useState } from "react";
 import {
   GitPullRequest,
   Loader2,
-  CheckCircle,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   GitPullRequestDraft,
+  Clock,
+  Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../ui/tooltip";
-
-type PullRequestOpenedProps = {
-  status: "loading" | "generating" | "done";
-  title?: string;
-  description?: string;
-  url?: string;
-  prNumber?: number;
-  branch?: string;
-  targetBranch?: string;
-  isDraft?: boolean;
-};
-
-export function PullRequestOpened({
-  status,
-  title,
-  description,
-  url,
-  prNumber,
-  branch,
-  targetBranch = "main",
-  isDraft = false,
-}: PullRequestOpenedProps) {
-  const [expanded, setExpanded] = useState(false);
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
 
   const getStatusIcon = () => {
     switch (status) {
@@ -170,3 +143,4 @@ export function PullRequestOpened({
     </div>
   );
 }
+
