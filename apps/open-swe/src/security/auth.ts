@@ -56,7 +56,10 @@ function apiKeysInRequestBody(
     logger.info("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr);
     return false;
   } catch (e: any) {
-    logger.error("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr, e);
+    logger.error("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", {
+      bodyStr,
+      error: e,
+    });
     return false;
   }
 }
