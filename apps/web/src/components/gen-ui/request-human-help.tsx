@@ -42,9 +42,10 @@ export function RequestHumanHelp({
 
   // Extract response from requestHelpEvents if available
   const eventResponse = requestHelpEvents?.find(
-    (event) => event.data && typeof event.data === 'object' && 'response' in event.data
+    (event) =>
+      event.data && typeof event.data === "object" && "response" in event.data,
   )?.data?.response as string | undefined;
-  
+
   const hasEventResponse = !!eventResponse;
   const finalResponse = eventResponse || submittedResponse;
   const isResponded = hasEventResponse || hasSubmitted;

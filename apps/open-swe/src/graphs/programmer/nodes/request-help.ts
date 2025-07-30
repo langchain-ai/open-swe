@@ -7,14 +7,20 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
-import { DO_NOT_RENDER_ID_PREFIX, GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
+import {
+  DO_NOT_RENDER_ID_PREFIX,
+  GITHUB_USER_LOGIN_HEADER,
+} from "@open-swe/shared/constants";
 import {
   getSandboxWithErrorHandling,
   stopSandbox,
 } from "../../../utils/sandbox.js";
-import { postGitHubIssueComment } from "../../planner/nodes/proposed-plan.js";
 import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
-import { CustomNodeEvent, REQUEST_HELP_NODE_ID } from "@open-swe/shared/open-swe/custom-node-events";
+import {
+  CustomNodeEvent,
+  REQUEST_HELP_NODE_ID,
+} from "@open-swe/shared/open-swe/custom-node-events";
+import { postGitHubIssueComment } from "../../../utils/github/plan.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -24,7 +30,7 @@ ${helpRequest}
 \`\`\``;
 };
 
-const createEventsMessage = (events: CustomNodeEvent[]) => 
+const createEventsMessage = (events: CustomNodeEvent[]) =>
   new AIMessage({
     id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
     content: "Request help response",
@@ -128,17 +134,19 @@ Please check the Open SWE interface to respond to this request.`;
       status: "success",
     });
 
-    const customEvent = [{
-      nodeId: REQUEST_HELP_NODE_ID,
-      actionId: uuidv4(),
-      action: "Help request response",
-      createdAt: new Date().toISOString(),
-      data: {
-        status: "success" as const,
-        response: interruptRes.args,
-        runId: config.configurable?.run_id ?? "",
+    const customEvent = [
+      {
+        nodeId: REQUEST_HELP_NODE_ID,
+        actionId: uuidv4(),
+        action: "Help request response",
+        createdAt: new Date().toISOString(),
+        data: {
+          status: "success" as const,
+          response: interruptRes.args,
+          runId: config.configurable?.run_id ?? "",
+        },
       },
-    }];
+    ];
     try {
       config?.writer?.(customEvent);
     } catch {

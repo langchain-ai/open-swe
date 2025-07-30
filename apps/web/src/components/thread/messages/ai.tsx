@@ -374,18 +374,14 @@ export function AssistantMessage({
       },
     ];
 
-    const newRun = await thread.client.runs.create(
-      threadId,
-      assistantId,
-      {
-        command: { resume: humanResponse },
-        config: {
-          recursion_limit: 400,
-        },
-        streamResumable: true,
-        streamMode: OPEN_SWE_STREAM_MODE as StreamMode[]
+    const newRun = await thread.client.runs.create(threadId, assistantId, {
+      command: { resume: humanResponse },
+      config: {
+        recursion_limit: 400,
       },
-    );
+      streamResumable: true,
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+    });
     await modifyRunId?.(newRun.run_id);
   };
 

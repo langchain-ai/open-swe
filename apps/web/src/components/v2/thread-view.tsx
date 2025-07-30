@@ -463,24 +463,28 @@ export function ThreadView({
                                         return {
                                           threadId: programmerSession.threadId,
                                           runId,
-                                        }
+                                        };
                                       }
                                       return {
                                         ...prev,
                                         runId,
-                                      }
-                                    })
+                                      };
+                                    });
                                     if (plannerSession?.threadId) {
                                       try {
                                         // Attempt to update the planner session with the new run ID of the programmer.
-                                        await programmerStream.client.threads.updateState(plannerSession?.threadId, {
-                                          values: {
-                                            programmerSession: {
-                                              threadId: programmerSession.threadId,
-                                              runId,
-                                            }
-                                          }
-                                        })
+                                        await programmerStream.client.threads.updateState(
+                                          plannerSession?.threadId,
+                                          {
+                                            values: {
+                                              programmerSession: {
+                                                threadId:
+                                                  programmerSession.threadId,
+                                                runId,
+                                              },
+                                            },
+                                          },
+                                        );
                                       } catch {
                                         // no-op
                                       }

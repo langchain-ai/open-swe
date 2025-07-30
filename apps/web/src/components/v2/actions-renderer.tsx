@@ -128,10 +128,7 @@ export function ActionsRenderer<
   );
 
   const requestHelpEvents = useMemo(
-    () =>
-      customNodeEvents.filter(
-        (e) => e.nodeId === REQUEST_HELP_NODE_ID,
-      ),
+    () => customNodeEvents.filter((e) => e.nodeId === REQUEST_HELP_NODE_ID),
     [customNodeEvents],
   );
 
@@ -163,7 +160,7 @@ export function ActionsRenderer<
     if (!allCustomEvents?.length) {
       return;
     }
-    console.log("found new events from msgs!", allCustomEvents)
+    console.log("found new events from msgs!", allCustomEvents);
 
     setCustomNodeEvents((prev) => {
       // If no existing events, set all new events
