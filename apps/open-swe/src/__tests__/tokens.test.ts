@@ -11,7 +11,6 @@ import {
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
-  MAX_INTERNAL_TOKENS,
 } from "../utils/tokens.js";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 
