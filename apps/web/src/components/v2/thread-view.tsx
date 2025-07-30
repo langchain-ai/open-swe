@@ -403,6 +403,7 @@ export function ThreadView({
                             {plannerSession ? (
                               <div className="scrollbar-pretty-auto overflow-y-auto px-2">
                                 <ActionsRenderer<PlannerGraphState>
+                                  taskPlan={programmerTaskPlan}
                                   runId={plannerSession.runId}
                                   customNodeEvents={customPlannerNodeEvents}
                                   setCustomNodeEvents={

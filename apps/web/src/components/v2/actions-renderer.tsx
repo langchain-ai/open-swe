@@ -13,7 +13,11 @@ import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState, PlanItem } from "@open-swe/shared/open-swe/types";
+import {
+  GraphState,
+  PlanItem,
+  TaskPlan,
+} from "@open-swe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";
@@ -65,6 +69,7 @@ interface ActionsRendererProps<
   customNodeEvents: CustomNodeEvent[];
   setCustomNodeEvents: Dispatch<SetStateAction<CustomNodeEvent[]>>;
   stream: ReturnType<typeof useStream<StateType>>;
+  taskPlan?: TaskPlan;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -92,6 +97,7 @@ const getCustomNodeEventsFromMessages = (
 export function ActionsRenderer<
   StateType extends PlannerGraphState | GraphState,
 >({
+  taskPlan,
   runId,
   customNodeEvents,
   setCustomNodeEvents,
@@ -224,6 +230,7 @@ export function ActionsRenderer<
       {acceptedPlanEvents.length > 0 &&
         isAcceptedPlanEvents(acceptedPlanEvents) && (
           <AcceptedPlanStep
+            taskPlan={taskPlan}
             planTitle={
               acceptedPlanEvents[acceptedPlanEvents.length - 1].data.planTitle
             }

@@ -69,6 +69,7 @@ function routeGeneratedAction(
     ) {
       // Need to return a `Send` here so that we can update the state to include the plan change request.
       return new Send("update-plan", {
+        ...state,
         planChangeRequest: toolCall.args?.update_plan_reasoning,
       });
     }
