@@ -20,6 +20,9 @@ import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { validate } from "uuid";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "Auth");
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -38,6 +41,7 @@ interface AuthenticateReturn extends BaseAuthReturn {
 function apiKeysInRequestBody(
   bodyStr: string | Record<string, unknown>,
 ): boolean {
+  logger.info("CHECKING RUN REQ BODY!!", bodyStr);
   try {
     const body = typeof bodyStr === "string" ? JSON.parse(bodyStr) : bodyStr;
     if (
@@ -46,11 +50,13 @@ function apiKeysInRequestBody(
         "openaiApiKey" in body.config.configurable.apiKeys ||
         "googleApiKey" in body.config.configurable.apiKeys)
     ) {
+      logger.info("RUN REQ BODY CONTAINS API KEYS!!", bodyStr);
       return true;
     }
+    logger.info("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr);
     return false;
-  } catch {
-    // no-op
+  } catch (e: any) {
+    logger.error("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr, e);
     return false;
   }
 }
