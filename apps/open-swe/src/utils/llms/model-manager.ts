@@ -340,7 +340,7 @@ export class ModelManager {
       },
       openai: {
         [Task.PLANNER]: "o3",
-        [Task.PROGRAMMER]: "gpt-4o",
+        [Task.PROGRAMMER]: "gpt-4.1",
         [Task.REVIEWER]: "o3",
         [Task.ROUTER]: "gpt-4o-mini",
         [Task.SUMMARIZER]: "gpt-4.1-mini",
