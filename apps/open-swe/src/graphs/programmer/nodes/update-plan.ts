@@ -109,7 +109,9 @@ function removeUncalledTools(lastMessage: AIMessage): AIMessage {
     return lastMessage;
   }
 
-  const updatePlanReasoningToolCall = lastMessage.tool_calls?.find((tc) => tc.name === updatePlanReasoningTool.name);
+  const updatePlanReasoningToolCall = lastMessage.tool_calls?.find(
+    (tc) => tc.name === updatePlanReasoningTool.name,
+  );
   if (!updatePlanReasoningToolCall) {
     throw new Error("Update plan reasoning tool call not found.");
   }
@@ -118,7 +120,7 @@ function removeUncalledTools(lastMessage: AIMessage): AIMessage {
   return new AIMessage({
     ...lastMessage,
     tool_calls: [updatePlanReasoningToolCall],
-  })
+  });
 }
 
 export async function updatePlan(
