@@ -16,6 +16,7 @@ import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
 import { threadsToMetadata } from "@/lib/thread-utils";
+import { UserPopover } from "@/components/user-popover";
 import { OpenSWELogoSVG } from "@/components/icons/openswe";
 
 type FilterStatus =
@@ -122,8 +123,8 @@ function AllThreadsPageContent() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <InstallationSelector />
               <ThemeToggle />
+              <UserPopover />
             </div>
           </div>
         </div>
