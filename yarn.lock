@@ -4263,7 +4263,7 @@ __metadata:
     katex: ^0.16.21
     langgraph-nextjs-api-passthrough: ^0.1.4
     lodash: ^4.17.21
-    lucide-react: ^0.476.0
+    lucide-react: ^0.532.0
     next: ^15.2.3
     next-themes: ^0.4.4
     nuqs: ^2.4.1
@@ -14609,12 +14609,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lucide-react@npm:^0.476.0":
-  version: 0.476.0
-  resolution: "lucide-react@npm:0.476.0"
+"lucide-react@npm:^0.532.0":
+  version: 0.532.0
+  resolution: "lucide-react@npm:0.532.0"
   peerDependencies:
     react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: fcfb5a4ce7be4d6184cca9cd1641bc9c967b70e8a29d2704d3a71a4c08d58b89aaabfbc436f323e7a93b2d2ef5f46782e99a88118267ed6f0670df70d35805d8
+  checksum: 5d2312b8836f8502f45bf6dbc355c7ab980b9f1f87ad8d12b81bc2f2de51d6176326aecf5bef09f56f65a50bef4d183b6df875a9d0b50777994f1effc27036e8
   languageName: node
   linkType: hard
 
