@@ -60,9 +60,8 @@ const LoadingSpinner: React.FC<{ text: string }> = ({ text }) => {
     </Box>
   );
 };
-
+// eslint-disable-next-line no-unused-vars
 const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
-  // eslint-disable-line no-unused-vars
   onSubmit,
 }) => {
   const [input, setInput] = useState("");
