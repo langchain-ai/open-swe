@@ -229,8 +229,6 @@ export function ActionsRenderer<
           thread={stream as UseStream<Record<string, unknown>>}
           threadMessages={stream.messages}
           message={m}
-          isLoading={false}
-          handleRegenerate={() => {}}
           modifyRunId={modifyRunId}
           threadId={threadId}
           assistantId={stream.assistantId}

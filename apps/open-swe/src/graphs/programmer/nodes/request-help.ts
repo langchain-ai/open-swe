@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, isAIMessage, ToolMessage } from "@langchain/core/messages";
 import {
   GraphConfig,
   GraphState,
@@ -8,9 +8,19 @@ import {
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
 import {
+  DO_NOT_RENDER_ID_PREFIX,
+  GITHUB_USER_LOGIN_HEADER,
+} from "@open-swe/shared/constants";
+import {
   getSandboxWithErrorHandling,
   stopSandbox,
 } from "../../../utils/sandbox.js";
+import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
+import {
+  CustomNodeEvent,
+  REQUEST_HELP_NODE_ID,
+} from "@open-swe/shared/open-swe/custom-node-events";
+import { postGitHubIssueComment } from "../../../utils/github/plan.js";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -19,6 +29,16 @@ const constructDescription = (helpRequest: string): string => {
 ${helpRequest}
 \`\`\``;
 };
+
+const createEventsMessage = (events: CustomNodeEvent[]) =>
+  new AIMessage({
+    id: `${DO_NOT_RENDER_ID_PREFIX}${uuidv4()}`,
+    content: "Request help response",
+    additional_kwargs: {
+      hidden: true,
+      customNodeEvents: events,
+    },
+  });
 
 export async function requestHelp(
   state: GraphState,
@@ -34,6 +54,42 @@ export async function requestHelp(
   }
 
   const toolCall = lastMessage.tool_calls[0];
+
+  const threadId = config.configurable?.thread_id;
+  if (!threadId) {
+    throw new Error("Thread ID not found in config");
+  }
+
+  const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
+  const userTag = userLogin ? `@${userLogin} ` : "";
+
+  const runUrl = getOpenSweAppUrl(threadId);
+  const commentBody = runUrl
+    ? `### 🤖 Open SWE Needs Help
+
+${userTag}I've encountered a situation where I need human assistance to continue.
+
+**Help Request:**
+${toolCall.args.help_request}
+
+You can view and respond to this request in the [Open SWE interface](${runUrl}).
+
+Please provide guidance so I can continue working on this issue.`
+    : `### 🤖 Open SWE Needs Help
+
+${userTag}I've encountered a situation where I need human assistance to continue.
+
+**Help Request:**
+${toolCall.args.help_request}
+
+Please check the Open SWE interface to respond to this request.`;
+
+  await postGitHubIssueComment({
+    githubIssueId: state.githubIssueId,
+    targetRepository: state.targetRepository,
+    commentBody,
+    config,
+  });
 
   const interruptInput: HumanInterrupt = {
     action_request: {
@@ -78,8 +134,28 @@ export async function requestHelp(
       status: "success",
     });
 
+    const customEvent = [
+      {
+        nodeId: REQUEST_HELP_NODE_ID,
+        actionId: uuidv4(),
+        action: "Help request response",
+        createdAt: new Date().toISOString(),
+        data: {
+          status: "success" as const,
+          response: interruptRes.args,
+          runId: config.configurable?.run_id ?? "",
+        },
+      },
+    ];
+    try {
+      config?.writer?.(customEvent);
+    } catch {
+      // no-op
+    }
+
+    const humanResponseCustomEventMsg = createEventsMessage(customEvent);
     const commandUpdate: GraphUpdate = {
-      messages: [toolMessage],
+      messages: [toolMessage, humanResponseCustomEventMsg],
       internalMessages: [toolMessage],
       sandboxSessionId: sandbox.id,
       ...(codebaseTree && { codebaseTree }),

@@ -339,9 +339,9 @@ export class ModelManager {
         [Task.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
-        [Task.PLANNER]: "o3",
+        [Task.PLANNER]: "gpt-4.1",
         [Task.PROGRAMMER]: "gpt-4.1",
-        [Task.REVIEWER]: "o3",
+        [Task.REVIEWER]: "gpt-4.1",
         [Task.ROUTER]: "gpt-4o-mini",
         [Task.SUMMARIZER]: "gpt-4.1-mini",
       },

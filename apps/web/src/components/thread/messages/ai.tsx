@@ -3,6 +3,7 @@ import {
   AIMessage,
   Checkpoint,
   Message,
+  StreamMode,
   ToolMessage,
 } from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
@@ -28,6 +29,7 @@ import {
 import { DiagnoseErrorAction } from "@/components/v2/diagnose-error-action";
 import { WriteTechnicalNotes } from "@/components/gen-ui/write-technical-notes";
 import { CodeReviewStarted } from "@/components/gen-ui/code-review-started";
+import { RequestHumanHelp } from "@/components/gen-ui/request-human-help";
 import { ToolCall } from "@langchain/core/messages/tool";
 import {
   createApplyPatchToolFields,
@@ -44,6 +46,7 @@ import {
   createSearchDocumentForToolFields,
   createWriteTechnicalNotesToolFields,
   createConversationHistorySummaryToolFields,
+  createRequestHumanHelpToolFields,
   createReviewStartedToolFields,
   createScratchpadFields,
   createTextEditorToolFields,
@@ -54,6 +57,9 @@ import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { HumanResponse } from "@langchain/langgraph/prebuilt";
+import { OPEN_SWE_STREAM_MODE } from "@open-swe/shared/constants";
+import { CustomNodeEvent } from "@open-swe/shared/open-swe/custom-node-events";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -109,6 +115,8 @@ type ConversationHistorySummaryToolArgs = z.infer<
   typeof conversationHistorySummaryTool.schema
 >;
 
+const requestHumanHelpTool = createRequestHumanHelpToolFields();
+type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
 const textEditorTool = createTextEditorToolFields({
   owner: "dummy",
   repo: "dummy",
@@ -128,6 +136,7 @@ function isMcpTool(toolName: string): boolean {
     getURLContentTool.name,
     openPrTool.name,
     diagnoseErrorTool.name,
+    requestHumanHelpTool.name,
     textEditorTool.name,
     viewTool.name,
   ];
@@ -299,10 +308,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range:
-        args.view_range && args.view_range.length === 2
-          ? [args.view_range[0], args.view_range[1]]
-          : undefined,
+      view_range: args.view_range,
       old_str: args.old_str,
       new_str: args.new_str,
       file_text: args.file_text,
@@ -318,10 +324,7 @@ export function mapToolMessageToActionStepProps(
       success,
       command: args.command || "view",
       path: args.path || "",
-      view_range:
-        args.view_range && args.view_range.length === 2
-          ? [args.view_range[0], args.view_range[1]]
-          : undefined,
+      view_range: args.view_range as [number, number] | undefined,
       output,
       reasoningText,
     };
@@ -344,20 +347,44 @@ export function mapToolMessageToActionStepProps(
 
 export function AssistantMessage({
   message,
-  isLoading,
-  handleRegenerate,
+  threadId,
+  assistantId,
   forceRenderInterrupt = false,
   thread,
   threadMessages,
+  modifyRunId,
+  requestHelpEvents,
 }: {
   message: Message | undefined;
-  isLoading: boolean;
-  handleRegenerate: (parentCheckpoint: Checkpoint | null | undefined) => void;
+  threadId: string;
+  assistantId: string;
   forceRenderInterrupt?: boolean;
   thread: ReturnType<typeof useStream<Record<string, unknown>>>;
   threadMessages: Message[];
+  modifyRunId?: (runId: string) => Promise<void>;
+  requestHelpEvents?: CustomNodeEvent[];
 }) {
   const content = message?.content ?? [];
+
+  const handleHumanHelpResponse = async (response: string) => {
+    const humanResponse: HumanResponse[] = [
+      {
+        type: "response",
+        args: response,
+      },
+    ];
+
+    const newRun = await thread.client.runs.create(threadId, assistantId, {
+      command: { resume: humanResponse },
+      config: {
+        recursion_limit: 400,
+      },
+      streamResumable: true,
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+    });
+    await modifyRunId?.(newRun.run_id);
+  };
+
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
@@ -367,9 +394,7 @@ export function AssistantMessage({
   const messages = threadMessages;
   const idx = message ? messages.findIndex((m) => m.id === message.id) : -1;
 
-  const meta = message ? thread.getMessagesMetadata(message) : undefined;
   const threadInterrupt = thread.interrupt;
-  const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
@@ -450,6 +475,10 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === reviewStartedTool.name)
     : undefined;
 
+  const requestHumanHelpToolCall = message
+    ? aiToolCalls.find((tc) => tc.name === requestHumanHelpTool.name)
+    : undefined;
+
   // Check if this is a conversation history summary message
   if (conversationHistorySummaryToolCall && aiToolCalls.length === 1) {
     const correspondingToolResult = toolResults.find(
@@ -477,6 +506,27 @@ export function AssistantMessage({
       <div className="flex flex-col gap-4">
         <CodeReviewStarted
           status={correspondingToolResult ? "done" : "generating"}
+        />
+      </div>
+    );
+  }
+
+  if (requestHumanHelpToolCall) {
+    const correspondingToolResult = toolResults.find(
+      (tr) => tr && tr.tool_call_id === requestHumanHelpToolCall.id,
+    );
+
+    const args = requestHumanHelpToolCall.args as RequestHumanHelpToolArgs;
+    const reasoningText = getContentString(content);
+
+    return (
+      <div className="flex flex-col gap-4">
+        <RequestHumanHelp
+          status={correspondingToolResult ? "done" : "generating"}
+          helpRequest={args.help_request}
+          reasoningText={reasoningText}
+          onSubmitResponse={handleHumanHelpResponse}
+          requestHelpEvents={requestHelpEvents}
         />
       </div>
     );
@@ -733,10 +783,7 @@ export function AssistantMessage({
           status: "generating",
           command: args?.command || "view",
           path: args?.path || "",
-          view_range:
-            args.view_range && args.view_range.length === 2
-              ? [args.view_range[0], args.view_range[1]]
-              : undefined,
+          view_range: args?.view_range,
           old_str: args?.old_str,
           new_str: args?.new_str,
           file_text: args?.file_text,
@@ -750,10 +797,7 @@ export function AssistantMessage({
           status: "generating",
           command: args?.command || "view",
           path: args?.path || "",
-          view_range:
-            args.view_range && args.view_range.length === 2
-              ? [args.view_range[0], args.view_range[1]]
-              : undefined,
+          view_range: args?.view_range,
           output: "",
         } as ActionItemProps;
       } else {
