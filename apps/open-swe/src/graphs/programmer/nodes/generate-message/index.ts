@@ -323,7 +323,7 @@ export async function generateAction(
     response.tool_calls.some((t) => t.name === markTaskCompletedTool.name)
   ) {
     logger.error(
-      "Multiple tool calls found, including mark_task_completed. Removing the mark_task_completed call.",
+      `Multiple tool calls found, including ${markTaskCompletedTool.name}. Removing the ${markTaskCompletedTool.name} call.`,
       {
         toolCalls: JSON.stringify(response.tool_calls, null, 2),
       },

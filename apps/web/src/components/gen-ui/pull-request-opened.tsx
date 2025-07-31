@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   GitPullRequest,
   Loader2,
@@ -43,7 +44,7 @@ export function PullRequestOpened({
         return (
           <Badge
             variant="secondary"
-            className="border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300"
+            className="border-gray-200 bg-gray-100 text-gray-700 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300"
           >
             <Clock className="h-3 w-3" />
             Preparing
@@ -53,7 +54,7 @@ export function PullRequestOpened({
         return (
           <Badge
             variant="secondary"
-            className="border-purple-200 bg-purple-100 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300"
+            className="border-gray-200 bg-gray-100 text-gray-700 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300"
           >
             <Loader2 className="h-3 w-3 animate-spin" />
             Opening
@@ -64,7 +65,7 @@ export function PullRequestOpened({
           return (
             <Badge
               variant="secondary"
-              className="border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              className="border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300"
             >
               <GitPullRequestDraft className="h-3 w-3" />
               Draft
@@ -74,7 +75,7 @@ export function PullRequestOpened({
         return (
           <Badge
             variant="secondary"
-            className="border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+            className="border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-800/50 dark:text-emerald-300"
           >
             <Check className="h-3 w-3" />
             Opened
@@ -110,18 +111,18 @@ export function PullRequestOpened({
   return (
     <div
       className={cn(
-        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-purple-50/50 transition-shadow dark:from-purple-950/20",
+        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-gray-50/50 transition-shadow dark:from-gray-900/20",
         "shadow-sm hover:shadow-md",
       )}
     >
       {/* Header */}
       <div
         className={cn(
-          "relative flex items-center bg-gradient-to-r from-purple-50 to-purple-50/50 p-4 backdrop-blur-sm dark:from-purple-950/30 dark:to-purple-950/10",
+          "relative flex items-center bg-gradient-to-r from-gray-50 to-gray-50/50 p-4 backdrop-blur-sm dark:from-gray-900/20 dark:to-gray-900/10",
           "rounded-xl",
         )}
       >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-500 shadow-md dark:bg-purple-600">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-500 shadow-md dark:bg-gray-600">
           {isDraft ? (
             <GitPullRequestDraft className="h-4 w-4 text-white" />
           ) : (
@@ -178,18 +179,28 @@ export function PullRequestOpened({
       </div>
 
       {/* Content */}
-      {expanded && description && status === "done" && (
-        <div className="border-t p-4">
-          <div className="bg-muted/30 rounded-lg p-3">
-            <h4 className="text-muted-foreground mb-2 text-xs font-medium">
-              Description
-            </h4>
-            <pre className="text-foreground text-sm whitespace-pre-wrap">
-              {description}
-            </pre>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {expanded && description && status === "done" && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="border-t p-4">
+              <div className="rounded-lg bg-gray-50/50 p-3 dark:bg-gray-800/30">
+                <h4 className="text-muted-foreground mb-2 text-xs font-medium">
+                  Description
+                </h4>
+                <pre className="text-foreground text-sm whitespace-pre-wrap">
+                  {description}
+                </pre>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

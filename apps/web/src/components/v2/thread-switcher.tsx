@@ -47,7 +47,7 @@ export function ThreadSwitcher({
         <Button
           variant="outline"
           size="sm"
-          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground h-7 gap-1 text-xs dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground h-7 gap-1 text-xs"
         >
           <Layers3 className="h-3 w-3" />
           <span className="hidden sm:inline">Switch Thread</span>
@@ -55,7 +55,7 @@ export function ThreadSwitcher({
       </SheetTrigger>
       <SheetContent
         side="right"
-        className="border-border bg-background w-80 sm:w-96 dark:border-gray-800 dark:bg-gray-950"
+        className="border-border bg-background w-80 sm:w-96"
       >
         <SheetHeader className="pb-4">
           <SheetTitle className="text-foreground text-base">
@@ -70,7 +70,7 @@ export function ThreadSwitcher({
               router.push("/chat");
               setOpen(false);
             }}
-            className="border-border bg-card text-foreground hover:bg-muted h-8 w-full justify-start gap-2 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="border-border bg-card text-foreground hover:bg-muted h-8 w-full justify-start gap-2 text-xs"
             variant="outline"
           >
             <Plus className="h-3 w-3" />
@@ -79,7 +79,7 @@ export function ThreadSwitcher({
 
           {/* Current Thread */}
           <div className="space-y-2">
-            <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase dark:text-gray-500">
+            <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               Current Thread
             </h3>
             <ThreadCard thread={currentThread} />
@@ -88,7 +88,7 @@ export function ThreadSwitcher({
           {/* Other Threads */}
           {otherThreads.length > 0 && (
             <div className="h-full space-y-2">
-              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase dark:text-gray-500">
+              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Other Threads
               </h3>
               <ScrollArea className="h-full">

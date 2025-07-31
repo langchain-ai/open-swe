@@ -1,5 +1,6 @@
 import { FileText, ChevronDown, Check } from "lucide-react";
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { MarkdownText } from "../thread/markdown-text";
 import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
@@ -15,18 +16,18 @@ export function ConversationHistorySummary({ summary }: { summary: string }) {
   return (
     <div
       className={cn(
-        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-blue-50/50 transition-shadow dark:from-blue-950/20",
+        "group via-background to-background dark:via-background dark:to-background rounded-xl border bg-gradient-to-br from-gray-50/50 transition-shadow dark:from-gray-900/20",
         "shadow-sm hover:shadow-md",
       )}
     >
       {/* Header */}
       <div
         className={cn(
-          "relative flex items-center bg-gradient-to-r from-blue-50 to-blue-50/50 p-4 backdrop-blur-sm dark:from-blue-950/30 dark:to-blue-950/10",
+          "relative flex items-center bg-gradient-to-r from-gray-50 to-gray-50/50 p-4 backdrop-blur-sm dark:from-gray-900/20 dark:to-gray-900/10",
           "rounded-xl",
         )}
       >
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 shadow-md dark:bg-blue-600">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-500 shadow-md dark:bg-gray-600">
           <FileText className="h-4 w-4 text-white" />
         </div>
 
@@ -37,7 +38,7 @@ export function ConversationHistorySummary({ summary }: { summary: string }) {
             </h3>
             <Badge
               variant="secondary"
-              className="border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
+              className="border-gray-200 bg-gray-100 text-gray-700 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-300"
             >
               <Check className="h-3 w-3" />
               Complete
@@ -64,13 +65,23 @@ export function ConversationHistorySummary({ summary }: { summary: string }) {
       </div>
 
       {/* Content */}
-      {expanded && (
-        <div className="p-4">
-          <div className="text-sm">
-            <MarkdownText>{summary}</MarkdownText>
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            <div className="p-4">
+              <div className="text-sm">
+                <MarkdownText>{summary}</MarkdownText>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4,11 +4,10 @@ import type React from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Send } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { StreamMode } from "@langchain/langgraph-sdk";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GraphState } from "@open-swe/shared/open-swe/types";
@@ -18,7 +17,6 @@ import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import {
   API_KEY_REQUIRED_MESSAGE,
   MANAGER_GRAPH_ID,
-  OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
@@ -106,7 +104,7 @@ export function TerminalInput({
             },
             ifNotExists: "create",
             streamResumable: true,
-            streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+            streamMode: ["values", "messages-tuple", "custom"],
           },
         );
 
@@ -172,9 +170,9 @@ export function TerminalInput({
   }, [draftToLoad, setMessage]);
 
   return (
-    <div className="border-border bg-muted rounded-md border p-2 font-mono text-xs dark:bg-black">
+    <div className="border-border bg-muted hover:border-muted-foreground/50 hover:bg-muted/80 focus-within:border-muted-foreground/70 focus-within:bg-muted/80 focus-within:shadow-muted-foreground/20 rounded-md border p-2 font-mono text-xs transition-all duration-200 focus-within:shadow-md">
       <div className="text-foreground flex items-center gap-1">
-        <div className="flex items-center gap-1 rounded-md border border-gray-200 p-1 dark:border-gray-700">
+        <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200">
           <span className="text-muted-foreground">open-swe</span>
           <span className="text-muted-foreground/70">@</span>
           <span className="text-muted-foreground">github</span>
@@ -191,12 +189,12 @@ export function TerminalInput({
           disabled={disabled || !message.trim() || !selectedRepository}
           size="icon"
           variant="brand"
-          className="ml-auto size-8"
+          className="ml-auto size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
         >
           {loading ? (
-            <Loader2 className="size-4 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Send className="size-4" />
+            <ArrowUp className="size-4" />
           )}
         </Button>
       </div>
@@ -209,7 +207,7 @@ export function TerminalInput({
           onKeyDown={handleKeyPress}
           placeholder={placeholder}
           disabled={disabled}
-          className="text-foreground placeholder:text-muted-foreground max-h-[50vh] min-h-[80px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="text-foreground placeholder:text-muted-foreground focus:placeholder:text-muted-foreground/60 max-h-[50vh] min-h-[80px] flex-1 resize-none border-none bg-transparent p-0 font-mono text-xs shadow-none transition-all duration-200 focus-visible:ring-0 focus-visible:ring-offset-0"
           rows={6}
           onPaste={onPaste}
         />

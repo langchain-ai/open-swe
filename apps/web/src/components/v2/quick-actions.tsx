@@ -41,7 +41,7 @@ function DevReadmePromptQuickAction({
   return (
     <Card
       onClick={() => setQuickActionPrompt(DEV_README_PROMPT)}
-      className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
+      className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm"
     >
       <CardHeader className="px-3">
         <CardTitle className="text-foreground text-sm">
@@ -71,7 +71,7 @@ export function QuickActions({ setQuickActionPrompt }: QuickActionsProps) {
         />
         <Card
           onClick={() => setQuickActionPrompt(GENERATE_RULES_PROMPT)}
-          className="border-border bg-card hover:bg-muted cursor-pointer py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
+          className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm"
         >
           <CardHeader className="px-3">
             <CardTitle className="text-foreground text-sm">

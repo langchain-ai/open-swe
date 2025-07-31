@@ -1,6 +1,7 @@
 "use client";
 
 import { JSX, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Terminal,
   FileText,
@@ -165,7 +166,7 @@ function MatchCaseIcon({ matchCase }: { matchCase: boolean }) {
             "rounded-sm border border-gray-300 px-1 py-[2px] text-xs dark:border-gray-600",
             matchCase
               ? "border-blue-500 bg-blue-500/80 text-white"
-              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+              : "dark:bg-muted dark:text-muted-foreground bg-muted text-gray-800",
           )}
         >
           <p className="font-mono">Aa</p>
@@ -554,7 +555,7 @@ function ActionItem(props: ActionItemProps) {
       props.output
     ) {
       return (
-        <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
+        <div className="bg-muted text-foreground/90 overflow-x-auto p-2">
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
@@ -577,7 +578,7 @@ function ActionItem(props: ActionItemProps) {
       }
 
       return (
-        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
+        <div className="bg-muted overflow-x-auto p-2">
           {hasArgs && (
             <div className="mb-3">
               <div className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
@@ -623,7 +624,7 @@ function ActionItem(props: ActionItemProps) {
       );
     } else if (props.actionType === "get_url_content" && props.output) {
       return (
-        <div className="bg-muted text-foreground/90 overflow-x-auto p-2 dark:bg-gray-900">
+        <div className="bg-muted text-foreground/90 overflow-x-auto p-2">
           <pre className="text-xs font-normal whitespace-pre-wrap">
             {props.output}
           </pre>
@@ -631,7 +632,7 @@ function ActionItem(props: ActionItemProps) {
       );
     } else if (props.actionType === "apply-patch" && props.diff) {
       return (
-        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
+        <div className="bg-muted overflow-x-auto p-2">
           <pre
             className="text-foreground/90 text-xs font-normal whitespace-pre-wrap"
             dangerouslySetInnerHTML={{ __html: formatDiff(props.diff) }}
@@ -664,7 +665,7 @@ function ActionItem(props: ActionItemProps) {
       props.scratchpad.length > 0
     ) {
       return (
-        <div className="bg-muted overflow-x-auto p-2 dark:bg-gray-900">
+        <div className="bg-muted overflow-x-auto p-2">
           <ul className="list-disc pl-5 text-xs font-normal">
             {props.scratchpad.map((note, i) => (
               <li
@@ -684,7 +685,7 @@ function ActionItem(props: ActionItemProps) {
 
   return (
     <div className="border-border mb-2 overflow-hidden rounded-md border last:mb-0">
-      <div className="border-border flex w-full items-center border-b bg-gray-50 p-2 dark:bg-gray-800">
+      <div className="border-border bg-muted/50 flex w-full items-center border-b p-2">
         {renderHeaderIcon()}
         {renderHeaderContent()}
         <div className="ml-auto flex items-center gap-2">
@@ -707,15 +708,24 @@ function ActionItem(props: ActionItemProps) {
         </div>
       </div>
 
-      {renderContent()}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
+            {renderContent()}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 export function ActionStep(props: ActionStepProps) {
-  const [showReasoning, setShowReasoning] = useState(true);
-  const [showSummary, setShowSummary] = useState(true);
-
   const reasoningText =
     "reasoningText" in props ? props.reasoningText : undefined;
   const summaryText = "summaryText" in props ? props.summaryText : undefined;
@@ -724,21 +734,41 @@ export function ActionStep(props: ActionStepProps) {
     (action: ActionItemProps) => action.status === "done",
   );
 
+  const [showReasoning, setShowReasoning] = useState(!!reasoningText);
+  const [showSummary, setShowSummary] = useState(!!summaryText);
+
   return (
-    <div className="border-border overflow-hidden rounded-md border">
-      <div className="border-b border-blue-300 bg-blue-100/50 p-2 dark:border-blue-800 dark:bg-blue-900/50">
+    <div className="border-border bg-muted overflow-hidden rounded-md border">
+      <div className="bg-muted dark:bg-muted border-b border-l-4 border-gray-200 border-l-gray-500 p-2 dark:border-gray-600 dark:border-l-gray-400">
         <button
           onClick={() => setShowReasoning(!showReasoning)}
-          className="flex cursor-pointer items-center gap-1 text-xs font-normal text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-700 transition-colors duration-200 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-200"
         >
-          <MessageSquare className="h-3 w-3" />
-          {showReasoning ? "Hide reasoning" : "Show reasoning"}
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform duration-200",
+              showReasoning && "rotate-180",
+            )}
+          />
+          <span>{showReasoning ? "Hide reasoning" : "Show reasoning"}</span>
         </button>
-        {showReasoning && (
-          <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-700 dark:text-blue-300">
-            {reasoningText || "No reasoning provided."}
-          </BasicMarkdownText>
-        )}
+        <AnimatePresence>
+          {showReasoning && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+              <div className="mt-3 rounded-md bg-gray-50/50 px-3 py-2 dark:bg-gray-800/30">
+                <BasicMarkdownText className="text-xs leading-relaxed text-gray-700 dark:text-gray-300">
+                  {reasoningText || "No reasoning provided."}
+                </BasicMarkdownText>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <div className="p-2">
@@ -751,19 +781,36 @@ export function ActionStep(props: ActionStepProps) {
       </div>
 
       {summaryText && anyActionDone && (
-        <div className="border-t border-green-300 bg-green-100/50 p-2 dark:border-green-800 dark:bg-green-900/50">
+        <div className="bg-muted dark:bg-muted border-t border-gray-300 p-2 dark:border-gray-600">
           <button
             onClick={() => setShowSummary(!showSummary)}
-            className="flex cursor-pointer items-center gap-1 text-xs font-normal text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+            className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors duration-200 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
           >
-            <FileText className="h-3 w-3" />
-            {showSummary ? "Hide summary" : "Show summary"}
+            <ChevronDown
+              className={cn(
+                "h-3 w-3 transition-transform duration-200",
+                showSummary && "rotate-180",
+              )}
+            />
+            <span>{showSummary ? "Hide summary" : "Show summary"}</span>
           </button>
-          {showSummary && (
-            <span className="text-green-700 dark:text-green-300">
-              <BasicMarkdownText>{summaryText}</BasicMarkdownText>
-            </span>
-          )}
+          <AnimatePresence>
+            {showSummary && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="mt-3 rounded-md bg-gray-50/50 px-3 py-2 dark:bg-gray-800/30">
+                  <BasicMarkdownText className="text-xs leading-relaxed text-gray-700 dark:text-gray-300">
+                    {summaryText}
+                  </BasicMarkdownText>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>

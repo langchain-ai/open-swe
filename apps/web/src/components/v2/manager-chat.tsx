@@ -5,15 +5,7 @@ import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Bot,
-  Copy,
-  CopyCheck,
-  Send,
-  User,
-  Loader2,
-  AlertCircle,
-} from "lucide-react";
+import { Bot, Copy, CopyCheck, ArrowUp, User, AlertCircle } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
 import { cn } from "@/lib/utils";
@@ -21,6 +13,7 @@ import { isAIMessageSDK } from "@/lib/langchain-messages";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
+import { Loader2 } from "lucide-react";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -102,7 +95,7 @@ export function ManagerChat({
   errorState,
 }: ManagerChatProps) {
   return (
-    <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r dark:bg-gray-950">
+    <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
       <div className="relative flex-1">
         <StickToBottom
           className="absolute inset-0"
@@ -119,16 +112,16 @@ export function ManagerChat({
                   return (
                     <div
                       key={message.id}
-                      className="group flex gap-3"
+                      className="group bg-muted flex gap-3 rounded-lg p-3"
                     >
                       <div className="flex-shrink-0">
                         {message.type === "human" ? (
-                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full dark:bg-gray-700">
+                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full">
                             <User className="text-muted-foreground h-3 w-3" />
                           </div>
                         ) : (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900">
-                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-400" />
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-950/50">
+                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-300" />
                           </div>
                         )}
                       </div>
@@ -166,13 +159,13 @@ export function ManagerChat({
         </StickToBottom>
       </div>
 
-      <div className="border-border bg-muted/30 border-t p-4 dark:bg-gray-950">
+      <div className="border-border bg-muted/30 border-t p-4">
         <div className="flex gap-2">
           <Textarea
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             placeholder="Type your message..."
-            className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm dark:bg-gray-900"
+            className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm"
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
                 e.preventDefault();
@@ -180,22 +173,26 @@ export function ManagerChat({
               }
             }}
           />
-          <Button
-            onClick={isLoading ? cancelRun : handleSendMessage}
-            disabled={isLoading ? false : !chatInput.trim()}
-            size={isLoading ? "sm" : "icon"}
-            variant={isLoading ? "destructive" : "brand"}
-            className={cn(isLoading ? "h-12 px-4 py-2" : "")}
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Cancel
-              </>
-            ) : (
-              <Send className="size-4" />
-            )}
-          </Button>
+          {isLoading ? (
+            <TooltipIconButton
+              className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
+              variant="destructive"
+              onClick={cancelRun}
+              tooltip="Cancel run"
+            >
+              <Loader2 className="size-4 animate-spin" />
+            </TooltipIconButton>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!chatInput.trim()}
+              size="icon"
+              variant="brand"
+              className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          )}
         </div>
         <div className="text-muted-foreground mt-2 text-xs">
           Press Cmd+Enter to send

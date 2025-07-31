@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { FilePlus2, Archive, ListChecks } from "lucide-react";
+import { Archive, ListChecks } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -12,7 +12,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { Label } from "../ui/label";
 import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
@@ -20,10 +19,9 @@ import { GitHubInstallationBanner } from "../github/installation-banner";
 import { ApiKeyBanner } from "../api-key-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
-import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
-import { InstallationSelector } from "../github/installation-selector";
+import { UserPopover } from "../user-popover";
 
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
@@ -32,6 +30,7 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
+import { OpenSWELogoSVG } from "../icons/openswe";
 
 function OpenSettingsButton() {
   return (
@@ -89,7 +88,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const {
     contentBlocks,
     setContentBlocks,
-    handleFileUpload,
     dropRef,
     removeBlock,
     dragOver,
@@ -121,13 +119,12 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="border-border bg-card border-b px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-2 w-2 rounded-full bg-green-500"></div>
-            <span className="text-muted-foreground font-mono text-sm">
-              Open SWE
-            </span>
+            <OpenSWELogoSVG
+              width={120}
+              height={18}
+            />
           </div>
           <div className="flex items-center gap-4">
-            <InstallationSelector />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
@@ -135,7 +132,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             <OpenDocumentationButton />
             <OpenSettingsButton />
             <ThemeToggle />
-            <GitHubLogoutButton />
+            <UserPopover />
           </div>
         </div>
       </div>
@@ -148,7 +145,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
           {/* Terminal Chat Input */}
           <Card
             className={cn(
-              "border-border bg-card py-0 dark:bg-gray-950",
+              "border-border bg-card py-0",
               dragOver
                 ? "border-primary border-2 border-dotted"
                 : "border border-solid",
@@ -159,14 +156,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <ContentBlocksPreview
                 blocks={contentBlocks}
                 onRemove={removeBlock}
-              />
-              <input
-                id="file-input"
-                type="file"
-                onChange={handleFileUpload}
-                multiple
-                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                className="hidden"
               />
               <div className="space-y-3">
                 <TerminalInput
@@ -183,27 +172,13 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   setAutoAcceptPlan={setAutoAccept}
                 />
                 <div className="flex items-center gap-2">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Label
-                          htmlFor="file-input"
-                          className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center justify-center rounded-full bg-inherit"
-                        >
-                          <FilePlus2 className="size-4" />
-                        </Label>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Attach files
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
                   <TooltipIconButton
-                    variant={autoAccept ? "brand" : "ghost"}
+                    variant={autoAccept ? "default" : "ghost"}
                     tooltip="Automatically accept the plan"
                     className={cn(
+                      "transition-colors duration-200",
                       autoAccept
-                        ? "text-secondary"
+                        ? "bg-primary hover:bg-primary/90"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                     onClick={() => setAutoAccept((prev) => !prev)}

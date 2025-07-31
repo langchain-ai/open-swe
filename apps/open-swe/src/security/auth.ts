@@ -5,7 +5,6 @@ import {
   verifyGithubUserId,
 } from "@open-swe/shared/github/verify-user";
 import {
-  API_KEY_REQUIRED_MESSAGE,
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
@@ -18,11 +17,6 @@ import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { validate } from "uuid";
-import { createLogger, LogLevel } from "../utils/logger.js";
-
-const logger = createLogger(LogLevel.INFO, "Auth");
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -36,64 +30,6 @@ interface AuthenticateReturn extends BaseAuthReturn {
   metadata: {
     installation_name: string;
   };
-}
-
-function apiKeysInRequestBody(
-  bodyStr: string | Record<string, unknown>,
-): boolean {
-  logger.info("CHECKING RUN REQ BODY!!", bodyStr);
-  try {
-    const body = typeof bodyStr === "string" ? JSON.parse(bodyStr) : bodyStr;
-    if (
-      body.config?.configurable &&
-      ("anthropicApiKey" in body.config.configurable.apiKeys ||
-        "openaiApiKey" in body.config.configurable.apiKeys ||
-        "googleApiKey" in body.config.configurable.apiKeys)
-    ) {
-      logger.info("RUN REQ BODY CONTAINS API KEYS!!", bodyStr);
-      return true;
-    }
-    logger.info("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr);
-    return false;
-  } catch (e: any) {
-    logger.error("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", {
-      bodyStr,
-      error: e,
-    });
-    return false;
-  }
-}
-
-function isRunReq(reqUrl: string): boolean {
-  try {
-    const url = new URL(reqUrl);
-    const pathnameParts = url.pathname.split("/");
-    const isCreateAndWait = !!(
-      pathnameParts[1] === "threads" &&
-      validate(pathnameParts[2]) &&
-      pathnameParts[3] === "runs" &&
-      pathnameParts[4] === "wait" &&
-      pathnameParts.length === 5
-    );
-    const isCreateBackground = !!(
-      pathnameParts[1] === "threads" &&
-      validate(pathnameParts[2]) &&
-      pathnameParts[3] === "runs" &&
-      pathnameParts.length === 4
-    );
-    const isCreateStream = !!(
-      pathnameParts[1] === "threads" &&
-      validate(pathnameParts[2]) &&
-      pathnameParts[3] === "runs" &&
-      pathnameParts[4] === "stream" &&
-      pathnameParts.length === 5
-    );
-
-    return !!isCreateAndWait || !!isCreateBackground || !!isCreateStream;
-  } catch {
-    // no-op
-    return false;
-  }
 }
 
 export const auth = new Auth()
@@ -220,26 +156,6 @@ export const auth = new Auth()
       throw new HTTPException(401, {
         message: "User not found",
       });
-    }
-
-    const reqCopy = request.clone();
-    let reqBody: string | Record<string, unknown>;
-    try {
-      reqBody = (await reqCopy.json()) as Record<string, unknown>;
-    } catch {
-      reqBody = await reqCopy.text();
-    }
-    if (!isAllowedUser(user.login)) {
-      if (isRunReq(request.url)) {
-        if (!apiKeysInRequestBody(reqBody)) {
-          logger.warn("No API keys found in run request body", {
-            url: request.url,
-          });
-          throw new HTTPException(401, {
-            message: API_KEY_REQUIRED_MESSAGE,
-          });
-        }
-      }
     }
 
     return {
