@@ -11,11 +11,10 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { Building2, LogOut, User, ChevronDown } from "lucide-react";
+import { Building2, LogOut, User } from "lucide-react";
 import { GitHubSVG } from "@/components/icons/github";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -32,7 +31,7 @@ export function UserPopover({ className }: UserPopoverProps) {
     installationsError: error,
     switchInstallation,
   } = useGitHubAppProvider();
-  
+
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const GITHUB_APP_INSTALLED_KEY = "github_app_installed";
@@ -68,7 +67,6 @@ export function UserPopover({ className }: UserPopoverProps) {
     );
   };
 
-  // Show loading state
   if (isLoading || !currentInstallation) {
     return (
       <Button
@@ -77,12 +75,11 @@ export function UserPopover({ className }: UserPopoverProps) {
         disabled
         className={cn("h-8 w-8 rounded-full p-0", className)}
       >
-        <div className="h-6 w-6 rounded-full bg-muted animate-pulse" />
+        <div className="bg-muted h-6 w-6 animate-pulse rounded-full" />
       </Button>
     );
   }
 
-  // Show error state
   if (error) {
     return (
       <Button
@@ -91,8 +88,8 @@ export function UserPopover({ className }: UserPopoverProps) {
         disabled
         className={cn("h-8 w-8 rounded-full p-0", className)}
       >
-        <div className="h-6 w-6 rounded-full bg-destructive/20 flex items-center justify-center">
-          <GitHubSVG className="h-3 w-3 text-destructive" />
+        <div className="bg-destructive/20 flex h-6 w-6 items-center justify-center rounded-full">
+          <GitHubSVG className="text-destructive h-3 w-3" />
         </div>
       </Button>
     );
@@ -104,10 +101,7 @@ export function UserPopover({ className }: UserPopoverProps) {
         <Button
           variant="ghost"
           size="sm"
-          className={cn(
-            "h-8 w-8 rounded-full p-0 hover:bg-accent",
-            className
-          )}
+          className={cn("hover:bg-accent h-8 w-8 rounded-full p-0", className)}
         >
           <img
             src={currentInstallation.avatarUrl}
@@ -116,20 +110,22 @@ export function UserPopover({ className }: UserPopoverProps) {
           />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-0" align="end">
+      <PopoverContent
+        className="w-80 p-0"
+        align="end"
+      >
         <div className="p-4">
-          {/* Current User Display */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="mb-4 flex items-center gap-3">
             <img
               src={currentInstallation.avatarUrl}
               alt={`${currentInstallation.accountName} avatar`}
               className="h-10 w-10 rounded-full"
             />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium truncate">
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">
                 {currentInstallation.accountName}
               </div>
-              <div className="text-sm text-muted-foreground flex items-center gap-1">
+              <div className="text-muted-foreground flex items-center gap-1 text-sm">
                 {getAccountIcon(currentInstallation.accountType)}
                 <span className="capitalize">
                   {currentInstallation.accountType.toLowerCase()}
@@ -138,17 +134,16 @@ export function UserPopover({ className }: UserPopoverProps) {
             </div>
           </div>
 
-          {/* Installation Switcher */}
           {installations.length > 1 && (
             <>
-              <div className="space-y-2 mb-4">
+              <div className="mb-4 space-y-2">
                 <label className="text-sm font-medium">Switch Account</label>
                 <Select
                   value={currentInstallation.id.toString()}
                   onValueChange={handleValueChange}
                 >
                   <SelectTrigger className="w-full">
-                    <div className="flex items-center gap-2 flex-1">
+                    <div className="flex flex-1 items-center gap-2">
                       <img
                         src={currentInstallation.avatarUrl}
                         alt={`${currentInstallation.accountName} avatar`}
@@ -183,14 +178,13 @@ export function UserPopover({ className }: UserPopoverProps) {
             </>
           )}
 
-          {/* Logout Button */}
           <Button
             variant="ghost"
-            className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950/50"
+            className="w-full justify-start text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/50 dark:hover:text-red-300"
             onClick={handleLogout}
             disabled={isLoggingOut}
           >
-            <LogOut className="h-4 w-4 mr-2" />
+            <LogOut className="mr-2 h-4 w-4" />
             {isLoggingOut ? "Signing out..." : "Sign out"}
           </Button>
         </div>
