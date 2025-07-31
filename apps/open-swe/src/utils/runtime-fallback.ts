@@ -17,6 +17,7 @@ import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { getConfig } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -108,8 +109,13 @@ export class FallbackRunnable<
         continue;
       }
 
+      const graphConfig = getConfig() as GraphConfig;
+
       try {
-        const model = await this.modelManager.initializeModel(modelConfig);
+        const model = await this.modelManager.initializeModel(
+          modelConfig,
+          graphConfig,
+        );
         let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
           model;
 
