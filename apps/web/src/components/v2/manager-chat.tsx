@@ -186,7 +186,6 @@ export function ManagerChat({
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                Cancel
               </>
             ) : (
               <ArrowUp className="size-4" />
