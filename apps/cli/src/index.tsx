@@ -61,7 +61,8 @@ const LoadingSpinner: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({ // eslint-disable-line no-unused-vars
+const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
+  // eslint-disable-line no-unused-vars
   onSubmit,
 }) => {
   const [input, setInput] = useState("");
@@ -110,13 +111,6 @@ const App: React.FC = () => {
   const [plannerThreadId, setPlannerThreadId] = useState<string | null>(null);
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(false);
-
-  // Set up local mode defaults
-  const selectedRepo = {
-    full_name: "local/project",
-    clone_url: "local",
-    default_branch: "main",
-  };
 
   const PlannerFeedbackInput: React.FC = () => {
     const [selectedOption, setSelectedOption] = useState<
@@ -284,7 +278,7 @@ const App: React.FC = () => {
                   setLoadingLogs,
                 });
 
-                streamingService.startNewSession(value, selectedRepo);
+                streamingService.startNewSession(value);
               }}
             />
           ) : (
