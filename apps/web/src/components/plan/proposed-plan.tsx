@@ -32,7 +32,7 @@ export function ProposedPlan({
         <div className="flex items-center justify-center gap-8">
           <button
             onClick={handleRejectPlan}
-            className="group flex flex-col items-center gap-2 transition-all"
+            className="group flex cursor-pointer flex-col items-center gap-2 transition-all"
           >
             <div className="rounded-full border-2 border-dashed border-red-500 p-3 transition-all group-hover:border-solid group-hover:bg-red-50 dark:group-hover:bg-red-950/50">
               <X className="h-5 w-5 text-red-500" />
@@ -44,7 +44,7 @@ export function ProposedPlan({
 
           <button
             onClick={handleResumePlan}
-            className="group flex flex-col items-center gap-2 transition-all"
+            className="group flex cursor-pointer flex-col items-center gap-2 transition-all"
           >
             <div className="rounded-full border-2 border-dashed border-green-500 p-3 transition-all group-hover:border-solid group-hover:bg-green-50 dark:group-hover:bg-green-950/50">
               <ArrowDown className="h-5 w-5 text-green-500" />

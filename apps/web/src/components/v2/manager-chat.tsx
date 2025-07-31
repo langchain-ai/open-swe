@@ -173,24 +173,26 @@ export function ManagerChat({
               }
             }}
           />
-          <Button
-            onClick={isLoading ? cancelRun : handleSendMessage}
-            disabled={isLoading ? false : !chatInput.trim()}
-            size="icon"
-            variant={isLoading ? "destructive" : "brand"}
-            className={cn(
-              "size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent",
-              isLoading && "h-auto rounded-md border-none px-3 py-2",
-            )}
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-              </>
-            ) : (
+          {isLoading ? (
+            <TooltipIconButton
+              className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
+              variant="destructive"
+              onClick={cancelRun}
+              tooltip="Cancel run"
+            >
+              <Loader2 className="size-4 animate-spin" />
+            </TooltipIconButton>
+          ) : (
+            <Button
+              onClick={handleSendMessage}
+              disabled={!chatInput.trim()}
+              size="icon"
+              variant="brand"
+              className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
+            >
               <ArrowUp className="size-4" />
-            )}
-          </Button>
+            </Button>
+          )}
         </div>
         <div className="text-muted-foreground mt-2 text-xs">
           Press Cmd+Enter to send

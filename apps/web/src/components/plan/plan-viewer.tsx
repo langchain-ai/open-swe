@@ -5,6 +5,7 @@ import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Dispatch, SetStateAction, useState } from "react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
+import { MarkdownText } from "../thread/markdown-text";
 
 interface PlanViewerProps {
   planItems: PlanItem[];
@@ -166,7 +167,7 @@ export function PlanViewer({
                       className="text-foreground"
                     />
                   ) : (
-                    <p
+                    <MarkdownText
                       className={cn("text-sm leading-relaxed", {
                         "text-foreground": status === "current",
                         "text-foreground/80":
@@ -175,7 +176,7 @@ export function PlanViewer({
                       })}
                     >
                       {planItems[item.index].plan}
-                    </p>
+                    </MarkdownText>
                   )}
 
                   {/* Summary for completed tasks */}
@@ -184,9 +185,9 @@ export function PlanViewer({
                       <p className="mb-1 text-xs font-medium text-green-700 dark:text-green-300">
                         Summary:
                       </p>
-                      <p className="text-xs text-green-600 dark:text-green-400">
+                      <MarkdownText className="text-xs text-green-600 dark:text-green-400">
                         {item.summary}
-                      </p>
+                      </MarkdownText>
                     </div>
                   )}
                 </div>

@@ -726,9 +726,6 @@ function ActionItem(props: ActionItemProps) {
 }
 
 export function ActionStep(props: ActionStepProps) {
-  const [showReasoning, setShowReasoning] = useState(true);
-  const [showSummary, setShowSummary] = useState(true);
-
   const reasoningText =
     "reasoningText" in props ? props.reasoningText : undefined;
   const summaryText = "summaryText" in props ? props.summaryText : undefined;
@@ -736,6 +733,9 @@ export function ActionStep(props: ActionStepProps) {
   const anyActionDone = props.actions.some(
     (action: ActionItemProps) => action.status === "done",
   );
+
+  const [showReasoning, setShowReasoning] = useState(!!reasoningText);
+  const [showSummary, setShowSummary] = useState(!!summaryText);
 
   return (
     <div className="border-border bg-muted overflow-hidden rounded-md border">
