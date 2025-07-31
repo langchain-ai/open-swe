@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Paperclip, Archive, ListChecks } from "lucide-react";
+import { Archive, ListChecks } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -12,7 +12,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { Label } from "../ui/label";
 import { ContentBlocksPreview } from "../thread/ContentBlocksPreview";
 import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
@@ -161,14 +160,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                 blocks={contentBlocks}
                 onRemove={removeBlock}
               />
-              <input
-                id="file-input"
-                type="file"
-                onChange={handleFileUpload}
-                multiple
-                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                className="hidden"
-              />
               <div className="space-y-3">
                 <TerminalInput
                   placeholder="Describe your coding task or ask a question..."
@@ -184,21 +175,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   setAutoAcceptPlan={setAutoAccept}
                 />
                 <div className="flex items-center gap-2">
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Label
-                          htmlFor="file-input"
-                          className="text-muted-foreground hover:text-foreground flex cursor-pointer items-center justify-center rounded-full bg-inherit"
-                        >
-                          <Paperclip className="size-4" />
-                        </Label>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom">
-                        Attachments
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
                   <TooltipIconButton
                     variant={autoAccept ? "default" : "ghost"}
                     tooltip="Automatically accept the plan"
