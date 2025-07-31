@@ -17,7 +17,7 @@ import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { getConfig, LangGraphRunnableConfig } from "@langchain/langgraph";
+import { getConfig } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -109,11 +109,7 @@ export class FallbackRunnable<
         continue;
       }
 
-      const config: LangGraphRunnableConfig<GraphConfig> = getConfig();
-      const graphConfig = config?.configurable;
-      if (!graphConfig) {
-        throw new Error("Graph config not found");
-      }
+      const graphConfig = getConfig() as GraphConfig;
 
       try {
         const model = await this.modelManager.initializeModel(
