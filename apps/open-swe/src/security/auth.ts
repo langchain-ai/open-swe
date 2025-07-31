@@ -20,6 +20,9 @@ import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { validate } from "uuid";
+import { createLogger, LogLevel } from "../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "Auth");
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -38,6 +41,7 @@ interface AuthenticateReturn extends BaseAuthReturn {
 function apiKeysInRequestBody(
   bodyStr: string | Record<string, unknown>,
 ): boolean {
+  logger.info("CHECKING RUN REQ BODY!!", bodyStr);
   try {
     const body = typeof bodyStr === "string" ? JSON.parse(bodyStr) : bodyStr;
     if (
@@ -46,11 +50,16 @@ function apiKeysInRequestBody(
         "openaiApiKey" in body.config.configurable.apiKeys ||
         "googleApiKey" in body.config.configurable.apiKeys)
     ) {
+      logger.info("RUN REQ BODY CONTAINS API KEYS!!", bodyStr);
       return true;
     }
+    logger.info("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", bodyStr);
     return false;
-  } catch {
-    // no-op
+  } catch (e: any) {
+    logger.error("RUN REQ BODY DOES NOT CONTAIN API KEYS!!", {
+      bodyStr,
+      error: e,
+    });
     return false;
   }
 }
@@ -200,10 +209,18 @@ export const auth = new Auth()
     }
 
     const reqCopy = request.clone();
-    const reqBody = await reqCopy.text();
+    let reqBody: string | Record<string, unknown>;
+    try {
+      reqBody = (await reqCopy.json()) as Record<string, unknown>;
+    } catch {
+      reqBody = await reqCopy.text();
+    }
     if (!isAllowedUser(user.login)) {
       if (isRunReq(request.url)) {
         if (!apiKeysInRequestBody(reqBody)) {
+          logger.warn("No API keys found in run request body", {
+            url: request.url,
+          });
           throw new HTTPException(401, {
             message: API_KEY_REQUIRED_MESSAGE,
           });

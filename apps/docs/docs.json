@@ -18,6 +18,10 @@
             "pages": ["index"]
           },
           {
+            "group": "Examples",
+            "pages": ["examples"]
+          },
+          {
             "group": "Usage",
             "pages": ["usage/intro", "usage/ui", "usage/github"]
           },

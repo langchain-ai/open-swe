@@ -28,6 +28,7 @@ export function isCustomNodeEvent(event: unknown): event is CustomNodeEvent {
 }
 export const INITIALIZE_NODE_ID = "initialize";
 export const ACCEPTED_PLAN_NODE_ID = "accepted-plan";
+export const REQUEST_HELP_NODE_ID = "request-help";
 
 export const INIT_STEPS = [
   "Resuming sandbox",
