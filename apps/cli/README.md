@@ -10,8 +10,12 @@ A command-line interface for Open SWE that provides a terminal-based chat experi
 ## Development
 
 1. Install dependencies: `yarn install`
-2. Build the CLI: `yarn build`
-3. Run the CLI: `yarn cli`
+2. Create a `.env` file and set `OPEN_SWE_LOCAL_PROJECT_PATH` to point to an existing git repository:
+   ```bash
+   echo "OPEN_SWE_LOCAL_PROJECT_PATH=/path/to/your/git/repository" > .env
+   ```
+3. Build the CLI: `yarn build`
+4. Run the CLI: `yarn cli`
 
 ## Usage
 
@@ -27,6 +31,11 @@ The CLI will:
 2. Work directly on files in your current directory
 3. Provide interactive chat with the Open SWE agent
 4. Stream real-time logs and responses
+
+## Prerequisites
+
+- An existing git repository that you want to work on
+- The repository must be initialized with git and have at least one commit
 
 ## Features
 
