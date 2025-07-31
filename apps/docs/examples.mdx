@@ -58,7 +58,8 @@ Below are a series of examples you can try out:
   ```txt Build a middleware that issues short-lived access tokens and long-lived
   refresh tokens. Store refresh tokens in a signed, HttpOnly cookie and expose
   `/auth/refresh` to rotate them. Protect a sample route (`/profile`) and supply
-  Postman collections for login and refresh flows. ```
+  Postman collections for login and refresh flows.
+  ```
 </Accordion>
 
 <Accordion title="Pluggable caching service">
@@ -72,14 +73,16 @@ Below are a series of examples you can try out:
   ```txt Stand up an Apollo Server that federates data from the public
   JSONPlaceholder `/users` and `/posts` endpoints. Expose a `user(id)` query
   returning the user plus their posts in a single round-trip. Add schema-driven
-  TypeScript types (`codegen.yml`) and example queries in `README.md`. ```
+  TypeScript types (`codegen.yml`) and example queries in `README.md`.
+  ```
 </Accordion>
 
 <Accordion title="Image upload to S3 with signed URLs">
   ```txt Create an endpoint that returns a time-limited pre-signed PUT URL for
   an S3 bucket (use `@aws-sdk/client-s3`). Include a small React demo (Vite)
   that lets a user pick an image and upload it directly. Validate MIME type on
-  the server before signing. ```
+  the server before signing.
+  ```
 </Accordion>
 
 <Accordion title="Locale-aware date utility library">
