@@ -7,6 +7,7 @@ import {
   INITIALIZE_NODE_ID,
   ACCEPTED_PLAN_NODE_ID,
   mapCustomEventsToSteps,
+  REQUEST_HELP_NODE_ID,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { Message } from "@langchain/langgraph-sdk";
@@ -66,10 +67,12 @@ interface ActionsRendererProps<
   StateType extends PlannerGraphState | GraphState,
 > {
   runId?: string;
+  threadId: string;
   customNodeEvents: CustomNodeEvent[];
   setCustomNodeEvents: Dispatch<SetStateAction<CustomNodeEvent[]>>;
   stream: ReturnType<typeof useStream<StateType>>;
   taskPlan?: TaskPlan;
+  modifyRunId?: (runId: string) => Promise<void>;
 }
 
 const getCustomNodeEventsFromMessages = (
@@ -102,6 +105,8 @@ export function ActionsRenderer<
   customNodeEvents,
   setCustomNodeEvents,
   stream,
+  threadId,
+  modifyRunId,
 }: ActionsRendererProps<StateType>) {
   const [streamLoading, setStreamLoading] = useState(stream.isLoading);
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
@@ -120,6 +125,11 @@ export function ActionsRenderer<
         (e) => e.nodeId === ACCEPTED_PLAN_NODE_ID && e.data.runId === runId,
       ),
     [customNodeEvents, runId],
+  );
+
+  const requestHelpEvents = useMemo(
+    () => customNodeEvents.filter((e) => e.nodeId === REQUEST_HELP_NODE_ID),
+    [customNodeEvents],
   );
 
   const steps = mapCustomEventsToSteps(initializeEvents);
@@ -223,8 +233,10 @@ export function ActionsRenderer<
           thread={stream as UseStream<Record<string, unknown>>}
           threadMessages={stream.messages}
           message={m}
-          isLoading={false}
-          handleRegenerate={() => {}}
+          modifyRunId={modifyRunId}
+          threadId={threadId}
+          assistantId={stream.assistantId}
+          requestHelpEvents={requestHelpEvents}
         />
       ))}
       {acceptedPlanEvents.length > 0 &&
