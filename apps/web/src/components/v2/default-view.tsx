@@ -20,10 +20,9 @@ import { GitHubInstallationBanner } from "../github/installation-banner";
 import { ApiKeyBanner } from "../api-key-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
-import { GitHubLogoutButton } from "../github/github-oauth-button";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
-import { InstallationSelector } from "../github/installation-selector";
+import { UserPopover } from "../user-popover";
 
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
@@ -127,7 +126,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <InstallationSelector />
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
@@ -135,7 +133,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             <OpenDocumentationButton />
             <OpenSettingsButton />
             <ThemeToggle />
-            <GitHubLogoutButton />
+            <UserPopover />
           </div>
         </div>
       </div>
