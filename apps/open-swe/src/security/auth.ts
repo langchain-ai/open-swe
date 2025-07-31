@@ -209,10 +209,18 @@ export const auth = new Auth()
     }
 
     const reqCopy = request.clone();
-    const reqBody = await reqCopy.text();
+    let reqBody: string | Record<string, unknown>;
+    try {
+      reqBody = (await reqCopy.json()) as Record<string, unknown>;
+    } catch {
+      reqBody = await reqCopy.text();
+    }
     if (!isAllowedUser(user.login)) {
       if (isRunReq(request.url)) {
         if (!apiKeysInRequestBody(reqBody)) {
+          logger.warn("No API keys found in run request body", {
+            url: request.url,
+          });
           throw new HTTPException(401, {
             message: API_KEY_REQUIRED_MESSAGE,
           });
