@@ -5,6 +5,7 @@ import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
 import { cloneRepo } from "./github/git.js";
 import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
+import { isLocalMode } from "./local-mode.js";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -96,6 +97,18 @@ export async function getSandboxWithErrorHandling(
   codebaseTree: string | null;
   dependenciesInstalled: boolean | null;
 }> {
+  if (isLocalMode(config)) {
+    const mockSandbox = {
+      id: sandboxSessionId || "local-mock-sandbox",
+      state: "started",
+    } as Sandbox;
+
+    return {
+      sandbox: mockSandbox,
+      codebaseTree: null,
+      dependenciesInstalled: false,
+    };
+  }
   try {
     if (!sandboxSessionId) {
       throw new Error("No sandbox ID provided.");
@@ -155,7 +168,11 @@ export async function getSandboxWithErrorHandling(
     });
 
     // Get codebase tree
-    const codebaseTree = await getCodebaseTree(sandbox.id, targetRepository);
+    const codebaseTree = await getCodebaseTree(
+      sandbox.id,
+      targetRepository,
+      config,
+    );
     const codebaseTreeToReturn =
       codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
 

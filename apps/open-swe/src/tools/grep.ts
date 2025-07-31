@@ -1,15 +1,16 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
+import { isLocalMode, getLocalWorkingDirectory } from "../utils/local-mode.js";
+import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
 import {
   createGrepToolFields,
   formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { wrapScript } from "../utils/wrap-script.js";
-import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
 
@@ -20,24 +21,50 @@ const DEFAULT_ENV = {
 
 export function createGrepTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  config: GraphConfig,
 ) {
   const grepTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const sandbox = await getSandboxSessionOrThrow(input);
+        const command = formatGrepCommand(input as any);
 
-        const repoRoot = getRepoAbsolutePath(state.targetRepository);
-        const command = formatGrepCommand(input);
+        let repoRoot;
+        if (isLocalMode(config)) {
+          // In local mode, use the local working directory
+          repoRoot = getLocalWorkingDirectory();
+        } else {
+          // In sandbox mode, use the sandbox path
+          repoRoot = getRepoAbsolutePath(state.targetRepository);
+        }
+
         logger.info("Running grep search command", {
           command: command.join(" "),
           repoRoot,
         });
-        const response = await sandbox.process.executeCommand(
-          wrapScript(command.join(" ")),
-          repoRoot,
-          DEFAULT_ENV,
-          TIMEOUT_SEC,
-        );
+
+        let response;
+
+        if (isLocalMode(config)) {
+          // Local mode: use LocalShellExecutor
+          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+
+          response = await executor.executeCommand(
+            command.join(" "),
+            repoRoot,
+            DEFAULT_ENV,
+            TIMEOUT_SEC,
+            true, // localMode
+          );
+        } else {
+          // Sandbox mode: use existing sandbox logic
+          const sandbox = await getSandboxSessionOrThrow(input);
+          response = await sandbox.process.executeCommand(
+            command.join(" "),
+            repoRoot,
+            DEFAULT_ENV,
+            TIMEOUT_SEC,
+          );
+        }
 
         let successResult = response.result;
 
@@ -59,16 +86,22 @@ export function createGrepTool(
           status: "success",
         };
       } catch (e) {
-        const errorFields = getSandboxErrorFields(e);
-        if (errorFields) {
-          const errorResult =
-            errorFields.result ?? errorFields.artifacts?.stdout;
-          throw new Error(
-            `Failed to run grep search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-          );
-        }
+        if (isLocalMode(config)) {
+          // Local mode error handling
+          throw e;
+        } else {
+          // Sandbox mode error handling
+          const errorFields = getSandboxErrorFields(e);
+          if (errorFields) {
+            const errorResult =
+              errorFields.result ?? errorFields.artifacts?.stdout;
+            throw new Error(
+              `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+            );
+          }
 
-        throw e;
+          throw e;
+        }
       }
     },
     createGrepToolFields(state.targetRepository),

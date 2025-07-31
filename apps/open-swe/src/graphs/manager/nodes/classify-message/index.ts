@@ -1,4 +1,4 @@
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -38,10 +38,14 @@ import {
   PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
+
+// Add local mode utility function
+function isLocalMode(config: GraphConfig): boolean {
+  return (config.configurable as any)?.["x-local-mode"] === "true";
+}
 
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
@@ -60,21 +64,26 @@ export async function classifyMessage(
     throw new Error("No human message found.");
   }
 
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
-  });
+  // In local mode, skip LangGraph client creation since we don't need external API calls
+  let plannerThread: any = undefined;
+  let programmerThread: any = undefined;
+  let langGraphClient: any = undefined;
 
-  const plannerThread = state.plannerSession?.threadId
-    ? await langGraphClient.threads.get<PlannerGraphState>(
-        state.plannerSession.threadId,
-      )
-    : undefined;
-  const plannerThreadValues = plannerThread?.values;
-  const programmerThread = plannerThreadValues?.programmerSession?.threadId
-    ? await langGraphClient.threads.get<GraphState>(
-        plannerThreadValues.programmerSession.threadId,
-      )
-    : undefined;
+  if (!isLocalMode(config)) {
+    langGraphClient = createLangGraphClient({
+      defaultHeaders: getDefaultHeaders(config),
+    });
+
+    plannerThread = state.plannerSession?.threadId
+      ? await langGraphClient.threads.get(state.plannerSession.threadId)
+      : undefined;
+    const plannerThreadValues = plannerThread?.values;
+    programmerThread = plannerThreadValues?.programmerSession?.threadId
+      ? await langGraphClient.threads.get(
+          plannerThreadValues.programmerSession.threadId,
+        )
+      : undefined;
+  }
 
   const programmerStatus = programmerThread?.status ?? "not_started";
   const plannerStatus = plannerThread?.status ?? "not_started";
@@ -157,178 +166,199 @@ export async function classifyMessage(
     });
   }
 
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
-  let githubIssueId = state.githubIssueId;
+  // Skip GitHub token requirements in local mode
+  if (!isLocalMode(config)) {
+    const { githubAccessToken } = getGitHubTokensFromConfig(config);
+    let githubIssueId = state.githubIssueId;
 
-  const newMessages: BaseMessage[] = [response];
+    const newMessages: BaseMessage[] = [response];
 
-  // If it's not a no_op, ensure there is a GitHub issue with the user's request.
-  if (!githubIssueId) {
-    const { title } = await createIssueFieldsFromMessages(
-      state.messages,
-      config.configurable,
-    );
-    const { content: body } = extractIssueTitleAndContentFromMessage(
-      getMessageContentString(userMessage.content),
-    );
+    // If it's not a no_op, ensure there is a GitHub issue with the user's request.
+    if (!githubIssueId) {
+      const { title } = await createIssueFieldsFromMessages(
+        state.messages,
+        config.configurable,
+      );
+      const { content: body } = extractIssueTitleAndContentFromMessage(
+        getMessageContentString(userMessage.content),
+      );
 
-    const newIssue = await createIssue({
-      owner: state.targetRepository.owner,
-      repo: state.targetRepository.repo,
-      title,
-      body: formatContentForIssueBody(body),
-      githubAccessToken,
-    });
-    if (!newIssue) {
-      throw new Error("Failed to create issue.");
-    }
-    githubIssueId = newIssue.number;
-    // Ensure we remove the old message, and replace it with an exact copy,
-    // but with the issue ID & isOriginalIssue set in additional_kwargs.
-    newMessages.push(
-      ...[
-        new RemoveMessage({
-          id: userMessage.id ?? "",
-        }),
-        new HumanMessage({
-          ...userMessage,
-          additional_kwargs: {
-            githubIssueId: githubIssueId,
-            isOriginalIssue: true,
-          },
-        }),
-      ],
-    );
-  } else if (
-    githubIssueId &&
-    state.messages.filter(isHumanMessage).length > 1
-  ) {
-    // If there already is a GitHub issue ID in state, and multiple human messages, add any
-    // human messages to the issue which weren't already added.
-    const messagesNotInIssue = state.messages
-      .filter(isHumanMessage)
-      .filter((message) => {
-        // If the message doesn't contain `githubIssueId` in additional kwargs, it hasn't been added to the issue.
-        return !message.additional_kwargs?.githubIssueId;
-      });
-
-    const createCommentsPromise = messagesNotInIssue.map(async (message) => {
-      const createdIssue = await createIssueComment({
+      const newIssue = await createIssue({
         owner: state.targetRepository.owner,
         repo: state.targetRepository.repo,
-        issueNumber: githubIssueId,
-        body: getMessageContentString(message.content),
-        githubToken: githubAccessToken,
+        title,
+        body: formatContentForIssueBody(body),
+        githubAccessToken,
       });
-      if (!createdIssue?.id) {
-        throw new Error("Failed to create issue comment");
+      if (!newIssue) {
+        throw new Error("Failed to create issue.");
       }
+      githubIssueId = newIssue.number;
+      // Ensure we remove the old message, and replace it with an exact copy,
+      // but with the issue ID & isOriginalIssue set in additional_kwargs.
       newMessages.push(
         ...[
           new RemoveMessage({
-            id: message.id ?? "",
+            id: userMessage.id ?? "",
           }),
           new HumanMessage({
-            ...message,
+            ...userMessage,
             additional_kwargs: {
-              githubIssueId,
-              githubIssueCommentId: createdIssue.id,
-              ...((toolCallArgs.route as string) ===
-              "start_planner_for_followup"
-                ? {
-                    isFollowup: true,
-                  }
-                : {}),
+              githubIssueId: githubIssueId,
+              isOriginalIssue: true,
             },
           }),
         ],
       );
-    });
+    } else if (
+      githubIssueId &&
+      state.messages.filter(isHumanMessage).length > 1
+    ) {
+      // If there already is a GitHub issue ID in state, and multiple human messages, add any
+      // human messages to the issue which weren't already added.
+      const messagesNotInIssue = state.messages
+        .filter(isHumanMessage)
+        .filter((message) => {
+          // If the message doesn't contain `githubIssueId` in additional kwargs, it hasn't been added to the issue.
+          return !message.additional_kwargs?.githubIssueId;
+        });
 
-    await Promise.all(createCommentsPromise);
+      const createCommentsPromise = messagesNotInIssue.map(async (message) => {
+        const createdIssue = await createIssueComment({
+          owner: state.targetRepository.owner,
+          repo: state.targetRepository.repo,
+          issueNumber: githubIssueId,
+          body: getMessageContentString(message.content),
+          githubToken: githubAccessToken,
+        });
+        if (!createdIssue?.id) {
+          throw new Error("Failed to create issue comment");
+        }
+        newMessages.push(
+          ...[
+            new RemoveMessage({
+              id: message.id ?? "",
+            }),
+            new HumanMessage({
+              ...message,
+              additional_kwargs: {
+                githubIssueId,
+                githubIssueCommentId: createdIssue.id,
+                ...((toolCallArgs.route as string) ===
+                "start_planner_for_followup"
+                  ? {
+                      isFollowup: true,
+                    }
+                  : {}),
+              },
+            }),
+          ],
+        );
+      });
 
-    let newPlannerId: string | undefined;
-    let goto = END;
+      await Promise.all(createCommentsPromise);
 
-    if (plannerStatus === "interrupted") {
-      if (!state.plannerSession?.threadId) {
-        throw new Error("No planner session found. Unable to resume planner.");
-      }
-      // We need to resume the planner session via a 'response' so that it can re-plan
-      const plannerResume: HumanResponse = {
-        type: "response",
-        args: "resume planner",
-      };
-      logger.info("Resuming planner session");
-      const newPlannerRun = await langGraphClient.runs.create(
-        state.plannerSession?.threadId,
-        PLANNER_GRAPH_ID,
-        {
-          command: {
-            resume: plannerResume,
+      let newPlannerId: string | undefined;
+      let goto = END;
+
+      if (plannerStatus === "interrupted") {
+        if (!state.plannerSession?.threadId) {
+          throw new Error(
+            "No planner session found. Unable to resume planner.",
+          );
+        }
+        // We need to resume the planner session via a 'response' so that it can re-plan
+        const plannerResume: HumanResponse = {
+          type: "response",
+          args: "resume planner",
+        };
+        logger.info("Resuming planner session");
+        const newPlannerRun = await langGraphClient.runs.create(
+          state.plannerSession?.threadId,
+          PLANNER_GRAPH_ID,
+          {
+            command: {
+              resume: plannerResume,
+            },
+            streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
           },
-          streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-        },
-      );
-      newPlannerId = newPlannerRun.run_id;
-      logger.info("Planner session resumed", {
-        runId: newPlannerRun.run_id,
-        threadId: state.plannerSession.threadId,
+        );
+        newPlannerId = newPlannerRun.run_id;
+        logger.info("Planner session resumed", {
+          runId: newPlannerRun.run_id,
+          threadId: state.plannerSession.threadId,
+        });
+      }
+
+      if (toolCallArgs.route === "start_planner_for_followup") {
+        goto = "start-planner";
+      }
+
+      // After creating the new comment, we can add the message to state and end.
+      const commandUpdate: ManagerGraphUpdate = {
+        messages: newMessages,
+        ...(newPlannerId && state.plannerSession?.threadId
+          ? {
+              plannerSession: {
+                threadId: state.plannerSession.threadId,
+                runId: newPlannerId,
+              },
+            }
+          : {}),
+      };
+      return new Command({
+        update: commandUpdate,
+        goto,
       });
     }
 
-    if (toolCallArgs.route === "start_planner_for_followup") {
-      goto = "start-planner";
-    }
+    // Issue has been created, and any missing human messages have been added to it.
 
-    // After creating the new comment, we can add the message to state and end.
     const commandUpdate: ManagerGraphUpdate = {
       messages: newMessages,
-      ...(newPlannerId && state.plannerSession?.threadId
-        ? {
-            plannerSession: {
-              threadId: state.plannerSession.threadId,
-              runId: newPlannerId,
-            },
-          }
-        : {}),
+      ...(githubIssueId ? { githubIssueId } : {}),
     };
-    return new Command({
-      update: commandUpdate,
-      goto,
-    });
-  }
 
-  // Issue has been created, and any missing human messages have been added to it.
+    if (
+      (toolCallArgs.route as any) === "update_programmer" ||
+      (toolCallArgs.route as any) === "update_planner" ||
+      (toolCallArgs.route as any) === "resume_and_update_planner"
+    ) {
+      // If the route is one of the above, we don't need to do anything since the issue now contains
+      // the new messages, and the coding agent will handle pulling them in. This should never be
+      // reachable since we should return early after adding the Github comment, but include anyways...
+      return new Command({
+        update: commandUpdate,
+        goto: END,
+      });
+    }
 
-  const commandUpdate: ManagerGraphUpdate = {
-    messages: newMessages,
-    ...(githubIssueId ? { githubIssueId } : {}),
-  };
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      // Always kickoff a new start planner node. This will enqueue new runs on the planner graph.
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
+  } else {
+    // In local mode, just route to planner without GitHub issue creation
+    const newMessages: BaseMessage[] = [response];
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: newMessages,
+    };
 
-  if (
-    (toolCallArgs.route as any) === "update_programmer" ||
-    (toolCallArgs.route as any) === "update_planner" ||
-    (toolCallArgs.route as any) === "resume_and_update_planner"
-  ) {
-    // If the route is one of the above, we don't need to do anything since the issue now contains
-    // the new messages, and the coding agent will handle pulling them in. This should never be
-    // reachable since we should return early after adding the Github comment, but include anyways...
-    return new Command({
-      update: commandUpdate,
-      goto: END,
-    });
-  }
-
-  if (
-    toolCallArgs.route === "start_planner" ||
-    toolCallArgs.route === "start_planner_for_followup"
-  ) {
-    // Always kickoff a new start planner node. This will enqueue new runs on the planner graph.
-    return new Command({
-      update: commandUpdate,
-      goto: "start-planner",
-    });
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
   }
 
   throw new Error(`Invalid route: ${toolCallArgs.route}`);

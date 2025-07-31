@@ -39,6 +39,7 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { isLocalMode } from "../../../utils/local-mode.js";
 import {
   postGitHubIssueComment,
   cleanTaskItems,
@@ -85,9 +86,16 @@ async function startProgrammerRun(input: {
   newMessages?: BaseMessage[];
 }) {
   const { runInput, state, config, newMessages } = input;
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
-  });
+  let langGraphClient;
+  if (isLocalMode(config)) {
+    langGraphClient = createLangGraphClient({
+      defaultHeaders: { "x-local-mode": "true" },
+    });
+  } else {
+    langGraphClient = createLangGraphClient({
+      defaultHeaders: getDefaultHeaders(config),
+    });
+  }
 
   const programmerThreadId = uuidv4();
   // Restart the sandbox.
@@ -112,7 +120,10 @@ async function startProgrammerRun(input: {
       input: runInput,
       config: {
         recursion_limit: 400,
-        configurable: getCustomConfigurableFields(config),
+        configurable: {
+          ...getCustomConfigurableFields(config),
+          ...(isLocalMode(config) && { "x-local-mode": "true" }),
+        },
       },
       ifNotExists: "create",
       streamResumable: true,
@@ -121,14 +132,17 @@ async function startProgrammerRun(input: {
     },
   );
 
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
-    config,
-    runInput.taskPlan,
-  );
+  // Skip GitHub operations in local mode
+  if (!isLocalMode(config)) {
+    await addTaskPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      runInput.taskPlan,
+    );
+  }
 
   return new Command({
     goto: END,
@@ -153,6 +167,13 @@ export async function interruptProposedPlan(
     throw new Error("No proposed plan found.");
   }
 
+  logger.info("Interrupting proposed plan", {
+    autoAcceptPlan: state.autoAcceptPlan,
+    isLocalMode: isLocalMode(config),
+    proposedPlanLength: proposedPlan.length,
+    proposedPlanTitle: state.proposedPlanTitle,
+  });
+
   let planItems: PlanItem[];
   const userRequest = getInitialUserRequest(state.messages);
   const userFollowupRequest = getRecentUserRequest(state.messages);
@@ -167,15 +188,20 @@ export async function interruptProposedPlan(
   };
 
   if (state.autoAcceptPlan) {
-    logger.info("Auto accepting plan.");
-
-    // Post comment to GitHub issue about auto-accepting the plan
-    await postGitHubIssueComment({
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-      commentBody: `### 🤖 Plan Generated\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nProceeding to implementation...`,
-      config,
+    logger.info("Auto accepting plan.", {
+      autoAcceptPlan: state.autoAcceptPlan,
+      isLocalMode: isLocalMode(config),
     });
+
+    // Post comment to GitHub issue about auto-accepting the plan (only if not in local mode)
+    if (!isLocalMode(config) && state.githubIssueId) {
+      await postGitHubIssueComment({
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+        commentBody: `### 🤖 Plan Generated\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nProceeding to implementation...`,
+        config,
+      });
+    }
 
     planItems = proposedPlan.map((p, index) => ({
       index,
@@ -206,22 +232,24 @@ export async function interruptProposedPlan(
     });
   }
 
-  await addProposedPlanToIssue(
-    {
+  if (!isLocalMode(config) && state.githubIssueId) {
+    await addProposedPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      proposedPlan,
+    );
+
+    // Post comment to GitHub issue about plan being ready for approval
+    await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,
       targetRepository: state.targetRepository,
-    },
-    config,
-    proposedPlan,
-  );
-
-  // Post comment to GitHub issue about plan being ready for approval
-  await postGitHubIssueComment({
-    githubIssueId: state.githubIssueId,
-    targetRepository: state.targetRepository,
-    commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
-    config,
-  });
+      commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
+      config,
+    });
+  }
 
   const interruptResponse = interrupt<
     HumanInterrupt,
@@ -276,13 +304,15 @@ export async function interruptProposedPlan(
       { existingTaskPlan: state.taskPlan },
     );
 
-    // Update the comment to notify the user that the plan was accepted
-    await postGitHubIssueComment({
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-      commentBody: `### ✅ Plan Accepted ✅\n\nThe proposed plan was accepted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
-      config,
-    });
+    // Update the comment to notify the user that the plan was accepted (only if not in local mode)
+    if (!isLocalMode(config) && state.githubIssueId) {
+      await postGitHubIssueComment({
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+        commentBody: `### ✅ Plan Accepted ✅\n\nThe proposed plan was accepted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+        config,
+      });
+    }
   } else if (humanResponse.type === "edit") {
     const editedPlan = (humanResponse.args as ActionRequest).args.plan
       .split(PLAN_INTERRUPT_DELIMITER)
@@ -301,12 +331,15 @@ export async function interruptProposedPlan(
       { existingTaskPlan: state.taskPlan },
     );
 
-    await postGitHubIssueComment({
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-      commentBody: `### ✅ Plan Edited & Submitted ✅\n\nThe proposed plan was edited and submitted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
-      config,
-    });
+    // Update the comment to notify the user that the plan was edited (only if not in local mode)
+    if (!isLocalMode(config) && state.githubIssueId) {
+      await postGitHubIssueComment({
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+        commentBody: `### ✅ Plan Edited & Submitted ✅\n\nThe proposed plan was edited and submitted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
+        config,
+      });
+    }
   } else {
     throw new Error("Unknown interrupt type." + humanResponse.type);
   }

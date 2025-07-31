@@ -5,6 +5,7 @@ import {
   isHumanMessage,
   isToolMessage,
 } from "@langchain/core/messages";
+
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 
@@ -12,6 +13,92 @@ interface LogChunk {
   event: string;
   data: any;
   ops?: Array<{ value: string }>;
+}
+
+/**
+ * Format a tool call arguments into a clean, readable string
+ */
+function formatToolCallArgs(tool: any): string {
+  const toolName = tool.name || "unknown";
+
+  if (!tool.args) return toolName;
+
+  switch (toolName.toLowerCase()) {
+    case "shell": {
+      if (Array.isArray(tool.args.command)) {
+        return `${toolName}: ${tool.args.command.join(" ")}`;
+      }
+      return `${toolName}: ${tool.args.command || ""}`;
+    }
+
+    case "grep":
+    case "grep_search": {
+      const query = tool.args.query || "";
+      const path = tool.args.path || "";
+      return `${toolName}: "${query}" in ${path}`;
+    }
+
+    case "view": {
+      return `${toolName}: ${tool.args.path || ""}`;
+    }
+
+    case "search_documents_for": {
+      return `${toolName}: "${tool.args.query || ""}"`;
+    }
+
+    case "get_url_content": {
+      return `${toolName}: ${tool.args.url || ""}`;
+    }
+
+    case "session_plan": {
+      const title = tool.args.title || "";
+      const planSteps = tool.args.plan || [];
+      if (title) {
+        return `${toolName}: "${title}" (${planSteps.length} steps)`;
+      }
+      return `${toolName}: ${planSteps.length} plan steps`;
+    }
+
+    case "apply_patch": {
+      return `${toolName}: ${tool.args.file_path || ""}`;
+    }
+
+    case "install_dependencies": {
+      const deps = tool.args.dependencies || [];
+      return `${toolName}: ${deps.length} dependencies`;
+    }
+
+    case "create_text_editor": {
+      return `${toolName}: ${tool.args.file_path || ""}`;
+    }
+
+    case "scratchpad": {
+      const content = tool.args.content || "";
+      const contentMaxLength = 50;
+      return content.length > contentMaxLength
+        ? `${toolName}: ${content.slice(0, contentMaxLength)}...`
+        : `${toolName}: ${content}`;
+    }
+
+    case "command_safety_evaluator": {
+      const command = tool.args.command || "";
+      return `${toolName}: evaluating "${command}"`;
+    }
+
+    case "respond_and_route": {
+      const response = tool.args.response || "";
+      const route = tool.args.route || "";
+      if (response && route) {
+        return `${toolName}: "${response}" → ${route}`;
+      } else if (response) {
+        return `${toolName}: "${response}"`;
+      } else if (route) {
+        return `${toolName}: → ${route}`;
+      }
+      return `${toolName}: routing decision`;
+    }
+  }
+  return "";
 }
 
 /**
@@ -148,24 +235,8 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
               createWriteTechnicalNotesToolFields().name;
 
             message.tool_calls.forEach((tool) => {
-              let argsString = "";
-              if (typeof tool.args === "string") {
-                argsString = tool.args;
-              } else if (tool.args !== undefined) {
-                try {
-                  argsString = JSON.stringify(tool.args, null, 2);
-                } catch {
-                  argsString = String(tool.args);
-                }
-              }
-              // Truncate the string if too long
-              const maxLength = 150;
-              const truncatedArgs =
-                argsString.length > maxLength
-                  ? argsString.slice(0, maxLength) + "... [trunc]"
-                  : argsString;
-              const toolName = tool.name || "unknown";
-              logs.push(`[TOOL CALL] ${toolName}: ${truncatedArgs}`);
+              const formattedArgs = formatToolCallArgs(tool);
+              logs.push(`[TOOL CALL] ${formattedArgs}`);
 
               // Handle technical notes from tool call
               if (
