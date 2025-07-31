@@ -137,7 +137,7 @@ export function ThreadCard({
       <CardHeader>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-foreground truncate text-sm">
+            <CardTitle className="text-foreground line-clamp-2 text-sm leading-tight">
               <InlineMarkdownText>{threadTitle}</InlineMarkdownText>
             </CardTitle>
             <div className="mt-1 flex items-center gap-1">

@@ -89,7 +89,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const {
     contentBlocks,
     setContentBlocks,
-    handleFileUpload,
     dropRef,
     removeBlock,
     dragOver,

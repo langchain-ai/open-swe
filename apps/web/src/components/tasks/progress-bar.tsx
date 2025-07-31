@@ -20,6 +20,7 @@ import {
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { InlineMarkdownText } from "@/components/thread/markdown-text";
 
 interface ProgressBarProps {
   taskPlan?: TaskPlan;
@@ -139,11 +140,12 @@ export function ProgressBar({
               </TooltipTrigger>
               <TooltipContent
                 side="top"
-                className="max-w-xs p-2 text-xs"
+                className="bg-popover text-popover-foreground max-w-xs border p-2 text-xs before:hidden after:hidden"
+                sideOffset={5}
               >
                 <div className="space-y-1">
-                  <p className="font-medium">Plan Progress</p>
-                  <p>
+                  <p className="text-foreground font-medium">Plan Progress</p>
+                  <p className="text-muted-foreground">
                     Shows the current progress of the AI agent's plan execution.
                   </p>
                 </div>
@@ -240,7 +242,9 @@ export function ProgressBar({
                             : "Pending"}
                       </span>
                     </div>
-                    <p className="text-xs break-words">{item.plan}</p>
+                    <InlineMarkdownText className="text-xs break-words">
+                      {item.plan}
+                    </InlineMarkdownText>
                   </div>
                 </HoverCardContent>
               </HoverCard>
