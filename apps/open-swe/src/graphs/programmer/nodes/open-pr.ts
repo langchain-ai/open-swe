@@ -58,6 +58,8 @@ Here are all of the tasks you completed:
 
 {CUSTOM_RULES}
 
+Always use proper markdown formatting when generating the pull request contents.
+
 You should not include any mention of an issue to close, unless explicitly requested by the user. The body will automatically include a mention of the issue to close.
 
 With all of this in mind, please use the \`open_pr\` tool to open a pull request.`;
