@@ -65,7 +65,7 @@ function AuthStatusContent() {
 
   const showGetStarted = !isAuth;
   const showInstallApp =
-    !showGetStarted && hasGitHubAppInstalled === false && !isTokenLoading;
+    !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
   const showLoading = !showGetStarted && !showInstallApp && !githubToken;
 
   useEffect(() => {
