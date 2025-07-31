@@ -120,39 +120,33 @@ export class ModelManager {
         "SECRETS_ENCRYPTION_KEY environment variable is required",
       );
     }
-
     if (!userLogin) {
       throw new Error("User login not found in config");
     }
 
-    const apiKeys = graphConfig.configurable?.apiKeys;
-    if (!isAllowedUser(userLogin)) {
-      if (!apiKeys) {
-        throw new Error(API_KEY_REQUIRED_MESSAGE);
-      }
-
-      const providerApiKey = providerToApiKey(provider, apiKeys);
-      if (!providerApiKey) {
-        throw new Error(
-          "No API key found for provider: " +
-            provider +
-            ". Please add one in the settings page.",
-        );
-      }
-
-      const apiKey = decryptSecret(providerApiKey, secretsEncryptionKey);
-      if (!apiKey) {
-        throw new Error(
-          "No API key found for provider: " +
-            provider +
-            ". Please add one in the settings page.",
-        );
-      }
-
-      return apiKey;
+    // If the user is allowed, we can return early
+    if (isAllowedUser(userLogin)) {
+      return null;
     }
 
-    return null;
+    const apiKeys = graphConfig.configurable?.apiKeys;
+    if (!apiKeys) {
+      throw new Error(API_KEY_REQUIRED_MESSAGE);
+    }
+
+    const missingProviderKeyMessage = `No API key found for provider: ${provider}. Please add one in the settings page.`;
+
+    const providerApiKey = providerToApiKey(provider, apiKeys);
+    if (!providerApiKey) {
+      throw new Error(missingProviderKeyMessage);
+    }
+
+    const apiKey = decryptSecret(providerApiKey, secretsEncryptionKey);
+    if (!apiKey) {
+      throw new Error(missingProviderKeyMessage);
+    }
+
+    return apiKey;
   }
 
   /**
