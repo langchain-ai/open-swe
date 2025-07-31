@@ -72,7 +72,7 @@ function AuthStatusContent() {
     if (!showGetStarted && !showInstallApp && !showLoading) {
       router.push("/chat");
     }
-  }, [showGetStarted, showInstallApp, showLoading]);
+  }, [showGetStarted, showInstallApp, showLoading, router]);
 
   if (showGetStarted) {
     return (
@@ -172,6 +172,7 @@ function AuthStatusContent() {
       </div>
     );
   }
+  return null;
 }
 
 export default function AuthStatus() {

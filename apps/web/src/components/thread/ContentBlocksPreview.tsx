@@ -22,7 +22,7 @@ export const ContentBlocksPreview: React.FC<ContentBlocksPreviewProps> = ({
 }) => {
   if (!blocks.length) return null;
   return (
-    <div className={cn("flex flex-wrap gap-2 pb-1", className)}>
+    <div className={cn("flex flex-wrap gap-2 pb-3", className)}>
       {blocks.map((block, idx) => (
         <MultimodalPreview
           key={idx}

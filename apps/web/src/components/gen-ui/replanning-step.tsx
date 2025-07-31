@@ -34,7 +34,9 @@ export function ReplanningStep({
       case "generating":
         return <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />;
       case "done":
-        return <CheckCircle className="h-3.5 w-3.5 text-green-500" />;
+        return (
+          <CheckCircle className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+        );
     }
   };
 
@@ -52,16 +54,16 @@ export function ReplanningStep({
   return (
     <div className="overflow-hidden rounded-md border border-gray-200">
       {reasoningText && (
-        <div className="border-b border-blue-100 bg-blue-50 p-2">
+        <div className="border-b border-blue-200 bg-blue-50 p-2 dark:border-blue-800/50 dark:bg-blue-950/20">
           <button
             onClick={() => setShowReasoning(!showReasoning)}
-            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800"
+            className="flex items-center gap-1 text-xs font-normal text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
           >
             <MessageSquare className="h-3 w-3" />
             {showReasoning ? "Hide reasoning" : "Show reasoning"}
           </button>
           {showReasoning && (
-            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800">
+            <BasicMarkdownText className="mt-1 text-xs font-normal text-blue-800 dark:text-blue-200">
               {reasoningText}
             </BasicMarkdownText>
           )}
