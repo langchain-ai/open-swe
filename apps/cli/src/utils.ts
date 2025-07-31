@@ -17,17 +17,15 @@ const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 export async function submitFeedback({
   plannerFeedback,
   plannerThreadId,
-  selectedRepo,
   setLogs,
   setPlannerFeedback,
   setStreamingPhase,
 }: {
   plannerFeedback: string;
   plannerThreadId: string;
-  selectedRepo: any;
-  setLogs: (updater: (prev: string[]) => string[]) => void;
-  setPlannerFeedback: () => void;
-  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void;
+  setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars
+  setPlannerFeedback: () => void; // eslint-disable-line no-unused-vars
+  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void; // eslint-disable-line no-unused-vars
 }) {
   try {
     // Set streaming phase back to streaming when feedback submission starts

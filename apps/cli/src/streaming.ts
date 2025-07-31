@@ -10,10 +10,10 @@ import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interr
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 interface StreamingCallbacks {
-  setLogs: (updater: (prev: string[]) => string[]) => void;
-  setPlannerThreadId: (id: string) => void;
-  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void;
-  setLoadingLogs: (loading: boolean) => void;
+  setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars
+  setPlannerThreadId: (id: string) => void; // eslint-disable-line no-unused-vars
+  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void; // eslint-disable-line no-unused-vars
+  setLoadingLogs: (loading: boolean) => void; // eslint-disable-line no-unused-vars
 }
 
 export class StreamingService {
@@ -149,7 +149,7 @@ export class StreamingService {
     this.callbacks.setStreamingPhase("done");
   }
 
-  async startNewSession(prompt: string, selectedRepo: any) {
+  async startNewSession(prompt: string) {
     this.callbacks.setLogs(() => []);
     this.callbacks.setLoadingLogs(true);
 

@@ -61,7 +61,7 @@ const LoadingSpinner: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
+const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({ // eslint-disable-line no-unused-vars
   onSubmit,
 }) => {
   const [input, setInput] = useState("");
@@ -177,14 +177,13 @@ const App: React.FC = () => {
         await submitFeedback({
           plannerFeedback,
           plannerThreadId,
-          selectedRepo,
           setLogs,
           setPlannerFeedback: () => setPlannerFeedback(null),
           setStreamingPhase,
         });
       })();
     }
-  }, [streamingPhase, plannerFeedback, selectedRepo, plannerThreadId]);
+  }, [streamingPhase, plannerFeedback, plannerThreadId]);
 
   // Main UI: logs area + input prompt
   // Calculate available space for logs based on whether welcome message is shown
@@ -227,9 +226,7 @@ const App: React.FC = () => {
                   dimColor={
                     !log.startsWith("[AI]") && !log.includes("PROPOSED PLAN")
                   }
-                  bold={
-                    log.startsWith("[AI]") || log.includes("PROPOSED PLAN")
-                  }
+                  bold={log.startsWith("[AI]") || log.includes("PROPOSED PLAN")}
                 >
                   {log}
                 </Text>
@@ -300,9 +297,7 @@ const App: React.FC = () => {
 
       {/* Local mode indicator underneath the input bar */}
       <Box paddingX={2} paddingY={0}>
-        <Text>
-          🏠 Local Mode - Working on {process.cwd()}
-        </Text>
+        <Text>🏠 Local Mode - Working on {process.cwd()}</Text>
       </Box>
     </Box>
   );
