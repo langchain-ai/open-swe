@@ -81,14 +81,20 @@ export function createLogger(level: LogLevel, prefix: string) {
       ? `[${prefix}]`
       : `${BOLD}${color}[${prefix}]${RESET}`;
 
+  // In production, only allow warn and error logs
+  const isProduction = process.env.NODE_ENV === "production";
+
   return {
     debug: (message: string, data?: any) => {
-      if (level === LogLevel.DEBUG) {
+      if (!isProduction && level === LogLevel.DEBUG) {
         logWithOptionalIds(styledPrefix, message, data);
       }
     },
     info: (message: string, data?: any) => {
-      if (level === LogLevel.INFO || level === LogLevel.DEBUG) {
+      if (
+        !isProduction &&
+        (level === LogLevel.INFO || level === LogLevel.DEBUG)
+      ) {
         logWithOptionalIds(styledPrefix, message, data);
       }
     },
