@@ -20,7 +20,10 @@ import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
-import { createShellExecutor, LocalExecuteResponse } from "../shell-executor/index.js";
+import {
+  createShellExecutor,
+  LocalExecuteResponse,
+} from "../shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -267,7 +270,11 @@ export async function checkoutBranchAndCommit(
   logger.info(`Committing changes to branch ${branchName}`);
 
   // Validate and filter files before committing
-  const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox, config);
+  const validFiles = await getValidFilesToCommit(
+    absoluteRepoDir,
+    sandbox,
+    config,
+  );
 
   if (validFiles.length === 0) {
     logger.info("No valid files to commit after filtering");
