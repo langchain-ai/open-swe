@@ -65,7 +65,7 @@ export async function classifyMessage(
 
   let plannerThread: Thread<PlannerGraphState> | undefined;
   let programmerThread: Thread<GraphState> | undefined;
-  
+
   // Only create LangGraph client if not in local mode
   let langGraphClient: Client | undefined;
   if (!isLocalMode(config)) {
