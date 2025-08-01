@@ -1,0 +1,131 @@
+---
+title: "Manager Agent"
+description: "Entry point and request router for the agent system"
+---
+
+# Manager Agent
+
+The Manager agent serves as the intelligent entry point and coordinator for all user requests in the Open SWE system. It acts as the central nervous system, handling request classification, session management, and routing to appropriate specialized agents without performing any direct code operations.
+
+## Core Responsibilities
+
+### GitHub Issue Initialization
+
+- Creates and manages GitHub issues for new user requests
+- Links requests to appropriate repositories and target branches
+- Maintains issue metadata and tracking information
+- Handles issue comments and updates throughout the workflow
+
+### Message Classification & Routing
+
+The Manager uses LLM-based analysis to classify incoming messages and determine appropriate routing:
+
+- **Intent Analysis**: Determines whether messages are new requests, updates, or administrative operations
+- **Context Awareness**: Considers current session states and workflow progress
+- **Smart Routing**: Routes messages to the most appropriate agent based on classification
+
+### Session State Management
+
+The Manager tracks and coordinates two critical session types:
+
+#### `plannerSession`
+
+- **Thread Management**: Creates and manages LangGraph threads for planning operations
+- **State Tracking**: Monitors planning progress and interrupts
+- **Handoff Coordination**: Manages transitions from planning to implementation
+
+#### `programmerSession`
+
+- **Implementation Tracking**: Monitors code implementation progress
+- **Feedback Routing**: Handles user feedback during implementation
+- **Completion Management**: Coordinates final steps and PR creation
+
+## Routing Strategies
+
+The Manager implements five primary routing strategies based on message classification:
+
+### `start_planner`
+
+- **Trigger**: New complete requests requiring plan generation
+- **Action**: Initiates new planning session via LangGraph SDK
+- **Context**: Used when no active planner session exists
+
+### `update_planner`
+
+- **Trigger**: Additional context for active planning sessions
+- **Action**: Forwards messages to running planner without interruption
+- **Context**: Planner is actively gathering context or generating plans
+
+### `resume_planner`
+
+- **Trigger**: User feedback on interrupted planning sessions
+- **Action**: Resumes paused planner with user input
+- **Context**: Planner is waiting for plan approval or feedback
+
+### `update_programmer`
+
+- **Trigger**: Context or feedback for active implementation
+- **Action**: Forwards messages to running programmer session
+- **Context**: Programmer is actively implementing approved plans
+
+### `create_new_session`
+
+- **Trigger**: Independent requests requiring separate GitHub issues
+- **Action**: Creates new session with fresh GitHub issue
+- **Context**: Request is unrelated to current workflow
+
+## Architecture Design
+
+### Tool-Free Operation
+
+The Manager agent operates **without any tools**, focusing exclusively on:
+
+- **Pure Coordination Logic**: LLM-based decision making for routing
+- **Session State Management**: Tracking and coordinating agent sessions
+- **Message Classification**: Intelligent analysis of user intent
+
+### LangGraph SDK Integration
+
+- **Thread Creation**: Manages LangGraph threads for planner and programmer agents
+- **Session Invocation**: Uses SDK to start and manage agent sessions
+- **Streaming Support**: Handles real-time updates and progress tracking
+- **Error Handling**: Manages session failures and recovery
+
+## Workflow Nodes
+
+The Manager operates through four key nodes:
+
+### `initialize-github-issue`
+
+- Sets up GitHub integration and issue creation
+- Establishes repository context and branch information
+- Prepares metadata for downstream agents
+
+### `classify-message`
+
+- Analyzes user messages using LLM classification
+- Determines routing strategy based on content and context
+- Considers current session states in decision making
+
+### `start-planner`
+
+- Initiates new planner sessions via LangGraph SDK
+- Passes user requests and context to planner agent
+- Establishes plannerSession tracking
+
+### `create-new-session`
+
+- Handles creation of independent workflow sessions
+- Manages GitHub issue creation for separate requests
+- Initializes fresh session state
+
+## Session Coordination
+
+The Manager maintains sophisticated session awareness:
+
+- **State Persistence**: Tracks session IDs, thread IDs, and run states
+- **Lifecycle Management**: Handles session creation, updates, and completion
+- **Cross-Agent Communication**: Facilitates handoffs between planner and programmer
+- **Error Recovery**: Manages session failures and restart scenarios
+
+This architecture ensures that complex software engineering workflows are properly coordinated while maintaining clear separation of concerns between routing logic and implementation details.

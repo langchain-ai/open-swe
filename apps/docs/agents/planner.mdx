@@ -1,0 +1,151 @@
+---
+title: "Planner Agent"
+description: "Generates comprehensive implementation plans for user requests"
+---
+
+# Planner Agent
+
+The Planner agent is responsible for generating comprehensive implementation plans by thoroughly analyzing codebases, gathering contextual information, and breaking down complex user requests into structured, actionable tasks. It serves as the strategic thinking component of the Open SWE system.
+
+## Core Role & Responsibilities
+
+### Strategic Plan Generation
+
+- **Request Analysis**: Deeply analyzes user requests to understand requirements and scope
+- **Codebase Exploration**: Systematically explores codebases to understand existing architecture, patterns, and dependencies
+- **Task Decomposition**: Breaks down complex requests into logical, sequential implementation steps
+- **Context Integration**: Combines user requirements with codebase understanding to create informed plans
+
+### Comprehensive Context Gathering
+
+- **Architecture Understanding**: Maps existing code structure and identifies relevant components
+- **Dependency Analysis**: Identifies required dependencies, imports, and interconnections
+- **Pattern Recognition**: Recognizes existing code patterns and conventions to maintain consistency
+- **Documentation Research**: Gathers information from external sources when needed
+
+## Invocation by Manager
+
+The Planner is invoked by the Manager agent via **LangGraph SDK** in three scenarios:
+
+### `start_planner`
+
+- **Trigger**: New complete requests requiring fresh plan generation
+- **Context**: No active planning session exists
+- **Action**: Creates new LangGraph thread and begins planning process
+
+### `update_planner`
+
+- **Trigger**: Additional context or requirements for active planning sessions
+- **Context**: Planner is actively gathering context or generating plans
+- **Action**: Forwards new information to running planner without interruption
+
+### `resume_planner`
+
+- **Trigger**: User feedback on interrupted planning sessions
+- **Context**: Planner is paused waiting for plan approval or modifications
+- **Action**: Resumes planning with user input and feedback
+
+## Available Tools
+
+During the **`generate-plan-context-action`** node, the Planner has access to a comprehensive toolset:
+
+### Core Analysis Tools
+
+- **`grep`** - Search codebase for patterns, functions, classes, and text matches
+- **`shell`** - Execute commands for exploration, testing, and environment analysis
+- **`view`** - Read file contents, examine directory structures, and understand code organization
+
+### Documentation & Research Tools
+
+- **`scratchpad`** - Take structured notes during context gathering for plan generation
+- **`get-url-content`** - Fetch external documentation, API references, or resources
+- **`search-document-for`** - Search within fetched documents for specific information
+
+### Extended Capabilities
+
+- **`MCP tools`** - Additional specialized tools via Model Context Protocol integration
+
+## Key Workflow Nodes
+
+The Planner operates through six critical nodes:
+
+### `prepare-graph-state`
+
+- **Purpose**: Initialize planning session with user request and repository context
+- **Actions**: Set up sandbox environment, validate inputs, prepare for context gathering
+- **Output**: Ready state for context gathering phase
+
+### `generate-plan-context-action`
+
+- **Purpose**: Generate specific actions needed to gather context for informed planning
+- **Actions**: Determine what information is needed, select appropriate tools
+- **Output**: Tool calls for context gathering or transition to plan generation
+
+### `take-plan-actions`
+
+- **Purpose**: Execute context-gathering tools and collect information
+- **Actions**: Run grep searches, view files, execute shell commands, take notes
+- **Output**: Gathered context and information for plan creation
+
+### `generate-plan`
+
+- **Purpose**: Create the comprehensive implementation plan based on gathered context
+- **Actions**: Synthesize information, structure tasks, define implementation steps
+- **Output**: Detailed, actionable implementation plan
+
+### `notetaker`
+
+- **Purpose**: Document plan details and rationale for transparency
+- **Actions**: Record planning decisions, context, and implementation strategy
+- **Output**: Documented plan with supporting information
+
+### `interrupt-proposed-plan`
+
+- **Purpose**: Present plan for human review and approval
+- **Actions**: Format plan for presentation, pause execution for user input
+- **Output**: Plan approval, rejection, or modification requests
+
+## Plan Approval Process
+
+The Planner implements a structured approval workflow:
+
+### 1. Context Gathering Phase
+
+- **Systematic Exploration**: Uses tools to understand codebase structure and requirements
+- **Information Collection**: Gathers all necessary context before plan generation
+- **Note Taking**: Documents findings and insights for plan creation
+
+### 2. Plan Generation Phase
+
+- **Strategic Planning**: Creates comprehensive, step-by-step implementation plans
+- **Task Structuring**: Organizes tasks in logical sequence with clear dependencies
+- **Quality Assurance**: Ensures plans are complete, actionable, and well-structured
+
+### 3. Human Interrupt Phase
+
+- **Plan Presentation**: Presents proposed plan for human review
+- **Feedback Collection**: Waits for user approval, rejection, or modification requests
+- **Auto Mode**: Bypasses human approval when configured for automatic operation
+
+### 4. Plan Acceptance & Handoff
+
+- **Approval Processing**: Handles user feedback and plan modifications if needed
+- **Programmer Invocation**: Calls `startProgrammerRun()` after plan acceptance
+- **Session Transition**: Transfers control to Programmer agent with approved plan
+
+### 5. Programmer Session Creation
+
+- **LangGraph SDK Integration**: Creates new programmer thread via SDK
+- **Context Transfer**: Passes approved plan and all gathered context
+- **Session Management**: Establishes programmerSession tracking in Manager
+
+## Integration with System Architecture
+
+The Planner serves as the critical bridge between user requirements and implementation:
+
+- **Upstream**: Receives classified requests from Manager agent
+- **Downstream**: Provides structured plans to Programmer agent
+- **Human Interaction**: Enables plan review and approval for quality control
+- **Context Preservation**: Maintains all gathered information for downstream use
+
+This systematic approach ensures that implementation begins with thorough understanding and well-structured plans, leading to more successful outcomes and reduced iteration cycles.
