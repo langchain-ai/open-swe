@@ -6,7 +6,7 @@ import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { ReviewerGraphState } from "@open-swe/shared/open-swe/reviewer/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Installation } from "./useGitHubInstallations";
 
 type ThreadSortBy = "thread_id" | "status" | "created_at" | "updated_at";
@@ -75,6 +75,7 @@ export function useThreadsSWR<
     disableOrgFiltering,
     pagination,
   } = options;
+  const [hasMoreState, setHasMoreState] = useState(true);
 
   const paginationWithDefaults = {
     limit: 25,
@@ -141,7 +142,12 @@ export function useThreadsSWR<
       return allThreads;
     }
 
+    if (!allThreads.length) {
+      setHasMoreState(false);
+    }
+
     if (!currentInstallation) {
+      setHasMoreState(false);
       return [];
     }
 
@@ -154,11 +160,16 @@ export function useThreadsSWR<
     });
   }, [data, currentInstallation, disableOrgFiltering]);
 
+  const hasMore = useMemo(() => {
+    return hasMoreState && !!threads.length;
+  }, [threads, paginationWithDefaults]);
+
   return {
     threads,
     error,
     isLoading,
     isValidating,
     mutate,
+    hasMore,
   };
 }
