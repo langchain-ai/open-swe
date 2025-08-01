@@ -105,6 +105,7 @@ export class StreamingService {
         interruptArr && interruptArr[0] && interruptArr[0].value
           ? interruptArr[0].value
           : undefined;
+
       if (isAgentInboxInterruptSchema(firstInterruptValue)) {
         return { needsFeedback: true };
       }
@@ -165,49 +166,83 @@ export class StreamingService {
     this.callbacks.setLoadingLogs(true);
 
     try {
-      const userAccessToken = getAccessToken();
-      const installationAccessToken = await getInstallationAccessToken();
-      const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+      const isLocalMode = process.env.OPEN_SWE_LOCAL_MODE === "true";
 
-      if (!userAccessToken || !installationAccessToken || !encryptionKey) {
-        this.callbacks.setLogs(() => [
-          `Missing secrets: ${userAccessToken ? "" : "userAccessToken, "}${installationAccessToken ? "" : "installationAccessToken, "}${encryptionKey ? "" : "encryptionKey"}`,
-        ]);
-        return;
-      }
+      let headers: Record<string, string> = {};
+      let runInput: any;
 
-      const encryptedUserToken = encryptSecret(userAccessToken, encryptionKey);
-      const encryptedInstallationToken = encryptSecret(
-        installationAccessToken,
-        encryptionKey,
-      );
-      const [owner, repoName] = selectedRepo.full_name.split("/");
-
-      const runInput = {
-        messages: [
-          {
-            id: uuidv4(),
-            type: "human",
-            content: [{ type: "text", text: prompt }],
+      if (isLocalMode) {
+        // Local mode: no GitHub authentication required
+        runInput = {
+          messages: [
+            {
+              id: uuidv4(),
+              type: "human",
+              content: [{ type: "text", text: prompt }],
+            },
+          ],
+          targetRepository: {
+            owner: "local",
+            repo: "local",
+            branch: "main",
           },
-        ],
-        targetRepository: {
-          owner,
-          repo: repoName,
-          branch: selectedRepo.default_branch || "main",
-        },
-        autoAcceptPlan: false,
-      };
+          autoAcceptPlan: false,
+        };
 
-      const installationId = getInstallationId();
-      const newClient = new Client({
-        apiUrl: LANGGRAPH_URL,
-        defaultHeaders: {
+        headers = {
+          "x-local-mode": "true",
+        };
+      } else {
+        // Normal mode: require GitHub authentication
+        const userAccessToken = getAccessToken();
+        const installationAccessToken = await getInstallationAccessToken();
+        const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+
+        if (!userAccessToken || !installationAccessToken || !encryptionKey) {
+          this.callbacks.setLogs(() => [
+            `Missing secrets: ${userAccessToken ? "" : "userAccessToken, "}${installationAccessToken ? "" : "installationAccessToken, "}${encryptionKey ? "" : "encryptionKey"}`,
+          ]);
+          return;
+        }
+
+        const encryptedUserToken = encryptSecret(
+          userAccessToken,
+          encryptionKey,
+        );
+        const encryptedInstallationToken = encryptSecret(
+          installationAccessToken,
+          encryptionKey,
+        );
+        const [owner, repoName] = selectedRepo.full_name.split("/");
+
+        runInput = {
+          messages: [
+            {
+              id: uuidv4(),
+              type: "human",
+              content: [{ type: "text", text: prompt }],
+            },
+          ],
+          targetRepository: {
+            owner,
+            repo: repoName,
+            branch: selectedRepo.default_branch || "main",
+          },
+          autoAcceptPlan: false,
+        };
+
+        const installationId = getInstallationId();
+        headers = {
           [GITHUB_TOKEN_COOKIE]: encryptedUserToken,
           [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptedInstallationToken,
           [GITHUB_INSTALLATION_NAME]: owner,
           [GITHUB_INSTALLATION_ID]: installationId,
-        },
+        };
+      }
+
+      const newClient = new Client({
+        apiUrl: LANGGRAPH_URL,
+        defaultHeaders: headers,
       });
 
       this.callbacks.setClient(newClient);

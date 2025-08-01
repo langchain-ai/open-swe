@@ -5,6 +5,10 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "../../../utils/local-mode.js";
+import {
   createGetURLContentTool,
   createShellTool,
   createSearchDocumentForTool,
@@ -35,6 +39,7 @@ import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
+import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -49,11 +54,42 @@ export async function takeActions(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const viewTool = createViewTool(state);
-  const shellTool = createShellTool(state);
-  const searchTool = createGrepTool(state);
+  // Filter out unsafe commands
+  const { filteredToolCalls, wasFiltered } = await filterUnsafeCommands(
+    lastMessage.tool_calls,
+    config,
+  );
+
+  if (wasFiltered) {
+    // If all tool calls were filtered out, we need to handle this differently
+    if (filteredToolCalls.length === 0) {
+      // Remove the last message entirely since it has no valid tool calls
+      const modifiedMessages = messages.slice(0, -1);
+      return new Command({
+        goto: "take-plan-actions",
+        update: { messages: modifiedMessages },
+      });
+    }
+
+    // Create a modified message with only safe tool calls
+    const modifiedMessage = {
+      ...lastMessage,
+      tool_calls: filteredToolCalls,
+    };
+
+    // Replace the last message in state
+    const modifiedMessages = [...messages.slice(0, -1), modifiedMessage];
+    return new Command({
+      goto: "take-plan-actions",
+      update: { messages: modifiedMessages },
+    });
+  }
+
+  const viewTool = createViewTool(state, config);
+  const shellTool = createShellTool(state, config);
+  const searchTool = createGrepTool(state, config);
   const scratchpadTool = createScratchpadTool("");
-  const getURLContentTool = createGetURLContentTool(state);
+  const getURLContentTool = createGetURLContentTool(state, config);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
@@ -198,7 +234,9 @@ export async function takeActions(
       { documentCache: {} } as { documentCache: Record<string, string> },
     );
 
-  const repoPath = getRepoAbsolutePath(state.targetRepository);
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
   if (changedFiles?.length > 0) {
     logger.warn(
@@ -207,7 +245,7 @@ export async function takeActions(
         changedFiles,
       },
     );
-    await stashAndClearChanges(repoPath, sandbox);
+    await stashAndClearChanges(repoPath, sandbox, config);
 
     // Rewrite the tool call contents to include a changed files warning.
     toolCallResults = toolCallResults.map(

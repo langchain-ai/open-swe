@@ -17,9 +17,10 @@
     "strict": true,
     "strictFunctionTypes": false,
     "outDir": "dist",
+    "rootDir": "src",
     "types": ["jest", "node"],
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.d.ts"]
 }

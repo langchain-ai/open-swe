@@ -79,6 +79,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
 <workspace_information>
     <current_working_directory>{CURRENT_WORKING_DIRECTORY}</current_working_directory>
     <repository_status>Already cloned and accessible in the current directory</repository_status>
+    {LOCAL_MODE_NOTE}
 
     <codebase_tree>
         Generated via: \`git ls-files | tree --fromfile -L 3\`:

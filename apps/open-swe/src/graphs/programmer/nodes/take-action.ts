@@ -8,6 +8,7 @@ import {
   createShellTool,
   createSearchDocumentForTool,
 } from "../../../tools/index.js";
+import { getLocalShellExecutor } from "../../../utils/local-shell-executor.js";
 import {
   GraphState,
   GraphConfig,
@@ -31,6 +32,10 @@ import {
 } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "../../../utils/local-mode.js";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -38,6 +43,7 @@ import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
+import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -51,12 +57,12 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const applyPatchTool = createApplyPatchTool(state);
-  const shellTool = createShellTool(state);
-  const searchTool = createGrepTool(state);
-  const textEditorTool = createTextEditorTool(state);
-  const installDependenciesTool = createInstallDependenciesTool(state);
-  const getURLContentTool = createGetURLContentTool(state);
+  const applyPatchTool = createApplyPatchTool(state, config);
+  const shellTool = createShellTool(state, config);
+  const searchTool = createGrepTool(state, config);
+  const textEditorTool = createTextEditorTool(state, config);
+  const installDependenciesTool = createInstallDependenciesTool(state, config);
+  const getURLContentTool = createGetURLContentTool(state, config);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
@@ -83,6 +89,40 @@ export async function takeAction(
   const toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
+  }
+
+  // Filter out unsafe commands
+  const { filteredToolCalls, wasFiltered } = await filterUnsafeCommands(
+    toolCalls,
+    config,
+  );
+
+  if (wasFiltered) {
+    // If all tool calls were filtered out, we need to handle this differently
+    if (filteredToolCalls.length === 0) {
+      // Remove the last message entirely since it has no valid tool calls
+      const modifiedMessages = state.internalMessages.slice(0, -1);
+      return new Command({
+        goto: "take-action",
+        update: { internalMessages: modifiedMessages },
+      });
+    }
+
+    // Create a modified message with only safe tool calls
+    const modifiedMessage = {
+      ...lastMessage,
+      tool_calls: filteredToolCalls,
+    };
+
+    // Replace the last message in state
+    const modifiedMessages = [
+      ...state.internalMessages.slice(0, -1),
+      modifiedMessage,
+    ];
+    return new Command({
+      goto: "take-action",
+      update: { internalMessages: modifiedMessages },
+    });
   }
 
   const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
@@ -203,10 +243,10 @@ export async function takeAction(
 
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
@@ -215,23 +255,45 @@ export async function takeAction(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    const result = await checkoutBranchAndCommit(
-      config,
-      state.targetRepository,
-      sandbox,
-      {
-        branchName,
-        githubInstallationToken,
-        taskPlan: state.taskPlan,
-        githubIssueId: state.githubIssueId,
-      },
-    );
-    branchName = result.branchName;
-    pullRequestNumber = result.updatedTaskPlan
-      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-      : undefined;
-    updatedTaskPlan = result.updatedTaskPlan;
+    if (!isLocalMode(config)) {
+      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const result = await checkoutBranchAndCommit(
+        config,
+        state.targetRepository,
+        sandbox,
+        {
+          branchName,
+          githubInstallationToken,
+          taskPlan: state.taskPlan,
+          githubIssueId: state.githubIssueId,
+        },
+      );
+      branchName = result.branchName;
+      pullRequestNumber = result.updatedTaskPlan
+        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+        : undefined;
+      updatedTaskPlan = result.updatedTaskPlan;
+    } else {
+      logger.info("Skipping GitHub commit operations in local mode");
+      const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+      const commitResult = await executor.executeCommand(
+        "git add . && git commit -m 'Auto-commit changes from Open SWE agent'",
+        getLocalWorkingDirectory(),
+        undefined,
+        30, // timeout in seconds
+        true, // localMode
+      );
+
+      if (commitResult.exitCode !== 0) {
+        logger.error("Failed to commit changes in local mode", {
+          exitCode: commitResult.exitCode,
+          result: commitResult.result,
+        });
+        // Don't throw error, just log it to avoid breaking the flow
+      } else {
+        logger.info("Successfully committed changes in local mode");
+      }
+    }
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -239,7 +301,7 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree();
+  const codebaseTree = await getCodebaseTree(undefined, undefined, config);
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE

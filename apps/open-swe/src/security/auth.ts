@@ -48,6 +48,20 @@ export const auth = new Auth()
       };
     }
 
+    // Check for local mode first
+    const localModeHeader = request.headers.get("x-local-mode");
+    if (localModeHeader === "true") {
+      return {
+        identity: "local-user",
+        is_authenticated: true,
+        display_name: "Local User",
+        metadata: {
+          installation_name: "local-mode",
+        },
+        permissions: LANGGRAPH_USER_PERMISSIONS,
+      };
+    }
+
     const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
     if (ghSecretHashHeader) {
       // This will either return a valid user, or throw an error

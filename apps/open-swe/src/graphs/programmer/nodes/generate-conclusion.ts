@@ -17,6 +17,7 @@ import {
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { isLocalMode } from "../../../utils/local-mode.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
@@ -72,15 +73,17 @@ Given all of this, please respond with the concise conclusion. Do not include an
     activeTaskId,
     getMessageContentString(response.content),
   );
-  // Update the github issue to include the new overall task summary.
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
-    config,
-    updatedTaskPlan,
-  );
+  // Update the github issue to include the new overall task summary (only if not in local mode)
+  if (!isLocalMode(config) && state.githubIssueId) {
+    await addTaskPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      updatedTaskPlan,
+    );
+  }
 
   return {
     messages: [response],

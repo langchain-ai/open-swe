@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { isLocalMode } from "../../../utils/local-mode.js";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -22,20 +23,35 @@ const logger = createLogger(LogLevel.INFO, "StartPlanner");
 /**
  * Start planner node.
  * This node will kickoff a new planner session using the LangGraph SDK.
+ * In local mode, creates a planner session with local mode headers.
  */
 export async function startPlanner(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
-  });
-
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
   const followupMessage = getRecentUserRequest(state.messages, {
     returnFullMessage: true,
+    config,
   });
+
   try {
+    let langGraphClient;
+
+    if (isLocalMode(config)) {
+      // In local mode, create client with local mode headers
+      langGraphClient = createLangGraphClient({
+        defaultHeaders: {
+          "x-local-mode": "true",
+        },
+      });
+    } else {
+      // In normal mode, create client with GitHub headers
+      langGraphClient = createLangGraphClient({
+        defaultHeaders: getDefaultHeaders(config),
+      });
+    }
+
     const runInput: PlannerGraphUpdate = {
       // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
       githubIssueId: state.githubIssueId,
@@ -46,6 +62,7 @@ export async function startPlanner(
       autoAcceptPlan: state.autoAcceptPlan,
       ...(followupMessage && { messages: [followupMessage] }),
     };
+
     const run = await langGraphClient.runs.create(
       plannerThreadId,
       PLANNER_GRAPH_ID,
@@ -53,7 +70,12 @@ export async function startPlanner(
         input: runInput,
         config: {
           recursion_limit: 400,
-          configurable: getCustomConfigurableFields(config),
+          configurable: {
+            ...getCustomConfigurableFields(config),
+            ...(isLocalMode(config) && {
+              "x-local-mode": "true",
+            }),
+          },
         },
         ifNotExists: "create",
         multitaskStrategy: "enqueue",

@@ -12,16 +12,48 @@ import {
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
-import { Client } from "@langchain/langgraph-sdk";
+import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import { submitFeedback } from "./utils.js";
 import { StreamingService } from "./streaming.js";
-
-type StreamMode = "values" | "updates" | "messages";
 
 const GITHUB_LOGIN_URL =
   process.env.GITHUB_LOGIN_URL || "http://localhost:3000/api/auth/github/login";
 
 startAuthServer();
+
+const isLocalMode = process.argv.includes("--local");
+
+// Show usage help
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(`
+Open SWE CLI
+
+Usage:
+  yarn dev                 # Run with GitHub authentication (default)
+  yarn dev --local         # Run in local mode (no GitHub auth, works on current directory)
+  
+Options:
+  --local                  # Work directly on local codebase without GitHub authentication
+  --help, -h               # Show this help message
+
+Examples:
+  yarn dev --local         # Start CLI to modify files in current directory
+  yarn dev                 # Start CLI with full GitHub integration
+`);
+  process.exit(0);
+}
+
+if (isLocalMode) {
+  // Set environment variable to enable local mode on the server
+  process.env.OPEN_SWE_LOCAL_MODE = "true";
+
+  console.log("🏠 Starting Open SWE CLI in Local Mode");
+  console.log("   Working directory:", process.env.OPEN_SWE_PROJECT_PATH);
+  console.log("   No GitHub authentication required");
+  console.log("");
+} else {
+  startAuthServer();
+}
 
 const LoadingSpinner: React.FC<{ text: string }> = ({ text }) => {
   const [dots, setDots] = useState("");
@@ -168,7 +200,7 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState("");
   const [exit, setExit] = useState(false);
   const [authStarted, setAuthStarted] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(isLocalMode);
   const [repos, setRepos] = useState<any[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<any | null>(null);
   const [selectingRepo, setSelectingRepo] = useState(false);
@@ -235,6 +267,18 @@ const App: React.FC = () => {
 
   // On mount, check for existing token
   useEffect(() => {
+    if (isLocalMode) {
+      setIsLoggedIn(true);
+      setLoadingRepos(false); // Ensure no loading state in local mode
+      // Set up local mode defaults
+      setSelectedRepo({
+        full_name: "local/project",
+        clone_url: "local",
+        default_branch: "main",
+      });
+      setInstallChecked(true);
+      return;
+    }
     const token = getAccessToken();
     if (token) {
       setIsLoggedIn(true);
@@ -243,6 +287,7 @@ const App: React.FC = () => {
 
   // After login, fetch and store user repos
   useEffect(() => {
+    if (isLocalMode) return;
     if (isLoggedIn && repos.length === 0 && !loadingRepos) {
       const token = getAccessToken();
       if (token) {
@@ -263,6 +308,7 @@ const App: React.FC = () => {
 
   // Poll for installation_id after opening install page
   useEffect(() => {
+    if (isLocalMode) return;
     let interval: ReturnType<typeof setInterval>;
     if (waitingForInstall) {
       interval = setInterval(() => {
@@ -326,6 +372,20 @@ const App: React.FC = () => {
 
   // Poll for token after auth flow starts
   useEffect(() => {
+    if (isLocalMode || !pollingForToken || isLoggedIn) return;
+
+    const interval = setInterval(() => {
+      const token = getAccessToken();
+      if (token) {
+        setIsLoggedIn(true);
+        setPollingForToken(false);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [pollingForToken, isLoggedIn]);
+
+  // Poll for token after auth flow starts
+  useEffect(() => {
     if (pollingForToken && !isLoggedIn) {
       const interval = setInterval(() => {
         const token = getAccessToken();
@@ -338,47 +398,52 @@ const App: React.FC = () => {
     }
   }, [pollingForToken, isLoggedIn]);
 
-  // Custom input for planner feedback (must be inside App)
-  const PlanFeedbackSelect: React.FC = () => {
-    const [highlighted, setHighlighted] = useState(0);
-    const [isMessage, setIsMessage] = useState(false);
+  const PlannerFeedbackInput: React.FC = () => {
+    const [selectedOption, setSelectedOption] = useState<
+      "approve" | "deny" | null
+    >(null);
 
-    const options = [
-      { value: "approve", label: "Approve" },
-      { value: "deny", label: "Deny" },
-    ];
-
-    useInput((input: string, key: { [key: string]: any }) => {
+    useInput((inputChar: string, key: { [key: string]: any }) => {
       if (streamingPhase !== "awaitingFeedback") return;
-      if (isMessage) return;
 
-      if (key.return) {
-        setIsMessage(true);
-        setPlannerFeedback(options[highlighted].value);
+      if (key.return && selectedOption) {
+        setPlannerFeedback(selectedOption);
+        setSelectedOption(null);
       } else if (key.leftArrow) {
-        setHighlighted((h) => (h - 1 + options.length) % options.length);
+        setSelectedOption("approve");
       } else if (key.rightArrow) {
-        setHighlighted((h) => (h + 1) % options.length);
+        setSelectedOption("deny");
       }
     });
 
-    if (streamingPhase !== "awaitingFeedback") return null;
+    if (streamingPhase !== "awaitingFeedback") {
+      return null;
+    }
 
     return (
       <Box flexDirection="row" alignItems="center" gap={2}>
-        <Text>Plan feedback:</Text>
-        {options.map((option, idx) => (
-          <Text
-            key={option.value}
-            dimColor={idx !== highlighted}
-            bold={idx === highlighted}
-          >
-            {idx === highlighted ? "[" : " "}
-            {option.label}
-            {idx === highlighted ? "]" : " "}
+        <Text>Plan feedback: </Text>
+        <Box
+          borderStyle="round"
+          borderColor={selectedOption === "approve" ? "green" : "white"}
+          paddingX={2}
+          paddingY={0}
+        >
+          <Text color={selectedOption === "approve" ? "green" : "white"}>
+            {selectedOption === "approve" ? "▶ " : "  "}Approve
           </Text>
-        ))}
-        <Text dimColor>Use ←/→ to navigate, Enter to select</Text>
+        </Box>
+        <Box
+          borderStyle="round"
+          borderColor={selectedOption === "deny" ? "red" : "white"}
+          paddingX={2}
+          paddingY={0}
+        >
+          <Text color={selectedOption === "deny" ? "red" : "white"}>
+            {selectedOption === "deny" ? "▶ " : "  "}Deny
+          </Text>
+        </Box>
+        <Text dimColor>(Use ←/→ to select, Enter to confirm)</Text>
       </Box>
     );
   };
@@ -390,8 +455,8 @@ const App: React.FC = () => {
       plannerFeedback &&
       plannerThreadId
     ) {
-      // Immediately switch to streaming mode to hide the feedback prompt
-      setStreamingPhase("streaming");
+      // Don't immediately switch to streaming mode - let the feedback submission complete naturally
+      // setStreamingPhase("streaming"); // REMOVED: This was causing the input to disappear
 
       (async () => {
         await submitFeedback({
@@ -400,10 +465,21 @@ const App: React.FC = () => {
           selectedRepo,
           setLogs,
           setPlannerFeedback: () => setPlannerFeedback(null),
+          setStreamingPhase,
         });
       })();
     }
   }, [streamingPhase, plannerFeedback, selectedRepo, plannerThreadId]);
+
+  // Add debug logging for streaming phase changes
+  useEffect(() => {
+    // Removed debug logging
+  }, [streamingPhase]);
+
+  // Add debug logging for planner feedback changes
+  useEffect(() => {
+    // Removed debug logging
+  }, [plannerFeedback]);
 
   // Loading repos after login
   if (isLoggedIn && loadingRepos) {
@@ -415,7 +491,12 @@ const App: React.FC = () => {
   }
 
   // Repo selection UI
-  if (isLoggedIn && repos.length > 0 && (selectingRepo || !selectedRepo)) {
+  if (
+    isLoggedIn &&
+    repos.length > 0 &&
+    (selectingRepo || !selectedRepo) &&
+    !isLocalMode
+  ) {
     return (
       <Box flexDirection="column" padding={1}>
         <Box justifyContent="center" marginBottom={1}>
@@ -494,6 +575,13 @@ const App: React.FC = () => {
 
   // Main UI: logs area + input prompt
   if (isLoggedIn && selectedRepo) {
+    const modeIndicator = isLocalMode ? (
+      <Box paddingX={2} paddingY={1}>
+        <Text dimColor>
+          🏠 Local Mode - Working on {process.env.OPEN_SWE_LOCAL_PROJECT_PATH}
+        </Text>
+      </Box>
+    ) : null;
     // Calculate available space for logs based on whether welcome message is shown
     const headerHeight = 0; // Welcome message is now above input bar, not at top
     const inputHeight = 4; // Fixed input area height (increased due to padding)
@@ -514,6 +602,7 @@ const App: React.FC = () => {
 
     return (
       <Box flexDirection="column" height={process.stdout.rows}>
+        {modeIndicator}
         {/* Auto-scrolling logs area - strict boundary container */}
         <Box
           height={availableLogHeight}
@@ -581,7 +670,9 @@ const App: React.FC = () => {
           justifyContent="center"
         >
           <Box>
-            {!hasStartedChat ? (
+            {streamingPhase === "awaitingFeedback" ? (
+              <PlannerFeedbackInput />
+            ) : !hasStartedChat ? (
               <CustomInput
                 onSubmit={(value) => {
                   setHasStartedChat(true);
@@ -608,19 +699,12 @@ const App: React.FC = () => {
             )}
           </Box>
         </Box>
-
-        {/* Plan feedback below the input bar */}
-        {streamingPhase === "awaitingFeedback" && (
-          <Box flexDirection="column" paddingX={2} marginTop={1}>
-            <PlanFeedbackSelect />
-          </Box>
-        )}
       </Box>
     );
   }
 
   // Auth prompt UI
-  if (!isLoggedIn && authPrompt === null) {
+  if (!isLoggedIn && authPrompt === null && !isLocalMode) {
     return (
       <Box flexDirection="column" padding={1}>
         <Box

@@ -1,6 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { applyPatch } from "diff";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
@@ -8,8 +8,147 @@ import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { Sandbox } from "@daytonaio/sdk";
+import { isLocalMode, getLocalWorkingDirectory } from "../utils/local-mode.js";
+import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
+import { promises as fs } from "fs";
+import { join, isAbsolute } from "path";
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
+
+/**
+ * Local version of readFile using Node.js fs
+ */
+async function readFileLocal(
+  filePath: string,
+  workDir: string,
+): Promise<{
+  success: boolean;
+  output: string;
+}> {
+  try {
+    const fullPath = isAbsolute(filePath) ? filePath : join(workDir, filePath);
+    const content = await fs.readFile(fullPath, "utf-8");
+    return {
+      success: true,
+      output: content,
+    };
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      // File doesn't exist, create it
+      try {
+        const fullPath = isAbsolute(filePath)
+          ? filePath
+          : join(workDir, filePath);
+        await fs.writeFile(fullPath, "", "utf-8");
+        return {
+          success: true,
+          output: "",
+        };
+      } catch (createError: any) {
+        return {
+          success: false,
+          output: `FAILED TO CREATE FILE '${filePath}'. Error: ${createError.message}`,
+        };
+      }
+    }
+    return {
+      success: false,
+      output: `FAILED TO READ FILE '${filePath}'. Error: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Local version of writeFile using Node.js fs
+ */
+async function writeFileLocal(
+  filePath: string,
+  content: string,
+  workDir: string,
+): Promise<{
+  success: boolean;
+  output: string;
+}> {
+  try {
+    const fullPath = isAbsolute(filePath) ? filePath : join(workDir, filePath);
+    await fs.writeFile(fullPath, content, "utf-8");
+    return {
+      success: true,
+      output: `Successfully wrote file '${filePath}'.`,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      output: `FAILED TO WRITE FILE '${filePath}'. Error: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * Local version of applyPatchWithGit using LocalShellExecutor
+ */
+async function applyPatchWithGitLocal(
+  workDir: string,
+  diffContent: string,
+): Promise<{ success: boolean; output: string }> {
+  const tempPatchFile = join(
+    workDir,
+    `patch_${Date.now()}_${Math.random().toString(36).substring(2)}.diff`,
+  );
+
+  try {
+    // Create the patch file locally
+    await fs.writeFile(tempPatchFile, diffContent, "utf-8");
+
+    // Execute git apply with --verbose for detailed error messages
+    const executor = getLocalShellExecutor(workDir);
+    const response = await executor.executeCommand(
+      `git apply --verbose "${tempPatchFile}"`,
+      workDir,
+      {},
+      30, // 30 seconds timeout
+      true, // localMode
+    );
+
+    // Clean up temp file
+    try {
+      await fs.unlink(tempPatchFile);
+    } catch (cleanupError) {
+      logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
+        cleanupError,
+      });
+    }
+
+    if (response.exitCode !== 0) {
+      return {
+        success: false,
+        output: `Git apply failed with exit code ${response.exitCode}:\n${response.result || response.artifacts?.stdout || "No error output"}`,
+      };
+    }
+
+    return {
+      success: true,
+      output: response.result || "Patch applied successfully",
+    };
+  } catch (error) {
+    // Clean up temp file on error
+    try {
+      await fs.unlink(tempPatchFile);
+    } catch (cleanupError) {
+      logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
+        cleanupError,
+      });
+    }
+
+    return {
+      success: false,
+      output:
+        error instanceof Error
+          ? error.message
+          : "Unknown error applying patch with git",
+    };
+  }
+}
 
 /**
  * Attempts to apply a patch using Git CLI
@@ -71,40 +210,69 @@ async function applyPatchWithGit(
   }
 }
 
-export function createApplyPatchTool(state: GraphState) {
+export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
   const applyPatchTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
-      const sandbox = await getSandboxSessionOrThrow(input);
-
       const { diff, file_path } = input;
+      const workDir = isLocalMode(config)
+        ? getLocalWorkingDirectory()
+        : getRepoAbsolutePath(state.targetRepository);
 
-      const workDir = getRepoAbsolutePath(state.targetRepository);
-      const { success: readFileSuccess, output: readFileOutput } =
-        await readFile({
+      let readFileResult;
+      let gitResult;
+
+      if (isLocalMode(config)) {
+        // Local mode: use local file operations
+        readFileResult = await readFileLocal(file_path, workDir);
+        if (!readFileResult.success) {
+          throw new Error(readFileResult.output);
+        }
+
+        // First try to apply the patch using Git CLI for better error messages
+        logger.info(
+          `Attempting to apply patch to ${file_path} using Git CLI (local mode)`,
+        );
+        gitResult = await applyPatchWithGitLocal(workDir, diff);
+      } else {
+        // Sandbox mode: use existing sandbox operations
+        const sandbox = await getSandboxSessionOrThrow(input);
+
+        readFileResult = await readFile({
           sandbox,
           filePath: file_path,
           workDir,
         });
-      if (!readFileSuccess) {
-        throw new Error(readFileOutput);
+        if (!readFileResult.success) {
+          throw new Error(readFileResult.output);
+        }
+
+        // First try to apply the patch using Git CLI for better error messages
+        logger.info(
+          `Attempting to apply patch to ${file_path} using Git CLI (sandbox mode)`,
+        );
+        gitResult = await applyPatchWithGit(sandbox, workDir, diff);
       }
 
-      // First try to apply the patch using Git CLI for better error messages
-      logger.info(`Attempting to apply patch to ${file_path} using Git CLI`);
-      const gitResult = await applyPatchWithGit(sandbox, workDir, diff);
+      const readFileOutput = readFileResult.output;
 
       // If Git successfully applied the patch, read the updated file and return success
       if (gitResult.success) {
-        const { success: readUpdatedFileSuccess, output: updatedContent } =
-          await readFile({
+        let readUpdatedResult;
+
+        if (isLocalMode(config)) {
+          readUpdatedResult = await readFileLocal(file_path, workDir);
+        } else {
+          const sandbox = await getSandboxSessionOrThrow(input);
+          readUpdatedResult = await readFile({
             sandbox,
             filePath: file_path,
             workDir,
           });
+        }
 
-        if (!readUpdatedFileSuccess) {
+        if (!readUpdatedResult.success) {
           throw new Error(
-            `Failed to read updated file after applying patch: ${updatedContent}`,
+            `Failed to read updated file after applying patch: ${readUpdatedResult.output}`,
           );
         }
 
@@ -170,15 +338,26 @@ export function createApplyPatchTool(state: GraphState) {
         );
       }
 
-      const { success: writeFileSuccess, output: writeFileOutput } =
-        await writeFile({
+      let writeFileResult;
+
+      if (isLocalMode(config)) {
+        writeFileResult = await writeFileLocal(
+          file_path,
+          patchedContent,
+          workDir,
+        );
+      } else {
+        const sandbox = await getSandboxSessionOrThrow(input);
+        writeFileResult = await writeFile({
           sandbox,
           filePath: file_path,
           content: patchedContent,
           workDir,
         });
-      if (!writeFileSuccess) {
-        throw new Error(writeFileOutput);
+      }
+
+      if (!writeFileResult.success) {
+        throw new Error(writeFileResult.output);
       }
 
       let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
