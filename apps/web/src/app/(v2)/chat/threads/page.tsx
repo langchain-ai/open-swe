@@ -31,10 +31,18 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
+  const [limit, setLimit] = useState(25);
+  const [offset, setOffset] = useState(0);
   const { currentInstallation, installationsLoading } = useGitHubAppProvider();
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
+    pagination: {
+      limit,
+      offset,
+      sortBy: "updated_at",
+      sortOrder: "desc",
+    },
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
@@ -264,6 +272,14 @@ function AllThreadsPageContent() {
               </div>
             </div>
           )}
+          <div className="flex items-center justify-center">
+            <Button
+              variant="outline"
+              onClick={() => setOffset((prev) => prev + limit)}
+            >
+              Load more
+            </Button>
+          </div>
         </div>
       </div>
     </div>
