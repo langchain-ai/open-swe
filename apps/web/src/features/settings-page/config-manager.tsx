@@ -9,7 +9,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Settings } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Settings, AlertTriangle } from "lucide-react";
 import { ConfigField } from "@/components/configuration/config-field";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,20 +63,24 @@ export function ConfigManager() {
     // TODO: If we implement a concept of users and start storing config on assistants,
     // we will need to update this to fetch configs from the assistant first.
     setLoading(true);
-    setDefaultConfig(extractConfigurationsFromSchema({}));
 
-    if (getConfig(DEFAULT_CONFIG_KEY)) {
-      const actualConfigs = extractConfigurationsFromSchema(
-        getConfig(DEFAULT_CONFIG_KEY),
-      );
-      setConfigurations(actualConfigs);
-      setLoading(false);
-      return;
-    }
-    const actualConfigs = extractConfigurationsFromSchema({});
-    actualConfigs.forEach((c) => {
-      updateConfig(DEFAULT_CONFIG_KEY, c.label, c.default);
-    });
+    // Extract default configurations from schema
+    const defaultConfigs = extractConfigurationsFromSchema({});
+    setDefaultConfig(defaultConfigs);
+
+    // Get existing user configurations (if any)
+    const existingConfig = getConfig(DEFAULT_CONFIG_KEY) || {};
+
+    // Create configurations array with user values where they exist, defaults otherwise
+    const actualConfigs = defaultConfigs.map((config) => ({
+      ...config,
+      // Use existing user value if it exists, otherwise keep the default for display
+      default:
+        existingConfig[config.label] !== undefined
+          ? existingConfig[config.label]
+          : config.default,
+    }));
+
     setConfigurations(actualConfigs);
     setLoading(false);
   };
@@ -89,11 +94,21 @@ export function ConfigManager() {
     const defaultValue = defaultConfig.find(
       (c) => c.label === config.label,
     )?.default;
+    // Only consider it configured if the user has explicitly set a value
     return currentValue !== undefined && currentValue !== defaultValue;
   });
 
   return (
     <div className="space-y-8">
+      <Alert className="border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>
+          <strong>Warning:</strong> The default configuration values have been
+          carefully selected for optimal performance. Modifying these settings
+          may negatively impact the agent's performance and behavior. Only
+          change these values if you understand their implications.
+        </AlertDescription>
+      </Alert>
       <Card className="bg-card border-border shadow-sm">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -182,8 +197,14 @@ export function ConfigManager() {
                       min={config.min}
                       max={config.max}
                       step={config.step}
-                      value={configs[DEFAULT_CONFIG_KEY]?.[config.label]}
+                      value={
+                        configs[DEFAULT_CONFIG_KEY]?.[config.label] !==
+                        undefined
+                          ? configs[DEFAULT_CONFIG_KEY][config.label]
+                          : config.default
+                      }
                       setValue={(value) => {
+                        // Only store in config when user actually changes a value
                         updateConfig(DEFAULT_CONFIG_KEY, config.label, value);
                       }}
                     />
@@ -204,13 +225,21 @@ export function ConfigManager() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() =>
+                              onClick={() => {
+                                // Remove the config value to revert to default
+                                // This effectively "unsets" the user's custom value
+                                const existingConfig =
+                                  getConfig(DEFAULT_CONFIG_KEY) || {};
+                                const {
+                                  [config.label]: _,
+                                  ...remainingConfig
+                                } = existingConfig;
                                 updateConfig(
                                   DEFAULT_CONFIG_KEY,
-                                  config.label,
-                                  defaultValue,
-                                )
-                              }
+                                  "",
+                                  remainingConfig,
+                                );
+                              }}
                             >
                               Reset to Default
                             </Button>
