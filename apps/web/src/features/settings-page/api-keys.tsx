@@ -33,9 +33,9 @@ const API_KEY_SECTIONS: Record<string, Omit<ApiKeySection, "keys">> = {
   llms: {
     title: "LLMs",
   },
-  infrastructure: {
-    title: "Infrastructure",
-  },
+  // infrastructure: {
+  //   title: "Infrastructure",
+  // },
 };
 
 const API_KEY_DEFINITIONS = {
@@ -44,13 +44,13 @@ const API_KEY_DEFINITIONS = {
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
   ],
-  infrastructure: [
-    {
-      id: "daytonaApiKey",
-      name: "Daytona",
-      description: "Users not required to set this if using the demo",
-    },
-  ],
+  // infrastructure: [
+  //   {
+  //     id: "daytonaApiKey",
+  //     name: "Daytona",
+  //     description: "Users not required to set this if using the demo",
+  //   },
+  // ],
 };
 
 export function APIKeysTab() {
