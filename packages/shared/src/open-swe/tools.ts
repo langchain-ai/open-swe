@@ -496,8 +496,13 @@ export function createReviewStartedToolFields() {
   };
 }
 
-export function createTextEditorToolFields(targetRepository: TargetRepository) {
-  const repoRoot = getRepoAbsolutePath(targetRepository);
+export function createTextEditorToolFields(
+  targetRepository: TargetRepository,
+  config: GraphConfig,
+) {
+  const repoRoot = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(targetRepository);
   const textEditorToolSchema = z.object({
     command: z
       .enum(["view", "str_replace", "create", "insert"])

@@ -40,9 +40,8 @@ import {
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
-import { StreamMode } from "@langchain/langgraph-sdk";
+import { StreamMode, Thread } from "@langchain/langgraph-sdk";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
-import { Thread } from "@langchain/langgraph-sdk";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";

@@ -27,7 +27,7 @@ export default [
       "@typescript-eslint/no-explicit-any": 0,
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { args: "none", argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+        { args: "none", varsIgnorePattern: "^_" },
       ],
       "react-refresh/only-export-components": [
         "warn",

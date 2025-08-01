@@ -37,6 +37,10 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import {
@@ -90,6 +94,23 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
+  // Skip PR creation in local mode
+  if (isLocalMode(config)) {
+    logger.info("Skipping PR creation in local mode");
+    return {
+      messages: [
+        new ToolMessage({
+          id: uuidv4(),
+          tool_call_id: "local-mode-skip",
+          content:
+            "Pull request creation skipped in local mode. Changes have been committed to your local repository.",
+          name: "open_pr",
+          status: "success",
+        }),
+      ],
+    };
+  }
+
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
@@ -109,10 +130,10 @@ export async function openPullRequest(
     );
   }
 
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
   if (changedFiles.length > 0) {

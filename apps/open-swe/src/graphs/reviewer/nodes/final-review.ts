@@ -14,6 +14,9 @@ import {
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
 } from "@open-swe/shared/open-swe/tools";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+
 import {
   loadModel,
   supportsParallelToolCallsParam,
@@ -32,6 +35,8 @@ import {
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
+
+const logger = createLogger(LogLevel.INFO, "FinalReview");
 
 const SYSTEM_PROMPT = `You are a code reviewer for a software engineer working on a large codebase.
 
@@ -187,14 +192,18 @@ export async function finalReview(
     "agent",
   );
 
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
-    config,
-    updatedTaskPlan,
-  );
+  if (!isLocalMode(config)) {
+    await addTaskPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      updatedTaskPlan,
+    );
+  } else {
+    logger.info("Skipping GitHub issue update in local mode");
+  }
 
   const toolMessage = new ToolMessage({
     id: uuidv4(),
