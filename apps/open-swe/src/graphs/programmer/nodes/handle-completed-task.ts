@@ -6,7 +6,7 @@ import {
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
 import { Command } from "@langchain/langgraph";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   completePlanItem,
   getActivePlanItems,

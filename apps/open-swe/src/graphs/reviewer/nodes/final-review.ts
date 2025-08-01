@@ -14,7 +14,7 @@ import {
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
 } from "@open-swe/shared/open-swe/tools";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 
 import {

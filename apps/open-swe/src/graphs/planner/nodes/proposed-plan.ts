@@ -40,12 +40,11 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   postGitHubIssueComment,
   cleanTaskItems,
 } from "../../../utils/github/plan.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 

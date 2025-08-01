@@ -17,7 +17,7 @@ import {
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
 
