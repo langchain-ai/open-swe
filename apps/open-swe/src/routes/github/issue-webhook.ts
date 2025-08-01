@@ -178,6 +178,11 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     // Create config object with Claude Opus 4 model configuration for max labels
     const config: Record<string, any> = {
       recursion_limit: 400,
+      tags: [
+        `owner:${issueData.owner}`,
+        `repo:${issueData.repo}`,
+        "source:github_webhook_issue_label",
+      ],
     };
 
     if (isMaxLabel) {

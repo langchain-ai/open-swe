@@ -101,6 +101,11 @@ export function TerminalInput({
               configurable: {
                 ...getConfig(DEFAULT_CONFIG_KEY),
               },
+              tags: [
+                `owner:${selectedRepository.owner}`,
+                `repo:${selectedRepository.repo}`,
+                "source:web_start_manager",
+              ],
             },
             ifNotExists: "create",
             streamResumable: true,

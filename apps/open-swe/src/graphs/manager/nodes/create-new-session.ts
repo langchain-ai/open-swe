@@ -93,6 +93,11 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     config: {
       recursion_limit: 400,
       configurable: getCustomConfigurableFields(config),
+      tags: [
+        `owner:${state.targetRepository.owner}`,
+        `repo:${state.targetRepository.repo}`,
+        "source:manager_create_new_session",
+      ],
     },
     ifNotExists: "create",
     streamResumable: true,

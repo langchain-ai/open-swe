@@ -66,6 +66,11 @@ export async function startPlanner(
         config: {
           recursion_limit: 400,
           configurable: getCustomConfigurableFields(config),
+          tags: [
+            `owner:${state.targetRepository.owner}`,
+            `repo:${state.targetRepository.repo}`,
+            "source:manager_start_planner",
+          ],
         },
         ifNotExists: "create",
         multitaskStrategy: "enqueue",

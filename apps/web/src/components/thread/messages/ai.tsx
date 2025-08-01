@@ -345,6 +345,19 @@ export function mapToolMessageToActionStepProps(
   };
 }
 
+const attemptParseOwnerRepo = (repoQueryParam: string) => {
+  try {
+    if (!repoQueryParam || !repoQueryParam.includes("/")) {
+      return undefined;
+    }
+    const [owner, repo] = repoQueryParam.split("/");
+    return { owner, repo };
+  } catch {
+    // no-op
+    return undefined;
+  }
+};
+
 export function AssistantMessage({
   message,
   threadId,
@@ -364,6 +377,7 @@ export function AssistantMessage({
   modifyRunId?: (runId: string) => Promise<void>;
   requestHelpEvents?: CustomNodeEvent[];
 }) {
+  const [repo] = useQueryState("repo");
   const content = message?.content ?? [];
 
   const handleHumanHelpResponse = async (response: string) => {
@@ -374,10 +388,18 @@ export function AssistantMessage({
       },
     ];
 
+    const ownerRepo = attemptParseOwnerRepo(repo ?? "");
+
     const newRun = await thread.client.runs.create(threadId, assistantId, {
       command: { resume: humanResponse },
       config: {
         recursion_limit: 400,
+        tags: [
+          ...(ownerRepo
+            ? [`owner:${ownerRepo?.owner}`, `repo:${ownerRepo?.repo}`]
+            : []),
+          "source:web_interrupt_response",
+        ],
       },
       streamResumable: true,
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],

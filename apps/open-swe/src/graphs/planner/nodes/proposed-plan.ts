@@ -117,6 +117,11 @@ async function startProgrammerRun(input: {
       config: {
         recursion_limit: 400,
         configurable: getCustomConfigurableFields(config),
+        tags: [
+          `owner:${state.targetRepository.owner}`,
+          `repo:${state.targetRepository.repo}`,
+          "source:planner_proposed_plan",
+        ],
       },
       ifNotExists: "create",
       streamResumable: true,
