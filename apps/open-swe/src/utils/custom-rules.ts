@@ -184,7 +184,8 @@ async function getCustomRulesLocal(
         return parseCustomRulesFromString(agentsMdContent);
       }
     } catch (error) {
-      logger.error("Failed to read AGENTS.md", { error });
+      // AGENTS.md doesn't exist, which is expected
+      logger.debug("AGENTS.md not found, trying other files", { error });
     }
 
     // Try to read AGENT.md, CLAUDE.md, CURSOR.md
@@ -198,8 +199,8 @@ async function getCustomRulesLocal(
           return parseCustomRulesFromString(content);
         }
       } catch (error) {
-        // File doesn't exist, continue to next file
-        logger.error(`Failed to read ${fileName}`, { error });
+        // File doesn't exist, which is expected - continue to next file
+        logger.debug(`${fileName} not found, trying next file`, { error });
       }
     }
   } catch (error) {

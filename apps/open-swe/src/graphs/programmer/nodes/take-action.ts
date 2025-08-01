@@ -8,6 +8,7 @@ import {
   createShellTool,
   createSearchDocumentForTool,
 } from "../../../tools/index.js";
+import { createShellExecutor } from "../../../utils/shell-executor.js";
 import {
   GraphState,
   GraphConfig,
@@ -31,6 +32,10 @@ import {
 } from "../../../utils/tree.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -51,7 +56,7 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const applyPatchTool = createApplyPatchTool(state);
+  const applyPatchTool = createApplyPatchTool(state, config);
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const textEditorTool = createTextEditorTool(state, config);
@@ -203,10 +208,10 @@ export async function takeAction(
 
   // Always check if there are changed files after running a tool.
   // If there are, commit them.
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
@@ -215,23 +220,44 @@ export async function takeAction(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    const result = await checkoutBranchAndCommit(
-      config,
-      state.targetRepository,
-      sandbox,
-      {
-        branchName,
-        githubInstallationToken,
-        taskPlan: state.taskPlan,
-        githubIssueId: state.githubIssueId,
-      },
-    );
-    branchName = result.branchName;
-    pullRequestNumber = result.updatedTaskPlan
-      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-      : undefined;
-    updatedTaskPlan = result.updatedTaskPlan;
+    if (!isLocalMode(config)) {
+      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const result = await checkoutBranchAndCommit(
+        config,
+        state.targetRepository,
+        sandbox,
+        {
+          branchName,
+          githubInstallationToken,
+          taskPlan: state.taskPlan,
+          githubIssueId: state.githubIssueId,
+        },
+      );
+      branchName = result.branchName;
+      pullRequestNumber = result.updatedTaskPlan
+        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+        : undefined;
+      updatedTaskPlan = result.updatedTaskPlan;
+    } else {
+      logger.info("Skipping GitHub commit operations in local mode");
+      const executor = createShellExecutor(config);
+      const commitResult = await executor.executeCommand({
+        command:
+          "git add . && git commit -m 'Auto-commit changes from Open SWE agent'",
+        workdir: getLocalWorkingDirectory(),
+        timeout: 30, // timeout in seconds
+      });
+
+      if (commitResult.exitCode !== 0) {
+        logger.error("Failed to commit changes in local mode", {
+          exitCode: commitResult.exitCode,
+          result: commitResult.result,
+        });
+        // Don't throw error, just log it to avoid breaking the flow
+      } else {
+        logger.info("Successfully committed changes in local mode");
+      }
+    }
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -239,7 +265,7 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree();
+  const codebaseTree = await getCodebaseTree(undefined, undefined, config);
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE

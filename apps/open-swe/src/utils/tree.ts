@@ -13,7 +13,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "./local-shell-executor.js";
+import { createShellExecutor } from "./shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "Tree");
 
@@ -32,7 +32,7 @@ export async function getCodebaseTree(
 
     // Check if we're in local mode
     if (config && isLocalMode(config)) {
-      return getCodebaseTreeLocal();
+      return getCodebaseTreeLocal(config);
     }
 
     // If sandbox session ID is not provided, try to get it from the current state.
@@ -58,12 +58,14 @@ export async function getCodebaseTree(
 
     const sandbox = await daytonaClient().get(sandboxSessionId);
     const repoDir = path.join(SANDBOX_ROOT_DIR, targetRepository.repo);
-    const response = await sandbox.process.executeCommand(
+
+    const executor = createShellExecutor(config!);
+    const response = await executor.executeCommand({
       command,
-      repoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
+      workdir: repoDir,
+      timeout: TIMEOUT_SEC,
+      sandbox,
+    });
 
     if (response.exitCode !== 0) {
       logger.error("Failed to generate tree", {
@@ -93,20 +95,20 @@ export async function getCodebaseTree(
 }
 
 /**
- * Local version of getCodebaseTree using LocalShellExecutor
+ * Local version of getCodebaseTree using unified shell executor
  */
-async function getCodebaseTreeLocal(): Promise<string> {
+async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
   try {
     // In local mode, always use the current working directory
     const workingDirectory = getLocalWorkingDirectory();
 
-    const executor = getLocalShellExecutor(workingDirectory);
+    const executor = createShellExecutor(config);
     const command = `git ls-files | tree --fromfile -L 3`;
 
-    const response = await executor.executeCommand(command, {
+    const response = await executor.executeCommand({
+      command,
       workdir: workingDirectory,
       timeout: TIMEOUT_SEC,
-      localMode: true,
     });
 
     if (response.exitCode !== 0) {

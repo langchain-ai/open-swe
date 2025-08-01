@@ -37,6 +37,10 @@ import {
 } from "@open-swe/shared/open-swe/tasks";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import {
@@ -109,10 +113,10 @@ export async function openPullRequest(
     );
   }
 
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
   if (changedFiles.length > 0) {

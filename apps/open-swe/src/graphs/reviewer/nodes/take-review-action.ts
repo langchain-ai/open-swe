@@ -24,6 +24,10 @@ import {
 } from "../../../utils/github/git.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
@@ -101,9 +105,8 @@ export async function takeReviewerActions(
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
           ...toolCall.args,
-          // Pass in the existing/new sandbox session ID to the tool call.
-          // use `x` prefix to avoid name conflicts with tool args.
-          xSandboxSessionId: sandbox.id,
+          // Only pass sandbox session ID in sandbox mode, not local mode
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
         })) as {
           result: string;
           status: "success" | "error";
@@ -151,8 +154,10 @@ export async function takeReviewerActions(
   });
 
   const toolCallResults = await Promise.all(toolCallResultsPromise);
-  const repoPath = getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+  const repoPath = isLocalMode(config)
+    ? getLocalWorkingDirectory()
+    : getRepoAbsolutePath(state.targetRepository);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;

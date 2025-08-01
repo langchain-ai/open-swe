@@ -122,7 +122,7 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
               formattedResult =
                 formattedResult.slice(0, maxLength) + "... [trunc]";
             }
-            logs.push(`[TOOL RESULT] ${toolName}: ${formattedResult}`);
+            logs.push(`[TOOL RESULT] ${toolName}: ${result}`);
           }
           continue;
         }

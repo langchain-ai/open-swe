@@ -14,7 +14,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "../../utils/local-shell-executor.js";
+import { createShellExecutor } from "../../utils/shell-executor.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
@@ -48,8 +48,8 @@ export function createTextEditorTool(
         let result: string;
 
         if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor for file operations
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+          // Local mode: use unified shell executor for file operations
+          const executor = createShellExecutor(config);
 
           // Convert sandbox path to local path
           let localPath = path;
@@ -62,14 +62,11 @@ export function createTextEditorTool(
           switch (command) {
             case "view": {
               // Use cat command to view file content
-              const viewResponse = await executor.executeCommand(
-                `cat "${filePath}"`,
-                {
-                  workdir: workDir,
-                  timeout: TIMEOUT_SEC,
-                  localMode: true,
-                },
-              );
+              const viewResponse = await executor.executeCommand({
+                command: `cat "${filePath}"`,
+                workdir: workDir,
+                timeout: TIMEOUT_SEC,
+              });
               if (viewResponse.exitCode !== 0) {
                 throw new Error(`Failed to read file: ${viewResponse.result}`);
               }
@@ -92,14 +89,11 @@ export function createTextEditorTool(
                 .replace(/\//g, "\\/")
                 .replace(/'/g, "'\"'\"'");
 
-              const sedResponse = await executor.executeCommand(
-                `sed -i 's/${escapedOldStr}/${escapedNewStr}/g' "${filePath}"`,
-                {
-                  workdir: workDir,
-                  timeout: TIMEOUT_SEC,
-                  localMode: true,
-                },
-              );
+              const sedResponse = await executor.executeCommand({
+                command: `sed -i 's/${escapedOldStr}/${escapedNewStr}/g' "${filePath}"`,
+                workdir: workDir,
+                timeout: TIMEOUT_SEC,
+              });
               if (sedResponse.exitCode !== 0) {
                 throw new Error(
                   `Failed to replace string: ${sedResponse.result}`,
@@ -112,19 +106,12 @@ export function createTextEditorTool(
               if (!file_text) {
                 throw new Error("create command requires file_text parameter");
               }
-              // Create file with content using proper escaping
-              const escapedFileText = file_text
-                .replace(/\\/g, "\\\\")
-                .replace(/'/g, "'\"'\"'");
-
-              const createResponse = await executor.executeCommand(
-                `echo '${escapedFileText}' > "${filePath}"`,
-                {
-                  workdir: workDir,
-                  timeout: TIMEOUT_SEC,
-                  localMode: true,
-                },
-              );
+              // Create file with content using a more robust approach
+              const createResponse = await executor.executeCommand({
+                command: `echo '${file_text}' > "${filePath}"`,
+                workdir: workDir,
+                timeout: TIMEOUT_SEC,
+              });
               if (createResponse.exitCode !== 0) {
                 throw new Error(
                   `Failed to create file: ${createResponse.result}`,
@@ -145,14 +132,11 @@ export function createTextEditorTool(
                 .replace(/\//g, "\\/")
                 .replace(/'/g, "'\"'\"'");
 
-              const insertResponse = await executor.executeCommand(
-                `sed -i '${insert_line}i\\${escapedNewStr}' "${filePath}"`,
-                {
-                  workdir: workDir,
-                  timeout: TIMEOUT_SEC,
-                  localMode: true,
-                },
-              );
+              const insertResponse = await executor.executeCommand({
+                command: `sed -i '${insert_line}i\\${escapedNewStr}' "${filePath}"`,
+                workdir: workDir,
+                timeout: TIMEOUT_SEC,
+              });
               if (insertResponse.exitCode !== 0) {
                 throw new Error(
                   `Failed to insert line: ${insertResponse.result}`,
@@ -235,7 +219,7 @@ export function createTextEditorTool(
         };
       }
     },
-    createTextEditorToolFields(state.targetRepository),
+    createTextEditorToolFields(state.targetRepository, config),
   );
 
   return textEditorTool;

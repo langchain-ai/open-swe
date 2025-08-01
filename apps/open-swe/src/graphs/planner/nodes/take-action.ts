@@ -205,7 +205,7 @@ export async function takeActions(
   const repoPath = isLocalMode(config)
     ? getLocalWorkingDirectory()
     : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
   if (changedFiles?.length > 0) {
     logger.warn(
       "Changes found in the codebase after taking action. Reverting.",

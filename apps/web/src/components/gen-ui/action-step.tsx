@@ -56,7 +56,7 @@ const grepTool = createGrepToolFields(dummyRepo);
 type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const searchDocumentForTool = createSearchDocumentForToolFields();
 type SearchDocumentForToolArgs = z.infer<typeof searchDocumentForTool.schema>;
-const textEditorTool = createTextEditorToolFields(dummyRepo);
+const textEditorTool = createTextEditorToolFields(dummyRepo, {});
 type TextEditorToolArgs = z.infer<typeof textEditorTool.schema>;
 
 // Common props for all action types

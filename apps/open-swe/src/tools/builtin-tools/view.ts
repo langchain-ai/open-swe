@@ -9,7 +9,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "../../utils/local-shell-executor.js";
+import { createShellExecutor } from "../../utils/shell-executor.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
@@ -37,8 +37,8 @@ export function createViewTool(
 
         let result: string;
         if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor for file viewing
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+          // Local mode: use unified shell executor for file viewing
+          const executor = createShellExecutor(config);
 
           // Convert sandbox path to local path
           let localPath = path;
@@ -49,10 +49,10 @@ export function createViewTool(
           const filePath = `${workDir}/${localPath}`;
 
           // Use cat command to view file content
-          const response = await executor.executeCommand(`cat "${filePath}"`, {
+          const response = await executor.executeCommand({
+            command: `cat "${filePath}"`,
             workdir: workDir,
             timeout: TIMEOUT_SEC,
-            localMode: true,
           });
 
           if (response.exitCode !== 0) {
@@ -83,7 +83,7 @@ export function createViewTool(
         };
       }
     },
-    createViewToolFields(state.targetRepository),
+    createViewToolFields(state.targetRepository, config),
   );
 
   return viewTool;

@@ -168,7 +168,11 @@ export async function getSandboxWithErrorHandling(
     });
 
     // Get codebase tree
-    const codebaseTree = await getCodebaseTree(sandbox.id, targetRepository);
+    const codebaseTree = await getCodebaseTree(
+      sandbox.id,
+      targetRepository,
+      config,
+    );
     const codebaseTreeToReturn =
       codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE ? null : codebaseTree;
 

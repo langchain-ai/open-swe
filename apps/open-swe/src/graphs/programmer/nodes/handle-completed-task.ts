@@ -6,6 +6,7 @@ import {
   GraphUpdate,
 } from "@open-swe/shared/open-swe/types";
 import { Command } from "@langchain/langgraph";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   completePlanItem,
   getActivePlanItems,
@@ -87,14 +88,18 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
-    config,
-    updatedPlanTasks,
-  );
+  if (!isLocalMode(config)) {
+    await addTaskPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      updatedPlanTasks,
+    );
+  } else {
+    logger.info("Skipping GitHub issue update in local mode");
+  }
 
   const commandUpdate: GraphUpdate = {
     messages: newMessages,
