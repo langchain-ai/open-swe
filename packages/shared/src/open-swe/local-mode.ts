@@ -5,7 +5,10 @@ import path from "path";
  * Checks if the current execution context is in local mode
  * (working on local files instead of sandbox/Daytona)
  */
-export function isLocalMode(config: GraphConfig): boolean {
+export function isLocalMode(config?: GraphConfig): boolean {
+  if (!config) {
+    return isLocalModeFromEnv();
+  }
   return (config.configurable as any)?.["x-local-mode"] === "true";
 }
 

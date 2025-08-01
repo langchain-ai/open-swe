@@ -21,9 +21,9 @@ const DEFAULT_ENV = {
  * This eliminates the need for if/else blocks in every tool that runs shell commands
  */
 export class ShellExecutor {
-  private config: GraphConfig;
+  private config?: GraphConfig;
 
-  constructor(config: GraphConfig) {
+  constructor(config?: GraphConfig) {
     this.config = config;
   }
 
@@ -103,7 +103,7 @@ export class ShellExecutor {
   /**
    * Check if we're in local mode
    */
-  isLocalMode(): boolean {
+  checkLocalMode(): boolean {
     return isLocalMode(this.config);
   }
 
@@ -125,7 +125,7 @@ export class ShellExecutor {
 /**
  * Factory function to create a ShellExecutor instance
  */
-export function createShellExecutor(config: GraphConfig): ShellExecutor {
+export function createShellExecutor(config?: GraphConfig): ShellExecutor {
   return new ShellExecutor(config);
 }
 
