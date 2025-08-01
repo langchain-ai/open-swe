@@ -45,7 +45,7 @@ export const TASK_TO_CONFIG_DEFAULTS_MAP = {
     temperature: 0,
   },
   [Task.SUMMARIZER]: {
-    modelName: "openai:gpt-4.1-mini",
+    modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
 };
