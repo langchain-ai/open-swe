@@ -102,6 +102,22 @@ export async function generatePlan(
       ...inputMessages,
     ]);
 
+  // Filter out empty plans
+  response.tool_calls = response.tool_calls?.map((tc) => {
+    if (tc.id === sessionPlanTool.name) {
+      return {
+        ...tc,
+        args: {
+          ...tc.args,
+          plan: (tc.args as z.infer<typeof sessionPlanTool.schema>).plan.filter(
+            (p) => p.length > 0,
+          ),
+        },
+      };
+    }
+    return tc;
+  });
+
   const toolCall = response.tool_calls?.[0];
   if (!toolCall) {
     throw new Error("Failed to generate plan");
