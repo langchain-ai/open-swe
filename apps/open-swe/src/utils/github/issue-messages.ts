@@ -9,6 +9,7 @@ import { getIssue, getIssueComments } from "./api.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { DETAILS_OPEN_TAG } from "./issue-task.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
@@ -53,6 +54,10 @@ export async function getMissingMessages(
   input: GetMissingMessagesInput,
   config: GraphConfig,
 ): Promise<BaseMessage[]> {
+  if (isLocalMode(config)) {
+    return [];
+  }
+
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
   const [issue, comments] = await Promise.all([
     getIssue({

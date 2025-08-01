@@ -120,15 +120,18 @@ ${messages.map(getMessageString).join("\n")}
   ];
 }
 
-function createToolsAndPrompt(state: ReviewerGraphState): {
+function createToolsAndPrompt(
+  state: ReviewerGraphState,
+  config: GraphConfig,
+): {
   providerTools: Record<Provider, BindToolsInput[]>;
   providerMessages: Record<Provider, BaseMessageLike[]>;
 } {
   const tools = [
-    createGrepTool(state),
-    createShellTool(state),
-    createViewTool(state),
-    createInstallDependenciesTool(state),
+    createGrepTool(state, config),
+    createShellTool(state, config),
+    createViewTool(state, config),
+    createInstallDependenciesTool(state, config),
     createScratchpadTool(
       "when generating a final review, after all context gathering and reviewing is complete",
     ),
@@ -193,7 +196,10 @@ export async function generateReviewActions(
   );
   const isAnthropicModel = modelName.includes("claude-");
 
-  const { providerTools, providerMessages } = createToolsAndPrompt(state);
+  const { providerTools, providerMessages } = createToolsAndPrompt(
+    state,
+    config,
+  );
 
   const model = await loadModel(config, Task.REVIEWER, {
     providerTools,

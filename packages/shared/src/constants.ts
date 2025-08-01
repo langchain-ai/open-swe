@@ -11,7 +11,7 @@ export const GITHUB_INSTALLATION_TOKEN_COOKIE = "x-github-installation-token";
 export const GITHUB_INSTALLATION_NAME = "x-github-installation-name";
 export const GITHUB_PAT = "x-github-pat";
 export const GITHUB_INSTALLATION_ID = "x-github-installation-id";
-
+export const LOCAL_MODE_HEADER = "x-local-mode";
 export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";

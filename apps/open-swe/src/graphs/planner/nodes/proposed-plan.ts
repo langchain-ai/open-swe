@@ -25,6 +25,7 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
@@ -43,6 +44,7 @@ import {
   postGitHubIssueComment,
   cleanTaskItems,
 } from "../../../utils/github/plan.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -86,7 +88,9 @@ async function startProgrammerRun(input: {
 }) {
   const { runInput, state, config, newMessages } = input;
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
+    defaultHeaders: isLocalMode(config)
+      ? { [LOCAL_MODE_HEADER]: "true" }
+      : getDefaultHeaders(config),
   });
 
   const programmerThreadId = uuidv4();
@@ -121,14 +125,17 @@ async function startProgrammerRun(input: {
     },
   );
 
-  await addTaskPlanToIssue(
-    {
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-    },
-    config,
-    runInput.taskPlan,
-  );
+  // Skip GitHub operations in local mode
+  if (!isLocalMode(config)) {
+    await addTaskPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      runInput.taskPlan,
+    );
+  }
 
   return new Command({
     goto: END,
@@ -153,6 +160,13 @@ export async function interruptProposedPlan(
     throw new Error("No proposed plan found.");
   }
 
+  logger.info("Interrupting proposed plan", {
+    autoAcceptPlan: state.autoAcceptPlan,
+    isLocalMode: isLocalMode(config),
+    proposedPlanLength: proposedPlan.length,
+    proposedPlanTitle: state.proposedPlanTitle,
+  });
+
   let planItems: PlanItem[];
   const userRequest = getInitialUserRequest(state.messages);
   const userFollowupRequest = getRecentUserRequest(state.messages);
@@ -167,7 +181,10 @@ export async function interruptProposedPlan(
   };
 
   if (state.autoAcceptPlan) {
-    logger.info("Auto accepting plan.");
+    logger.info("Auto accepting plan.", {
+      autoAcceptPlan: state.autoAcceptPlan,
+      isLocalMode: isLocalMode(config),
+    });
 
     // Post comment to GitHub issue about auto-accepting the plan
     await postGitHubIssueComment({
@@ -206,22 +223,24 @@ export async function interruptProposedPlan(
     });
   }
 
-  await addProposedPlanToIssue(
-    {
+  if (!isLocalMode(config)) {
+    await addProposedPlanToIssue(
+      {
+        githubIssueId: state.githubIssueId,
+        targetRepository: state.targetRepository,
+      },
+      config,
+      proposedPlan,
+    );
+
+    // Post comment to GitHub issue about plan being ready for approval
+    await postGitHubIssueComment({
       githubIssueId: state.githubIssueId,
       targetRepository: state.targetRepository,
-    },
-    config,
-    proposedPlan,
-  );
-
-  // Post comment to GitHub issue about plan being ready for approval
-  await postGitHubIssueComment({
-    githubIssueId: state.githubIssueId,
-    targetRepository: state.targetRepository,
-    commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
-    config,
-  });
+      commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
+      config,
+    });
+  }
 
   const interruptResponse = interrupt<
     HumanInterrupt,

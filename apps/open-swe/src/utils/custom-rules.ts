@@ -2,6 +2,13 @@ import { CustomRules } from "@open-swe/shared/open-swe/types";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
+import { promises as fs } from "fs";
+import { join } from "path";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 const logger = createLogger(LogLevel.INFO, "CustomRules");
 
@@ -117,8 +124,13 @@ export function parseCustomRulesFromString(
 export async function getCustomRules(
   sandbox: Sandbox,
   rootDir: string,
+  config?: GraphConfig,
 ): Promise<CustomRules | undefined> {
   try {
+    if (config && isLocalMode(config)) {
+      return getCustomRulesLocal(rootDir);
+    }
+
     const catAgentsMdFileCommand = ["cat", "AGENTS.md"];
     const agentsMdRes = await sandbox.process.executeCommand(
       catAgentsMdFileCommand.join(" "),
@@ -150,6 +162,48 @@ export async function getCustomRules(
     logger.error("Failed to get custom rules", {
       ...(sandboxErrorFields ? { ...sandboxErrorFields } : { error }),
     });
+  }
+
+  return undefined;
+}
+
+/**
+ * Local version of getCustomRules using Node.js fs
+ */
+async function getCustomRulesLocal(
+  rootDir: string,
+): Promise<CustomRules | undefined> {
+  try {
+    const workingDirectory = rootDir || getLocalWorkingDirectory();
+
+    // Try to read AGENTS.md first
+    try {
+      const agentsMdPath = join(workingDirectory, "AGENTS.md");
+      const agentsMdContent = await fs.readFile(agentsMdPath, "utf-8");
+      if (agentsMdContent && agentsMdContent.length > 0) {
+        return parseCustomRulesFromString(agentsMdContent);
+      }
+    } catch (error) {
+      logger.error("Failed to read AGENTS.md", { error });
+    }
+
+    // Try to read AGENT.md, CLAUDE.md, CURSOR.md
+    const filesToTry = ["AGENT.md", "CLAUDE.md", "CURSOR.md"];
+
+    for (const fileName of filesToTry) {
+      try {
+        const filePath = join(workingDirectory, fileName);
+        const content = await fs.readFile(filePath, "utf-8");
+        if (content && content.length > 0) {
+          return parseCustomRulesFromString(content);
+        }
+      } catch (error) {
+        // File doesn't exist, continue to next file
+        logger.error(`Failed to read ${fileName}`, { error });
+      }
+    }
+  } catch (error) {
+    logger.error("Failed to get custom rules in local mode", { error });
   }
 
   return undefined;

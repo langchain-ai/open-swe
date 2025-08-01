@@ -23,6 +23,9 @@
     },
     "test": {
       "dependsOn": ["^test"]
+    },
+    "clean": {
+      "dependsOn": ["^clean"]
     }
   }
 }

@@ -60,10 +60,14 @@ By reviewing these actions, and comparing them to the plan and original user req
     When reviewing the changes, you should perform these actions in order:
 
     <required_scripts>
-    Search for any scripts which are required for the pull request to pass CI. This may include unit tests (you do not have access to environment variables, and thus can not run integration tests), linters, formatters, etc.
+    Search for any scripts which are required for the pull request to pass CI. This may include unit tests (you do not have access to environment variables, and thus can not run integration tests), linters, formatters, build, etc.
     Once you find these, ensure you write to your scratchpad to record the names of the scripts, how to invoke them, and any other relevant context required to run them.
-        - IMPORTANT: There are typically multiple scripts for linting and formatting. Never assume one will do both.
-        - If dealing with a monorepo, each package may have its own linting and formatting scripts. Ensure you use the correct script for the package you're working on.
+    
+    - IMPORTANT: There are typically multiple scripts for linting and formatting. Never assume one will do both.
+    - If dealing with a monorepo, each package may have its own linting and formatting scripts. Ensure you use the correct script for the package you're working on.
+    
+    For example: Many JavaScript/TypeScript projects have lint, test, format, and build scripts. Python projects may have lint, test, format, and typecheck scripts.
+    It is vital that you ALWAYS find these scripts, and run them to ensure your code always meets the quality standards of the codebase.
     </required_scripts>
 
     <changed_files>

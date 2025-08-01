@@ -1,11 +1,17 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
+import { LocalExecuteResponse } from "../utils/shell-executor/types.js";
+import { getLocalShellExecutor } from "../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InstallDependenciesTool");
 
@@ -16,12 +22,11 @@ const DEFAULT_ENV = {
 
 export function createInstallDependenciesTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  config: GraphConfig,
 ) {
   const installDependenciesTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const sandbox = await getSandboxSessionOrThrow(input);
-
         const repoRoot = getRepoAbsolutePath(state.targetRepository);
         const command = input.command.join(" ");
         const workdir = input.workdir || repoRoot;
@@ -29,12 +34,28 @@ export function createInstallDependenciesTool(
           command,
           workdir,
         });
-        const response = await sandbox.process.executeCommand(
-          command,
-          workdir,
-          DEFAULT_ENV,
-          TIMEOUT_SEC * 2.5, // add a 2.5 min timeout
-        );
+
+        let response: LocalExecuteResponse;
+
+        if (isLocalMode(config)) {
+          // Local mode: use LocalShellExecutor
+          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+          response = await executor.executeCommand(command, {
+            workdir: workdir,
+            env: DEFAULT_ENV,
+            timeout: TIMEOUT_SEC * 2.5, // add a 2.5 min timeout
+            localMode: true,
+          });
+        } else {
+          // Sandbox mode: use existing sandbox logic
+          const sandbox = await getSandboxSessionOrThrow(input);
+          response = await sandbox.process.executeCommand(
+            command,
+            workdir,
+            DEFAULT_ENV,
+            TIMEOUT_SEC * 2.5, // add a 2.5 min timeout
+          );
+        }
 
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
@@ -48,16 +69,22 @@ export function createInstallDependenciesTool(
           status: "success",
         };
       } catch (e) {
-        const errorFields = getSandboxErrorFields(e);
-        if (errorFields) {
-          const errorResult =
-            errorFields.result ?? errorFields.artifacts?.stdout;
-          throw new Error(
-            `Failed to install dependencies. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-          );
-        }
+        if (isLocalMode(config)) {
+          // Local mode error handling
+          throw e;
+        } else {
+          // Sandbox mode error handling
+          const errorFields = getSandboxErrorFields(e);
+          if (errorFields) {
+            const errorResult =
+              errorFields.result ?? errorFields.artifacts?.stdout;
+            throw new Error(
+              `Failed to install dependencies. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+            );
+          }
 
-        throw e;
+          throw e;
+        }
       }
     },
     createInstallDependenciesToolFields(state.targetRepository),

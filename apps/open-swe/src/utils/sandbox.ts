@@ -5,6 +5,7 @@ import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
 import { cloneRepo } from "./github/git.js";
 import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -96,6 +97,18 @@ export async function getSandboxWithErrorHandling(
   codebaseTree: string | null;
   dependenciesInstalled: boolean | null;
 }> {
+  if (isLocalMode(config)) {
+    const mockSandbox = {
+      id: sandboxSessionId || "local-mock-sandbox",
+      state: "started",
+    } as Sandbox;
+
+    return {
+      sandbox: mockSandbox,
+      codebaseTree: null,
+      dependenciesInstalled: null,
+    };
+  }
   try {
     if (!sandboxSessionId) {
       throw new Error("No sandbox ID provided.");

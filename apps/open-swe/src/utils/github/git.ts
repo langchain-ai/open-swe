@@ -19,6 +19,14 @@ import { createPullRequest } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
+import {
+  getLocalWorkingDirectory,
+  isLocalMode,
+} from "@open-swe/shared/open-swe/local-mode";
+import {
+  getLocalShellExecutor,
+  LocalExecuteResponse,
+} from "../shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -43,12 +51,26 @@ async function getValidFilesToCommit(
   sandbox: Sandbox,
   excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
 ): Promise<string[]> {
-  const gitStatusOutput = await sandbox.process.executeCommand(
-    "git status --porcelain",
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
-  );
+  let gitStatusOutput: LocalExecuteResponse;
+
+  // Check if we're in local mode (sandbox doesn't have process)
+  if (!sandbox.process) {
+    // Local mode: use LocalShellExecutor
+    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+    gitStatusOutput = await executor.executeCommand("git status --porcelain", {
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      localMode: true,
+    });
+  } else {
+    // Sandbox mode: use sandbox.process
+    gitStatusOutput = await sandbox.process.executeCommand(
+      "git status --porcelain",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+  }
 
   if (gitStatusOutput.exitCode !== 0) {
     logger.error(`Failed to get git status for file validation`, {
@@ -120,12 +142,26 @@ export async function getChangedFilesStatus(
   absoluteRepoDir: string,
   sandbox: Sandbox,
 ): Promise<string[]> {
-  const gitStatusOutput = await sandbox.process.executeCommand(
-    "git status --porcelain",
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
-  );
+  let gitStatusOutput: LocalExecuteResponse;
+
+  // Check if we're in local mode (sandbox doesn't have process)
+  if (!sandbox.process) {
+    // Local mode: use LocalShellExecutor
+    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+    gitStatusOutput = await executor.executeCommand("git status --porcelain", {
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      localMode: true,
+    });
+  } else {
+    // Sandbox mode: use sandbox.process
+    gitStatusOutput = await sandbox.process.executeCommand(
+      "git status --porcelain",
+      absoluteRepoDir,
+      undefined,
+      TIMEOUT_SEC,
+    );
+  }
 
   if (gitStatusOutput.exitCode !== 0) {
     logger.error(`Failed to get changed files status`, {
@@ -139,9 +175,23 @@ export async function getChangedFilesStatus(
 
 export async function stashAndClearChanges(
   absoluteRepoDir: string,
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
+  config?: GraphConfig,
 ): Promise<ExecuteResponse | false> {
+  // In local mode, we don't want to stash and clear changes
+  if (config && isLocalMode(config)) {
+    logger.info("Skipping stash and clear changes in local mode");
+    return {
+      exitCode: 0,
+      result: "Skipped stash and clear in local mode",
+    };
+  }
+
   try {
+    // Sandbox mode: use existing sandbox logic
+    if (!sandbox) {
+      throw new Error("Sandbox is required in non-local mode");
+    }
     const gitStashOutput = await sandbox.process.executeCommand(
       "git add -A && git stash && git reset --hard",
       absoluteRepoDir,
@@ -156,6 +206,7 @@ export async function stashAndClearChanges(
     }
     return gitStashOutput;
   } catch (e) {
+    // Sandbox mode error handling
     const errorFields = getSandboxErrorFields(e);
     logger.error(`Failed to stash and clear changes`, {
       ...(errorFields && { errorFields }),

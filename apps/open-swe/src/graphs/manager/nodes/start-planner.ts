@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -8,6 +9,7 @@ import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
@@ -22,20 +24,29 @@ const logger = createLogger(LogLevel.INFO, "StartPlanner");
 /**
  * Start planner node.
  * This node will kickoff a new planner session using the LangGraph SDK.
+ * In local mode, creates a planner session with local mode headers.
  */
 export async function startPlanner(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<ManagerGraphUpdate> {
-  const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
-  });
-
   const plannerThreadId = state.plannerSession?.threadId ?? uuidv4();
   const followupMessage = getRecentUserRequest(state.messages, {
     returnFullMessage: true,
+    config,
   });
+
+  const localMode = isLocalMode(config);
+
   try {
+    const langGraphClient = createLangGraphClient({
+      defaultHeaders: localMode
+        ? {
+            [LOCAL_MODE_HEADER]: "true",
+          }
+        : getDefaultHeaders(config),
+    });
+
     const runInput: PlannerGraphUpdate = {
       // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
       githubIssueId: state.githubIssueId,
@@ -44,8 +55,9 @@ export async function startPlanner(
       taskPlan: state.taskPlan,
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
-      ...(followupMessage && { messages: [followupMessage] }),
+      ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
     };
+
     const run = await langGraphClient.runs.create(
       plannerThreadId,
       PLANNER_GRAPH_ID,
