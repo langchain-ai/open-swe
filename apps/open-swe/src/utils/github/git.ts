@@ -19,8 +19,11 @@ import { createPullRequest } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
-import { getLocalShellExecutor } from "../local-shell-executor.js";
-import { getLocalWorkingDirectory, isLocalMode } from "../local-mode.js";
+import {
+  getLocalWorkingDirectory,
+  isLocalMode,
+} from "@open-swe/shared/open-swe/local-mode";
+import { createShellExecutor, LocalExecuteResponse } from "../shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -43,21 +46,20 @@ export function parseGitStatusOutput(gitStatusOutput: string): string[] {
 async function getValidFilesToCommit(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  config: GraphConfig,
   excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
 ): Promise<string[]> {
-  let gitStatusOutput;
+  let gitStatusOutput: ExecuteResponse | LocalExecuteResponse;
 
   // Check if we're in local mode (sandbox doesn't have process)
   if (!sandbox.process) {
-    // Local mode: use LocalShellExecutor
-    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-    gitStatusOutput = await executor.executeCommand(
-      "git status --porcelain",
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-      true, // localMode
-    );
+    // Local mode: use ShellExecutor
+    const executor = createShellExecutor(config);
+    gitStatusOutput = await executor.executeCommand({
+      command: "git status --porcelain",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+    });
   } else {
     // Sandbox mode: use sandbox.process
     gitStatusOutput = await sandbox.process.executeCommand(
@@ -137,20 +139,19 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
 export async function getChangedFilesStatus(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  config: GraphConfig,
 ): Promise<string[]> {
-  let gitStatusOutput;
+  let gitStatusOutput: ExecuteResponse | LocalExecuteResponse;
 
   // Check if we're in local mode (sandbox doesn't have process)
   if (!sandbox.process) {
-    // Local mode: use LocalShellExecutor
-    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-    gitStatusOutput = await executor.executeCommand(
-      "git status --porcelain",
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-      true, // localMode
-    );
+    // Local mode: use ShellExecutor
+    const executor = createShellExecutor(config);
+    gitStatusOutput = await executor.executeCommand({
+      command: "git status --porcelain",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+    });
   } else {
     // Sandbox mode: use sandbox.process
     gitStatusOutput = await sandbox.process.executeCommand(
@@ -176,19 +177,26 @@ export async function stashAndClearChanges(
   sandbox: Sandbox | null,
   config?: GraphConfig,
 ): Promise<ExecuteResponse | false> {
+  // In local mode, we don't want to stash and clear changes
+  if (config && isLocalMode(config)) {
+    logger.info("Skipping stash and clear changes in local mode");
+    return {
+      exitCode: 0,
+      result: "Skipped stash and clear in local mode",
+    };
+  }
+
   try {
     let gitStashOutput: any; // Use any to handle type incompatibility
 
     if (config && isLocalMode(config)) {
-      // Local mode: use LocalShellExecutor
-      const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-      gitStashOutput = await executor.executeCommand(
-        "git add -A && git stash && git reset --hard",
-        absoluteRepoDir,
-        {},
-        TIMEOUT_SEC,
-        true, // localMode
-      );
+      // Local mode: use ShellExecutor
+      const executor = createShellExecutor(config);
+      gitStashOutput = await executor.executeCommand({
+        command: "git add -A && git stash && git reset --hard",
+        workdir: absoluteRepoDir,
+        timeout: TIMEOUT_SEC,
+      });
     } else {
       // Sandbox mode: use existing sandbox logic
       if (!sandbox) {
@@ -262,7 +270,7 @@ export async function checkoutBranchAndCommit(
   logger.info(`Committing changes to branch ${branchName}`);
 
   // Validate and filter files before committing
-  const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox);
+  const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox, config);
 
   if (validFiles.length === 0) {
     logger.info("No valid files to commit after filtering");

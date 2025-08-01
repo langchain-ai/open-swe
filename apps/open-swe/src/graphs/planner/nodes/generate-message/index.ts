@@ -25,7 +25,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../../../utils/local-mode.js";
+} from "@open-swe/shared/open-swe/local-mode";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";

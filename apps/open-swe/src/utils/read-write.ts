@@ -2,7 +2,10 @@ import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import { traceable } from "langsmith/traceable";
-import { isLocalMode, getLocalWorkingDirectory } from "./local-mode.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { promises as fs } from "fs";
 import { join, isAbsolute } from "path";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
@@ -242,7 +245,7 @@ async function readFileLocal(
       } catch (createError: any) {
         return {
           success: false,
-          output: `FAILED TO CREATE FILE '${filePath}'. Error: ${createError.message}`,
+          output: `FAILED TO AUTOMATICALLY CREATE FILE '${filePath}' AFTER READING FILE ERRORED WITH CODE: ${error.code}. Error: ${createError.message}`,
         };
       }
     }

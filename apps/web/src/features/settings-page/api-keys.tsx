@@ -8,7 +8,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Eye, EyeOff, Key, Trash2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Eye, EyeOff, Key, Trash2, Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -106,6 +107,13 @@ export function APIKeysTab() {
 
   return (
     <div className="space-y-8">
+      <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
+        <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+        <AlertDescription className="text-blue-800 dark:text-blue-300">
+          Open SWE uses Anthropic models by default. Configure your Anthropic
+          API key below to get started.
+        </AlertDescription>
+      </Alert>
       {Object.entries(apiKeySections).map(([sectionKey, section]) => (
         <Card
           key={sectionKey}

@@ -40,13 +40,10 @@ import {
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
-import { StreamMode } from "@langchain/langgraph-sdk";
-
-// Add local mode utility function
-function isLocalMode(config: GraphConfig): boolean {
-  return (config.configurable as any)?.["x-local-mode"] === "true";
-}
-
+import { StreamMode, Thread } from "@langchain/langgraph-sdk";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -64,16 +61,13 @@ export async function classifyMessage(
     throw new Error("No human message found.");
   }
 
-  // In local mode, skip LangGraph client creation since we don't need external API calls
-  let plannerThread: any = undefined;
-  let programmerThread: any = undefined;
-  let langGraphClient: any = undefined;
+  let plannerThread: Thread<PlannerGraphState> | undefined;
+  let programmerThread: Thread<GraphState> | undefined;
+  const langGraphClient = createLangGraphClient({
+    defaultHeaders: getDefaultHeaders(config),
+  });
 
   if (!isLocalMode(config)) {
-    langGraphClient = createLangGraphClient({
-      defaultHeaders: getDefaultHeaders(config),
-    });
-
     plannerThread = state.plannerSession?.threadId
       ? await langGraphClient.threads.get(state.plannerSession.threadId)
       : undefined;
@@ -166,10 +160,30 @@ export async function classifyMessage(
     });
   }
 
-  // Skip GitHub token requirements in local mode
-  if (!isLocalMode(config)) {
-    const { githubAccessToken } = getGitHubTokensFromConfig(config);
-    let githubIssueId = state.githubIssueId;
+  if (isLocalMode(config)) {
+    // In local mode, just route to planner without GitHub issue creation
+    const newMessages: BaseMessage[] = [response];
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: newMessages,
+    };
+
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
+
+    throw new Error(
+      `Unsupported route for local mode received: ${toolCallArgs.route}`,
+    );
+  }
+
+  const { githubAccessToken } = getGitHubTokensFromConfig(config);
+  let githubIssueId = state.githubIssueId;
 
     const newMessages: BaseMessage[] = [response];
 
@@ -258,6 +272,7 @@ export async function classifyMessage(
 
       await Promise.all(createCommentsPromise);
 
+<<<<<<< HEAD
       let newPlannerId: string | undefined;
       let goto = END;
 
@@ -281,6 +296,27 @@ export async function classifyMessage(
               resume: plannerResume,
             },
             streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+=======
+    if (plannerStatus === "interrupted") {
+      if (!state.plannerSession?.threadId) {
+        throw new Error("No planner session found. Unable to resume planner.");
+      }
+      // We need to resume the planner session via a 'response' so that it can re-plan
+      const plannerResume: HumanResponse = {
+        type: "response",
+        args: "resume planner",
+      };
+      logger.info("Resuming planner session");
+      if (!langGraphClient) {
+        throw new Error("LangGraph client not initialized");
+      }
+      const newPlannerRun = await langGraphClient.runs.create(
+        state.plannerSession?.threadId,
+        PLANNER_GRAPH_ID,
+        {
+          command: {
+            resume: plannerResume,
+>>>>>>> main
           },
         );
         newPlannerId = newPlannerRun.run_id;

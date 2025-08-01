@@ -1,3 +1,4 @@
+import { join } from "path";
 import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -8,9 +9,9 @@ import { handleViewCommand } from "./handlers.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../utils/local-mode.js";
-import { getLocalShellExecutor } from "../../utils/local-shell-executor.js";
+} from "@open-swe/shared/open-swe/local-mode";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { createShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
@@ -37,8 +38,8 @@ export function createViewTool(
 
         let result;
         if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor for file viewing
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
+          // Local mode: use ShellExecutor for file viewing
+          const executor = createShellExecutor(config);
 
           // Convert sandbox path to local path
           let localPath = path;
@@ -46,16 +47,14 @@ export function createViewTool(
             // Remove the sandbox prefix to get the relative path
             localPath = path.replace("/home/daytona/project/", "");
           }
-          const filePath = `${workDir}/${localPath}`;
+          const filePath = join(workDir, localPath);
 
           // Use cat command to view file content
-          const response = await executor.executeCommand(
-            `cat "${filePath}"`,
-            workDir,
-            {},
-            TIMEOUT_SEC,
-            true, // localMode
-          );
+          const response = await executor.executeCommand({
+            command: `cat "${filePath}"`,
+            workdir: workDir,
+            timeout: TIMEOUT_SEC,
+          });
 
           if (response.exitCode !== 0) {
             throw new Error(`Failed to read file: ${response.result}`);

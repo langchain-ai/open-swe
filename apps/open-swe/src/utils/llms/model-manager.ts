@@ -42,9 +42,9 @@ export enum CircuitState {
 }
 
 export const PROVIDER_FALLBACK_ORDER = [
-  "google-genai",
-  "anthropic",
   "openai",
+  "anthropic",
+  "google-genai",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -238,10 +238,21 @@ export class ModelManager {
         (!selectedModelConfig ||
           fallbackModel.modelName !== selectedModelConfig.modelName)
       ) {
+        // Check if fallback model is a thinking model
+        const isThinkingModel =
+          (provider === "openai" && fallbackModel.modelName.startsWith("o")) ||
+          fallbackModel.modelName.includes("extended-thinking");
+
         const fallbackConfig = {
           ...fallbackModel,
-          temperature: baseConfig.temperature,
+          temperature: isThinkingModel ? undefined : baseConfig.temperature,
           maxTokens: baseConfig.maxTokens,
+          ...(isThinkingModel
+            ? {
+                thinkingModel: true,
+                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
+              }
+            : {}),
         };
         configs.push(fallbackConfig);
       }
@@ -348,9 +359,9 @@ export class ModelManager {
         [Task.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
-        [Task.PLANNER]: "gpt-4.1",
+        [Task.PLANNER]: "o3",
         [Task.PROGRAMMER]: "gpt-4.1",
-        [Task.REVIEWER]: "gpt-4.1",
+        [Task.REVIEWER]: "o3",
         [Task.ROUTER]: "gpt-4o-mini",
         [Task.SUMMARIZER]: "gpt-4.1-mini",
       },

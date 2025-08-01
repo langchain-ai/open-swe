@@ -4,8 +4,9 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import { isLocalMode, getLocalWorkingDirectory } from "../utils/local-mode.js";
-import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { Sandbox } from "@daytonaio/sdk";
+import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 const DEFAULT_ENV = {
   // Prevents corepack from showing a y/n download prompt which causes the command to hang
@@ -21,68 +22,37 @@ export function createShellTool(
       try {
         const { command, workdir, timeout } = input;
 
-        if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor with local working directory
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-          const response = await executor.executeCommand(
-            command.join(" "),
-            getLocalWorkingDirectory(), // Always use local working directory in local mode
-            DEFAULT_ENV,
-            timeout ?? TIMEOUT_SEC,
-            true, // localMode
-          );
+        // Get sandbox if needed for sandbox mode
+        let sandbox: Sandbox | undefined;
+        if (!isLocalMode(config)) {
+          sandbox = await getSandboxSessionOrThrow(input);
+        }
 
-          if (response.exitCode !== 0) {
-            const errorResult = response.result ?? response.artifacts?.stdout;
-            throw new Error(
-              `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`,
-            );
-          }
+        const executor = createShellExecutor(config);
+        const response = await executor.executeCommand({
+          command,
+          workdir,
+          timeout: timeout ?? TIMEOUT_SEC,
+          env: DEFAULT_ENV,
+        });
 
+        return {
+          result: response.result ?? `exit code: ${response.exitCode}`,
+          status: "success",
+        };
+      } catch (error: any) {
+        const errorFields = getSandboxErrorFields(error);
+        if (errorFields) {
           return {
-            result: response.result ?? `exit code: ${response.exitCode}`,
-            status: "success",
-          };
-        } else {
-          // Sandbox mode: use existing sandbox logic
-          const sandbox = await getSandboxSessionOrThrow(input);
-
-          const response = await sandbox.process.executeCommand(
-            command.join(" "),
-            workdir,
-            DEFAULT_ENV,
-            timeout ?? TIMEOUT_SEC,
-          );
-
-          if (response.exitCode !== 0) {
-            const errorResult = response.result ?? response.artifacts?.stdout;
-            throw new Error(
-              `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`,
-            );
-          }
-
-          return {
-            result: response.result ?? `exit code: ${response.exitCode}`,
-            status: "success",
+            result: `Error: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
+            status: "error",
           };
         }
-      } catch (e) {
-        if (isLocalMode(config)) {
-          // Local mode error handling
-          throw e;
-        } else {
-          // Sandbox mode error handling
-          const errorFields = getSandboxErrorFields(e);
-          if (errorFields) {
-            const errorResult =
-              errorFields.result ?? errorFields.artifacts?.stdout;
-            throw new Error(
-              `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-            );
-          }
 
-          throw e;
-        }
+        return {
+          result: `Error: ${error.message || String(error)}`,
+          status: "error",
+        };
       }
     },
     createShellToolFields(state.targetRepository),

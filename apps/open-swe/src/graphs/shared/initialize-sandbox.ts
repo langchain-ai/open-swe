@@ -27,7 +27,7 @@ import { withRetry } from "../../utils/retry.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../utils/local-mode.js";
+} from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 
@@ -342,7 +342,7 @@ export async function initializeSandbox(
     },
   };
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
-  let codebaseTree = undefined;
+  let codebaseTree: string | undefined;
   try {
     codebaseTree = await getCodebaseTree(sandbox.id, undefined, config);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");

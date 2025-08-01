@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -9,6 +9,7 @@ import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
@@ -35,22 +36,16 @@ export async function startPlanner(
     config,
   });
 
-  try {
-    let langGraphClient;
+  const localMode = isLocalMode(config);
 
-    if (isLocalMode(config)) {
-      // In local mode, create client with local mode headers
-      langGraphClient = createLangGraphClient({
-        defaultHeaders: {
-          "x-local-mode": "true",
-        },
-      });
-    } else {
-      // In normal mode, create client with GitHub headers
-      langGraphClient = createLangGraphClient({
-        defaultHeaders: getDefaultHeaders(config),
-      });
-    }
+  try {
+    const langGraphClient = createLangGraphClient({
+      defaultHeaders: localMode
+        ? {
+            [LOCAL_MODE_HEADER]: "true",
+          }
+        : getDefaultHeaders(config),
+    });
 
     const runInput: PlannerGraphUpdate = {
       // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
@@ -60,7 +55,7 @@ export async function startPlanner(
       taskPlan: state.taskPlan,
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
-      ...(followupMessage && { messages: [followupMessage] }),
+      ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
     };
 
     const run = await langGraphClient.runs.create(

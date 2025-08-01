@@ -2,7 +2,10 @@ import { CustomRules } from "@open-swe/shared/open-swe/types";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
-import { isLocalMode, getLocalWorkingDirectory } from "./local-mode.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { promises as fs } from "fs";
 import { join } from "path";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
@@ -164,7 +167,7 @@ export async function getCustomRules(
   return undefined;
 }
 
-/**Add a comment on lines R168 to R201Add diff commentMarkdown input: edit mode selected.WritePreviewAdd a suggestionHeadingBoldItalicQuoteCodeLinkUnordered listNumbered listTask listMentionReferenceSaved repliesAdd FilesPaste, drop, or click to add filesCancelCommentStart a reviewReturn to code
+/**
  * Local version of getCustomRules using Node.js fs
  */
 async function getCustomRulesLocal(
@@ -196,8 +199,8 @@ async function getCustomRulesLocal(
           return parseCustomRulesFromString(content);
         }
       } catch (error) {
-        // File doesn't exist, which is expected - continue to next file
-        logger.debug(`${fileName} not found, trying next file`, { error });
+        // File doesn't exist, continue to next file
+        logger.error(`Failed to read ${fileName}`, { error });
       }
     }
   } catch (error) {

@@ -9,7 +9,7 @@ import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
 import { getIssue } from "../../../utils/github/api.js";
 import { extractTasksFromIssueContent } from "../../../utils/github/issue-task.js";
 import { getMessageContentFromIssue } from "../../../utils/github/issue-messages.js";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 /**
  * The initialize function will do nothing if there's already a human message

@@ -6,6 +6,7 @@ import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
 
@@ -35,7 +36,7 @@ export async function submitFeedback({
     const client = new Client({
       apiUrl: LANGGRAPH_URL,
       defaultHeaders: {
-        "x-local-mode": "true", // Signal to server this is local mode
+        [LOCAL_MODE_HEADER]: "true", // Signal to server this is local mode
       },
     });
 
@@ -57,7 +58,7 @@ export async function submitFeedback({
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
       config: {
         configurable: {
-          "x-local-mode": "true",
+          [LOCAL_MODE_HEADER]: "true",
         },
       },
     });

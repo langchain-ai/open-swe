@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "mint dev",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "clean": "rm -rf .turbo || true"
   },
   "devDependencies": {
     "mint": "^4.2.12",

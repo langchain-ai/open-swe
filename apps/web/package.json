@@ -16,7 +16,8 @@
     "lint": "next lint",
     "lint:fix": "next lint --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "clean": "rm -rf .turbo .next || true && rm next-env.d.ts || true"
   },
   "dependencies": {
     "@langchain/core": "^0.3.65",

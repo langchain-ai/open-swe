@@ -9,7 +9,11 @@ import { getIssue, getIssueComments } from "./api.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { DETAILS_OPEN_TAG } from "./issue-task.js";
+<<<<<<< HEAD
 import { isLocalMode } from "../local-mode.js";
+=======
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+>>>>>>> main
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],

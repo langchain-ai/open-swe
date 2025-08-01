@@ -3,11 +3,16 @@ import { v4 as uuidv4 } from "uuid";
 import {
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
 import { isAgentInboxInterruptSchema } from "@open-swe/shared/agent-inbox-interrupt";
+import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { HumanMessage } from "@langchain/core/messages";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
+
+type RunInput = ManagerGraphUpdate;
 
 interface StreamingCallbacks {
   setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars

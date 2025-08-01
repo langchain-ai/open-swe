@@ -18,6 +18,7 @@ import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { getConfig } from "@langchain/langgraph";
+import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -141,9 +142,19 @@ export class FallbackRunnable<
           "bindTools" in runnableToUse &&
           runnableToUse.bindTools
         ) {
+          const supportsParallelToolCall =
+            !MODELS_NO_PARALLEL_TOOL_CALLING.some(
+              (modelName) => modelKey === modelName,
+            );
+
+          const kwargs = { ...toolsToUse.kwargs };
+          if (!supportsParallelToolCall && "parallel_tool_calls" in kwargs) {
+            delete kwargs.parallel_tool_calls;
+          }
+
           runnableToUse = (runnableToUse as ConfigurableModel).bindTools(
             toolsToUse.tools,
-            toolsToUse.kwargs,
+            kwargs,
           );
         }
 

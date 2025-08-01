@@ -20,7 +20,7 @@ import {
 } from "../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
-import { isLocalMode } from "../../../utils/local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 export async function prepareGraphState(
   state: PlannerGraphState,

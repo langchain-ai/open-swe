@@ -5,7 +5,7 @@ import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
 import { cloneRepo } from "./github/git.js";
 import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
-import { isLocalMode } from "./local-mode.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -106,7 +106,7 @@ export async function getSandboxWithErrorHandling(
     return {
       sandbox: mockSandbox,
       codebaseTree: null,
-      dependenciesInstalled: false,
+      dependenciesInstalled: null,
     };
   }
   try {

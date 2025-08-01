@@ -29,7 +29,7 @@ export async function loadModel(
   return fallbackModel;
 }
 
-const MODELS_NO_PARALLEL_TOOL_CALLING = ["openai:o3", "openai:o3-mini"];
+export const MODELS_NO_PARALLEL_TOOL_CALLING = ["openai:o3", "openai:o3-mini"];
 
 export function supportsParallelToolCallsParam(
   config: GraphConfig,

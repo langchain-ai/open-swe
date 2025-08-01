@@ -4,20 +4,17 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import { isLocalMode, getLocalWorkingDirectory } from "../utils/local-mode.js";
-import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import {
   createGrepToolFields,
   formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
+import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
-
-const DEFAULT_ENV = {
-  // Prevents corepack from showing a y/n download prompt which causes the command to hang
-  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-};
 
 export function createGrepTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
@@ -27,44 +24,22 @@ export function createGrepTool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
         const command = formatGrepCommand(input as any);
-
-        let repoRoot;
-        if (isLocalMode(config)) {
-          // In local mode, use the local working directory
-          repoRoot = getLocalWorkingDirectory();
-        } else {
-          // In sandbox mode, use the sandbox path
-          repoRoot = getRepoAbsolutePath(state.targetRepository);
-        }
+        const localMode = isLocalMode(config);
+        const localAbsolutePath = getLocalWorkingDirectory();
+        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
+        const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
 
         logger.info("Running grep search command", {
           command: command.join(" "),
-          repoRoot,
+          workDir,
         });
 
-        let response;
-
-        if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-
-          response = await executor.executeCommand(
-            command.join(" "),
-            repoRoot,
-            DEFAULT_ENV,
-            TIMEOUT_SEC,
-            true, // localMode
-          );
-        } else {
-          // Sandbox mode: use existing sandbox logic
-          const sandbox = await getSandboxSessionOrThrow(input);
-          response = await sandbox.process.executeCommand(
-            command.join(" "),
-            repoRoot,
-            DEFAULT_ENV,
-            TIMEOUT_SEC,
-          );
-        }
+        const executor = createShellExecutor(config);
+        const response = await executor.executeCommand({
+          command,
+          workdir: workDir,
+          timeout: TIMEOUT_SEC,
+        });
 
         let successResult = response.result;
 

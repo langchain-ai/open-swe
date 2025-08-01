@@ -6,8 +6,12 @@ import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import { isLocalMode, getLocalWorkingDirectory } from "../utils/local-mode.js";
-import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
+import { LocalExecuteResponse } from "../utils/shell-executor/types.js";
+import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InstallDependenciesTool");
 
@@ -31,18 +35,17 @@ export function createInstallDependenciesTool(
           workdir,
         });
 
-        let response;
+        let response: LocalExecuteResponse;
 
         if (isLocalMode(config)) {
-          // Local mode: use LocalShellExecutor
-          const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-          response = await executor.executeCommand(
+          // Local mode: use ShellExecutor
+          const executor = createShellExecutor(config);
+          response = await executor.executeCommand({
             command,
-            workdir,
-            DEFAULT_ENV,
-            TIMEOUT_SEC * 2.5, // add a 2.5 min timeout
-            true, // localMode
-          );
+            workdir: workdir,
+            env: DEFAULT_ENV,
+            timeout: TIMEOUT_SEC * 2.5, // add a 2.5 min timeout
+          });
         } else {
           // Sandbox mode: use existing sandbox logic
           const sandbox = await getSandboxSessionOrThrow(input);
