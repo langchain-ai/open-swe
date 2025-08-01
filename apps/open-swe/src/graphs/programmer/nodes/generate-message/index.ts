@@ -173,12 +173,12 @@ async function createToolsAndPrompt(
 }> {
   const mcpTools = await getMcpTools(config);
   const sharedTools = [
-    createGrepTool(state),
-    createShellTool(state),
+    createGrepTool(state, config),
+    createShellTool(state, config),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
     createGetURLContentTool(state),
-    createInstallDependenciesTool(state),
+    createInstallDependenciesTool(state, config),
     createMarkTaskCompletedToolFields(),
     createSearchDocumentForTool(state, config),
     ...mcpTools,

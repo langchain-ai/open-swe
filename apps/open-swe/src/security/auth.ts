@@ -11,6 +11,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import { decryptSecret } from "@open-swe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
@@ -45,6 +46,21 @@ export const auth = new Auth()
         metadata: {
           installation_name: "n/a",
         },
+      };
+    }
+
+    // Check for local mode first
+    const localModeHeader = request.headers.get(LOCAL_MODE_HEADER);
+    const isRunningLocalModeEnv = process.env.OPEN_SWE_LOCAL_MODE === "true";
+    if (localModeHeader === "true" && isRunningLocalModeEnv) {
+      return {
+        identity: "local-user",
+        is_authenticated: true,
+        display_name: "Local User",
+        metadata: {
+          installation_name: "local-mode",
+        },
+        permissions: LANGGRAPH_USER_PERMISSIONS,
       };
     }
 

@@ -6,7 +6,7 @@ import {
 import { getIssue, updateIssue } from "./api.js";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { createLogger, LogLevel } from "../logger.js";
-
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 
 export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";
@@ -95,6 +95,12 @@ export async function getPlansFromIssue(
   taskPlan: TaskPlan | null;
   proposedPlan: string[] | null;
 }> {
+  if (isLocalMode(config)) {
+    return {
+      taskPlan: null,
+      proposedPlan: null,
+    };
+  }
   const issue = await getIssue({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,

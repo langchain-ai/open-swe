@@ -1,30 +1,35 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-
-const DEFAULT_ENV = {
-  // Prevents corepack from showing a y/n download prompt which causes the command to hang
-  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-};
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { Sandbox } from "@daytonaio/sdk";
+import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 export function createShellTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  config: GraphConfig,
 ) {
   const shellTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const sandbox = await getSandboxSessionOrThrow(input);
-
         const { command, workdir, timeout } = input;
-        const response = await sandbox.process.executeCommand(
-          command.join(" "),
+
+        // Get sandbox if needed for sandbox mode
+        let sandbox: Sandbox | undefined;
+        if (!isLocalMode(config)) {
+          sandbox = await getSandboxSessionOrThrow(input);
+        }
+
+        const executor = createShellExecutor(config);
+        const response = await executor.executeCommand({
+          command,
           workdir,
-          DEFAULT_ENV,
-          timeout ?? TIMEOUT_SEC,
-        );
+          timeout: timeout ?? TIMEOUT_SEC,
+          sandbox,
+        });
 
         if (response.exitCode !== 0) {
           const errorResult = response.result ?? response.artifacts?.stdout;
@@ -37,17 +42,19 @@ export function createShellTool(
           result: response.result ?? `exit code: ${response.exitCode}`,
           status: "success",
         };
-      } catch (e) {
-        const errorFields = getSandboxErrorFields(e);
+      } catch (error: any) {
+        const errorFields = getSandboxErrorFields(error);
         if (errorFields) {
-          const errorResult =
-            errorFields.result ?? errorFields.artifacts?.stdout;
-          throw new Error(
-            `Command failed. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-          );
+          return {
+            result: `Error: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
+            status: "error",
+          };
         }
 
-        throw e;
+        return {
+          result: `Error: ${error.message || String(error)}`,
+          status: "error",
+        };
       }
     },
     createShellToolFields(state.targetRepository),

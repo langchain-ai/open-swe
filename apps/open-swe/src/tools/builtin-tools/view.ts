@@ -1,33 +1,72 @@
+import { join } from "path";
 import { tool } from "@langchain/core/tools";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "../utils/get-sandbox-id.js";
 import { createViewToolFields } from "@open-swe/shared/open-swe/tools";
 import { handleViewCommand } from "./handlers.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
+import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
 export function createViewTool(
   state: Pick<GraphState, "sandboxSessionId" | "targetRepository">,
+  config: GraphConfig,
 ) {
   const viewTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const sandbox = await getSandboxSessionOrThrow(input);
-        const workDir = getRepoAbsolutePath(state.targetRepository);
-
-        const { command, path, view_range } = input;
+        const { command, path, view_range } = input as any;
         if (command !== "view") {
           throw new Error(`Unknown command: ${command}`);
         }
 
-        const result = await handleViewCommand(
-          sandbox,
-          path,
-          workDir,
-          view_range as [number, number] | undefined,
-        );
+        const localMode = isLocalMode(config);
+        const localAbsolutePath = getLocalWorkingDirectory();
+        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
+        const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
+        let result: string;
+
+        if (localMode) {
+          // Local mode: use LocalShellExecutor for file viewing
+          const executor = getLocalShellExecutor(localAbsolutePath);
+
+          // Convert sandbox path to local path
+          let localPath = path;
+          if (path.startsWith("/home/daytona/project/")) {
+            // Remove the sandbox prefix to get the relative path
+            localPath = path.replace("/home/daytona/project/", "");
+          }
+          const filePath = join(workDir, localPath);
+
+          // Use cat command to view file content
+          const response = await executor.executeCommand(`cat "${filePath}"`, {
+            workdir: workDir,
+            timeout: TIMEOUT_SEC,
+            localMode: true,
+          });
+
+          if (response.exitCode !== 0) {
+            throw new Error(`Failed to read file: ${response.result}`);
+          }
+
+          result = response.result;
+        } else {
+          // Sandbox mode: use existing handler
+          const sandbox = await getSandboxSessionOrThrow(input);
+          result = await handleViewCommand(
+            sandbox,
+            path,
+            workDir,
+            view_range as [number, number] | undefined,
+          );
+        }
 
         logger.info(`View command executed successfully on ${path}`);
         return { result, status: "success" };

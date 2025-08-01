@@ -1,26 +1,54 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { readFile, writeFile } from "../../utils/read-write.js";
 import { getSandboxErrorFields } from "../../utils/sandbox-error-fields.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  createShellExecutor,
+  LocalExecuteResponse,
+} from "../../utils/shell-executor/index.js";
 
 export async function handleViewCommand(
   sandbox: Sandbox,
   path: string,
   workDir: string,
   viewRange?: [number, number],
+  config?: GraphConfig,
 ): Promise<string> {
   try {
     // Check if path is a directory
-    const statOutput = await sandbox.process.executeCommand(
-      `stat -c %F "${path}"`,
-      workDir,
-    );
+    let statOutput: LocalExecuteResponse;
+    if (!config) {
+      // Fallback to direct sandbox execution if no config provided
+      statOutput = await sandbox.process.executeCommand(
+        `stat -c %F "${path}"`,
+        workDir,
+      );
+    } else {
+      const executor = createShellExecutor(config);
+      statOutput = await executor.executeCommand({
+        command: `stat -c %F "${path}"`,
+        workdir: workDir,
+        sandbox,
+      });
+    }
 
     if (statOutput.exitCode === 0 && statOutput.result?.includes("directory")) {
       // List directory contents
-      const lsOutput = await sandbox.process.executeCommand(
-        `ls -la "${path}"`,
-        workDir,
-      );
+      let lsOutput: LocalExecuteResponse;
+      if (!config) {
+        // Fallback to direct sandbox execution if no config provided
+        lsOutput = await sandbox.process.executeCommand(
+          `ls -la "${path}"`,
+          workDir,
+        );
+      } else {
+        const executor = createShellExecutor(config);
+        lsOutput = await executor.executeCommand({
+          command: `ls -la "${path}"`,
+          workdir: workDir,
+          sandbox,
+        });
+      }
 
       if (lsOutput.exitCode !== 0) {
         throw new Error(`Failed to list directory: ${lsOutput.result}`);
@@ -34,6 +62,7 @@ export async function handleViewCommand(
       sandbox,
       filePath: path,
       workDir,
+      config,
     });
 
     if (!success) {

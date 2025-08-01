@@ -6,6 +6,7 @@ import {
   updateIssueComment,
 } from "./api.js";
 import { createLogger, LogLevel } from "../logger.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPlan");
 
@@ -40,6 +41,13 @@ export async function postGitHubIssueComment(input: {
   config: GraphConfig;
 }): Promise<void> {
   const { githubIssueId, targetRepository, commentBody, config } = input;
+
+  if (isLocalMode(config)) {
+    // In local mode, we don't post GitHub comments
+    logger.info("Skipping GitHub comment posting in local mode");
+    return;
+  }
+
   const githubAppName = process.env.GITHUB_APP_NAME;
   if (!githubAppName) {
     throw new Error("GITHUB_APP_NAME not set");

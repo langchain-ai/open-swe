@@ -7,6 +7,7 @@ import { encryptSecret } from "@open-swe/shared/crypto";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
 import {
   getAccessToken,
@@ -25,43 +26,63 @@ export async function submitFeedback({
   selectedRepo,
   setLogs,
   setPlannerFeedback,
+  setStreamingPhase,
 }: {
   plannerFeedback: string;
   plannerThreadId: string;
   selectedRepo: any;
-  setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars
+  // eslint-disable-next-line no-unused-vars
+  setLogs: (updater: (prev: string[]) => string[]) => void;
   setPlannerFeedback: () => void;
+  // eslint-disable-next-line no-unused-vars
+  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void;
 }) {
   try {
-    const userAccessToken = getAccessToken();
-    const installationAccessToken = await getInstallationAccessToken();
-    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+    // Set streaming phase back to streaming when feedback submission starts
+    setStreamingPhase("streaming");
 
-    if (!userAccessToken || !installationAccessToken || !encryptionKey) {
-      setLogs((prev) => [
-        ...prev,
-        "Missing access tokens for feedback submission",
-      ]);
-      return;
+    const isLocalMode = process.env.OPEN_SWE_LOCAL_MODE === "true";
+    let client: Client;
+
+    if (isLocalMode) {
+      // In local mode, create client without GitHub authentication
+      client = new Client({
+        apiUrl: LANGGRAPH_URL,
+        defaultHeaders: {
+          [LOCAL_MODE_HEADER]: "true", // Signal to server this is local mode
+        },
+      });
+    } else {
+      const userAccessToken = getAccessToken();
+      const installationAccessToken = await getInstallationAccessToken();
+      const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+
+      if (!userAccessToken || !installationAccessToken || !encryptionKey) {
+        setLogs((prev) => [
+          ...prev,
+          "Missing access tokens for feedback submission",
+        ]);
+        return;
+      }
+
+      const encryptedUserToken = encryptSecret(userAccessToken, encryptionKey);
+      const encryptedInstallationToken = encryptSecret(
+        installationAccessToken,
+        encryptionKey,
+      );
+      const [owner] = selectedRepo?.full_name.split("/") || [];
+
+      const installationId = getInstallationId();
+      client = new Client({
+        apiUrl: LANGGRAPH_URL,
+        defaultHeaders: {
+          "x-github-access-token": encryptedUserToken,
+          "x-github-installation-token": encryptedInstallationToken,
+          "x-github-installation-name": owner,
+          "x-github-installation-id": installationId,
+        },
+      });
     }
-
-    const encryptedUserToken = encryptSecret(userAccessToken, encryptionKey);
-    const encryptedInstallationToken = encryptSecret(
-      installationAccessToken,
-      encryptionKey,
-    );
-    const [owner] = selectedRepo?.full_name.split("/") || [];
-
-    const installationId = getInstallationId();
-    const client = new Client({
-      apiUrl: LANGGRAPH_URL,
-      defaultHeaders: {
-        "x-github-access-token": encryptedUserToken,
-        "x-github-installation-token": encryptedInstallationToken,
-        "x-github-installation-name": owner,
-        "x-github-installation-id": installationId,
-      },
-    });
 
     const formatted = formatDisplayLog(`Human feedback: ${plannerFeedback}`);
     if (formatted.length > 0) {
@@ -110,10 +131,15 @@ export async function submitFeedback({
         }
       }
     }
+
+    // Set streaming phase to done when complete
+    setStreamingPhase("done");
   } catch (error: unknown) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     setLogs((prev) => [...prev, `Error submitting feedback: ${errorMessage}`]);
+    // Set streaming phase to done even on error
+    setStreamingPhase("done");
   } finally {
     // Clear feedback state
     setPlannerFeedback();

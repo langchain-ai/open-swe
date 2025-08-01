@@ -25,6 +25,7 @@ import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 function formatSystemPrompt(state: PlannerGraphState): string {
   // It's a followup if there's more than one human message.
@@ -107,7 +108,7 @@ export async function generatePlan(
   }
 
   let newSessionId: string | undefined;
-  if (state.sandboxSessionId) {
+  if (state.sandboxSessionId && !isLocalMode(config)) {
     // Stop before returning, as the next step will be to interrupt the graph.
     newSessionId = await stopSandbox(state.sandboxSessionId);
   }

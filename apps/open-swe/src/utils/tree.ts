@@ -1,10 +1,19 @@
 import { getCurrentTaskInput } from "@langchain/langgraph";
-import { GraphState, TargetRepository } from "@open-swe/shared/open-swe/types";
+import {
+  GraphState,
+  TargetRepository,
+  GraphConfig,
+} from "@open-swe/shared/open-swe/types";
 import { daytonaClient } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import path from "node:path";
 import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
+import { getLocalShellExecutor } from "./shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "Tree");
 
@@ -14,11 +23,17 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
 export async function getCodebaseTree(
   sandboxSessionId_?: string,
   targetRepository_?: TargetRepository,
+  config?: GraphConfig,
 ): Promise<string> {
   try {
     const command = `git ls-files | tree --fromfile -L 3`;
     let sandboxSessionId = sandboxSessionId_;
     let targetRepository = targetRepository_;
+
+    // Check if we're in local mode
+    if (config && isLocalMode(config)) {
+      return getCodebaseTreeLocal();
+    }
 
     // If sandbox session ID is not provided, try to get it from the current state.
     if (!sandboxSessionId || !targetRepository) {
@@ -72,6 +87,48 @@ export async function getCodebaseTree(
             stack: e.stack,
           }
         : {}),
+    });
+    return FAILED_TO_GENERATE_TREE_MESSAGE;
+  }
+}
+
+/**
+ * Local version of getCodebaseTree using LocalShellExecutor
+ */
+async function getCodebaseTreeLocal(): Promise<string> {
+  try {
+    // In local mode, always use the current working directory
+    const workingDirectory = getLocalWorkingDirectory();
+
+    const executor = getLocalShellExecutor(workingDirectory);
+    const command = `git ls-files | tree --fromfile -L 3`;
+
+    const response = await executor.executeCommand(command, {
+      workdir: workingDirectory,
+      timeout: TIMEOUT_SEC,
+      localMode: true,
+    });
+
+    if (response.exitCode !== 0) {
+      logger.error("Failed to generate tree in local mode", {
+        exitCode: response.exitCode,
+        result: response.result,
+      });
+      throw new Error(
+        `Failed to generate tree in local mode: ${response.result}`,
+      );
+    }
+
+    return response.result;
+  } catch (e) {
+    logger.error("Failed to generate tree in local mode", {
+      ...(e instanceof Error
+        ? {
+            name: e.name,
+            message: e.message,
+            stack: e.stack,
+          }
+        : { error: e }),
     });
     return FAILED_TO_GENERATE_TREE_MESSAGE;
   }

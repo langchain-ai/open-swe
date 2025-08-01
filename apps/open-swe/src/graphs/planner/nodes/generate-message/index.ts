@@ -22,6 +22,10 @@ import {
 } from "../../utils/followup.js";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@open-swe/shared/open-swe/local-mode";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
@@ -39,7 +43,10 @@ import { createViewTool } from "../../../../tools/builtin-tools/view.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
-function formatSystemPrompt(state: PlannerGraphState): string {
+function formatSystemPrompt(
+  state: PlannerGraphState,
+  config: GraphConfig,
+): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const scratchpad = getScratchpad(state.messages)
@@ -57,7 +64,15 @@ function formatSystemPrompt(state: PlannerGraphState): string {
   )
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
-      getRepoAbsolutePath(state.targetRepository),
+      isLocalMode(config)
+        ? getLocalWorkingDirectory()
+        : getRepoAbsolutePath(state.targetRepository),
+    )
+    .replaceAll(
+      "{LOCAL_MODE_NOTE}",
+      isLocalMode(config)
+        ? "<local_mode_note>IMPORTANT: You are running in local mode. When specifying file paths, use relative paths from the current working directory or absolute paths that start with the current working directory. Do NOT use sandbox paths like '/home/daytona/project/'.</local_mode_note>"
+        : "",
     )
     .replaceAll(
       "{CODEBASE_TREE}",
@@ -81,9 +96,9 @@ export async function generateAction(
   const mcpTools = await getMcpTools(config);
 
   const tools = [
-    createGrepTool(state),
-    createShellTool(state),
-    createViewTool(state),
+    createGrepTool(state, config),
+    createShellTool(state, config),
+    createViewTool(state, config),
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",
     ),
@@ -129,10 +144,13 @@ export async function generateAction(
     .invoke([
       {
         role: "system",
-        content: formatSystemPrompt({
-          ...state,
-          taskPlan: latestTaskPlan ?? state.taskPlan,
-        }),
+        content: formatSystemPrompt(
+          {
+            ...state,
+            taskPlan: latestTaskPlan ?? state.taskPlan,
+          },
+          config,
+        ),
       },
       ...inputMessagesWithCache,
     ]);

@@ -1,4 +1,4 @@
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -38,11 +38,13 @@ import {
   PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
-
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { Thread } from "@langchain/langgraph-sdk";
+import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { GraphState } from "@open-swe/shared/open-swe/types";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -60,21 +62,23 @@ export async function classifyMessage(
     throw new Error("No human message found.");
   }
 
+  let plannerThread: Thread<PlannerGraphState> | undefined;
+  let programmerThread: Thread<GraphState> | undefined;
   const langGraphClient = createLangGraphClient({
     defaultHeaders: getDefaultHeaders(config),
   });
 
-  const plannerThread = state.plannerSession?.threadId
-    ? await langGraphClient.threads.get<PlannerGraphState>(
-        state.plannerSession.threadId,
-      )
-    : undefined;
-  const plannerThreadValues = plannerThread?.values;
-  const programmerThread = plannerThreadValues?.programmerSession?.threadId
-    ? await langGraphClient.threads.get<GraphState>(
-        plannerThreadValues.programmerSession.threadId,
-      )
-    : undefined;
+  if (!isLocalMode(config)) {
+    plannerThread = state.plannerSession?.threadId
+      ? await langGraphClient.threads.get(state.plannerSession.threadId)
+      : undefined;
+    const plannerThreadValues = plannerThread?.values;
+    programmerThread = plannerThreadValues?.programmerSession?.threadId
+      ? await langGraphClient.threads.get(
+          plannerThreadValues.programmerSession.threadId,
+        )
+      : undefined;
+  }
 
   const programmerStatus = programmerThread?.status ?? "not_started";
   const plannerStatus = plannerThread?.status ?? "not_started";
@@ -155,6 +159,28 @@ export async function classifyMessage(
       update: commandUpdate,
       goto: "create-new-session",
     });
+  }
+
+  if (isLocalMode(config)) {
+    // In local mode, just route to planner without GitHub issue creation
+    const newMessages: BaseMessage[] = [response];
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: newMessages,
+    };
+
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
+
+    throw new Error(
+      `Unsupported route for local mode received: ${toolCallArgs.route}`,
+    );
   }
 
   const { githubAccessToken } = getGitHubTokensFromConfig(config);
@@ -260,6 +286,9 @@ export async function classifyMessage(
         args: "resume planner",
       };
       logger.info("Resuming planner session");
+      if (!langGraphClient) {
+        throw new Error("LangGraph client not initialized");
+      }
       const newPlannerRun = await langGraphClient.runs.create(
         state.plannerSession?.threadId,
         PLANNER_GRAPH_ID,

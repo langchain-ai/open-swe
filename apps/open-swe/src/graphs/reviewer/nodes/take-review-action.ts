@@ -46,10 +46,10 @@ export async function takeReviewerActions(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const shellTool = createShellTool(state);
-  const searchTool = createGrepTool(state);
-  const viewTool = createViewTool(state);
-  const installDependenciesTool = createInstallDependenciesTool(state);
+  const shellTool = createShellTool(state, config);
+  const searchTool = createGrepTool(state, config);
+  const viewTool = createViewTool(state, config);
+  const installDependenciesTool = createInstallDependenciesTool(state, config);
   const scratchpadTool = createScratchpadTool("");
   const allTools = [
     shellTool,
