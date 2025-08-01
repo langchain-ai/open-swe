@@ -19,10 +19,7 @@ import { createPullRequest } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
-import {
-  getLocalWorkingDirectory,
-  isLocalMode,
-} from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createShellExecutor, LocalExecuteResponse } from "../shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");

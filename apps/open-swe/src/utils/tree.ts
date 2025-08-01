@@ -9,9 +9,7 @@ import { createLogger, LogLevel } from "./logger.js";
 import path from "node:path";
 import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
-import {
-  isLocalMode
-} from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createShellExecutor } from "./shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "Tree");

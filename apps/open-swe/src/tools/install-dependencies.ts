@@ -6,10 +6,7 @@ import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import {
-  isLocalMode,
-  getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { LocalExecuteResponse } from "../utils/shell-executor/types.js";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 
