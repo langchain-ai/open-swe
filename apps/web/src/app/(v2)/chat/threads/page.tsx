@@ -31,10 +31,22 @@ type FilterStatus =
 
 function AllThreadsPageContent() {
   const router = useRouter();
+  const limit = 25;
+  const [offset, setOffset] = useState(0);
   const { currentInstallation, installationsLoading } = useGitHubAppProvider();
-  const { threads, isLoading: threadsLoading } = useThreadsSWR({
+  const {
+    threads,
+    isLoading: threadsLoading,
+    hasMore,
+  } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
+    pagination: {
+      limit,
+      offset,
+      sortBy: "updated_at",
+      sortOrder: "desc",
+    },
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
@@ -96,6 +108,11 @@ function AllThreadsPageContent() {
     (statusFilter === "all"
       ? Object.values(groupedThreads).flat().length === 0
       : filteredThreads.length === 0);
+  const showNoThreads =
+    filteredThreads.length === 0 &&
+    !threadsLoading &&
+    !statusLoading &&
+    !showThreadsLoading;
 
   return (
     <div className="bg-background flex h-screen flex-col">
@@ -233,22 +250,18 @@ function AllThreadsPageContent() {
             </div>
           )}
 
-          {filteredThreads.length === 0 &&
-            !threadsLoading &&
-            !statusLoading && (
-              <div className="py-12 text-center">
-                <div className="text-muted-foreground mb-2">
-                  No threads found
-                </div>
-                <div className="text-muted-foreground/70 text-xs">
-                  {!threads || threads.length === 0
-                    ? "No threads have been created yet"
-                    : searchQuery
-                      ? "Try adjusting your search query"
-                      : "No threads match the selected filter"}
-                </div>
+          {showNoThreads && (
+            <div className="py-12 text-center">
+              <div className="text-muted-foreground mb-2">No threads found</div>
+              <div className="text-muted-foreground/70 text-xs">
+                {!threads || threads.length === 0
+                  ? "No threads have been created yet"
+                  : searchQuery
+                    ? "Try adjusting your search query"
+                    : "No threads match the selected filter"}
               </div>
-            )}
+            </div>
+          )}
 
           {showThreadsLoading && (
             <div>
@@ -262,6 +275,16 @@ function AllThreadsPageContent() {
                   <ThreadCardLoading key={`all-threads-loading-${index}`} />
                 ))}
               </div>
+            </div>
+          )}
+          {!showNoThreads && hasMore && (
+            <div className="flex items-center justify-center">
+              <Button
+                variant="outline"
+                onClick={() => setOffset((prev) => prev + limit)}
+              >
+                Load more
+              </Button>
             </div>
           )}
         </div>
