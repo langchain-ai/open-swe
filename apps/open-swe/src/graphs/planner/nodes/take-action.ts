@@ -57,7 +57,7 @@ export async function takeActions(
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const scratchpadTool = createScratchpadTool("");
-  const getURLContentTool = createGetURLContentTool(state);
+  const getURLContentTool = createGetURLContentTool(state, config);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
@@ -206,7 +206,7 @@ export async function takeActions(
     const repoPath = isLocalMode(config)
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
     if (changedFiles?.length > 0) {
       logger.warn(
         "Changes found in the codebase after taking action. Reverting.",

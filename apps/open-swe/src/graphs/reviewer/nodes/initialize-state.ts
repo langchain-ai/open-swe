@@ -14,7 +14,7 @@ import { Sandbox } from "@daytonaio/sdk";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../../utils/local-mode.js";
+} from "@open-swe/shared/open-swe/local-mode";
 import { getLocalShellExecutor } from "../../../utils/local-shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");

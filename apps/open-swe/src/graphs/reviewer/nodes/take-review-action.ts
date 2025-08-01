@@ -27,7 +27,7 @@ import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../../utils/local-mode.js";
+} from "@open-swe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
@@ -192,7 +192,7 @@ export async function takeReviewerActions(
   const repoPath = isLocalMode(config)
     ? getLocalWorkingDirectory()
     : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;

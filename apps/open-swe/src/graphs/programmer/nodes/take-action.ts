@@ -35,7 +35,7 @@ import { createInstallDependenciesTool } from "../../../tools/install-dependenci
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "../../../utils/local-mode.js";
+} from "@open-swe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -246,7 +246,7 @@ export async function takeAction(
   const repoPath = isLocalMode(config)
     ? getLocalWorkingDirectory()
     : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
