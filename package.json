@@ -11,6 +11,7 @@
     "build": "turbo build",
     "turbo:command": "turbo",
     "format": "turbo format",
+    "clean": "turbo clean",
     "format:check": "turbo format:check",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
