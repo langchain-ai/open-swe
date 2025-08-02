@@ -364,7 +364,7 @@ export function ThreadView({
       {/* Main Content - Split Layout */}
       <div className="flex w-full pt-12">
         <ManagerChat
-          messages={filteredMessages}
+          messages={displayMessages}
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
@@ -568,6 +568,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
