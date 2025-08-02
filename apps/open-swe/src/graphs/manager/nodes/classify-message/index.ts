@@ -301,7 +301,7 @@ export async function classifyMessage(
             resume: plannerResume,
           },
           metadata: {
-            source: "manager:start_planner",
+            source: "manager:classify_message_resume_planner",
             owner: state.targetRepository?.owner,
             repo: state.targetRepository?.repo,
           },
