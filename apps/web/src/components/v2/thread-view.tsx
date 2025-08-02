@@ -100,7 +100,8 @@ export function ThreadView({
     useState<ManagerGraphState["programmerSession"]>();
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
-  const [optimisticMessage, setOptimisticMessage] = useState<HumanMessage | null>(null);
+  const [optimisticMessage, setOptimisticMessage] =
+    useState<HumanMessage | null>(null);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -114,9 +115,11 @@ export function ThreadView({
     if (!displayThread.id) return;
     // Don't load if we already have messages from the stream
     if (stream.messages.length > 0) return;
-    
+
     try {
-      const storedData = sessionStorage.getItem(`lg:initial-message:${displayThread.id}`);
+      const storedData = sessionStorage.getItem(
+        `lg:initial-message:${displayThread.id}`,
+      );
       if (storedData) {
         const { message } = JSON.parse(storedData);
         // Reconstruct the HumanMessage with proper prototype
@@ -128,7 +131,10 @@ export function ThreadView({
         setOptimisticMessage(reconstructedMessage);
       }
     } catch (error) {
-      console.error("Failed to load optimistic message from sessionStorage:", error);
+      console.error(
+        "Failed to load optimistic message from sessionStorage:",
+        error,
+      );
     }
   }, [displayThread.id, stream.messages.length]);
 
@@ -141,7 +147,10 @@ export function ThreadView({
         try {
           sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
         } catch (error) {
-          console.error("Failed to remove optimistic message from sessionStorage:", error);
+          console.error(
+            "Failed to remove optimistic message from sessionStorage:",
+            error,
+          );
         }
       }
     }
@@ -332,7 +341,7 @@ export function ThreadView({
   });
 
   // Merge optimistic message with stream messages
-  const displayMessages = optimisticMessage 
+  const displayMessages = optimisticMessage
     ? [optimisticMessage as any, ...filteredMessages]
     : filteredMessages;
 
@@ -584,13 +593,3 @@ export function ThreadView({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-

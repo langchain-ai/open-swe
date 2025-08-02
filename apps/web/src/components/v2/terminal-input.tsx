@@ -115,7 +115,7 @@ export function TerminalInput({
 
         // set session storage so the stream can be resumed after redirect.
         sessionStorage.setItem(`lg:stream:${newThreadId}`, run.run_id);
-        
+
         // Store the initial message for optimistic rendering
         try {
           const initialMessageData = {
@@ -124,13 +124,16 @@ export function TerminalInput({
           };
           sessionStorage.setItem(
             `lg:initial-message:${newThreadId}`,
-            JSON.stringify(initialMessageData)
+            JSON.stringify(initialMessageData),
           );
         } catch (error) {
           // If sessionStorage fails, continue without optimistic rendering
-          console.error("Failed to store initial message in sessionStorage:", error);
+          console.error(
+            "Failed to store initial message in sessionStorage:",
+            error,
+          );
         }
-        
+
         push(`/chat/${newThreadId}`);
         clearCurrentDraft();
         setMessage("");
@@ -241,4 +244,3 @@ export function TerminalInput({
     </div>
   );
 }
-
