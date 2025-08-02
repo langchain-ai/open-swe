@@ -333,7 +333,7 @@ export function ThreadView({
 
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage 
-    ? [optimisticMessage, ...filteredMessages]
+    ? [optimisticMessage as any, ...filteredMessages]
     : filteredMessages;
 
   return (
@@ -584,6 +584,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
