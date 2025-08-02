@@ -147,6 +147,19 @@ export function ThreadView({
     }
   }, [stream.messages, optimisticMessage, stream.threadId]);
 
+  // Clean up sessionStorage on unmount
+  useEffect(() => {
+    return () => {
+      if (stream.threadId) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${stream.threadId}`);
+        } catch (error) {
+          // Silently fail on unmount
+        }
+      }
+    };
+  }, [stream.threadId]);
+
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
     CustomNodeEvent[]
   >([]);
@@ -571,6 +584,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
