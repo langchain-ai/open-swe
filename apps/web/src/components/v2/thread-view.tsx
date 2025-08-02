@@ -111,12 +111,12 @@ export function ThreadView({
 
   // Load optimistic message from sessionStorage
   useEffect(() => {
-    if (!stream.threadId) return;
+    if (!displayThread.id) return;
     // Don't load if we already have messages from the stream
     if (stream.messages.length > 0) return;
     
     try {
-      const storedData = sessionStorage.getItem(`lg:initial-message:${stream.threadId}`);
+      const storedData = sessionStorage.getItem(`lg:initial-message:${displayThread.id}`);
       if (storedData) {
         const { message } = JSON.parse(storedData);
         // Reconstruct the HumanMessage with proper prototype
@@ -130,7 +130,7 @@ export function ThreadView({
     } catch (error) {
       console.error("Failed to load optimistic message from sessionStorage:", error);
     }
-  }, [stream.threadId, stream.messages.length]);
+  }, [displayThread.id, stream.messages.length]);
 
   // Clear optimistic message and sessionStorage when real messages arrive
   useEffect(() => {
@@ -584,6 +584,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
