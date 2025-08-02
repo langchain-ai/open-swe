@@ -10,6 +10,7 @@ Custom rules allow you to provide project-specific context and guidelines to Ope
 ## What is AGENTS.md?
 
 `AGENTS.md` is a configuration file that tells Open SWE about your project's:
+
 - Coding standards and conventions
 - Repository structure and architecture
 - Dependencies and installation procedures
@@ -19,6 +20,7 @@ Custom rules allow you to provide project-specific context and guidelines to Ope
 ## Why Use Custom Rules?
 
 Custom rules help Open SWE:
+
 - Follow your project's specific conventions
 - Understand your codebase architecture
 - Use the correct package managers and tools
@@ -32,6 +34,7 @@ Without custom rules, Open SWE uses generic best practices that may not align wi
 ### `<general_rules>`
 
 Project-specific coding standards and conventions:
+
 - Package manager preferences (e.g., "Always use Yarn")
 - Code style requirements
 - Import/export patterns
@@ -40,6 +43,7 @@ Project-specific coding standards and conventions:
 ### `<repository_structure>`
 
 Description of your codebase organization:
+
 - Monorepo vs single package structure
 - Key directories and their purposes
 - Package relationships and dependencies
@@ -48,6 +52,7 @@ Description of your codebase organization:
 ### `<dependencies_and_installation>`
 
 Package management and setup instructions:
+
 - Package manager commands
 - Installation procedures
 - Key dependencies and their purposes
@@ -56,6 +61,7 @@ Package management and setup instructions:
 ### `<testing_instructions>`
 
 Testing framework and practices:
+
 - Test runner configuration (Jest, Vitest, etc.)
 - Test file naming conventions
 - How to run different test types
@@ -64,6 +70,7 @@ Testing framework and practices:
 ### `<pull_request_formatting>`
 
 PR creation and formatting guidelines:
+
 - Title and description templates
 - Required sections or checklists
 - Review process requirements
@@ -85,6 +92,7 @@ Open SWE reads custom rules from these files (in order of precedence):
 ## Missing Sections
 
 If your custom rules file doesn't include XML section tags:
+
 - The entire file content becomes `generalRules`
 - Other sections remain empty
 - Open SWE still benefits from the general guidance provided
@@ -93,17 +101,19 @@ If your custom rules file doesn't include XML section tags:
 
 ```markdown
 <general_rules>
+
 - Always use Yarn as the package manager
 - Follow strict TypeScript practices
 - Use ESLint and Prettier for code quality
-</general_rules>
+  </general_rules>
 
 <repository_structure>
 This is a Yarn workspace monorepo with three main packages:
+
 - apps/web: Next.js frontend
 - apps/api: Express backend
 - packages/shared: Common utilities
-</repository_structure>
+  </repository_structure>
 
 <dependencies_and_installation>
 Run `yarn install` from the repository root to install all dependencies.
@@ -111,11 +121,12 @@ Key dependencies include React 18, TypeScript, and Jest for testing.
 </dependencies_and_installation>
 
 <testing_instructions>
+
 - Run `yarn test` for unit tests
 - Run `yarn test:e2e` for end-to-end tests
 - Test files use `.test.ts` extension
 - Use Jest with React Testing Library
-</testing_instructions>
+  </testing_instructions>
 
 <pull_request_formatting>
 PR titles should follow: "feat: description" or "fix: description"

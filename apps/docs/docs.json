@@ -19,7 +19,14 @@
           },
           {
             "group": "Usage",
-            "pages": ["usage/intro", "usage/ui", "usage/github", "usage/examples", "usage/best-practices", "usage/custom-rules"]
+            "pages": [
+              "usage/intro",
+              "usage/ui",
+              "usage/github",
+              "usage/examples",
+              "usage/best-practices",
+              "usage/custom-rules"
+            ]
           },
           {
             "group": "Development Setup",
@@ -68,4 +75,3 @@
     }
   }
 }
-

@@ -20,7 +20,8 @@ Follow these guidelines to get the best results from Open SWE.
 Create an `AGENTS.md` file in your repository root to provide project-specific context. This helps Open SWE understand your codebase conventions and requirements.
 
 <Tip>
-  See the [Custom Rules](/usage/custom-rules) page for detailed guidance on setting up your AGENTS.md file.
+  See the [Custom Rules](/usage/custom-rules) page for detailed guidance on
+  setting up your AGENTS.md file.
 </Tip>
 
 ### Keep Tasks Well-Scoped
@@ -32,6 +33,7 @@ Create an `AGENTS.md` file in your repository root to provide project-specific c
 ### Avoid Multiple Tasks
 
 Submit separate requests for different features or fixes. This allows Open SWE to:
+
 - Generate more focused plans
 - Provide better error handling
 - Make changes easier to review
@@ -41,6 +43,7 @@ Submit separate requests for different features or fixes. This allows Open SWE t
 ### Claude Sonnet 4 (Default)
 
 Use for most coding tasks:
+
 - Standard feature implementation
 - Bug fixes
 - Code refactoring
@@ -49,6 +52,7 @@ Use for most coding tasks:
 ### Claude Opus 4 (Complex Tasks)
 
 Use for challenging problems requiring advanced reasoning:
+
 - Complex architectural changes
 - Performance optimization
 - Advanced algorithm implementation
@@ -63,11 +67,13 @@ Open SWE's prompts are specifically tuned for Claude models. Other models may pr
 ### open-swe vs open-swe-max
 
 **open-swe**: Uses Claude Sonnet 4
+
 - Suitable for most development tasks
 - Faster execution
 - Cost-effective
 
 **open-swe-max**: Uses Claude Opus 4
+
 - For complex tasks requiring advanced reasoning
 - Higher quality output for challenging problems
 - More expensive but better for difficult tasks
@@ -77,6 +83,7 @@ Open SWE's prompts are specifically tuned for Claude models. Other models may pr
 **Auto Mode (`-auto` labels)**
 
 Use for most tasks:
+
 - Open SWE excels at planning
 - Faster turnaround
 - Good for straightforward implementations
@@ -84,6 +91,7 @@ Use for most tasks:
 **Manual Mode (no `-auto` suffix)**
 
 Use for extremely complex tasks:
+
 - Allows plan review before execution
 - Better for critical or sensitive changes
 - Provides opportunity to modify plans
@@ -96,5 +104,6 @@ Use for extremely complex tasks:
 - `open-swe-max-auto`: Auto mode with Opus 4
 
 <Note>
-  In development environments, append `-dev` to all labels (e.g., `open-swe-dev`, `open-swe-auto-dev`).
+  In development environments, append `-dev` to all labels (e.g.,
+  `open-swe-dev`, `open-swe-auto-dev`).
 </Note>
