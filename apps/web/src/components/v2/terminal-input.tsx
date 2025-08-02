@@ -96,11 +96,6 @@ export function TerminalInput({
           MANAGER_GRAPH_ID,
           {
             input: runInput,
-            metadata: {
-              source: "web:start_manager",
-              owner: selectedRepository.owner,
-              repo: selectedRepository.repo,
-            },
             config: {
               recursion_limit: 400,
               configurable: {

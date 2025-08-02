@@ -63,11 +63,6 @@ export async function startPlanner(
       PLANNER_GRAPH_ID,
       {
         input: runInput,
-        metadata: {
-          source: "manager:start_planner",
-          owner: state.targetRepository?.owner,
-          repo: state.targetRepository?.repo,
-        },
         config: {
           recursion_limit: 400,
           configurable: getCustomConfigurableFields(config),

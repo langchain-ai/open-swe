@@ -190,11 +190,6 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
       input: runInput,
       config,
-      metadata: {
-        source: "github_webhook:issue_label",
-        owner: issueData.owner,
-        repo: issueData.repo,
-      },
       ifNotExists: "create",
       streamResumable: true,
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
