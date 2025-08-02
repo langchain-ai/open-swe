@@ -118,8 +118,9 @@ export function ThreadView({
       if (storedData) {
         const { message } = JSON.parse(storedData);
         // Reconstruct the HumanMessage with proper prototype
+        // Add a prefix to ensure the ID doesn't conflict with server messages
         const reconstructedMessage = new HumanMessage({
-          id: message.id,
+          id: `optimistic-${message.id}`,
           content: message.content,
         });
         setOptimisticMessage(reconstructedMessage);
@@ -568,6 +569,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
