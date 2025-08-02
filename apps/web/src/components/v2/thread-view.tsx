@@ -137,28 +137,28 @@ export function ThreadView({
     if (stream.messages.length > 0 && optimisticMessage) {
       setOptimisticMessage(null);
       // Clean up sessionStorage
-      if (stream.threadId) {
+      if (displayThread.id) {
         try {
-          sessionStorage.removeItem(`lg:initial-message:${stream.threadId}`);
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
         } catch (error) {
           console.error("Failed to remove optimistic message from sessionStorage:", error);
         }
       }
     }
-  }, [stream.messages, optimisticMessage, stream.threadId]);
+  }, [stream.messages, optimisticMessage, displayThread.id]);
 
   // Clean up sessionStorage on unmount
   useEffect(() => {
     return () => {
-      if (stream.threadId) {
+      if (displayThread.id) {
         try {
-          sessionStorage.removeItem(`lg:initial-message:${stream.threadId}`);
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
         } catch (error) {
           // Silently fail on unmount
         }
       }
     };
-  }, [stream.threadId]);
+  }, [displayThread.id]);
 
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
     CustomNodeEvent[]
@@ -584,6 +584,7 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
 
