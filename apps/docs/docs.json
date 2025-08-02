@@ -18,12 +18,15 @@
             "pages": ["index"]
           },
           {
-            "group": "Examples",
-            "pages": ["examples"]
-          },
-          {
             "group": "Usage",
-            "pages": ["usage/intro", "usage/ui", "usage/github"]
+            "pages": [
+              "usage/intro",
+              "usage/ui",
+              "usage/github",
+              "usage/examples",
+              "usage/best-practices",
+              "usage/custom-rules"
+            ]
           },
           {
             "group": "Development Setup",
