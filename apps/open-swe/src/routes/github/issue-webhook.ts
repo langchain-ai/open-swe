@@ -178,11 +178,6 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     // Create config object with Claude Opus 4 model configuration for max labels
     const config: Record<string, any> = {
       recursion_limit: 400,
-      tags: [
-        `owner:${issueData.owner}`,
-        `repo:${issueData.repo}`,
-        "source:github_webhook_issue_label",
-      ],
     };
 
     if (isMaxLabel) {
@@ -195,6 +190,11 @@ webhooks.on("issues.labeled", async ({ payload }) => {
     const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
       input: runInput,
       config,
+      metadata: {
+        source: "github_webhook:issue_label",
+        owner: issueData.owner,
+        repo: issueData.repo,
+      },
       ifNotExists: "create",
       streamResumable: true,
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],

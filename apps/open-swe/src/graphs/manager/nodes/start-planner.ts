@@ -63,14 +63,14 @@ export async function startPlanner(
       PLANNER_GRAPH_ID,
       {
         input: runInput,
+        metadata: {
+          source: "manager:start_planner",
+          owner: state.targetRepository?.owner,
+          repo: state.targetRepository?.repo,
+        },
         config: {
           recursion_limit: 400,
           configurable: getCustomConfigurableFields(config),
-          tags: [
-            `owner:${state.targetRepository.owner}`,
-            `repo:${state.targetRepository.repo}`,
-            "source:manager_start_planner",
-          ],
         },
         ifNotExists: "create",
         multitaskStrategy: "enqueue",

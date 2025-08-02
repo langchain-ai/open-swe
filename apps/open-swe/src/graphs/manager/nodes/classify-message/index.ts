@@ -300,12 +300,10 @@ export async function classifyMessage(
           command: {
             resume: plannerResume,
           },
-          config: {
-            tags: [
-              `owner:${state.targetRepository.owner}`,
-              `repo:${state.targetRepository.repo}`,
-              "source:manager_classify_message",
-            ],
+          metadata: {
+            source: "manager:start_planner",
+            owner: state.targetRepository?.owner,
+            repo: state.targetRepository?.repo,
           },
           streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
         },

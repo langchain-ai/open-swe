@@ -392,14 +392,13 @@ export function AssistantMessage({
 
     const newRun = await thread.client.runs.create(threadId, assistantId, {
       command: { resume: humanResponse },
+      metadata: {
+        source: "web:interrupt_response",
+        owner: ownerRepo?.owner,
+        repo: ownerRepo?.repo,
+      },
       config: {
         recursion_limit: 400,
-        tags: [
-          ...(ownerRepo
-            ? [`owner:${ownerRepo?.owner}`, `repo:${ownerRepo?.repo}`]
-            : []),
-          "source:web_interrupt_response",
-        ],
       },
       streamResumable: true,
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],

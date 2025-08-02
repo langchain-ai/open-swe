@@ -114,14 +114,14 @@ async function startProgrammerRun(input: {
     PROGRAMMER_GRAPH_ID,
     {
       input: runInput,
+      metadata: {
+        source: "planner:proposed_plan",
+        owner: state.targetRepository?.owner,
+        repo: state.targetRepository?.repo,
+      },
       config: {
         recursion_limit: 400,
         configurable: getCustomConfigurableFields(config),
-        tags: [
-          `owner:${state.targetRepository.owner}`,
-          `repo:${state.targetRepository.repo}`,
-          "source:planner_proposed_plan",
-        ],
       },
       ifNotExists: "create",
       streamResumable: true,
