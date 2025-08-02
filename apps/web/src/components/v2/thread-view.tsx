@@ -100,6 +100,8 @@ export function ThreadView({
     useState<ManagerGraphState["programmerSession"]>();
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
+  const [optimisticMessage, setOptimisticMessage] =
+    useState<HumanMessage | null>(null);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -107,6 +109,65 @@ export function ThreadView({
     });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
+
+  // Load optimistic message from sessionStorage
+  useEffect(() => {
+    if (!displayThread.id) return;
+    // Don't load if we already have messages from the stream
+    if (stream.messages.length > 0) return;
+
+    try {
+      const storedData = sessionStorage.getItem(
+        `lg:initial-message:${displayThread.id}`,
+      );
+      if (storedData) {
+        const { message } = JSON.parse(storedData);
+        // Reconstruct the HumanMessage with proper prototype
+        // Add a prefix to ensure the ID doesn't conflict with server messages
+        const reconstructedMessage = new HumanMessage({
+          id: `optimistic-${message.id}`,
+          content: message.content,
+        });
+        setOptimisticMessage(reconstructedMessage);
+      }
+    } catch (error) {
+      console.error(
+        "Failed to load optimistic message from sessionStorage:",
+        error,
+      );
+    }
+  }, [displayThread.id, stream.messages.length]);
+
+  // Clear optimistic message and sessionStorage when real messages arrive
+  useEffect(() => {
+    if (stream.messages.length > 0 && optimisticMessage) {
+      setOptimisticMessage(null);
+      // Clean up sessionStorage
+      if (displayThread.id) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
+        } catch (error) {
+          console.error(
+            "Failed to remove optimistic message from sessionStorage:",
+            error,
+          );
+        }
+      }
+    }
+  }, [stream.messages, optimisticMessage, displayThread.id]);
+
+  // Clean up sessionStorage on unmount
+  useEffect(() => {
+    return () => {
+      if (displayThread.id) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
+        } catch (error) {
+          // Silently fail on unmount
+        }
+      }
+    };
+  }, [displayThread.id]);
 
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
     CustomNodeEvent[]
@@ -279,6 +340,11 @@ export function ThreadView({
     return !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX);
   });
 
+  // Merge optimistic message with stream messages
+  const displayMessages = optimisticMessage
+    ? [optimisticMessage as any, ...filteredMessages]
+    : filteredMessages;
+
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
       {/* Header */}
@@ -323,7 +389,7 @@ export function ThreadView({
       {/* Main Content - Split Layout */}
       <div className="flex w-full pt-12">
         <ManagerChat
-          messages={filteredMessages}
+          messages={displayMessages}
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
