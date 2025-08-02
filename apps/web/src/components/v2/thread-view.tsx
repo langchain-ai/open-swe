@@ -100,6 +100,7 @@ export function ThreadView({
     useState<ManagerGraphState["programmerSession"]>();
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
+  const [optimisticMessage, setOptimisticMessage] = useState<HumanMessage | null>(null);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -527,3 +528,4 @@ export function ThreadView({
     </div>
   );
 }
+
