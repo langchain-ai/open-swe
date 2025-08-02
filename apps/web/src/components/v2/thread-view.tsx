@@ -315,6 +315,11 @@ export function ThreadView({
     return !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX);
   });
 
+  // Merge optimistic message with stream messages
+  const displayMessages = optimisticMessage 
+    ? [optimisticMessage, ...filteredMessages]
+    : filteredMessages;
+
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
       {/* Header */}
@@ -563,5 +568,6 @@ export function ThreadView({
     </div>
   );
 }
+
 
 
