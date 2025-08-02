@@ -5,12 +5,25 @@
  * across all thread data fetching in the application.
  */
 export const THREAD_SWR_CONFIG = {
-  refreshInterval: 15000, // 15s for general thread data
+  refreshInterval: 15000,
   revalidateOnFocus: false,
   revalidateOnReconnect: true,
-  errorRetryCount: 3,
-  errorRetryInterval: 5000,
-  dedupingInterval: 5000,
+  errorRetryCount: 5,
+  errorRetryInterval: 1000,
+  dedupingInterval: 2000,
+} as const;
+
+/**
+ * SWR configuration for initial thread loading
+ * Aggressive for first load only
+ */
+export const THREAD_INITIAL_LOADING_SWR_CONFIG = {
+  refreshInterval: 1000,
+  revalidateOnFocus: true,
+  revalidateOnReconnect: true,
+  errorRetryCount: 10,
+  errorRetryInterval: 100,
+  dedupingInterval: 100,
 } as const;
 
 /**
@@ -20,7 +33,8 @@ export const THREAD_SWR_CONFIG = {
 export const THREAD_STATUS_SWR_CONFIG = {
   ...THREAD_SWR_CONFIG,
   revalidateOnFocus: true,
-  dedupingInterval: 2000,
+  refreshInterval: 3000,
+  dedupingInterval: 1000,
 } as const;
 
 /**
@@ -28,12 +42,12 @@ export const THREAD_STATUS_SWR_CONFIG = {
  * Used when actively viewing a thread for real-time progress updates
  */
 export const TASK_PLAN_SWR_CONFIG = {
-  refreshInterval: 3000,
+  refreshInterval: 2000,
   revalidateOnFocus: true,
   revalidateOnReconnect: true,
-  errorRetryCount: 3,
-  errorRetryInterval: 2000,
-  dedupingInterval: 1000,
+  errorRetryCount: 5,
+  errorRetryInterval: 500,
+  dedupingInterval: 500,
 } as const;
 
 /**

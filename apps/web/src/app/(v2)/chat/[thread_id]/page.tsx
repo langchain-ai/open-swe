@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import * as React from "react";
 import { use, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
+import { THREAD_INITIAL_LOADING_SWR_CONFIG } from "@/lib/swr-config";
 
 interface ThreadPageProps {
   thread_id: string;
@@ -25,6 +26,8 @@ export default function ThreadPage({
 }) {
   const router = useRouter();
   const { thread_id } = use(params);
+  const [hasLoadedOnce, setHasLoadedOnce] = React.useState(false);
+
   const stream = useStream<ManagerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL ?? "",
     assistantId: MANAGER_GRAPH_ID,
@@ -33,10 +36,33 @@ export default function ThreadPage({
     fetchStateHistory: false,
   });
 
-  const { threads, isLoading: threadsLoading } = useThreadsSWR({
-    assistantId: MANAGER_GRAPH_ID,
+  // Aggressive loading for initial load
+  const { threads: initialThreads, isLoading: initialLoading } = useThreadsSWR({
+    assistantId: hasLoadedOnce ? undefined : MANAGER_GRAPH_ID,
+    disableOrgFiltering: true,
+    refreshInterval: THREAD_INITIAL_LOADING_SWR_CONFIG.refreshInterval,
+    revalidateOnFocus: THREAD_INITIAL_LOADING_SWR_CONFIG.revalidateOnFocus,
+    revalidateOnReconnect:
+      THREAD_INITIAL_LOADING_SWR_CONFIG.revalidateOnReconnect,
+    errorRetryCount: THREAD_INITIAL_LOADING_SWR_CONFIG.errorRetryCount,
+    errorRetryInterval: THREAD_INITIAL_LOADING_SWR_CONFIG.errorRetryInterval,
+    dedupingInterval: THREAD_INITIAL_LOADING_SWR_CONFIG.dedupingInterval,
+  });
+
+  // Normal polling after first load
+  const { threads: normalThreads, isLoading: normalLoading } = useThreadsSWR({
+    assistantId: hasLoadedOnce ? MANAGER_GRAPH_ID : undefined,
     disableOrgFiltering: true,
   });
+
+  const threads = hasLoadedOnce ? normalThreads : initialThreads;
+  const threadsLoading = hasLoadedOnce ? normalLoading : initialLoading;
+
+  React.useEffect(() => {
+    if (initialThreads.length > 0 && !hasLoadedOnce) {
+      setHasLoadedOnce(true);
+    }
+  }, [initialThreads.length, hasLoadedOnce]);
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
 

@@ -27,6 +27,9 @@ interface UseThreadsSWROptions {
   revalidateOnReconnect?: boolean;
   currentInstallation?: Installation | null;
   disableOrgFiltering?: boolean;
+  errorRetryCount?: number;
+  errorRetryInterval?: number;
+  dedupingInterval?: number;
   /**
    * Pagination options
    */
@@ -73,6 +76,9 @@ export function useThreadsSWR<
     revalidateOnReconnect = THREAD_SWR_CONFIG.revalidateOnReconnect,
     currentInstallation,
     disableOrgFiltering,
+    errorRetryCount = THREAD_SWR_CONFIG.errorRetryCount,
+    errorRetryInterval = THREAD_SWR_CONFIG.errorRetryInterval,
+    dedupingInterval = THREAD_SWR_CONFIG.dedupingInterval,
     pagination,
   } = options;
   const [hasMoreState, setHasMoreState] = useState(true);
@@ -129,9 +135,9 @@ export function useThreadsSWR<
       refreshInterval,
       revalidateOnFocus,
       revalidateOnReconnect,
-      errorRetryCount: THREAD_SWR_CONFIG.errorRetryCount,
-      errorRetryInterval: THREAD_SWR_CONFIG.errorRetryInterval,
-      dedupingInterval: THREAD_SWR_CONFIG.dedupingInterval,
+      errorRetryCount,
+      errorRetryInterval,
+      dedupingInterval,
     },
   );
 

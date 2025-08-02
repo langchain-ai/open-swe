@@ -2,7 +2,7 @@ import { PlanViewer } from "./plan-viewer";
 import { useProposedPlan } from "../thread/agent-inbox/hooks/useProposedPlan";
 import { PlanItem } from "@open-swe/shared/open-swe/types";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { X, ArrowDown } from "lucide-react";
+import { X, ArrowRight } from "lucide-react";
 
 export function ProposedPlan({
   originalPlanItems,
@@ -47,7 +47,7 @@ export function ProposedPlan({
             className="group flex cursor-pointer flex-col items-center gap-2 transition-all"
           >
             <div className="rounded-full border-2 border-dashed border-green-500 p-3 transition-all group-hover:border-solid group-hover:bg-green-50 dark:group-hover:bg-green-950/50">
-              <ArrowDown className="h-5 w-5 text-green-500" />
+              <ArrowRight className="h-5 w-5 text-green-500" />
             </div>
             <span className="text-muted-foreground text-xs group-hover:text-green-600 dark:group-hover:text-green-400">
               {changesMade ? "Submit changes" : "Continue"}

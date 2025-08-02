@@ -37,6 +37,7 @@ import { ProgressBar } from "@/components/tasks/progress-bar";
 import { TasksSidebar } from "@/components/tasks";
 import { TaskPlan } from "@open-swe/shared/open-swe/types";
 import { ErrorState } from "./types";
+import { useUser } from "@/hooks/useUser";
 import {
   CustomNodeEvent,
   isCustomNodeEvent,
@@ -90,6 +91,7 @@ export function ThreadView({
   allDisplayThreads,
   onBackToHome,
 }: ThreadViewProps) {
+  const { user } = useUser();
   const [chatInput, setChatInput] = useState("");
   const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
     "planner",
@@ -328,6 +330,7 @@ export function ThreadView({
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
           isLoading={stream.isLoading}
+          githubUser={user || undefined}
           cancelRun={cancelRun}
           errorState={errorState}
         />
