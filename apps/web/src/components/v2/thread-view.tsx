@@ -109,6 +109,41 @@ export function ThreadView({
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
+  // Load optimistic message from sessionStorage
+  useEffect(() => {
+    if (!stream.threadId) return;
+    
+    try {
+      const storedData = sessionStorage.getItem(`lg:initial-message:${stream.threadId}`);
+      if (storedData) {
+        const { message } = JSON.parse(storedData);
+        // Reconstruct the HumanMessage with proper prototype
+        const reconstructedMessage = new HumanMessage({
+          id: message.id,
+          content: message.content,
+        });
+        setOptimisticMessage(reconstructedMessage);
+      }
+    } catch (error) {
+      console.error("Failed to load optimistic message from sessionStorage:", error);
+    }
+  }, [stream.threadId]);
+
+  // Clear optimistic message and sessionStorage when real messages arrive
+  useEffect(() => {
+    if (stream.messages.length > 0 && optimisticMessage) {
+      setOptimisticMessage(null);
+      // Clean up sessionStorage
+      if (stream.threadId) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${stream.threadId}`);
+        } catch (error) {
+          console.error("Failed to remove optimistic message from sessionStorage:", error);
+        }
+      }
+    }
+  }, [stream.messages, optimisticMessage, stream.threadId]);
+
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
     CustomNodeEvent[]
   >([]);
@@ -528,4 +563,5 @@ export function ThreadView({
     </div>
   );
 }
+
 
