@@ -122,7 +122,7 @@ const App: React.FC = () => {
   const [plannerThreadId, setPlannerThreadId] = useState<string | null>(null);
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(false);
-  
+
   const PlannerFeedbackInput: React.FC = () => {
     const [selectedOption, setSelectedOption] = useState<
       "approve" | "deny" | null
