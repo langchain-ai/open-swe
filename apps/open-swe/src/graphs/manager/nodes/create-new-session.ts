@@ -90,11 +90,6 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
       update: commandUpdate,
       goto: "start-planner",
     },
-    metadata: {
-      source: "manager:create_new_session",
-      owner: state.targetRepository?.owner,
-      repo: state.targetRepository?.repo,
-    },
     config: {
       recursion_limit: 400,
       configurable: getCustomConfigurableFields(config),

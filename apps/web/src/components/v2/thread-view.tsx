@@ -47,7 +47,6 @@ import { TokenUsage } from "./token-usage";
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadMetadata;
-  allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
 }
 
@@ -87,7 +86,6 @@ const joinTokenData = (
 export function ThreadView({
   stream,
   displayThread,
-  allDisplayThreads,
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");
@@ -378,10 +376,7 @@ export function ThreadView({
               </>
             )}
           </div>
-          <ThreadSwitcher
-            currentThread={displayThread}
-            allThreads={allDisplayThreads}
-          />
+          <ThreadSwitcher currentThread={displayThread} />
           <ThemeToggle />
         </div>
       </div>
