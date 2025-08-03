@@ -48,6 +48,7 @@ import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
 import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@open-swe/shared/messages";
+import { useUser } from "@/hooks/useUser";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -93,6 +94,7 @@ export function ThreadView({
   displayThread,
   onBackToHome,
 }: ThreadViewProps) {
+  const { user } = useUser();
   const [chatInput, setChatInput] = useState("");
   const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
     "planner",
@@ -401,6 +403,7 @@ export function ThreadView({
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
           errorState={errorState}
+          githubUser={user || undefined}
         />
         {/* Right Side - Actions & Plan */}
         <div
