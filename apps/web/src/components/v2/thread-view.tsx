@@ -48,7 +48,6 @@ import { useUser } from "@/hooks/useUser";
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadMetadata;
-  allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
 }
 
@@ -88,7 +87,6 @@ const joinTokenData = (
 export function ThreadView({
   stream,
   displayThread,
-  allDisplayThreads,
   onBackToHome,
 }: ThreadViewProps) {
   const { user } = useUser();
@@ -314,10 +312,7 @@ export function ThreadView({
               </>
             )}
           </div>
-          <ThreadSwitcher
-            currentThread={displayThread}
-            allThreads={allDisplayThreads}
-          />
+          <ThreadSwitcher currentThread={displayThread} />
           <ThemeToggle />
         </div>
       </div>
