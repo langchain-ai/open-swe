@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sheet,
@@ -12,31 +11,33 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import {
-  CheckCircle,
-  XCircle,
-  Loader2,
-  GitBranch,
   Layers3,
   Plus,
-  Bug,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadMetadata } from "./types";
 import { ThreadCard } from "./thread-card";
+import { useThreadsSWR } from "@/hooks/useThreadsSWR";
+import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { threadsToMetadata } from "@/lib/thread-utils";
 
 interface ThreadSwitcherProps {
   currentThread: ThreadMetadata;
-  allThreads: ThreadMetadata[];
 }
 
 export function ThreadSwitcher({
   currentThread,
-  allThreads,
 }: ThreadSwitcherProps) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  const otherThreads = allThreads.filter((t) => t.id !== currentThread.id);
+  const { threads, isLoading: threadsLoading } = useThreadsSWR({
+    assistantId: MANAGER_GRAPH_ID,
+    disableOrgFiltering: true,
+  });
+
+  const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
+  const otherThreads = threadsMetadata.filter((t) => t.id !== currentThread.id);
 
   return (
     <Sheet

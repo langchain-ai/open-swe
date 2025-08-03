@@ -6,13 +6,28 @@ import { ThreadErrorCard } from "@/components/v2/thread-error-card";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import { use, useMemo } from "react";
-import { threadsToMetadata } from "@/lib/thread-utils";
+import { use, useEffect, useRef, useState } from "react";
+import { Client, Thread } from "@langchain/langgraph-sdk";
+
+async function fetchInitialThread(client: Client<ManagerGraphState>, threadId: string, reqCount = 0): Promise<Thread<ManagerGraphState> | null> {
+  try {
+    return await client.threads.get(threadId);
+  } catch (e) {
+    console.error("Failed to fetch thread", {
+      requestCount: reqCount,
+      error: e,
+    })
+    // Retry a max of 5 times
+    if (reqCount < 5) {
+      return fetchInitialThread(client, threadId, reqCount + 1);
+    }
+    return null;
+  }
+}
 
 interface ThreadPageProps {
   thread_id: string;
@@ -23,6 +38,7 @@ export default function ThreadPage({
 }: {
   params: Promise<ThreadPageProps>;
 }) {
+  const [initialFetchedThread, setInitialFetchedThread] = useState<Thread<ManagerGraphState> | null>(null);
   const router = useRouter();
   const { thread_id } = use(params);
   const stream = useStream<ManagerGraphState>({
@@ -38,14 +54,12 @@ export default function ThreadPage({
     disableOrgFiltering: true,
   });
 
-  const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
-
   // Find the thread by ID
   const thread = threads.find((t) => t.thread_id === thread_id);
 
   // We need a thread object for the hook, so use a dummy if not found
-  const dummyThread = thread || {
-    thread_id: thread_id,
+  const dummyThread = thread || initialFetchedThread || {
+    thread_id,
     values: {},
     status: "idle" as const,
     updated_at: new Date().toISOString(),
@@ -60,6 +74,18 @@ export default function ThreadPage({
     router.push("/chat");
   };
 
+  const initialThreadFetched = useRef(false);
+  useEffect(() => {
+    if (!thread && !initialFetchedThread && !initialThreadFetched.current) {
+      fetchInitialThread(stream.client as Client<ManagerGraphState>, thread_id)
+        .then(setInitialFetchedThread).finally(() => initialThreadFetched.current = true)
+    }
+
+    if (initialThreadFetched.current && initialFetchedThread && thread) {
+      setInitialFetchedThread(null);
+    }
+  }, [thread_id, thread])
+
   if (statusError && "message" in statusError && "type" in statusError) {
     return (
       <ThreadErrorCard
@@ -69,7 +95,7 @@ export default function ThreadPage({
     );
   }
 
-  if (!thread || threadsLoading) {
+  if ((!thread || threadsLoading) && (!initialFetchedThread || !initialThreadFetched.current)) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
@@ -78,7 +104,6 @@ export default function ThreadPage({
       <ThreadView
         stream={stream}
         displayThread={currentDisplayThread}
-        allDisplayThreads={threadsMetadata}
         onBackToHome={handleBackToHome}
       />
     </div>
