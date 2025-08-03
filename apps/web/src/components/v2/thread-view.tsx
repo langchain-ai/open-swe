@@ -18,7 +18,10 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
-import { HumanMessage } from "@langchain/core/messages";
+import {
+  coerceMessageLikeToMessage,
+  HumanMessage,
+} from "@langchain/core/messages";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
@@ -43,6 +46,8 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
+import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -99,7 +104,7 @@ export function ThreadView({
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
   const [optimisticMessage, setOptimisticMessage] =
-    useState<HumanMessage | null>(null);
+    useState<HumanMessageSDK | null>(null);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -110,22 +115,23 @@ export function ThreadView({
 
   // Load optimistic message from sessionStorage
   useEffect(() => {
-    if (!displayThread.id) return;
     // Don't load if we already have messages from the stream
-    if (stream.messages.length > 0) return;
+    if (stream.messages.length > 0) {
+      console.log("got messages", stream.messages);
+    }
 
     try {
       const storedData = sessionStorage.getItem(
         `lg:initial-message:${displayThread.id}`,
       );
       if (storedData) {
-        const { message } = JSON.parse(storedData);
-        // Reconstruct the HumanMessage with proper prototype
-        // Add a prefix to ensure the ID doesn't conflict with server messages
-        const reconstructedMessage = new HumanMessage({
+        const { message: stringifiedMessage } = JSON.parse(storedData);
+        const message = coerceMessageLikeToMessage(stringifiedMessage);
+        const reconstructedMessage: HumanMessageSDK = {
+          type: "human",
           id: `optimistic-${message.id}`,
-          content: message.content,
-        });
+          content: getMessageContentString(message.content),
+        };
         setOptimisticMessage(reconstructedMessage);
       }
     } catch (error) {
@@ -136,9 +142,10 @@ export function ThreadView({
     }
   }, [displayThread.id, stream.messages.length]);
 
-  // Clear optimistic message and sessionStorage when real messages arrive
+  // Clear optimistic message and sessionStorage when more than 1 message arrives (if its just 1, it'll only contain the ai message)
   useEffect(() => {
-    if (stream.messages.length > 0 && optimisticMessage) {
+    if (stream.messages.length > 1 && optimisticMessage) {
+      console.log("Clearing optimistic message", stream.messages);
       setOptimisticMessage(null);
       // Clean up sessionStorage
       if (displayThread.id) {
@@ -340,7 +347,7 @@ export function ThreadView({
 
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage
-    ? [optimisticMessage as any, ...filteredMessages]
+    ? [optimisticMessage, ...filteredMessages]
     : filteredMessages;
 
   return (
