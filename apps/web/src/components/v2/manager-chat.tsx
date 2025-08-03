@@ -14,6 +14,7 @@ import { BasicMarkdownText } from "../thread/markdown-text";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
+import { parsePartialJson } from "@langchain/core/output_parsers";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -75,6 +76,25 @@ interface ManagerChatProps {
 function extractResponseFromMessage(message: Message): string {
   if (!isAIMessageSDK(message)) {
     return getMessageContentString(message.content);
+  }
+  if (
+    Array.isArray(message.content) &&
+    ["input_json_delta", "tool_use"].includes(
+      message.content[0].type as string,
+    ) &&
+    "input" in message.content[0] &&
+    message.content[0].input
+  ) {
+    try {
+      console.log("about to parsePartialJson");
+      const parsedJson = parsePartialJson(message.content[0].input as string);
+      if (parsedJson.response) {
+        console.log("got parsedJson.response", parsedJson.response);
+        return parsedJson.response;
+      }
+    } catch {
+      // no-op
+    }
   }
   const toolCall = message.tool_calls?.[0];
   const response = toolCall?.args?.response;
@@ -138,6 +158,7 @@ export function ManagerChat({
   cancelRun,
   errorState,
 }: ManagerChatProps) {
+  console.log(messages.filter((m) => m.type === "ai"));
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
       <div className="relative flex-1">
