@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
   SheetContent,
@@ -82,7 +83,26 @@ export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
           </div>
 
           {/* Other Threads */}
-          {otherThreads.length > 0 && (
+          {threadsLoading ? (
+            <div className="h-full space-y-2">
+              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Other Threads
+              </h3>
+              <ScrollArea className="h-full">
+                <div className="space-y-1">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div
+                      key={i}
+                      className="border-border space-y-2 rounded-lg border p-3"
+                    >
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          ) : otherThreads.length > 0 ? (
             <div className="h-full space-y-2">
               <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                 Other Threads
@@ -97,6 +117,17 @@ export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
                   ))}
                 </div>
               </ScrollArea>
+            </div>
+          ) : (
+            <div className="h-full space-y-2">
+              <h3 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+                Other Threads
+              </h3>
+              <div className="flex h-32 items-center justify-center">
+                <p className="text-muted-foreground text-sm">
+                  No other threads
+                </p>
+              </div>
             </div>
           )}
         </div>
