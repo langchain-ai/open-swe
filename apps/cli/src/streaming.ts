@@ -2,6 +2,7 @@ import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import { v4 as uuidv4 } from "uuid";
 import {
   MANAGER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
   OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
@@ -171,7 +172,7 @@ export class StreamingService {
       };
 
       const headers = {
-        "x-local-mode": "true",
+        [LOCAL_MODE_HEADER]: "true",
       };
 
       const newClient = new Client({

@@ -118,7 +118,7 @@ async function startProgrammerRun(input: {
         recursion_limit: 400,
         configurable: {
           ...getCustomConfigurableFields(config),
-          ...(isLocalMode(config) && { "x-local-mode": "true" }),
+          ...(isLocalMode(config) && { [LOCAL_MODE_HEADER]: "true" }),
         },
       },
       ifNotExists: "create",

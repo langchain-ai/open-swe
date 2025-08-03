@@ -68,7 +68,7 @@ export async function startPlanner(
           configurable: {
             ...getCustomConfigurableFields(config),
             ...(isLocalMode(config) && {
-              "x-local-mode": "true",
+              [LOCAL_MODE_HEADER]: "true",
             }),
           },
         },

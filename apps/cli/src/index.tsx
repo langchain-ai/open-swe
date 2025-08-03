@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import React, { useState, useEffect } from "react";
 import { render, Box, Text, useInput } from "ink";
+import { Command } from "commander";
+import { OPEN_SWE_CLI_VERSION } from "./constants.js";
 
 // Handle graceful exit on Ctrl+C and Ctrl+K
 process.on("SIGINT", () => {
@@ -16,22 +18,32 @@ process.on("SIGTERM", () => {
 import { submitFeedback } from "./utils.js";
 import { StreamingService } from "./streaming.js";
 
-// Set environment variable to enable local mode
+// Parse command line arguments with Commander
+const program = new Command();
+
+program
+  .name("open-swe")
+  .description("Open SWE CLI - Local Mode")
+  .version(OPEN_SWE_CLI_VERSION)
+  .helpOption("-h, --help", "Display help for command")
+  .parse();
+
+// Always run in local mode
 process.env.OPEN_SWE_LOCAL_MODE = "true";
 
-// Show usage help
+// Show usage help if help requested
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   console.log(`
 Open SWE CLI - Local Mode
 
 Usage:
-  yarn cli                 # Run in local mode (works on current directory)
+  yarn cli [options]
   
 Options:
-  --help, -h               # Show this help message
+  --help, -h              # Show this help message
 
 Examples:
-  yarn cli                 # Start CLI to modify files in current directory
+  yarn cli                # Start CLI to modify files in current directory
 `);
   process.exit(0);
 }
