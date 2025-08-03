@@ -185,7 +185,9 @@ export class StreamingService {
 
       const run = await newClient.runs.create(threadId, MANAGER_GRAPH_ID, {
         input: runInput,
-        config: { recursion_limit: 400 },
+        config: {
+          recursion_limit: 400,
+        },
         ifNotExists: "create",
         streamResumable: true,
         streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],

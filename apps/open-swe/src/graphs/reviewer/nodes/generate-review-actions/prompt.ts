@@ -62,6 +62,10 @@ By reviewing these actions, and comparing them to the plan and original user req
     <required_scripts>
     Search for any scripts which are required for the pull request to pass CI. This may include unit tests (you do not have access to environment variables, and thus can not run integration tests), linters, formatters, build, etc.
     Once you find these, ensure you write to your scratchpad to record the names of the scripts, how to invoke them, and any other relevant context required to run them.
+    
+    - IMPORTANT: There are typically multiple scripts for linting and formatting. Never assume one will do both.
+    - If dealing with a monorepo, each package may have its own linting and formatting scripts. Ensure you use the correct script for the package you're working on.
+    
     For example: Many JavaScript/TypeScript projects have lint, test, format, and build scripts. Python projects may have lint, test, format, and typecheck scripts.
     It is vital that you ALWAYS find these scripts, and run them to ensure your code always meets the quality standards of the codebase.
     </required_scripts>
@@ -79,6 +83,9 @@ By reviewing these actions, and comparing them to the plan and original user req
     1. Complete, and accurate
     2. Required for the user's request to be successfully completed
     3. Are there extraneous comments, or code which is no longer needed?
+
+    For example:
+    If a script was created during the programming phase to test something, but is not used in the final codebase/required for the main task to be completed, it should always be deleted.
 
     Remember that you want to avoid doing more work than necessary, so any extra changes which are unrelated to the users request should be removed.
     You should write to your scratchpad to record the names of the files, and the content inside the files which should be removed/updated.

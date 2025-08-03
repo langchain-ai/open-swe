@@ -1,19 +1,16 @@
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import {
   AIMessage,
-  Checkpoint,
   Message,
   StreamMode,
   ToolMessage,
 } from "@langchain/langgraph-sdk";
 import { getContentString } from "../utils";
-import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import {
   LoadExternalComponent,
   UIMessage,
 } from "@langchain/langgraph-sdk/react-ui";
-import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";

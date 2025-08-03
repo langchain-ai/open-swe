@@ -29,7 +29,9 @@ export function createRequestHumanHelpToolFields() {
     help_request: z
       .string()
       .describe(
-        "The help request to send to the human. Should be concise, but descriptive.",
+        "The help request to send to the human. Should be concise, but descriptive.\n" +
+          "IMPORTANT: This should be a request which the user can help with, such as providing context into where a function lives/is used within a codebase, or answering questions about how to run scripts.\n" +
+          "IMPORTANT: The user does NOT have access to the filesystem you're running on, and thus can not make changes to the code for you.",
       ),
   });
   return {
