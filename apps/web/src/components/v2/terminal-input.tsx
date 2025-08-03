@@ -20,6 +20,9 @@ import {
 } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
+import { hasApiKeySet } from "@/lib/api-keys";
+import { useUser } from "@/hooks/useUser";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -35,6 +38,22 @@ interface TerminalInputProps {
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
   draftToLoad?: string;
 }
+
+const MISSING_API_KEYS_TOAST_CONTENT = <p>
+{API_KEY_REQUIRED_MESSAGE} Please add your API key(s) in{" "}
+<a
+  className="text-blue-500 underline underline-offset-1 dark:text-blue-400"
+  href="/settings?tab=api-keys"
+>
+  settings
+</a>
+</p>;
+
+const MISSING_API_KEYS_TOAST_OPTIONS = {
+  richColors: true,
+  duration: 30_000,
+  closeButton: true,
+};
 
 export function TerminalInput({
   placeholder = "Enter your command...",
@@ -55,6 +74,7 @@ export function TerminalInput({
   const { getConfig } = useConfigStore();
   const { selectedRepository } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
+  const { user, isLoading: isUserLoading } = useUser();
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -71,8 +91,25 @@ export function TerminalInput({
       });
       return;
     }
+
+    if (!user) {
+      toast.error("User not found. Please sign in first", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+
+    const defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
+
+    if (!isAllowedUser(user.login) && !hasApiKeySet(defaultConfig)) {
+      toast.error(MISSING_API_KEYS_TOAST_CONTENT, MISSING_API_KEYS_TOAST_OPTIONS);
+    }
+
     setLoading(true);
+
     const trimmedMessage = message.trim();
+
     if (trimmedMessage.length > 0 || contentBlocks.length > 0) {
       const newHumanMessage = new HumanMessage({
         id: uuidv4(),
@@ -91,6 +128,7 @@ export function TerminalInput({
           targetRepository: selectedRepository,
           autoAcceptPlan,
         };
+
         const run = await stream.client.runs.create(
           newThreadId,
           MANAGER_GRAPH_ID,
@@ -99,7 +137,7 @@ export function TerminalInput({
             config: {
               recursion_limit: 400,
               configurable: {
-                ...getConfig(DEFAULT_CONFIG_KEY),
+                ...defaultConfig,
               },
             },
             ifNotExists: "create",
@@ -144,20 +182,8 @@ export function TerminalInput({
           e.message.includes(API_KEY_REQUIRED_MESSAGE)
         ) {
           toast.error(
-            <p>
-              {API_KEY_REQUIRED_MESSAGE} Please add your API key(s) in{" "}
-              <a
-                className="text-blue-500 underline underline-offset-1 dark:text-blue-400"
-                href="/settings?tab=api-keys"
-              >
-                settings
-              </a>
-            </p>,
-            {
-              richColors: true,
-              duration: 30_000,
-              closeButton: true,
-            },
+            MISSING_API_KEYS_TOAST_CONTENT,
+            MISSING_API_KEYS_TOAST_OPTIONS,
           );
         }
       } finally {
@@ -205,7 +231,7 @@ export function TerminalInput({
 
         <Button
           onClick={handleSend}
-          disabled={disabled || !message.trim() || !selectedRepository}
+          disabled={disabled || !message.trim() || !selectedRepository || isUserLoading}
           size="icon"
           variant="brand"
           className="ml-auto size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"

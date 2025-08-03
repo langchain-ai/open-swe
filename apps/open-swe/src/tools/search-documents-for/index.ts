@@ -2,7 +2,8 @@ import { tool } from "@langchain/core/tools";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { createSearchDocumentForToolFields } from "@open-swe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
-import { loadModel, Task } from "../../utils/llms/index.js";
+import { loadModel } from "../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { DOCUMENT_SEARCH_PROMPT } from "./prompt.js";
@@ -76,7 +77,7 @@ export function createSearchDocumentForTool(
           };
         }
 
-        const model = await loadModel(config, Task.SUMMARIZER);
+        const model = await loadModel(config, LLMTask.SUMMARIZER);
 
         const searchPrompt = DOCUMENT_SEARCH_PROMPT.replace(
           "{DOCUMENT_PAGE_CONTENT}",

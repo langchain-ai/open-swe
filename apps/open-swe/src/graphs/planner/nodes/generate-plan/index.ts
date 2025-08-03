@@ -5,8 +5,8 @@ import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
@@ -55,12 +55,12 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, LLMTask.PLANNER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PLANNER,
+    LLMTask.PLANNER,
   );
   const sessionPlanTool = createSessionPlanToolFields();
   const modelWithTools = model.bindTools([sessionPlanTool], {

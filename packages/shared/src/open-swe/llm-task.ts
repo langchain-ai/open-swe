@@ -1,4 +1,4 @@
-export enum Task {
+export enum LLMTask {
   /**
    * Used for programmer tasks. This includes: writing code,
    * generating plans, taking context gathering actions, etc.
@@ -28,23 +28,23 @@ export enum Task {
 }
 
 export const TASK_TO_CONFIG_DEFAULTS_MAP = {
-  [Task.PLANNER]: {
+  [LLMTask.PLANNER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
-  [Task.PROGRAMMER]: {
+  [LLMTask.PROGRAMMER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
-  [Task.REVIEWER]: {
+  [LLMTask.REVIEWER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
   },
-  [Task.ROUTER]: {
+  [LLMTask.ROUTER]: {
     modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },
-  [Task.SUMMARIZER]: {
+  [LLMTask.SUMMARIZER]: {
     modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
   },

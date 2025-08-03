@@ -14,8 +14,8 @@ import { getMessageString } from "../../utils/message/content.js";
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { trackCachePerformance } from "../../utils/caching.js";
 import { getModelManager } from "../../utils/llms/model-manager.js";
 
@@ -95,12 +95,15 @@ export async function diagnoseError(
 
   logger.info("The last few tool calls resulted in errors. Diagnosing error.");
 
-  const model = await loadModel(config, Task.SUMMARIZER);
+  const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
+  const modelName = modelManager.getModelNameForTask(
+    config,
+    LLMTask.SUMMARIZER,
+  );
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    LLMTask.SUMMARIZER,
   );
   const modelWithTools = model.bindTools([diagnoseErrorTool], {
     tool_choice: diagnoseErrorTool.name,

@@ -16,8 +16,8 @@ import {
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { FallbackRunnable } from "../../../utils/runtime-fallback.js";
 
 const systemPromptIdentifyChanges = `You are operating as an agentic coding assistant built by LangChain. You've previously been given a task to generate a plan of action for, to address the user's initial request.
@@ -265,10 +265,10 @@ export async function rewritePlan(
     throw new Error("No plan change request found.");
   }
 
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, LLMTask.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PLANNER,
+    LLMTask.PLANNER,
   );
   const tasksToModify = await identifyTasksToModify(
     state,

@@ -8,8 +8,8 @@ import {
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { getMessageString } from "../../../utils/message/content.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
@@ -102,12 +102,15 @@ export async function notetaker(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.SUMMARIZER);
+  const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
+  const modelName = modelManager.getModelNameForTask(
+    config,
+    LLMTask.SUMMARIZER,
+  );
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    LLMTask.SUMMARIZER,
   );
   const modelWithTools = model.bindTools([condenseContextTool], {
     tool_choice: condenseContextTool.name,

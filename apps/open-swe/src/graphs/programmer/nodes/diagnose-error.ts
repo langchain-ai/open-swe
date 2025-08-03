@@ -17,8 +17,8 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { z } from "zod";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
@@ -108,10 +108,10 @@ export async function diagnoseError(
 
   logger.info("The last two tool calls resulted in errors. Diagnosing error.");
 
-  const model = await loadModel(config, Task.SUMMARIZER);
+  const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.SUMMARIZER,
+    LLMTask.SUMMARIZER,
   );
   const modelWithTools = model.bindTools([diagnoseErrorTool], {
     tool_choice: diagnoseErrorTool.name,
