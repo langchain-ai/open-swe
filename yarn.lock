@@ -1282,32 +1282,33 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@daytonaio/api-client@npm:0.25.0":
-  version: 0.25.0
-  resolution: "@daytonaio/api-client@npm:0.25.0"
+"@daytonaio/api-client@npm:0.25.4":
+  version: 0.25.4
+  resolution: "@daytonaio/api-client@npm:0.25.4"
   dependencies:
     axios: ^1.6.1
-  checksum: 2a33da02809b28bde1d04a788490e8c098529a87de30c41035eeeabc49ad17f76fda2ff60f91712f2a1258d801c0b6a4794def8b760fd438faf9b449b061937a
+  checksum: c3ff09da2af437620bada5c6161e52104ec32a2ef0f3a890d4da5458015e78e9de7ee28954e423477dc5fd7a8a07f58e5fd1fc919d9f382e86b6ad2da8b421c6
   languageName: node
   linkType: hard
 
-"@daytonaio/sdk@npm:^0.25.0":
-  version: 0.25.0
-  resolution: "@daytonaio/sdk@npm:0.25.0"
+"@daytonaio/sdk@npm:^0.25.4":
+  version: 0.25.4
+  resolution: "@daytonaio/sdk@npm:0.25.4"
   dependencies:
     "@aws-sdk/client-s3": ^3.787.0
     "@aws-sdk/lib-storage": ^3.798.0
-    "@daytonaio/api-client": 0.25.0
+    "@daytonaio/api-client": 0.25.4
     "@iarna/toml": ^2.2.5
     axios: ^1.6.1
     dotenv: ^17.0.1
     expand-tilde: ^2.0.2
     fast-glob: ^3.3.0
     form-data: ^4.0.0
+    isomorphic-ws: 5.0.0
     pathe: ^2.0.3
     shell-quote: ^1.8.2
     tar: ^6.2.0
-  checksum: 308e4c66138f4a5cedf2ff8796cddc62c87f6f6a5e28ef3f18dc7c3ed80c9b99f0e386d4a99717225f9eee6def9413356f8def62059c8946c5534c6469d9d7e4
+  checksum: d3d6e35c8c27a69c4cd8e241b9e1e4ac2171136718dc0ec21bf20e63e0d027f29a37ab16909025f14f891428055c9493382d72fe368d8db391249f59b4f00e21
   languageName: node
   linkType: hard
 
@@ -4092,7 +4093,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@open-swe/agent@workspace:apps/open-swe"
   dependencies:
-    "@daytonaio/sdk": ^0.25.0
+    "@daytonaio/sdk": ^0.25.4
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
@@ -13303,6 +13304,15 @@ __metadata:
   version: 3.1.1
   resolution: "isexe@npm:3.1.1"
   checksum: 7fe1931ee4e88eb5aa524cd3ceb8c882537bc3a81b02e438b240e47012eef49c86904d0f0e593ea7c3a9996d18d0f1f3be8d3eaa92333977b0c3a9d353d5563e
+  languageName: node
+  linkType: hard
+
+"isomorphic-ws@npm:5.0.0":
+  version: 5.0.0
+  resolution: "isomorphic-ws@npm:5.0.0"
+  peerDependencies:
+    ws: "*"
+  checksum: e20eb2aee09ba96247465fda40c6d22c1153394c0144fa34fe6609f341af4c8c564f60ea3ba762335a7a9c306809349f9b863c8beedf2beea09b299834ad5398
   languageName: node
   linkType: hard
 
