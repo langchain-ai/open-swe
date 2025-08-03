@@ -8,7 +8,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bot, Copy, CopyCheck, ArrowUp, User, AlertCircle } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
-import { cn } from "@/lib/utils";
 import { isAIMessageSDK } from "@/lib/langchain-messages";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import { ErrorState } from "./types";
@@ -70,6 +69,13 @@ interface ManagerChatProps {
   isLoading: boolean;
   cancelRun: () => void;
   errorState?: ErrorState | null;
+  githubUser?: {
+    login: string;
+    avatar_url: string;
+    html_url: string;
+    name: string | null;
+    email: string | null;
+  };
 }
 
 function extractResponseFromMessage(message: Message): string {
@@ -93,6 +99,7 @@ export function ManagerChat({
   isLoading,
   cancelRun,
   errorState,
+  githubUser,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
@@ -112,23 +119,35 @@ export function ManagerChat({
                   return (
                     <div
                       key={message.id}
-                      className="group bg-muted flex gap-3 rounded-lg p-3"
+                      className="group bg-muted flex items-start gap-3 rounded-lg p-3"
                     >
-                      <div className="flex-shrink-0">
+                      <div className="mt-0.5 flex-shrink-0">
                         {message.type === "human" ? (
-                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full">
-                            <User className="text-muted-foreground h-3 w-3" />
-                          </div>
+                          githubUser?.avatar_url ? (
+                            <div className="bg-muted flex h-6 w-6 items-center justify-center overflow-hidden rounded-full">
+                              <img
+                                src={githubUser.avatar_url}
+                                alt={githubUser.login}
+                                className="h-full w-full object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full">
+                              <User className="text-muted-foreground h-4 w-4" />
+                            </div>
+                          )
                         ) : (
                           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-950/50">
-                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                            <Bot className="size-4.5 text-blue-700 dark:text-blue-300" />
                           </div>
                         )}
                       </div>
                       <div className="relative min-w-0 flex-1 space-y-1 overflow-x-hidden">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
-                            {message.type === "human" ? "You" : "Agent"}
+                            {message.type === "human"
+                              ? githubUser?.login || "You"
+                              : "Open SWE"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
                             <MessageCopyButton content={messageContentString} />
