@@ -8,6 +8,7 @@ import { useUser } from "@/hooks/useUser";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import Link from "next/link";
+import { hasApiKeySet } from "@/lib/api-keys";
 
 const API_KEY_BANNER_DISMISSED_KEY = "api_key_banner_dismissed";
 
@@ -28,29 +29,15 @@ export function ApiKeyBanner() {
     }
   }, []);
 
-  // Don't show banner if:
-  // - Still loading user data
-  // - User is not authenticated
-  // - User has dismissed the banner
-  if (isLoading || !user || dismissed) {
-    return null;
-  }
+  const userIsAllowed = user && isAllowedUser(user.login);
 
-  // Check if user is in the allowed list
-  const userIsAllowed = isAllowedUser(user.login);
-
-  // If user is allowed, they don't need API keys
-  if (userIsAllowed) {
-    return null;
-  }
-
-  // Check if user has any API keys configured
-  const apiKeys = config.apiKeys || {};
-  const hasApiKeys =
-    apiKeys.anthropicApiKey || apiKeys.openaiApiKey || apiKeys.googleApiKey;
-
-  // If user has API keys, don't show banner
-  if (hasApiKeys) {
+  if (
+    isLoading ||
+    !user ||
+    dismissed ||
+    userIsAllowed ||
+    hasApiKeySet(config)
+  ) {
     return null;
   }
 
