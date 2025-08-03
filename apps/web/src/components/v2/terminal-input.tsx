@@ -39,15 +39,17 @@ interface TerminalInputProps {
   draftToLoad?: string;
 }
 
-const MISSING_API_KEYS_TOAST_CONTENT = <p>
-{API_KEY_REQUIRED_MESSAGE} Please add your API key(s) in{" "}
-<a
-  className="text-blue-500 underline underline-offset-1 dark:text-blue-400"
-  href="/settings?tab=api-keys"
->
-  settings
-</a>
-</p>;
+const MISSING_API_KEYS_TOAST_CONTENT = (
+  <p>
+    {API_KEY_REQUIRED_MESSAGE} Please add your API key(s) in{" "}
+    <a
+      className="text-blue-500 underline underline-offset-1 dark:text-blue-400"
+      href="/settings?tab=api-keys"
+    >
+      settings
+    </a>
+  </p>
+);
 
 const MISSING_API_KEYS_TOAST_OPTIONS = {
   richColors: true,
@@ -103,7 +105,10 @@ export function TerminalInput({
     const defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
 
     if (!isAllowedUser(user.login) && !hasApiKeySet(defaultConfig)) {
-      toast.error(MISSING_API_KEYS_TOAST_CONTENT, MISSING_API_KEYS_TOAST_OPTIONS);
+      toast.error(
+        MISSING_API_KEYS_TOAST_CONTENT,
+        MISSING_API_KEYS_TOAST_OPTIONS,
+      );
     }
 
     setLoading(true);
@@ -231,7 +236,9 @@ export function TerminalInput({
 
         <Button
           onClick={handleSend}
-          disabled={disabled || !message.trim() || !selectedRepository || isUserLoading}
+          disabled={
+            disabled || !message.trim() || !selectedRepository || isUserLoading
+          }
           size="icon"
           variant="brand"
           className="ml-auto size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
