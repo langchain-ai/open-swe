@@ -85,6 +85,50 @@ function extractResponseFromMessage(message: Message): string {
   return response;
 }
 
+function LoadingMessageDots() {
+  return (
+    <div className="text-foreground flex items-center space-x-1 overflow-x-hidden text-sm">
+      <style jsx>{`
+        @keyframes dotBounce {
+          0%,
+          80%,
+          100% {
+            transform: scale(0.8);
+            opacity: 0.5;
+          }
+          40% {
+            transform: scale(1.2);
+            opacity: 1;
+          }
+        }
+        .dot-bounce {
+          animation: dotBounce 1.4s infinite ease-in-out;
+        }
+      `}</style>
+      <div className="flex space-x-1">
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "0ms",
+          }}
+        />
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "200ms",
+          }}
+        />
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "400ms",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ManagerChat({
   messages,
   chatInput,
@@ -134,9 +178,13 @@ export function ManagerChat({
                             <MessageCopyButton content={messageContentString} />
                           </div>
                         </div>
-                        <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
-                          {messageContentString}
-                        </BasicMarkdownText>
+                        {messageContentString ? (
+                          <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
+                            {messageContentString}
+                          </BasicMarkdownText>
+                        ) : (
+                          <LoadingMessageDots />
+                        )}
                       </div>
                     </div>
                   );
