@@ -92,10 +92,8 @@ function extractResponseFromMessage(message: Message): string {
     message.content[0].input
   ) {
     try {
-      console.log("about to parsePartialJson");
       const parsedJson = parsePartialJson(message.content[0].input as string);
       if (parsedJson.response) {
-        console.log("got parsedJson.response", parsedJson.response);
         return parsedJson.response;
       }
     } catch {
@@ -165,7 +163,6 @@ export function ManagerChat({
   errorState,
   githubUser,
 }: ManagerChatProps) {
-  console.log(messages.filter((m) => m.type === "ai"));
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
       <div className="relative flex-1">

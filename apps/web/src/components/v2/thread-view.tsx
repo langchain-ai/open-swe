@@ -117,11 +117,6 @@ export function ThreadView({
 
   // Load optimistic message from sessionStorage
   useEffect(() => {
-    // Don't load if we already have messages from the stream
-    if (stream.messages.length > 0) {
-      console.log("got messages", stream.messages);
-    }
-
     try {
       const storedData = sessionStorage.getItem(
         `lg:initial-message:${displayThread.id}`,
@@ -144,12 +139,10 @@ export function ThreadView({
     }
   }, [displayThread.id, stream.messages.length]);
 
-  // Clear optimistic message and sessionStorage when more than 1 message arrives (if its just 1, it'll only contain the ai message)
+  // If there's more than 1 message, we've received both the human and ai message, so we can remove the optimistic message
   useEffect(() => {
     if (stream.messages.length > 1 && optimisticMessage) {
-      console.log("Clearing optimistic message", stream.messages);
       setOptimisticMessage(null);
-      // Clean up sessionStorage
       if (displayThread.id) {
         try {
           sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
@@ -169,8 +162,8 @@ export function ThreadView({
       if (displayThread.id) {
         try {
           sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
-        } catch (error) {
-          // Silently fail on unmount
+        } catch {
+          // no-op
         }
       }
     };
