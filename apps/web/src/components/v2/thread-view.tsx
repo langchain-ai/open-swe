@@ -129,7 +129,7 @@ export function ThreadView({
         const message = coerceMessageLikeToMessage(stringifiedMessage);
         const reconstructedMessage: HumanMessageSDK = {
           type: "human",
-          id: `optimistic-${message.id}`,
+          id: message.id,
           content: getMessageContentString(message.content),
         };
         setOptimisticMessage(reconstructedMessage);
@@ -347,7 +347,10 @@ export function ThreadView({
 
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage
-    ? [optimisticMessage, ...filteredMessages]
+    ? [
+        optimisticMessage,
+        ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
+      ]
     : filteredMessages;
 
   return (
