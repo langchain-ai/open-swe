@@ -10,10 +10,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import {
-  Layers3,
-  Plus,
-} from "lucide-react";
+import { Layers3, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { ThreadMetadata } from "./types";
 import { ThreadCard } from "./thread-card";
@@ -25,9 +22,7 @@ interface ThreadSwitcherProps {
   currentThread: ThreadMetadata;
 }
 
-export function ThreadSwitcher({
-  currentThread,
-}: ThreadSwitcherProps) {
+export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
 

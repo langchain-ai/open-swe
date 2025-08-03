@@ -310,9 +310,7 @@ export function ThreadView({
               </>
             )}
           </div>
-          <ThreadSwitcher
-            currentThread={displayThread}
-          />
+          <ThreadSwitcher currentThread={displayThread} />
           <ThemeToggle />
         </div>
       </div>

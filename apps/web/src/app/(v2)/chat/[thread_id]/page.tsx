@@ -13,14 +13,18 @@ import * as React from "react";
 import { use, useEffect, useRef, useState } from "react";
 import { Client, Thread } from "@langchain/langgraph-sdk";
 
-async function fetchInitialThread(client: Client<ManagerGraphState>, threadId: string, reqCount = 0): Promise<Thread<ManagerGraphState> | null> {
+async function fetchInitialThread(
+  client: Client<ManagerGraphState>,
+  threadId: string,
+  reqCount = 0,
+): Promise<Thread<ManagerGraphState> | null> {
   try {
     return await client.threads.get(threadId);
   } catch (e) {
     console.error("Failed to fetch thread", {
       requestCount: reqCount,
       error: e,
-    })
+    });
     // Retry a max of 5 times
     if (reqCount < 5) {
       return fetchInitialThread(client, threadId, reqCount + 1);
@@ -38,7 +42,8 @@ export default function ThreadPage({
 }: {
   params: Promise<ThreadPageProps>;
 }) {
-  const [initialFetchedThread, setInitialFetchedThread] = useState<Thread<ManagerGraphState> | null>(null);
+  const [initialFetchedThread, setInitialFetchedThread] =
+    useState<Thread<ManagerGraphState> | null>(null);
   const router = useRouter();
   const { thread_id } = use(params);
   const stream = useStream<ManagerGraphState>({
@@ -58,13 +63,14 @@ export default function ThreadPage({
   const thread = threads.find((t) => t.thread_id === thread_id);
 
   // We need a thread object for the hook, so use a dummy if not found
-  const dummyThread = thread || initialFetchedThread || {
-    thread_id,
-    values: {},
-    status: "idle" as const,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  };
+  const dummyThread = thread ||
+    initialFetchedThread || {
+      thread_id,
+      values: {},
+      status: "idle" as const,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
 
   const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,
@@ -78,13 +84,14 @@ export default function ThreadPage({
   useEffect(() => {
     if (!thread && !initialFetchedThread && !initialThreadFetched.current) {
       fetchInitialThread(stream.client as Client<ManagerGraphState>, thread_id)
-        .then(setInitialFetchedThread).finally(() => initialThreadFetched.current = true)
+        .then(setInitialFetchedThread)
+        .finally(() => (initialThreadFetched.current = true));
     }
 
     if (initialThreadFetched.current && initialFetchedThread && thread) {
       setInitialFetchedThread(null);
     }
-  }, [thread_id, thread])
+  }, [thread_id, thread]);
 
   if (statusError && "message" in statusError && "type" in statusError) {
     return (
@@ -95,7 +102,10 @@ export default function ThreadPage({
     );
   }
 
-  if ((!thread || threadsLoading) && (!initialFetchedThread || !initialThreadFetched.current)) {
+  if (
+    (!thread || threadsLoading) &&
+    (!initialFetchedThread || !initialThreadFetched.current)
+  ) {
     return <ThreadViewLoading onBackToHome={handleBackToHome} />;
   }
 
