@@ -21,8 +21,8 @@ import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
@@ -142,12 +142,12 @@ export async function openPullRequest(
 
   const openPrTool = createOpenPrToolFields();
   // use the router model since this is a simple task that doesn't need an advanced model
-  const model = await loadModel(config, Task.ROUTER);
+  const model = await loadModel(config, LLMTask.ROUTER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.ROUTER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.ROUTER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.ROUTER,
+    LLMTask.ROUTER,
   );
   const modelWithTool = model.bindTools([openPrTool], {
     tool_choice: openPrTool.name,

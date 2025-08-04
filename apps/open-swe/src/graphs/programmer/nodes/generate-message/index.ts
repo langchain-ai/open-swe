@@ -10,8 +10,8 @@ import {
   loadModel,
   Provider,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import {
   createShellTool,
   createApplyPatchTool,
@@ -267,10 +267,13 @@ export async function generateAction(
   config: GraphConfig,
 ): Promise<GraphUpdate> {
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
+  const modelName = modelManager.getModelNameForTask(
+    config,
+    LLMTask.PROGRAMMER,
+  );
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    LLMTask.PROGRAMMER,
   );
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
@@ -289,7 +292,7 @@ export async function generateAction(
     },
   );
 
-  const model = await loadModel(config, Task.PROGRAMMER, {
+  const model = await loadModel(config, LLMTask.PROGRAMMER, {
     providerTools: providerTools,
     providerMessages: providerMessages,
   });

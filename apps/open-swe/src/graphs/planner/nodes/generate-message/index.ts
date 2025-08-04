@@ -2,8 +2,8 @@ import {
   getModelManager,
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -86,12 +86,12 @@ export async function generateAction(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, Task.PLANNER);
+  const model = await loadModel(config, LLMTask.PLANNER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.PLANNER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PLANNER,
+    LLMTask.PLANNER,
   );
   const mcpTools = await getMcpTools(config);
 

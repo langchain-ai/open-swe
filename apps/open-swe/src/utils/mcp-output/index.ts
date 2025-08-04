@@ -1,5 +1,6 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../llms/index.js";
+import { loadModel } from "../llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { createLogger, LogLevel } from "../logger.js";
 import { DOCUMENT_TOC_GENERATION_PROMPT } from "./prompt.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
@@ -29,7 +30,7 @@ export async function handleMcpDocumentationOutput(
   });
 
   try {
-    const model = await loadModel(config, Task.SUMMARIZER);
+    const model = await loadModel(config, LLMTask.SUMMARIZER);
 
     const systemPrompt = DOCUMENT_TOC_GENERATION_PROMPT.replace(
       "{DOCUMENT_PAGE_CONTENT}",
