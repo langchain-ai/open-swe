@@ -277,7 +277,6 @@ const App: React.FC = () => {
             />
           ) : (
             <Box>
-              ls
               <Text>Streaming...</Text>
             </Box>
           )}

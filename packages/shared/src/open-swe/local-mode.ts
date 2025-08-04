@@ -18,8 +18,9 @@ export function isLocalMode(config?: GraphConfig): boolean {
  */
 export function getLocalWorkingDirectory(): string {
   return (
+    process.env.OPEN_SWE_LOCAL_PROJECT_PATH ||
     process.env.OPEN_SWE_PROJECT_PATH ||
-    path.join(process.env.HOME || "", "Desktop", "test")
+    process.cwd()
   );
 }
 
