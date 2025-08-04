@@ -8,7 +8,6 @@ import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { Sandbox } from "@daytonaio/sdk";
-import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
