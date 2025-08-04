@@ -8,6 +8,7 @@ import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js
 import {
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_PAT,
   LOCAL_MODE_HEADER,
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
@@ -86,7 +87,9 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     ? { [LOCAL_MODE_HEADER]: "true" }
     : getDefaultHeaders(config);
 
-  if (!isLocal) {
+  // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
+  // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
+  if (!isLocal && !(GITHUB_PAT in defaultHeaders)) {
     logger.info("Regenerating installation token before starting new session.");
     defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
       await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);

@@ -12,6 +12,7 @@ import {
   LOCAL_MODE_HEADER,
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
@@ -44,7 +45,9 @@ export async function startPlanner(
     ? { [LOCAL_MODE_HEADER]: "true" }
     : getDefaultHeaders(config);
 
-  if (!localMode) {
+  // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
+  // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
+  if (!localMode && !(GITHUB_PAT in defaultHeaders)) {
     logger.info("Regenerating installation token before starting planner run.");
     defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
       await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
