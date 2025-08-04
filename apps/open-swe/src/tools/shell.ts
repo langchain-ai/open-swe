@@ -27,6 +27,12 @@ export function createShellTool(
           env: DEFAULT_ENV,
         });
 
+        if (response.exitCode !== 0) {
+          const errorResult = response.result ?? response.artifacts?.stdout;
+          throw new Error(
+            `Command failed. Exit code: ${response.exitCode}\nResult: ${errorResult}`,
+          );
+        }
         return {
           result: response.result ?? `exit code: ${response.exitCode}`,
           status: "success",

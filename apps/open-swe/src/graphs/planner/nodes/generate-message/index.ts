@@ -102,7 +102,7 @@ export async function generateAction(
     createScratchpadTool(
       "when generating a final plan, after all context gathering is complete",
     ),
-    createGetURLContentTool(state, config),
+    createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
     ...mcpTools,
   ];

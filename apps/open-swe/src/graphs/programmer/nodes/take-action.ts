@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { isAIMessage, ToolMessage, AIMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
@@ -62,7 +62,7 @@ export async function takeAction(
   const searchTool = createGrepTool(state, config);
   const textEditorTool = createTextEditorTool(state, config);
   const installDependenciesTool = createInstallDependenciesTool(state, config);
-  const getURLContentTool = createGetURLContentTool(state, config);
+  const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
 
@@ -86,7 +86,7 @@ export async function takeAction(
     allTools.map((tool) => [tool.name, tool]),
   );
 
-  const toolCalls = lastMessage.tool_calls;
+  let toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
   }
@@ -97,6 +97,7 @@ export async function takeAction(
     config,
   );
 
+  let modifiedMessage: AIMessage | undefined;
   if (wasFiltered) {
     // If all tool calls were filtered out, we need to handle this differently
     if (filteredToolCalls.length === 0) {
@@ -109,20 +110,13 @@ export async function takeAction(
     }
 
     // Create a modified message with only safe tool calls
-    const modifiedMessage = {
+    modifiedMessage = new AIMessage({
       ...lastMessage,
       tool_calls: filteredToolCalls,
-    };
-
-    // Replace the last message in state
-    const modifiedMessages = [
-      ...state.internalMessages.slice(0, -1),
-      modifiedMessage,
-    ];
-    return new Command({
-      goto: "take-action",
-      update: { internalMessages: modifiedMessages },
     });
+
+    // Continue with the filtered tool calls
+    toolCalls = filteredToolCalls;
   }
 
   const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
@@ -327,9 +321,16 @@ export async function takeAction(
         )
       : []),
   ];
+
+  // Include the modified message if it was filtered
+  const internalMessagesUpdate =
+    wasFiltered && modifiedMessage
+      ? [modifiedMessage, ...toolCallResults]
+      : toolCallResults;
+
   const commandUpdate: GraphUpdate = {
     messages: userFacingMessagesUpdate,
-    internalMessages: toolCallResults,
+    internalMessages: internalMessagesUpdate,
     ...(branchName && { branchName }),
     ...(updatedTaskPlan && {
       taskPlan: updatedTaskPlan,

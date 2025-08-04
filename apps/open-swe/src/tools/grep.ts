@@ -49,7 +49,9 @@ export function createGrepTool(
         ) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           successResult = `Exit code 1. No results found.\n\n${errorResult}`;
-        } else if (response.exitCode > 1) {
+        }
+
+        if (response.exitCode > 1) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
             `Failed to run grep search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
@@ -62,20 +64,29 @@ export function createGrepTool(
         };
       } catch (e) {
         if (isLocalMode(config)) {
-          // Local mode error handling
-          throw e;
+          // Local mode error handling - return error object instead of throwing
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          return {
+            result: `Failed to run grep search command: ${errorMessage}`,
+            status: "error" as const,
+          };
         } else {
           // Sandbox mode error handling
           const errorFields = getSandboxErrorFields(e);
           if (errorFields) {
             const errorResult =
               errorFields.result ?? errorFields.artifacts?.stdout;
-            throw new Error(
-              `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-            );
+            return {
+              result: `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+              status: "error" as const,
+            };
           }
 
-          throw e;
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          return {
+            result: `Failed to run grep search command: ${errorMessage}`,
+            status: "error" as const,
+          };
         }
       }
     },

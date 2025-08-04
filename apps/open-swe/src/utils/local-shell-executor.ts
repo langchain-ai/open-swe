@@ -9,8 +9,8 @@ export interface ExecuteResponse {
   exitCode: number;
   result: string;
   artifacts?: {
-    stdout?: string;
-    stderr?: string;
+    stdout: string;
+    stderr: string;
   };
 }
 
@@ -79,7 +79,7 @@ export class LocalShellExecutor {
         result: stdout,
         artifacts: {
           stdout,
-          stderr: stderr || undefined,
+          stderr,
         },
       };
     } catch (error: any) {
@@ -163,7 +163,7 @@ export class LocalShellExecutor {
             result: stdout,
             artifacts: {
               stdout,
-              stderr: stderr || undefined,
+              stderr,
             },
           });
         });

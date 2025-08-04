@@ -9,6 +9,13 @@ import {
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
 
+export type ToolCall = {
+  name: string;
+  args: Record<string, any>;
+  id?: string;
+  type?: "tool_call";
+};
+
 interface LogChunk {
   event: string;
   data: any;
@@ -18,8 +25,8 @@ interface LogChunk {
 /**
  * Format a tool call arguments into a clean, readable string
  */
-function formatToolCallArgs(tool: any): string {
-  const toolName = tool.name || "unknown";
+function formatToolCallArgs(tool: ToolCall): string {
+  const toolName = tool.name || "unknown tool";
 
   if (!tool.args) return toolName;
 
@@ -31,19 +38,25 @@ function formatToolCallArgs(tool: any): string {
       return `${toolName}: ${tool.args.command || ""}`;
     }
 
-    case "grep":
-    case "grep_search": {
+    case "grep": {
       const query = tool.args.query || "";
-      const path = tool.args.path || "";
-      return `${toolName}: "${query}" in ${path}`;
+      return `${toolName}: "${query}"`;
     }
 
     case "view": {
       return `${toolName}: ${tool.args.path || ""}`;
     }
 
+    case "str_replace_based_edit_tool": {
+      const command = tool.args.command || "";
+      const path = tool.args.path || "";
+      return `${toolName}: ${command} ${path}`;
+    }
+
     case "search_documents_for": {
-      return `${toolName}: "${tool.args.query || ""}"`;
+      const query = tool.args.query || "";
+      const url = tool.args.url || "";
+      return `${toolName}: "${query}" in ${url}`;
     }
 
     case "get_url_content": {
@@ -64,20 +77,24 @@ function formatToolCallArgs(tool: any): string {
     }
 
     case "install_dependencies": {
-      const deps = tool.args.dependencies || [];
-      return `${toolName}: ${deps.length} dependencies`;
+      const command = tool.args.command || [];
+      if (Array.isArray(command)) {
+        return `${toolName}: ${command.join(" ")}`;
+      }
+      return `${toolName}: ${command}`;
     }
 
-    case "create_text_editor": {
-      return `${toolName}: ${tool.args.file_path || ""}`;
+    case "open_pr": {
+      const title = tool.args.title || "";
+      return `${toolName}: "${title}"`;
     }
 
     case "scratchpad": {
-      const content = tool.args.content || "";
-      const contentMaxLength = 50;
-      return content.length > contentMaxLength
-        ? `${toolName}: ${content.slice(0, contentMaxLength)}...`
-        : `${toolName}: ${content}`;
+      const scratchpad = tool.args.scratchpad || [];
+      if (Array.isArray(scratchpad)) {
+        return `${toolName}: ${scratchpad.length} notes`;
+      }
+      return `${toolName}: ${scratchpad}`;
     }
 
     case "command_safety_evaluator": {
@@ -97,6 +114,57 @@ function formatToolCallArgs(tool: any): string {
       }
       return `${toolName}: routing decision`;
     }
+
+    case "request_human_help": {
+      const helpRequest = tool.args.help_request || "";
+      return `${toolName}: "${helpRequest}"`;
+    }
+
+    case "update_plan": {
+      const reasoning = tool.args.update_plan_reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "mark_task_completed": {
+      const summary = tool.args.completed_task_summary || "";
+      return `${toolName}: ${summary.slice(0, 50)}...`;
+    }
+
+    case "mark_task_not_completed": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "diagnose_error": {
+      const diagnosis = tool.args.diagnosis || "";
+      return `${toolName}: ${diagnosis.slice(0, 50)}...`;
+    }
+
+    case "write_technical_notes": {
+      const notes = tool.args.notes || "";
+      return `${toolName}: ${notes.slice(0, 50)}...`;
+    }
+
+    case "summarize_conversation_history": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_completed": {
+      const review = tool.args.review || "";
+      return `${toolName}: ${review.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_not_complete": {
+      const review = tool.args.review || "";
+      const actions = tool.args.additional_actions || [];
+      return `${toolName}: ${review.slice(0, 30)}... (${actions.length} actions)`;
+    }
+
+    case "review_started": {
+      const started = tool.args.review_started || false;
+      return `${toolName}: ${started ? "started" : "not started"}`;
+    }
   }
   return "";
 }
@@ -113,9 +181,35 @@ function formatToolResult(message: ToolMessage): string {
   const toolName = message.name || "tool";
   switch (toolName.toLowerCase()) {
     case "shell":
-    case "grep_search":
-    case "search":
       return content;
+    case "grep": {
+      if (content.includes("Exit code 1. No results found.")) {
+        return "No results found";
+      }
+      // Count lines to show number of matches
+      const lines = content.split("\n").filter((line) => line.trim());
+      return `${lines.length} matches found`;
+    }
+    case "view": {
+      // Show file size/content length
+      const contentLength = content.length;
+      if (contentLength > 1000) {
+        return `${contentLength} characters (truncated)`;
+      }
+      return `${contentLength} characters`;
+    }
+    case "str_replace_based_edit_tool":
+      if (content.includes("Error")) {
+        return `Error: ${content}`;
+      }
+      return "File edited successfully";
+    case "search_documents_for":
+      if (content.includes("No content found")) {
+        return "No content found at URL";
+      }
+      return `${content.length} characters of search results`;
+    case "get_url_content":
+      return `${content.length} characters of content`;
     case "apply_patch":
       return content.includes("Error")
         ? `Error: ${content}`
@@ -124,6 +218,13 @@ function formatToolResult(message: ToolMessage): string {
       return content.includes("Error")
         ? `Error: ${content}`
         : "Dependencies installed successfully";
+    case "command_safety_evaluator":
+      try {
+        const evaluation = JSON.parse(content);
+        return `Safety: ${evaluation.is_safe ? "SAFE" : "UNSAFE"} (${evaluation.risk_level} risk)`;
+      } catch {
+        return content;
+      }
     default:
       if (content.length > 200) {
         return content.slice(0, 200) + "...";

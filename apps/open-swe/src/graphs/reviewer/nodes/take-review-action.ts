@@ -3,6 +3,7 @@ import {
   isAIMessage,
   isToolMessage,
   ToolMessage,
+  AIMessage,
 } from "@langchain/core/messages";
 import {
   createInstallDependenciesTool,
@@ -67,7 +68,7 @@ export async function takeReviewerActions(
     allTools.map((tool) => [tool.name, tool]),
   );
 
-  const toolCalls = lastMessage.tool_calls;
+  let toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
   }
@@ -78,6 +79,7 @@ export async function takeReviewerActions(
     config,
   );
 
+  let modifiedMessage: AIMessage | undefined;
   if (wasFiltered) {
     // If all tool calls were filtered out, we need to handle this differently
     if (filteredToolCalls.length === 0) {
@@ -90,20 +92,13 @@ export async function takeReviewerActions(
     }
 
     // Create a modified message with only safe tool calls
-    const modifiedMessage = {
+    modifiedMessage = new AIMessage({
       ...lastMessage,
       tool_calls: filteredToolCalls,
-    };
-
-    // Replace the last message in state
-    const modifiedMessages = [
-      ...state.reviewerMessages.slice(0, -1),
-      modifiedMessage,
-    ];
-    return new Command({
-      goto: "take-review-action",
-      update: { reviewerMessages: modifiedMessages },
     });
+
+    // Continue with the filtered tool calls
+    toolCalls = filteredToolCalls;
   }
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
@@ -253,9 +248,16 @@ export async function takeReviewerActions(
         )
       : []),
   ];
+
+  // Include the modified message if it was filtered
+  const reviewerMessagesUpdate =
+    wasFiltered && modifiedMessage
+      ? [modifiedMessage, ...toolCallResults]
+      : toolCallResults;
+
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
-    reviewerMessages: toolCallResults,
+    reviewerMessages: reviewerMessagesUpdate,
     ...(branchName && { branchName }),
     ...(updatedTaskPlan && {
       taskPlan: updatedTaskPlan,

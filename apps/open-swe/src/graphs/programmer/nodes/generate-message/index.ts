@@ -177,7 +177,7 @@ async function createToolsAndPrompt(
     createShellTool(state, config),
     createRequestHumanHelpToolFields(),
     createUpdatePlanToolFields(),
-    createGetURLContentTool(state, config),
+    createGetURLContentTool(state),
     createInstallDependenciesTool(state, config),
     createMarkTaskCompletedToolFields(),
     createSearchDocumentForTool(state, config),

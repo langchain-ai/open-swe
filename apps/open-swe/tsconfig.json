@@ -22,12 +22,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": [
-    "src/**/*.ts",
-    "src/**/*.js",
-    "evals/**/*.ts",
-    "scripts/**/*.ts",
-    "jest.setup.cjs"
-  ],
+  "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
   "exclude": ["node_modules", "dist"]
 }

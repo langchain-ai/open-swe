@@ -1,14 +1,12 @@
 import { Sandbox } from "@daytonaio/sdk";
 
-export interface LocalExecutionArtifacts {
-  stdout?: string;
-  stderr?: string;
-}
-
 export interface LocalExecuteResponse {
   exitCode: number;
   result: string;
-  artifacts?: LocalExecutionArtifacts;
+  artifacts?: {
+    stdout: string;
+    stderr?: string;
+  };
 }
 
 export interface ExecuteCommandOptions {

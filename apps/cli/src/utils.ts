@@ -56,11 +56,6 @@ export async function submitFeedback({
         ],
       },
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-      config: {
-        configurable: {
-          [LOCAL_MODE_HEADER]: "true",
-        },
-      },
     });
 
     let programmerStreamed = false;

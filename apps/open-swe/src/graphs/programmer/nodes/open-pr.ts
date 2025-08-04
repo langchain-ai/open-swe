@@ -96,23 +96,6 @@ export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  // Skip PR creation in local mode
-  if (isLocalMode(config)) {
-    logger.info("Skipping PR creation in local mode");
-    return {
-      messages: [
-        new ToolMessage({
-          id: uuidv4(),
-          tool_call_id: "local-mode-skip",
-          content:
-            "Pull request creation skipped in local mode. Changes have been committed to your local repository.",
-          name: "open_pr",
-          status: "success",
-        }),
-      ],
-    };
-  }
-
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
 
   const { sandbox, codebaseTree, dependenciesInstalled } =

@@ -3,6 +3,8 @@ import React, { useState, useEffect } from "react";
 import { render, Box, Text, useInput } from "ink";
 import { Command } from "commander";
 import { OPEN_SWE_CLI_VERSION } from "./constants.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 // Handle graceful exit on Ctrl+C and Ctrl+K
 process.on("SIGINT", () => {
@@ -30,23 +32,6 @@ program
 
 // Always run in local mode
 process.env.OPEN_SWE_LOCAL_MODE = "true";
-
-// Show usage help if help requested
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log(`
-Open SWE CLI - Local Mode
-
-Usage:
-  yarn cli [options]
-  
-Options:
-  --help, -h              # Show this help message
-
-Examples:
-  yarn cli                # Start CLI to modify files in current directory
-`);
-  process.exit(0);
-}
 
 console.log("🏠 Starting Open SWE CLI in Local Mode");
 console.log("   Working directory:", process.cwd());
@@ -190,12 +175,10 @@ const App: React.FC = () => {
     }
   }, [streamingPhase, plannerFeedback, plannerThreadId]);
 
-  // Main UI: logs area + input prompt
-  // Calculate available space for logs based on whether welcome message is shown
-  const headerHeight = 0; // Welcome message is now above input bar, not at top
-  const inputHeight = 4; // Fixed input area height (increased due to padding)
-  const welcomeHeight = hasStartedChat ? 0 : 8; // Welcome message height when shown
-  const paddingHeight = 3; // Extra padding to prevent overlap
+  const headerHeight = 0;
+  const inputHeight = 4;
+  const welcomeHeight = hasStartedChat ? 0 : 8;
+  const paddingHeight = 3;
   const availableLogHeight = Math.max(
     5,
     process.stdout.rows -
@@ -294,6 +277,7 @@ const App: React.FC = () => {
             />
           ) : (
             <Box>
+              ls
               <Text>Streaming...</Text>
             </Box>
           )}
@@ -302,7 +286,9 @@ const App: React.FC = () => {
 
       {/* Local mode indicator underneath the input bar */}
       <Box paddingX={2} paddingY={0}>
-        <Text>🏠 Local Mode - Working on {process.cwd()}</Text>
+        <Text>
+          Working on {process.env.OPEN_SWE_LOCAL_PROJECT_PATH} • Ctrl+K to exit
+        </Text>
       </Box>
     </Box>
   );

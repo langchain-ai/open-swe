@@ -27,14 +27,9 @@ export function createViewTool(
           throw new Error(`Unknown command: ${command}`);
         }
 
-        let workDir;
-        if (isLocalMode(config)) {
-          // In local mode, use the local working directory
-          workDir = getLocalWorkingDirectory();
-        } else {
-          // In sandbox mode, use the sandbox path
-          workDir = getRepoAbsolutePath(state.targetRepository);
-        }
+        const workDir = isLocalMode(config)
+          ? getLocalWorkingDirectory()
+          : getRepoAbsolutePath(state.targetRepository);
 
         let result;
         if (isLocalMode(config)) {
