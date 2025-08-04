@@ -12,7 +12,11 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "../utils/local-shell-executor.js";
+import {
+  getLocalShellExecutor,
+  ExecuteResponse,
+} from "../utils/local-shell-executor.js";
+import { LocalExecuteResponse } from "../utils/shell-executor/types.js";
 import { promises as fs } from "fs";
 import { join } from "path";
 
@@ -70,7 +74,7 @@ async function applyPatchWithGit(
     }
 
     // Execute git apply with --verbose for detailed error messages (same for both modes)
-    let response;
+    let response: ExecuteResponse | LocalExecuteResponse;
     if (isLocalMode(config)) {
       const executor = getLocalShellExecutor(workDir);
       response = await executor.executeCommand(
@@ -188,7 +192,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
 
       // If Git successfully applied the patch, read the updated file and return success
       if (gitResult.success) {
-        let readUpdatedResult;
+        let readUpdatedResult: FileOperationResult;
 
         if (isLocalMode(config)) {
           readUpdatedResult = await readFile({
@@ -274,7 +278,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         );
       }
 
-      let writeFileResult;
+      let writeFileResult: FileOperationResult;
 
       if (isLocalMode(config)) {
         writeFileResult = await writeFile({

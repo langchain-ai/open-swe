@@ -79,7 +79,7 @@ Only respond with the JSON object, no other text.`;
         const responseText = response.content as string;
 
         // Try to parse the JSON response
-        let evaluation;
+        let evaluation: z.infer<typeof SafetyEvaluationSchema>;
         try {
           // Extract JSON from the response (in case there's extra text)
           const jsonMatch = responseText.match(/\{[\s\S]*\}/);

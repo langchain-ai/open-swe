@@ -96,7 +96,6 @@ export async function takeAction(
     toolCalls,
     config,
   );
-
   let modifiedMessage: AIMessage | undefined;
   if (wasFiltered) {
     // If all tool calls were filtered out, we need to handle this differently
@@ -268,25 +267,7 @@ export async function takeAction(
         : undefined;
       updatedTaskPlan = result.updatedTaskPlan;
     } else {
-      logger.info("Skipping GitHub commit operations in local mode");
-      const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-      const commitResult = await executor.executeCommand(
-        "git add . && git commit -m 'Auto-commit changes from Open SWE agent'",
-        getLocalWorkingDirectory(),
-        undefined,
-        30, // timeout in seconds
-        true, // localMode
-      );
-
-      if (commitResult.exitCode !== 0) {
-        logger.error("Failed to commit changes in local mode", {
-          exitCode: commitResult.exitCode,
-          result: commitResult.result,
-        });
-        // Don't throw error, just log it to avoid breaking the flow
-      } else {
-        logger.info("Successfully committed changes in local mode");
-      }
+      logger.info("Skipping commit operations in local mode");
     }
   }
 

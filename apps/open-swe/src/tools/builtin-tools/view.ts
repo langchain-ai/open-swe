@@ -31,7 +31,7 @@ export function createViewTool(
           ? getLocalWorkingDirectory()
           : getRepoAbsolutePath(state.targetRepository);
 
-        let result;
+        let result: string;
         if (isLocalMode(config)) {
           // Local mode: use ShellExecutor for file viewing
           const executor = createShellExecutor(config);
