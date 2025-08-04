@@ -36,7 +36,7 @@ export async function submitFeedback({
     const client = new Client({
       apiUrl: LANGGRAPH_URL,
       defaultHeaders: {
-        [LOCAL_MODE_HEADER]: "true", 
+        [LOCAL_MODE_HEADER]: "true",
       },
     });
 

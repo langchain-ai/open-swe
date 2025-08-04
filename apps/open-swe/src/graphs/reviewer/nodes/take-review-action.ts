@@ -197,23 +197,27 @@ export async function takeReviewerActions(
     logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
       changedFiles,
     });
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    const result = await checkoutBranchAndCommit(
-      config,
-      state.targetRepository,
-      sandbox,
-      {
-        branchName,
-        githubInstallationToken,
-        taskPlan: state.taskPlan,
-        githubIssueId: state.githubIssueId,
-      },
-    );
-    branchName = result.branchName;
-    pullRequestNumber = result.updatedTaskPlan
-      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-      : undefined;
-    updatedTaskPlan = result.updatedTaskPlan;
+    if (!isLocalMode(config)) {
+      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const result = await checkoutBranchAndCommit(
+        config,
+        state.targetRepository,
+        sandbox,
+        {
+          branchName,
+          githubInstallationToken,
+          taskPlan: state.taskPlan,
+          githubIssueId: state.githubIssueId,
+        },
+      );
+      branchName = result.branchName;
+      pullRequestNumber = result.updatedTaskPlan
+        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+        : undefined;
+      updatedTaskPlan = result.updatedTaskPlan;
+    } else {
+      logger.info("Skipping commit operations in local mode");
+    }
   }
 
   let wereDependenciesInstalled: boolean | null = null;
