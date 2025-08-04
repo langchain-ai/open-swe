@@ -4114,6 +4114,7 @@ __metadata:
     "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/jest": ^29.5.0
+    "@types/jsonwebtoken": ^9.0.10
     "@types/node": ^22.13.5
     diff: ^8.0.1
     dotenv: ^16.4.7
@@ -4124,6 +4125,7 @@ __metadata:
     eslint-plugin-prettier: ^4.2.1
     hono: ^4.8.3
     jest: ^29.7.0
+    jsonwebtoken: ^9.0.2
     langchain: ^0.3.26
     langsmith: ^0.3.29
     prettier: ^3.5.2
