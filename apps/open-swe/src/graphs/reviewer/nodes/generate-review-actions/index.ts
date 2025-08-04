@@ -3,8 +3,8 @@ import {
   loadModel,
   Provider,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -189,10 +189,10 @@ export async function generateReviewActions(
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.REVIEWER,
+    LLMTask.REVIEWER,
   );
   const isAnthropicModel = modelName.includes("claude-");
 
@@ -201,7 +201,7 @@ export async function generateReviewActions(
     config,
   );
 
-  const model = await loadModel(config, Task.REVIEWER, {
+  const model = await loadModel(config, LLMTask.REVIEWER, {
     providerTools,
     providerMessages,
   });

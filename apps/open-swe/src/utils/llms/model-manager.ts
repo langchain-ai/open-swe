@@ -4,10 +4,12 @@ import {
 } from "langchain/chat_models/universal";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
-import { Task } from "./constants.js";
+import {
+  LLMTask,
+  TASK_TO_CONFIG_DEFAULTS_MAP,
+} from "@open-swe/shared/open-swe/llm-task";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
-import { TASK_TO_CONFIG_DEFAULTS_MAP } from "./constants.js";
 import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
@@ -101,7 +103,7 @@ export class ModelManager {
   /**
    * Load a single model (no fallback during loading)
    */
-  async loadModel(graphConfig: GraphConfig, task: Task) {
+  async loadModel(graphConfig: GraphConfig, task: LLMTask) {
     const baseConfig = this.getBaseConfigForTask(graphConfig, task);
     const model = await this.initializeModel(baseConfig, graphConfig);
     return model;
@@ -199,7 +201,7 @@ export class ModelManager {
 
   public getModelConfigs(
     config: GraphConfig,
-    task: Task,
+    task: LLMTask,
     selectedModel: ConfigurableModel,
   ) {
     const configs: ModelLoadConfig[] = [];
@@ -264,7 +266,7 @@ export class ModelManager {
   /**
    * Get the model name for a task from GraphConfig
    */
-  public getModelNameForTask(config: GraphConfig, task: Task): string {
+  public getModelNameForTask(config: GraphConfig, task: LLMTask): string {
     const baseConfig = this.getBaseConfigForTask(config, task);
     return baseConfig.modelName;
   }
@@ -274,34 +276,34 @@ export class ModelManager {
    */
   private getBaseConfigForTask(
     config: GraphConfig,
-    task: Task,
+    task: LLMTask,
   ): ModelLoadConfig {
     const taskMap = {
-      [Task.PLANNER]: {
+      [LLMTask.PLANNER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
-      [Task.PROGRAMMER]: {
+      [LLMTask.PROGRAMMER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
-      [Task.REVIEWER]: {
+      [LLMTask.REVIEWER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
-      [Task.ROUTER]: {
+      [LLMTask.ROUTER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
         temperature: config.configurable?.[`${task}Temperature`] ?? 0,
       },
-      [Task.SUMMARIZER]: {
+      [LLMTask.SUMMARIZER]: {
         modelName:
           config.configurable?.[`${task}ModelName`] ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
@@ -341,29 +343,29 @@ export class ModelManager {
    */
   private getDefaultModelForProvider(
     provider: Provider,
-    task: Task,
+    task: LLMTask,
   ): ModelLoadConfig | null {
-    const defaultModels: Record<Provider, Record<Task, string>> = {
+    const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
-        [Task.PLANNER]: "claude-sonnet-4-0",
-        [Task.PROGRAMMER]: "claude-sonnet-4-0",
-        [Task.REVIEWER]: "claude-sonnet-4-0",
-        [Task.ROUTER]: "claude-3-5-haiku-latest",
-        [Task.SUMMARIZER]: "claude-sonnet-4-0",
+        [LLMTask.PLANNER]: "claude-sonnet-4-0",
+        [LLMTask.PROGRAMMER]: "claude-sonnet-4-0",
+        [LLMTask.REVIEWER]: "claude-sonnet-4-0",
+        [LLMTask.ROUTER]: "claude-3-5-haiku-latest",
+        [LLMTask.SUMMARIZER]: "claude-sonnet-4-0",
       },
       "google-genai": {
-        [Task.PLANNER]: "gemini-2.5-flash",
-        [Task.PROGRAMMER]: "gemini-2.5-pro",
-        [Task.REVIEWER]: "gemini-2.5-flash",
-        [Task.ROUTER]: "gemini-2.5-flash",
-        [Task.SUMMARIZER]: "gemini-2.5-pro",
+        [LLMTask.PLANNER]: "gemini-2.5-flash",
+        [LLMTask.PROGRAMMER]: "gemini-2.5-pro",
+        [LLMTask.REVIEWER]: "gemini-2.5-flash",
+        [LLMTask.ROUTER]: "gemini-2.5-flash",
+        [LLMTask.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
-        [Task.PLANNER]: "o3",
-        [Task.PROGRAMMER]: "gpt-4.1",
-        [Task.REVIEWER]: "o3",
-        [Task.ROUTER]: "gpt-4o-mini",
-        [Task.SUMMARIZER]: "gpt-4.1-mini",
+        [LLMTask.PLANNER]: "o3",
+        [LLMTask.PROGRAMMER]: "gpt-4.1",
+        [LLMTask.REVIEWER]: "o3",
+        [LLMTask.ROUTER]: "gpt-4o-mini",
+        [LLMTask.SUMMARIZER]: "gpt-4.1-mini",
       },
     };
 

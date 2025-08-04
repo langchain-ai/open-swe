@@ -17,8 +17,8 @@ import {
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
@@ -117,12 +117,12 @@ export async function finalReview(
   const completedTool = createCodeReviewMarkTaskCompletedFields();
   const incompleteTool = createCodeReviewMarkTaskNotCompleteFields();
   const tools = [completedTool, incompleteTool];
-  const model = await loadModel(config, Task.REVIEWER);
+  const model = await loadModel(config, LLMTask.REVIEWER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.REVIEWER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.REVIEWER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.REVIEWER,
+    LLMTask.REVIEWER,
   );
   const modelWithTools = model.bindTools(tools, {
     tool_choice: "any",

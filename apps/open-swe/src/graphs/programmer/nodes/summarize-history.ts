@@ -5,7 +5,8 @@ import {
   GraphUpdate,
   PlanItem,
 } from "@open-swe/shared/open-swe/types";
-import { loadModel, Task } from "../../../utils/llms/index.js";
+import { loadModel } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import {
   AIMessage,
   BaseMessage,
@@ -148,9 +149,12 @@ export async function summarizeHistory(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const model = await loadModel(config, Task.SUMMARIZER);
+  const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.SUMMARIZER);
+  const modelName = modelManager.getModelNameForTask(
+    config,
+    LLMTask.SUMMARIZER,
+  );
 
   const plan = getActivePlanItems(state.taskPlan);
   const conversationHistoryToSummarize = await getMessagesSinceLastSummary(

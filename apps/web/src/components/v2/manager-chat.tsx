@@ -8,12 +8,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Bot, Copy, CopyCheck, ArrowUp, User, AlertCircle } from "lucide-react";
 import { Textarea } from "../ui/textarea";
 import { Button } from "../ui/button";
-import { cn } from "@/lib/utils";
 import { isAIMessageSDK } from "@/lib/langchain-messages";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
+import { parsePartialJson } from "@langchain/core/output_parsers";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -70,11 +70,35 @@ interface ManagerChatProps {
   isLoading: boolean;
   cancelRun: () => void;
   errorState?: ErrorState | null;
+  githubUser?: {
+    login: string;
+    avatar_url: string;
+    html_url: string;
+    name: string | null;
+    email: string | null;
+  };
 }
 
 function extractResponseFromMessage(message: Message): string {
   if (!isAIMessageSDK(message)) {
     return getMessageContentString(message.content);
+  }
+  if (
+    Array.isArray(message.content) &&
+    ["input_json_delta", "tool_use"].includes(
+      message.content[0].type as string,
+    ) &&
+    "input" in message.content[0] &&
+    message.content[0].input
+  ) {
+    try {
+      const parsedJson = parsePartialJson(message.content[0].input as string);
+      if (parsedJson.response) {
+        return parsedJson.response;
+      }
+    } catch {
+      // no-op
+    }
   }
   const toolCall = message.tool_calls?.[0];
   const response = toolCall?.args?.response;
@@ -85,6 +109,50 @@ function extractResponseFromMessage(message: Message): string {
   return response;
 }
 
+function LoadingMessageDots() {
+  return (
+    <div className="text-foreground flex items-center space-x-1 overflow-x-hidden text-sm">
+      <style jsx>{`
+        @keyframes dotBounce {
+          0%,
+          80%,
+          100% {
+            transform: scale(0.8);
+            opacity: 0.5;
+          }
+          40% {
+            transform: scale(1.2);
+            opacity: 1;
+          }
+        }
+        .dot-bounce {
+          animation: dotBounce 1.4s infinite ease-in-out;
+        }
+      `}</style>
+      <div className="flex space-x-1">
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "0ms",
+          }}
+        />
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "200ms",
+          }}
+        />
+        <div
+          className="dot-bounce h-1 w-1 rounded-full bg-current"
+          style={{
+            animationDelay: "400ms",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ManagerChat({
   messages,
   chatInput,
@@ -93,6 +161,7 @@ export function ManagerChat({
   isLoading,
   cancelRun,
   errorState,
+  githubUser,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
@@ -112,31 +181,47 @@ export function ManagerChat({
                   return (
                     <div
                       key={message.id}
-                      className="group bg-muted flex gap-3 rounded-lg p-3"
+                      className="group bg-muted flex items-start gap-3 rounded-lg p-3"
                     >
-                      <div className="flex-shrink-0">
+                      <div className="mt-0.5 flex-shrink-0">
                         {message.type === "human" ? (
-                          <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full">
-                            <User className="text-muted-foreground h-3 w-3" />
-                          </div>
+                          githubUser?.avatar_url ? (
+                            <div className="bg-muted flex h-6 w-6 items-center justify-center overflow-hidden rounded-full">
+                              <img
+                                src={githubUser.avatar_url}
+                                alt={githubUser.login}
+                                className="h-full w-full object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <div className="bg-muted flex h-6 w-6 items-center justify-center rounded-full">
+                              <User className="text-muted-foreground h-4 w-4" />
+                            </div>
+                          )
                         ) : (
                           <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-950/50">
-                            <Bot className="h-3 w-3 text-blue-700 dark:text-blue-300" />
+                            <Bot className="size-4.5 text-blue-700 dark:text-blue-300" />
                           </div>
                         )}
                       </div>
                       <div className="relative min-w-0 flex-1 space-y-1 overflow-x-hidden">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
-                            {message.type === "human" ? "You" : "Agent"}
+                            {message.type === "human"
+                              ? githubUser?.login || "You"
+                              : "Open SWE"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
                             <MessageCopyButton content={messageContentString} />
                           </div>
                         </div>
-                        <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
-                          {messageContentString}
-                        </BasicMarkdownText>
+                        {messageContentString ? (
+                          <BasicMarkdownText className="text-foreground overflow-x-hidden text-sm">
+                            {messageContentString}
+                          </BasicMarkdownText>
+                        ) : (
+                          <LoadingMessageDots />
+                        )}
                       </div>
                     </div>
                   );

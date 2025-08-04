@@ -8,8 +8,8 @@ import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { getMissingMessages } from "../../../utils/github/issue-messages.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";
@@ -119,10 +119,10 @@ export async function determineNeedsContext(
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
     getMissingMessages(state, config),
-    loadModel(config, Task.ROUTER),
+    loadModel(config, LLMTask.ROUTER),
   ]);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.ROUTER);
+  const modelName = modelManager.getModelNameForTask(config, LLMTask.ROUTER);
   if (!missingMessages.length) {
     throw new Error(
       "Can not determine if more context is needed if there are no missing messages.",
@@ -130,7 +130,7 @@ export async function determineNeedsContext(
   }
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.ROUTER,
+    LLMTask.ROUTER,
   );
   const modelWithTools = model.bindTools([determineContextTool], {
     tool_choice: determineContextTool.name,

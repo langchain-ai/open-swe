@@ -18,7 +18,10 @@ import {
 } from "@open-swe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
-import { HumanMessage } from "@langchain/core/messages";
+import {
+  coerceMessageLikeToMessage,
+  HumanMessage,
+} from "@langchain/core/messages";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
@@ -43,11 +46,13 @@ import {
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
+import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
+import { getMessageContentString } from "@open-swe/shared/messages";
+import { useUser } from "@/hooks/useUser";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadMetadata;
-  allDisplayThreads: ThreadMetadata[];
   onBackToHome: () => void;
 }
 
@@ -87,9 +92,9 @@ const joinTokenData = (
 export function ThreadView({
   stream,
   displayThread,
-  allDisplayThreads,
   onBackToHome,
 }: ThreadViewProps) {
+  const { user } = useUser();
   const [chatInput, setChatInput] = useState("");
   const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
     "planner",
@@ -100,6 +105,8 @@ export function ThreadView({
     useState<ManagerGraphState["programmerSession"]>();
   const [isTaskSidebarOpen, setIsTaskSidebarOpen] = useState(false);
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
+  const [optimisticMessage, setOptimisticMessage] =
+    useState<HumanMessageSDK | null>(null);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -107,6 +114,60 @@ export function ThreadView({
     });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
+
+  // Load optimistic message from sessionStorage
+  useEffect(() => {
+    try {
+      const storedData = sessionStorage.getItem(
+        `lg:initial-message:${displayThread.id}`,
+      );
+      if (storedData) {
+        const { message: stringifiedMessage } = JSON.parse(storedData);
+        const message = coerceMessageLikeToMessage(stringifiedMessage);
+        const reconstructedMessage: HumanMessageSDK = {
+          type: "human",
+          id: message.id,
+          content: getMessageContentString(message.content),
+        };
+        setOptimisticMessage(reconstructedMessage);
+      }
+    } catch (error) {
+      console.error(
+        "Failed to load optimistic message from sessionStorage:",
+        error,
+      );
+    }
+  }, [displayThread.id, stream.messages.length]);
+
+  // If there's more than 1 message, we've received both the human and ai message, so we can remove the optimistic message
+  useEffect(() => {
+    if (stream.messages.length > 1 && optimisticMessage) {
+      setOptimisticMessage(null);
+      if (displayThread.id) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
+        } catch (error) {
+          console.error(
+            "Failed to remove optimistic message from sessionStorage:",
+            error,
+          );
+        }
+      }
+    }
+  }, [stream.messages, optimisticMessage, displayThread.id]);
+
+  // Clean up sessionStorage on unmount
+  useEffect(() => {
+    return () => {
+      if (displayThread.id) {
+        try {
+          sessionStorage.removeItem(`lg:initial-message:${displayThread.id}`);
+        } catch {
+          // no-op
+        }
+      }
+    };
+  }, [displayThread.id]);
 
   const [customPlannerNodeEvents, setCustomPlannerNodeEvents] = useState<
     CustomNodeEvent[]
@@ -279,6 +340,14 @@ export function ThreadView({
     return !message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX);
   });
 
+  // Merge optimistic message with stream messages
+  const displayMessages = optimisticMessage
+    ? [
+        optimisticMessage,
+        ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
+      ]
+    : filteredMessages;
+
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
       {/* Header */}
@@ -312,10 +381,7 @@ export function ThreadView({
               </>
             )}
           </div>
-          <ThreadSwitcher
-            currentThread={displayThread}
-            allThreads={allDisplayThreads}
-          />
+          <ThreadSwitcher currentThread={displayThread} />
           <ThemeToggle />
         </div>
       </div>
@@ -323,13 +389,14 @@ export function ThreadView({
       {/* Main Content - Split Layout */}
       <div className="flex w-full pt-12">
         <ManagerChat
-          messages={filteredMessages}
+          messages={displayMessages}
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleSendMessage={handleSendMessage}
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
           errorState={errorState}
+          githubUser={user || undefined}
         />
         {/* Right Side - Actions & Plan */}
         <div

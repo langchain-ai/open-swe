@@ -9,8 +9,8 @@ import {
 import {
   loadModel,
   supportsParallelToolCallsParam,
-  Task,
 } from "../../../utils/llms/index.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 import { z } from "zod";
 import {
   getActiveTask,
@@ -148,12 +148,15 @@ export async function updatePlan(
     ...updatePlanToolCall,
   });
 
-  const model = await loadModel(config, Task.PROGRAMMER);
+  const model = await loadModel(config, LLMTask.PROGRAMMER);
   const modelManager = getModelManager();
-  const modelName = modelManager.getModelNameForTask(config, Task.PROGRAMMER);
+  const modelName = modelManager.getModelNameForTask(
+    config,
+    LLMTask.PROGRAMMER,
+  );
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
-    Task.PROGRAMMER,
+    LLMTask.PROGRAMMER,
   );
   const modelWithTools = model.bindTools([updatePlanTool], {
     tool_choice: updatePlanTool.name,
