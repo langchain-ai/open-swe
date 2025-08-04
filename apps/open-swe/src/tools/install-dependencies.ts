@@ -7,6 +7,7 @@ import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/t
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "InstallDependenciesTool");
 
@@ -32,7 +33,9 @@ export function createInstallDependenciesTool(
 
         // Use unified shell executor
         const executor = createShellExecutor(config);
-        const sandbox = await getSandboxSessionOrThrow(input);
+        const sandbox = isLocalMode(config)
+          ? undefined
+          : await getSandboxSessionOrThrow(input);
         const response = await executor.executeCommand({
           command,
           workdir: workdir,

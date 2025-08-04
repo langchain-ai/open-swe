@@ -33,6 +33,17 @@ export function createCommandSafetyEvaluator(config: GraphConfig) {
 
         const model = await loadModel(config, LLMTask.ROUTER);
 
+        // Create a tool for structured safety evaluation
+        const safetyEvaluationTool = {
+          name: "evaluate_safety",
+          description: "Evaluates the safety of a command",
+          schema: SafetyEvaluationSchema,
+        };
+
+        const modelWithTools = model.bindTools([safetyEvaluationTool], {
+          tool_choice: safetyEvaluationTool.name,
+        });
+
         const prompt = `You are a security expert evaluating whether a command is safe to run on a local development machine.
 
 Command: ${command}
@@ -59,47 +70,21 @@ Examples of SAFE commands:
 - "ls -la" (lists files)
 - "cat package.json" (reads file)
 - "npm install" (installs packages)
-- "git status" (git operation)
+- "git status" (git read operations)
 - "mkdir new-folder" (creates directory)
 - "touch file.txt" (creates file)
 - "echo 'hello' > test.txt" (writes to file)
 
-Evaluate the safety of this command. If it's a normal development task, mark it as safe.
+Evaluate the safety of this command. If it's a normal development task, mark it as safe.`;
 
-Respond with a JSON object in this exact format:
-{
-  "is_safe": true/false,
-  "reasoning": "Brief explanation of your assessment",
-  "risk_level": "low/medium/high"
-}
+        const response = await modelWithTools.invoke(prompt);
 
-Only respond with the JSON object, no other text.`;
-
-        const response = await model.invoke(prompt);
-        const responseText = response.content as string;
-
-        // Try to parse the JSON response
-        let evaluation: z.infer<typeof SafetyEvaluationSchema>;
-        try {
-          // Extract JSON from the response (in case there's extra text)
-          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            throw new Error("No JSON found in response");
-          }
-          evaluation = SafetyEvaluationSchema.parse(JSON.parse(jsonMatch[0]));
-        } catch (parseError) {
-          logger.error("Failed to parse safety evaluation response", {
-            response: responseText,
-            error: parseError,
-          });
-          // Default to unsafe if we can't parse
-          evaluation = {
-            is_safe: false,
-            reasoning:
-              "Failed to parse safety evaluation - defaulting to unsafe",
-            risk_level: "high",
-          };
+        if (!response.tool_calls?.[0]) {
+          throw new Error("No tool call returned from safety evaluation");
         }
+
+        const toolCall = response.tool_calls[0];
+        const evaluation = SafetyEvaluationSchema.parse(toolCall.args);
 
         logger.info("Command safety evaluation completed", {
           command,

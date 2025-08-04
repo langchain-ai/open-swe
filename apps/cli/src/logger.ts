@@ -49,8 +49,32 @@ function formatToolCallArgs(tool: ToolCall): string {
 
     case "str_replace_based_edit_tool": {
       const command = tool.args.command || "";
-      const path = tool.args.path || "";
-      return `${toolName}: ${command} ${path}`;
+
+      switch (command) {
+        case "insert": {
+          const insertLine = tool.args.insert_line;
+          const newStr = tool.args.new_str || "";
+          return `${toolName}: insert_line=${insertLine}, new_str="${newStr}"`;
+        }
+        case "str_replace": {
+          const oldStr = tool.args.old_str || "";
+          const newStr = tool.args.new_str || "";
+          return `${toolName}: old_str="${oldStr}", new_str="${newStr}"`;
+        }
+        case "create": {
+          const fileText = tool.args.file_text || "";
+          return `${toolName}: file_text="${fileText}"`;
+        }
+        case "view": {
+          const viewRange = tool.args.view_range;
+          if (viewRange) {
+            return `${toolName}: view_range=[${viewRange[0]}, ${viewRange[1]}]`;
+          }
+          return `${toolName}: view`;
+        }
+        default:
+          return `${toolName}: ${command}`;
+      }
     }
 
     case "search_documents_for": {
@@ -73,7 +97,10 @@ function formatToolCallArgs(tool: ToolCall): string {
     }
 
     case "apply_patch": {
-      return `${toolName}: ${tool.args.file_path || ""}`;
+      const filePath = tool.args.file_path || "";
+      const diff = tool.args.diff || "";
+      const diffLines = diff.split("\n").length;
+      return `${toolName}: applied ${diffLines} line diff to ${filePath}`;
     }
 
     case "install_dependencies": {
@@ -82,11 +109,6 @@ function formatToolCallArgs(tool: ToolCall): string {
         return `${toolName}: ${command.join(" ")}`;
       }
       return `${toolName}: ${command}`;
-    }
-
-    case "open_pr": {
-      const title = tool.args.title || "";
-      return `${toolName}: "${title}"`;
     }
 
     case "scratchpad": {
@@ -177,47 +199,49 @@ function formatToolResult(message: ToolMessage): string {
 
   if (!content) return "";
 
-  // For successful tool executions, format nicely
+  const isError = message.status === "error";
   const toolName = message.name || "tool";
+
+  // If it's an error, return error message immediately
+  if (isError) return `Error: ${content}`;
+
   switch (toolName.toLowerCase()) {
     case "shell":
       return content;
+
     case "grep": {
       if (content.includes("Exit code 1. No results found.")) {
         return "No results found";
       }
-      // Count lines to show number of matches
       const lines = content.split("\n").filter((line) => line.trim());
       return `${lines.length} matches found`;
     }
+
     case "view": {
-      // Show file size/content length
       const contentLength = content.length;
-      if (contentLength > 1000) {
-        return `${contentLength} characters (truncated)`;
-      }
-      return `${contentLength} characters`;
+      return contentLength > 1000
+        ? `${contentLength} characters (truncated)`
+        : `${contentLength} characters`;
     }
+
     case "str_replace_based_edit_tool":
-      if (content.includes("Error")) {
-        return `Error: ${content}`;
-      }
       return "File edited successfully";
+
     case "search_documents_for":
       if (content.includes("No content found")) {
         return "No content found at URL";
       }
       return `${content.length} characters of search results`;
+
     case "get_url_content":
       return `${content.length} characters of content`;
+
     case "apply_patch":
-      return content.includes("Error")
-        ? `Error: ${content}`
-        : "Patch applied successfully";
+      return "Patch applied successfully";
+
     case "install_dependencies":
-      return content.includes("Error")
-        ? `Error: ${content}`
-        : "Dependencies installed successfully";
+      return "Dependencies installed successfully";
+
     case "command_safety_evaluator":
       try {
         const evaluation = JSON.parse(content);
@@ -225,11 +249,9 @@ function formatToolResult(message: ToolMessage): string {
       } catch {
         return content;
       }
+
     default:
-      if (content.length > 200) {
-        return content.slice(0, 200) + "...";
-      }
-      return content;
+      return content.length > 200 ? content.slice(0, 200) + "..." : content;
   }
 }
 

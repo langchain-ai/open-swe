@@ -99,17 +99,6 @@ async function applyPatchWithGit(
       );
     }
 
-    // Clean up temp file (same for both modes)
-    if (isLocalMode(config)) {
-      try {
-        await fs.unlink(tempPatchFile);
-      } catch (cleanupError) {
-        logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
-          cleanupError,
-        });
-      }
-    }
-
     if (response.exitCode !== 0) {
       return {
         success: false,
@@ -122,7 +111,15 @@ async function applyPatchWithGit(
       output: response.result || "Patch applied successfully",
     };
   } catch (error) {
-    // Clean up temp file on error (same for both modes)
+    return {
+      success: false,
+      output:
+        error instanceof Error
+          ? error.message
+          : "Unknown error applying patch with git",
+    };
+  } finally {
+    // Clean up temp file (same for both modes)
     if (isLocalMode(config)) {
       try {
         await fs.unlink(tempPatchFile);
@@ -132,14 +129,6 @@ async function applyPatchWithGit(
         });
       }
     }
-
-    return {
-      success: false,
-      output:
-        error instanceof Error
-          ? error.message
-          : "Unknown error applying patch with git",
-    };
   }
 }
 

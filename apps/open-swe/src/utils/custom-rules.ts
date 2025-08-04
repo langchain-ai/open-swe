@@ -184,7 +184,6 @@ async function getCustomRulesLocal(
         return parseCustomRulesFromString(agentsMdContent);
       }
     } catch (error) {
-      // AGENTS.md doesn't exist, which is expected
       logger.debug("AGENTS.md not found, trying other files", { error });
     }
 

@@ -15,7 +15,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "../../../utils/local-shell-executor.js";
+import { getLocalShellExecutor } from "../../../utils/shell-executor/local-shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 

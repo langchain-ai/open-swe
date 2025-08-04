@@ -97,24 +97,23 @@ export async function takeAction(
   );
   let modifiedMessage: AIMessage | undefined;
   if (wasFiltered) {
-    // If all tool calls were filtered out, we need to handle this differently
     if (filteredToolCalls.length === 0) {
-      // Remove the last message entirely since it has no valid tool calls
-      const modifiedMessages = state.internalMessages.slice(0, -1);
-      return new Command({
-        goto: "take-action",
-        update: { internalMessages: modifiedMessages },
+      // If all tool calls were filtered out, create a modified message with no tool calls
+      modifiedMessage = new AIMessage({
+        ...lastMessage,
+        tool_calls: [],
       });
+      toolCalls = [];
+    } else {
+      // Create a modified message with only safe tool calls
+      modifiedMessage = new AIMessage({
+        ...lastMessage,
+        tool_calls: filteredToolCalls,
+      });
+
+      // Continue with the filtered tool calls
+      toolCalls = filteredToolCalls;
     }
-
-    // Create a modified message with only safe tool calls
-    modifiedMessage = new AIMessage({
-      ...lastMessage,
-      tool_calls: filteredToolCalls,
-    });
-
-    // Continue with the filtered tool calls
-    toolCalls = filteredToolCalls;
   }
 
   const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(

@@ -49,9 +49,7 @@ export function createGrepTool(
         ) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           successResult = `Exit code 1. No results found.\n\n${errorResult}`;
-        }
-
-        if (response.exitCode > 1) {
+        } else if (response.exitCode > 1) {
           const errorResult = response.result ?? response.artifacts?.stdout;
           throw new Error(
             `Failed to run grep search command. Exit code: ${response.exitCode}\nError: ${errorResult}`,
@@ -63,31 +61,21 @@ export function createGrepTool(
           status: "success",
         };
       } catch (e) {
-        if (isLocalMode(config)) {
-          // Local mode error handling - return error object instead of throwing
-          const errorMessage = e instanceof Error ? e.message : String(e);
+        const errorFields = getSandboxErrorFields(e);
+        if (errorFields) {
+          const errorResult =
+            errorFields.result ?? errorFields.artifacts?.stdout;
           return {
-            result: `Failed to run grep search command: ${errorMessage}`,
-            status: "error" as const,
-          };
-        } else {
-          // Sandbox mode error handling
-          const errorFields = getSandboxErrorFields(e);
-          if (errorFields) {
-            const errorResult =
-              errorFields.result ?? errorFields.artifacts?.stdout;
-            return {
-              result: `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
-              status: "error" as const,
-            };
-          }
-
-          const errorMessage = e instanceof Error ? e.message : String(e);
-          return {
-            result: `Failed to run grep search command: ${errorMessage}`,
+            result: `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
             status: "error" as const,
           };
         }
+
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        return {
+          result: `Failed to run grep search command: ${errorMessage}`,
+          status: "error" as const,
+        };
       }
     },
     createGrepToolFields(state.targetRepository),

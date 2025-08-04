@@ -9,7 +9,6 @@ export interface CommandEvaluation {
   commandDescription: string;
   commandString: string;
   isSafe: boolean;
-  isWriteCommand: boolean;
   reasoning: string;
   riskLevel: "low" | "medium" | "high";
 }
@@ -17,70 +16,10 @@ export interface CommandEvaluation {
 export interface CommandEvaluationResult {
   safeCommands: CommandEvaluation[];
   unsafeCommands: CommandEvaluation[];
-  writeCommands: CommandEvaluation[];
   allCommands: CommandEvaluation[];
   filteredToolCalls: any[];
   wasFiltered: boolean;
 }
-
-// Commands that are known to write/modify files or system state
-const WRITE_COMMANDS = [
-  // File operations
-  "rm",
-  "rmdir",
-  "mv",
-  "cp",
-  "mkdir",
-  "touch",
-  "chmod",
-  "chown",
-  "chgrp",
-  // Package managers
-  "npm",
-  "yarn",
-  "pip",
-  "apt",
-  "brew",
-  "apt-get",
-  "yum",
-  "dnf",
-  // Git operations
-  "git commit",
-  "git push",
-  "git pull",
-  "git merge",
-  "git rebase",
-  "git reset",
-  "git checkout",
-  // System operations
-  "sudo",
-  "su",
-  "useradd",
-  "userdel",
-  "groupadd",
-  "groupdel",
-  // Process management
-  "kill",
-  "pkill",
-  "killall",
-  "systemctl",
-  "service",
-  // Network operations
-  "ssh",
-  "scp",
-  "rsync",
-  // Database operations
-  "mysql",
-  "psql",
-  "sqlite3",
-  // Other dangerous commands
-  "dd",
-  "format",
-  "fdisk",
-  "mkfs",
-  "mount",
-  "umount",
-];
 
 // Commands that are known to be safe for reading
 const SAFE_READ_COMMANDS = [
@@ -119,35 +58,6 @@ const SAFE_READ_COMMANDS = [
   "history",
   "alias",
 ];
-
-export function isWriteCommand(command: string): boolean {
-  const lowerCommand = command.toLowerCase();
-
-  // Check for known write commands
-  for (const writeCmd of WRITE_COMMANDS) {
-    if (lowerCommand.includes(writeCmd.toLowerCase())) {
-      return true;
-    }
-  }
-
-  // Check for redirection operators that write to files
-  if (lowerCommand.includes(">") || lowerCommand.includes(">>")) {
-    return true;
-  }
-
-  // Check for pipe to write commands
-  if (
-    lowerCommand.includes("|") &&
-    (lowerCommand.includes("tee") ||
-      lowerCommand.includes("dd") ||
-      lowerCommand.includes("cp") ||
-      lowerCommand.includes("mv"))
-  ) {
-    return true;
-  }
-
-  return false;
-}
 
 export function isSafeReadCommand(command: string): boolean {
   const lowerCommand = command.toLowerCase();
@@ -216,7 +126,6 @@ export async function evaluateCommands(
   const safetyEvaluations = await Promise.all(
     commandToolCalls.map(async (toolCall) => {
       const { commandString, commandDescription } = getCommandString(toolCall);
-      const isWrite = isWriteCommand(commandString);
 
       try {
         const evaluation = await safetyEvaluator.invoke({
@@ -231,7 +140,6 @@ export async function evaluateCommands(
           commandDescription,
           commandString,
           isSafe: result.is_safe,
-          isWriteCommand: isWrite,
           reasoning: result.reasoning,
           riskLevel: result.risk_level,
         };
@@ -246,7 +154,6 @@ export async function evaluateCommands(
           commandDescription,
           commandString,
           isSafe: false,
-          isWriteCommand: isWrite,
           reasoning: "Failed to evaluate safety - defaulting to unsafe",
           riskLevel: "high" as const,
         };
@@ -261,9 +168,6 @@ export async function evaluateCommands(
   const unsafeCommands = safetyEvaluations.filter(
     (evaluation) => !evaluation.isSafe,
   );
-  const writeCommands = safetyEvaluations.filter(
-    (evaluation) => evaluation.isWriteCommand,
-  );
 
   // Filter out only unsafe commands (allow safe write commands)
   const safeToolCalls = safeCommands.map((evaluation) => evaluation.toolCall);
@@ -277,7 +181,6 @@ export async function evaluateCommands(
   return {
     safeCommands,
     unsafeCommands,
-    writeCommands,
     allCommands: safetyEvaluations,
     filteredToolCalls,
     wasFiltered,
@@ -310,18 +213,6 @@ export async function filterUnsafeCommands(
     evaluationResult.unsafeCommands.forEach((evaluation) => {
       logger.warn(`Filtering out UNSAFE command:`, {
         command: evaluation.commandDescription,
-        reasoning: evaluation.reasoning,
-        riskLevel: evaluation.riskLevel,
-      });
-    });
-  }
-
-  // Log write commands for awareness (but don't filter them out)
-  if (evaluationResult.writeCommands.length > 0) {
-    evaluationResult.writeCommands.forEach((evaluation) => {
-      logger.info(`Write command detected (will run if safe):`, {
-        command: evaluation.commandDescription,
-        isSafe: evaluation.isSafe,
         reasoning: evaluation.reasoning,
         riskLevel: evaluation.riskLevel,
       });
