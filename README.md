@@ -22,12 +22,13 @@ Open SWE is an open-source cloud-based coding agent built with [LangGraph](https
 
 # Features
 
+![UI Screenshot](./static/ui-screenshot.png)
+
 - 📝 **Planning**: Open SWE has a dedicated planning step which allows it to deeply understand complex codebases and nuanced tasks. You're also given the ability to accept, edit, or reject the proposed plan before it's executed.
 - 🤝 **Human in the loop**: With Open SWE, you can send it messages while it's running (both during the planning and execution steps). This allows for giving real time feedback and instructions without having to interrupt the process.
 - 🏃 **Parallel Execution**: You can run as many Open SWE tasks as you want in parallel! Since it runs in a sandbox environment in the cloud, you're not limited by the number of tasks you can run at once.
 - 🧑‍💻 **End to end task management**: Open SWE will automatically create GitHub issues for tasks, and create pull requests which will close the issue when implementation is complete.
 
-![UI Screenshot](./static/ui-screenshot.png)
 
 ## Usage
 
