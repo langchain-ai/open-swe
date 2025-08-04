@@ -11,7 +11,10 @@ export async function getInstallationToken(
   appId: string,
   privateKey: string,
 ): Promise<string> {
-  const jwtToken = generateJWT(appId, replaceNewlinesWithBackslashN(privateKey));
+  const jwtToken = generateJWT(
+    appId,
+    replaceNewlinesWithBackslashN(privateKey),
+  );
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
