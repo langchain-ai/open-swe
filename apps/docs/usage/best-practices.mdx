@@ -11,17 +11,16 @@ Follow these guidelines to get the best results from Open SWE.
 
 ### Be Clear and Direct
 
-- Include specific file paths and function names in your requests
-- Provide concrete examples of what you want to achieve
-- Avoid vague language like "improve" or "optimize" without specifics
+- Include specific file paths and function names in your requests. Open SWE preforms best when its given a clear starting point.
+- Provide concrete examples of what you want to achieve. Describe the end state you want to reach so Open SWE knows what it's working towards.
 
 ### Create Custom Rules
 
 Create an `AGENTS.md` file in your repository root to provide project-specific context. This helps Open SWE understand your codebase conventions and requirements.
 
 <Tip>
-  See the [Custom Rules](/usage/custom-rules) page for detailed guidance on
-  setting up your AGENTS.md file.
+  See the [Custom Rules](/labs/swe/usage/custom-rules) page for detailed guidance on
+  setting up your `AGENTS.md` file.
 </Tip>
 
 ### Keep Tasks Well-Scoped
@@ -40,39 +39,24 @@ Submit separate requests for different features or fixes. This allows Open SWE t
 
 ## Model Selection
 
-### Claude Sonnet 4 (Default)
-
-Use for most coding tasks:
-
-- Standard feature implementation
-- Bug fixes
-- Code refactoring
-- Documentation updates
-
-### Claude Opus 4 (Complex Tasks)
-
-Use for challenging problems requiring advanced reasoning:
-
-- Complex architectural changes
-- Performance optimization
-- Advanced algorithm implementation
-- Multi-system integrations
+- **Claude Sonnet 4 (Default)**: The default model for planning, writing code, and reviewing changes. This model offers the best balance of performance, speed and cost.
+- **Claude Opus 4**: A larger, more powerful model for difficult, or open-ended tasks. Opus 4 is more expensive and slower, but will provide better results for complex tasks.
 
 ### Avoid Other Models
 
-Open SWE's prompts are specifically tuned for Claude models. Other models may produce suboptimal results.
+Although Open SWE allows you to select any model from Anthropic, OpenAI and Google, its prompts are tuned specifically for Anthropic models, and other providers will not preform as well.
 
 ## Mode Selection
 
-### open-swe vs open-swe-max
+### `open-swe` vs `open-swe-max`
 
-**open-swe**: Uses Claude Sonnet 4
+**`open-swe`**: Uses Claude Sonnet 4
 
 - Suitable for most development tasks
 - Faster execution
 - Cost-effective
 
-**open-swe-max**: Uses Claude Opus 4
+**`open-swe-max`**: Uses Claude Opus 4 (only for the planning and code writing agents)
 
 - For complex tasks requiring advanced reasoning
 - Higher quality output for challenging problems
@@ -82,19 +66,9 @@ Open SWE's prompts are specifically tuned for Claude models. Other models may pr
 
 **Auto Mode (`-auto` labels)**
 
-Use for most tasks:
+It's recommended to use the auto mode for most tasks. Open SWE is very good at planning, and in most cases it does not need a manual review before execution.
 
-- Open SWE excels at planning
-- Faster turnaround
-- Good for straightforward implementations
-
-**Manual Mode (no `-auto` suffix)**
-
-Use for extremely complex tasks:
-
-- Allows plan review before execution
-- Better for critical or sensitive changes
-- Provides opportunity to modify plans
+If you're running Open SWE against an open-ended or very complex task, you may want to use manual mode to review the plan before execution.
 
 ## Label Reference
 

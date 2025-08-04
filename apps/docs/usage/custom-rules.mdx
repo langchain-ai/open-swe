@@ -1,15 +1,21 @@
 ---
 title: Custom Rules
-description: Configure Open SWE with project-specific rules using AGENTS.md
+description: Configure Open SWE with project-specific rules using `AGENTS.md`
 ---
 
 # Custom Rules
 
-Custom rules allow you to provide project-specific context and guidelines to Open SWE through configuration files in your repository root.
+Custom rules allow you to provide project-specific context and guidelines to Open SWE through a markdown file in your repository root.
 
-## What is AGENTS.md?
+## Getting Started
 
-`AGENTS.md` is a configuration file that tells Open SWE about your project's:
+The easiest way to get started is to have Open SWE itself write this file for you! The Open SWE UI provides a "Generate `AGENTS.md`" quick action which will insert a predefined prompt into the input. This prompt has been designed to generate a well-formatted `AGENTS.md` file from the agent.
+
+![Quick Action Generate AGENTS.md](/images/quick_action_generate_agents_md.png)
+
+## What is `AGENTS.md`?
+
+`AGENTS.md` is a markdown file that tells Open SWE about your project's:
 
 - Coding standards and conventions
 - Repository structure and architecture
@@ -39,6 +45,9 @@ Project-specific coding standards and conventions:
 - Code style requirements
 - Import/export patterns
 - Architectural guidelines
+- Common scripts, and how to run them
+
+Example: "Run `yarn test` to run tests", or "Run `yarn build` to build the project"
 
 ### `<repository_structure>`
 
@@ -49,6 +58,10 @@ Description of your codebase organization:
 - Package relationships and dependencies
 - Build system configuration
 
+Include context about where/how to create new files, apps, packages, etc. in this section.
+
+Example: "When creating new packages, place them inside the `packages` directory."
+
 ### `<dependencies_and_installation>`
 
 Package management and setup instructions:
@@ -58,6 +71,10 @@ Package management and setup instructions:
 - Key dependencies and their purposes
 - Workspace configuration details
 
+This section should include information about the package manager(s) used in the project, and how/where to install dependencies.
+
+Example: "Always install dependencies inside the specific app/package where they're used, never in the root `package.json` unless adding a resolution."
+
 ### `<testing_instructions>`
 
 Testing framework and practices:
@@ -65,7 +82,9 @@ Testing framework and practices:
 - Test runner configuration (Jest, Vitest, etc.)
 - Test file naming conventions
 - How to run different test types
-- Testing best practices for your project
+- Testing best practices for your project (e.g. what types of tests to write)
+
+Example: "Always run `yarn test` after making changes."
 
 ### `<pull_request_formatting>`
 
@@ -75,6 +94,8 @@ PR creation and formatting guidelines:
 - Required sections or checklists
 - Review process requirements
 - Linking conventions
+
+Example: "The pull request body should include a `Testing Steps` section which includes bullet points describing how to test the changes."
 
 ## File Names
 
@@ -91,13 +112,22 @@ Open SWE reads custom rules from these files (in order of precedence):
 
 ## Missing Sections
 
-If your custom rules file doesn't include XML section tags:
-
-- The entire file content becomes `generalRules`
-- Other sections remain empty
-- Open SWE still benefits from the general guidance provided
+If your custom rules file doesn't include XML section tags, the entire file content will be passed to the prompt inside a custom rules section.
 
 ## Formatting Example
+
+If your custom rules file does include the proper XML section tags, only the content from inside the known tags will be passed to the system prompt.
+
+Known tags:
+- `<general_rules>`
+- `<repository_structure>`
+- `<dependencies_and_installation>`
+- `<testing_instructions>`
+- `<pull_request_formatting>`
+
+Each tag _must_ contain a proper closing tag. If a tag is missing a closing tag, the entire file content will be passed to the prompt inside a custom rules section.
+
+Here is an example showing what your `AGENTS.md` file should look like:
 
 ```markdown
 <general_rules>
@@ -133,14 +163,3 @@ PR titles should follow: "feat: description" or "fix: description"
 Include a brief description and link any related issues.
 </pull_request_formatting>
 ```
-
-## Getting Started
-
-1. Create an `AGENTS.md` file in your repository root
-2. Add relevant sections using XML-style tags
-3. Include project-specific guidelines and conventions
-4. Test with Open SWE to ensure it follows your rules
-
-<Tip>
-  Start with `<general_rules>` and `<repository_structure>` sections, then add others as needed.
-</Tip>
