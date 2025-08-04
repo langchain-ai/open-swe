@@ -42,7 +42,7 @@ const formatPrompt = (taskPlan: PlanItem[]): string => {
 export async function generateConclusion(
   state: GraphState,
   config: GraphConfig,
-): Promise<GraphUpdate> {
+): Promise<Command> {
   const model = await loadModel(config, LLMTask.SUMMARIZER);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(

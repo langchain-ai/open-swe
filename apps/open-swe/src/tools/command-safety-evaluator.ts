@@ -1,8 +1,9 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { loadModel, Task } from "../utils/llms/index.js";
+import { loadModel } from "../utils/llms/index.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../utils/logger.js";
+import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
 
 const logger = createLogger(LogLevel.INFO, "CommandSafetyEvaluator");
 
@@ -30,7 +31,7 @@ export function createCommandSafetyEvaluator(config: GraphConfig) {
       try {
         const { command, tool_name, args } = CommandSafetySchema.parse(input);
 
-        const model = await loadModel(config, Task.ROUTER);
+        const model = await loadModel(config, LLMTask.ROUTER);
 
         const prompt = `You are a security expert evaluating whether a command is safe to run on a local development machine.
 
