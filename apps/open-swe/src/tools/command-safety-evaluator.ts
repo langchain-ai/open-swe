@@ -27,7 +27,7 @@ const SafetyEvaluationSchema = z.object({
 
 export function createCommandSafetyEvaluator(config: GraphConfig) {
   const safetyEvaluator = tool(
-    async (input): Promise<{ result: string; status: "success" | "error" }> => {
+    async (input): Promise<{ result: any; status: "success" | "error" }> => {
       try {
         const { command, tool_name, args } = CommandSafetySchema.parse(input);
 
@@ -94,7 +94,7 @@ Evaluate the safety of this command. If it's a normal development task, mark it 
         });
 
         return {
-          result: JSON.stringify(evaluation, null, 2),
+          result: evaluation,
           status: "success",
         };
       } catch (e) {

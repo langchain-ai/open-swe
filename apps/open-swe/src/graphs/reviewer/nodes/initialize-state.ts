@@ -62,10 +62,10 @@ async function getChangedFiles(
       const executor = getLocalShellExecutor(getLocalWorkingDirectory());
       const changedFilesRes = await executor.executeCommand(
         `git diff ${baseBranchName} --name-only`,
-        repoRoot,
-        {},
-        30, // timeout
-        true, // localMode
+        {
+          workdir: repoRoot,
+          timeout: 30,
+        },
       );
       if (changedFilesRes.exitCode !== 0) {
         logger.error(`Failed to get changed files: ${changedFilesRes.result}`);
@@ -106,10 +106,10 @@ async function getBaseBranchName(
       const executor = getLocalShellExecutor(getLocalWorkingDirectory());
       const baseBranchNameRes = await executor.executeCommand(
         "git config init.defaultBranch",
-        repoRoot,
-        {},
-        30, // timeout
-        true, // localMode
+        {
+          workdir: repoRoot,
+          timeout: 30,
+        },
       );
       if (baseBranchNameRes.exitCode !== 0) {
         logger.error("Failed to get base branch name", {

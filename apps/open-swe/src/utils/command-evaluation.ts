@@ -1,11 +1,52 @@
 import { createLogger, LogLevel } from "./logger.js";
 import { createCommandSafetyEvaluator } from "../tools/command-safety-evaluator.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  formatGrepCommand,
+  formatShellCommand,
+  formatViewCommand,
+  formatSearchDocumentsCommand,
+  formatGetURLContentCommand,
+  formatStrReplaceEditCommand,
+  GrepCommand,
+} from "@open-swe/shared/open-swe/tools";
+import { ToolCall } from "@langchain/core/messages/tool";
 
 const logger = createLogger(LogLevel.INFO, "CommandEvaluation");
 
+// Type definitions for tool call arguments
+interface ShellToolArgs {
+  command: string[];
+  workdir?: string;
+}
+
+interface ViewToolArgs {
+  command: string;
+  path: string;
+  view_range?: number[];
+}
+
+interface SearchDocumentsToolArgs {
+  query: string;
+  url: string;
+}
+
+interface GetURLContentToolArgs {
+  url: string;
+}
+
+interface StrReplaceEditToolArgs {
+  command: string;
+  path: string;
+  view_range?: [number, number];
+  old_str?: string;
+  new_str?: string;
+  file_text?: string;
+  insert_line?: number;
+}
+
 export interface CommandEvaluation {
-  toolCall: any;
+  toolCall: ToolCall;
   commandDescription: string;
   commandString: string;
   isSafe: boolean;
@@ -17,7 +58,7 @@ export interface CommandEvaluationResult {
   safeCommands: CommandEvaluation[];
   unsafeCommands: CommandEvaluation[];
   allCommands: CommandEvaluation[];
-  filteredToolCalls: any[];
+  filteredToolCalls: ToolCall[];
   wasFiltered: boolean;
 }
 
@@ -72,7 +113,7 @@ export function isSafeReadCommand(command: string): boolean {
   return false;
 }
 
-export function getCommandString(toolCall: any): {
+export function getCommandString(toolCall: ToolCall): {
   commandString: string;
   commandDescription: string;
 } {
@@ -80,25 +121,30 @@ export function getCommandString(toolCall: any): {
   let commandDescription = "";
 
   if (toolCall.name === "shell") {
-    const args = toolCall.args as { command: string[]; workdir?: string };
-    commandString = args.command.join(" ");
-    commandDescription = `${toolCall.name} - ${commandString}${args.workdir ? ` (in ${args.workdir})` : ""}`;
+    const args = toolCall.args as ShellToolArgs;
+    commandString = formatShellCommand(args.command, args.workdir);
+    commandDescription = `${toolCall.name} - ${commandString}`;
   } else if (toolCall.name === "grep") {
-    const args = toolCall.args as { query: string; file_path?: string };
-    commandString = `rg --color=never --line-number --heading -i '${args.query}'${args.file_path ? ` ${args.file_path}` : ""}`;
-    commandDescription = `${toolCall.name} - searching for "${args.query}"${args.file_path ? ` in ${args.file_path}` : ""}`;
+    const args = toolCall.args as GrepCommand;
+    const grepCommand = formatGrepCommand(args);
+    commandString = grepCommand.join(" ");
+    commandDescription = `${toolCall.name} - searching for "${args.query}"`;
   } else if (toolCall.name === "view") {
-    const args = toolCall.args as { file_path: string };
-    commandString = `cat ${args.file_path}`;
-    commandDescription = `${toolCall.name} - viewing ${args.file_path}`;
+    const args = toolCall.args as ViewToolArgs;
+    commandString = formatViewCommand(args.path);
+    commandDescription = `${toolCall.name} - viewing ${args.path}`;
   } else if (toolCall.name === "search_documents_for") {
-    const args = toolCall.args as { query: string; file_path?: string };
-    commandString = `search for "${args.query}"${args.file_path ? ` in ${args.file_path}` : ""}`;
-    commandDescription = `${toolCall.name} - searching documents for "${args.query}"${args.file_path ? ` in ${args.file_path}` : ""}`;
+    const args = toolCall.args as SearchDocumentsToolArgs;
+    commandString = formatSearchDocumentsCommand(args.query, args.url);
+    commandDescription = `${toolCall.name} - searching documents for "${args.query}" in ${args.url}`;
   } else if (toolCall.name === "get_url_content") {
-    const args = toolCall.args as { url: string };
-    commandString = `curl ${args.url}`;
+    const args = toolCall.args as GetURLContentToolArgs;
+    commandString = formatGetURLContentCommand(args.url);
     commandDescription = `${toolCall.name} - fetching content from ${args.url}`;
+  } else if (toolCall.name === "str_replace_based_edit_tool") {
+    const args = toolCall.args as StrReplaceEditToolArgs;
+    commandString = formatStrReplaceEditCommand(args.command, args.path);
+    commandDescription = `${toolCall.name} - ${commandString}`;
   }
 
   return { commandString, commandDescription };
@@ -114,6 +160,7 @@ export async function evaluateCommands(
     "view",
     "search_documents_for",
     "get_url_content",
+    "str_replace_based_edit_tool",
   ];
   logger.info("Evaluating safety of command-executing tools", {
     commandToolCalls: commandToolCalls.map((c) => c.name),
@@ -134,7 +181,7 @@ export async function evaluateCommands(
           args: toolCall.args,
         });
 
-        const result = JSON.parse(evaluation.result);
+        const result = evaluation.result;
         return {
           toolCall,
           commandDescription,
@@ -197,6 +244,7 @@ export async function filterUnsafeCommands(
     "view",
     "search_documents_for",
     "get_url_content",
+    "str_replace_based_edit_tool",
   ];
   const commandToolCalls = allToolCalls.filter((toolCall) =>
     commandExecutingTools.includes(toolCall.name),

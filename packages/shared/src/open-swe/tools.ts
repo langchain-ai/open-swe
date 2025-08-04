@@ -259,6 +259,34 @@ export function formatGrepCommand(
   return args;
 }
 
+/**
+ * Format a shell command for display purposes
+ */
+export function formatShellCommand(
+  command: string[],
+  workdir?: string,
+): string {
+  const commandStr = command.join(" ");
+  return workdir ? `${commandStr} (in ${workdir})` : commandStr;
+}
+
+/**
+ * Format a view command for display purposes
+ */
+export function formatViewCommand(path: string): string {
+  return `cat "${path}"`;
+}
+
+/**
+ * Format a search documents command for display purposes
+ */
+export function formatSearchDocumentsCommand(
+  query: string,
+  url: string,
+): string {
+  return `search for "${query}" in ${url}`;
+}
+
 export function createMarkTaskNotCompletedToolFields() {
   const markTaskNotCompletedToolSchema = z.object({
     reasoning: z
@@ -391,6 +419,34 @@ export function createGetURLContentToolFields() {
     description: "Get the full page content of a given URL in markdown format.",
     schema: getURLContentSchema,
   };
+}
+
+/**
+ * Format a get URL content command for display purposes
+ */
+export function formatGetURLContentCommand(url: string): string {
+  return `curl ${url}`;
+}
+
+/**
+ * Format a str_replace_based_edit_tool command for display purposes
+ */
+export function formatStrReplaceEditCommand(
+  command: string,
+  path: string,
+): string {
+  switch (command) {
+    case "view":
+      return `view file ${path}`;
+    case "str_replace":
+      return `replace text in ${path}`;
+    case "create":
+      return `create file ${path}`;
+    case "insert":
+      return `insert text in ${path}`;
+    default:
+      return `${command} ${path}`;
+  }
 }
 
 export function createSearchDocumentForToolFields() {

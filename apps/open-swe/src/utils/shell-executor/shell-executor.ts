@@ -92,7 +92,7 @@ export class ShellExecutor {
     env?: Record<string, string>,
     timeout?: number,
     sandbox?: Sandbox,
-  ): Promise<LocalExecuteResponse> {
+  ): Promise<Local> {
     if (!sandbox) {
       throw new Error("Sandbox is required for sandbox mode execution");
     }

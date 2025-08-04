@@ -8,15 +8,12 @@ import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { Sandbox } from "@daytonaio/sdk";
+import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
-import {
-  getLocalShellExecutor,
-  ExecuteResponse,
-} from "../utils/local-shell-executor.js";
-import { LocalExecuteResponse } from "../utils/shell-executor/types.js";
+import { createShellExecutor } from "../utils/shell-executor/shell-executor.js";
 import { promises as fs } from "fs";
 import { join } from "path";
 
@@ -73,31 +70,14 @@ async function applyPatchWithGit(
       }
     }
 
-    // Execute git apply with --verbose for detailed error messages (same for both modes)
-    let response: ExecuteResponse | LocalExecuteResponse;
-    if (isLocalMode(config)) {
-      const executor = getLocalShellExecutor(workDir);
-      response = await executor.executeCommand(
-        `git apply --verbose "${tempPatchFile}"`,
-        workDir,
-        {},
-        30, // 30 seconds timeout
-        true, // localMode
-      );
-    } else {
-      if (!sandbox) {
-        return {
-          success: false,
-          output: "Sandbox is required for non-local mode but not available",
-        };
-      }
-      response = await sandbox.process.executeCommand(
-        `git apply --verbose "${tempPatchFile}"`,
-        workDir,
-        {},
-        30, // 30 seconds timeout
-      );
-    }
+    // Execute git apply with --verbose for detailed error messages using unified executor
+    const executor = createShellExecutor(config);
+    const response = await executor.executeCommand({
+      command: `git apply --verbose "${tempPatchFile}"`,
+      workdir: workDir,
+      timeout: 30,
+      sandbox: sandbox || undefined,
+    });
 
     if (response.exitCode !== 0) {
       return {
