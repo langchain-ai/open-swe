@@ -1,5 +1,4 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import path from "path";
 
 /**
  * Checks if the current execution context is in local mode
