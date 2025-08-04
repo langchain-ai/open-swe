@@ -8,7 +8,6 @@ import {
   createShellTool,
   createSearchDocumentForTool,
 } from "../../../tools/index.js";
-import { getLocalShellExecutor } from "../../../utils/local-shell-executor.js";
 import {
   GraphState,
   GraphConfig,
