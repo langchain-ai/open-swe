@@ -133,7 +133,6 @@ export function QuickActions({ setQuickActionPrompt }: QuickActionsProps) {
           repo="typescript-template"
           title="Clone a TypeScript Template"
           description="Bootstrap a new TypeScript project with pre-configured build tools, linting, testing setup, etc."
-          subtitle="bracesproul/typescript-template"
         />
       </div>
     </div>
