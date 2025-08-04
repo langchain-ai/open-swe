@@ -1,3 +1,5 @@
+import { GITHUB_WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
+
 export const SCRATCHPAD_PROMPT = `Here is a collection of technical notes you wrote to a scratchpad while gathering context for the plan. Ensure you take these into account when writing your plan.
 
 <scratchpad>
@@ -51,6 +53,8 @@ Create your plan following these guidelines:
 6. **Combine simple, related steps:**
    - If you have multiple simple steps that are related, and should be executed one after the other, combine them into a single step.
    - For example, if you have multiple steps to run a linter, formatter, etc., combine them into a single step. The same goes for passing arguments, or editing files.
+
+${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
 </instructions>
 
 <output_format>
