@@ -216,6 +216,12 @@ Before starting, ensure you have the following installed:
       2. Click "Generate a private key"
       3. Download the `.pem` file and copy its contents
       4. Format as a single line with `\\n` for line breaks, or use the multiline format shown in the example
+    - **GITHUB_APP_REDIRECT_URI**: Should be `http://localhost:3000/api/auth/github/callback` for local development, or `https://your-production-url.com/api/auth/github/callback` for production.
+    - **GITHUB_WEBHOOK_SECRET**: Generate and save this value:
+      ```bash
+      openssl rand -hex 32
+      ```
+      Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/open-swe/.env` and `apps/web/.env`.
 
     Below are screenshots showing where in the GitHub App settings you can find the values for the environment variables.
 
