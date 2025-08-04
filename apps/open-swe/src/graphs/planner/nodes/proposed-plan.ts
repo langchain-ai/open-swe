@@ -26,6 +26,8 @@ import {
   PROGRAMMER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   LOCAL_MODE_HEADER,
+  GITHUB_INSTALLATION_ID,
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
 } from "@open-swe/shared/constants";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
@@ -45,6 +47,7 @@ import {
   cleanTaskItems,
 } from "../../../utils/github/plan.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -87,10 +90,24 @@ async function startProgrammerRun(input: {
   newMessages?: BaseMessage[];
 }) {
   const { runInput, state, config, newMessages } = input;
+  const isLocal = isLocalMode(config);
+  const defaultHeaders = isLocal
+    ? { [LOCAL_MODE_HEADER]: "true" }
+    : getDefaultHeaders(config);
+
+  if (!isLocal) {
+    logger.info(
+      "Regenerating installation token before starting programmer run.",
+    );
+    defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
+      await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
+    logger.info(
+      "Regenerated installation token before starting programmer run.",
+    );
+  }
+
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: isLocalMode(config)
-      ? { [LOCAL_MODE_HEADER]: "true" }
-      : getDefaultHeaders(config),
+    defaultHeaders,
   });
 
   const programmerThreadId = uuidv4();
