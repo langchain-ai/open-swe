@@ -1,0 +1,168 @@
+---
+title: "Programmer Agent"
+description: "Implements approved plans through code changes and testing"
+---
+
+# Programmer Agent
+
+The Programmer agent is responsible for implementing approved plans through systematic code changes, testing, and quality assurance. It serves as the execution engine of the Open SWE system, transforming strategic plans into working code while maintaining high quality standards.
+
+## Core Role & Responsibilities
+
+### Code Implementation & Execution
+
+- **Plan Execution**: Systematically implements approved plans through structured task execution
+- **Code Changes**: Applies patches, creates new files, modifies existing code, and manages file operations
+- **Dependency Management**: Installs required packages, manages dependencies, and handles environment setup
+- **Testing & Validation**: Runs tests, validates implementations, and ensures code functionality
+
+### Task & Plan Management
+
+- **Progress Tracking**: Monitors plan execution progress and marks individual tasks as completed
+- **Dynamic Plan Updates**: Handles plan modifications and adjustments during implementation
+- **Error Handling**: Manages implementation challenges and requests human assistance when needed
+- **Quality Assurance**: Integrates code review processes before completion
+
+## Invocation by Planner
+
+The Programmer is invoked by the Planner agent via **`startProgrammerRun()`** after plan acceptance:
+
+### Invocation Trigger
+
+- **Plan Approval**: After human approval of proposed implementation plan
+- **Automatic Mode**: When system is configured for automatic plan acceptance
+- **Context Transfer**: Receives approved plan and all gathered context from Planner
+
+### Session Creation
+
+- **LangGraph Thread**: Creates new programmer session via LangGraph SDK
+- **State Initialization**: Sets up execution environment with plan context
+- **Manager Integration**: Establishes programmerSession tracking in Manager agent
+
+## Comprehensive Toolset
+
+During the **`generate-action`** node, the Programmer has access to an extensive toolset:
+
+### Core Development Tools
+
+- **`apply-patch`** - Apply code patches and diffs to files
+- **`text-editor`** - Create, edit, and modify files with precise control
+- **`shell`** - Execute commands, run tests, build projects, and manage environment
+- **`grep`** - Search codebase for patterns, functions, and references
+
+### Environment & Dependencies
+
+- **`install-dependencies`** - Install required packages and manage project dependencies
+- **`get-url-content`** - Fetch external resources, documentation, and references
+- **`search-document-for`** - Search within fetched documents for specific information
+
+### Workflow Management Tools
+
+- **`request-human-help`** - Request assistance when encountering complex issues
+- **`update-plan`** - Modify the current implementation plan when needed
+- **`mark-task-completed`** - Mark individual plan tasks as finished
+
+### Extended Capabilities
+
+- **`MCP tools`** - Additional specialized tools via Model Context Protocol integration
+
+## Key Workflow Nodes
+
+The Programmer operates through seven critical nodes:
+
+### `initialize`
+
+- **Purpose**: Set up sandbox environment and prepare for plan execution
+- **Actions**: Initialize workspace, validate plan context, prepare execution state
+- **Output**: Ready environment for systematic plan implementation
+
+### `generate-action`
+
+- **Purpose**: Determine the next implementation step based on current plan state
+- **Actions**: Analyze remaining tasks, select appropriate tools, generate specific actions
+- **Output**: Tool calls for implementation or transition to other nodes
+
+### `take-action`
+
+- **Purpose**: Execute the chosen implementation action using available tools
+- **Actions**: Apply patches, edit files, run commands, install dependencies
+- **Output**: Implementation results and updated execution state
+
+### `update-plan`
+
+- **Purpose**: Handle dynamic plan modifications during implementation
+- **Actions**: Process plan updates, adjust task priorities, modify implementation strategy
+- **Output**: Updated plan state for continued execution
+
+### `handle-completed-task`
+
+- **Purpose**: Process completed tasks and update plan progress
+- **Actions**: Mark tasks complete, update progress tracking, determine next steps
+- **Output**: Updated plan state with completed task status
+
+### `generate-conclusion`
+
+- **Purpose**: Finalize implementation and prepare for review/completion
+- **Actions**: Summarize changes, prepare for review, generate implementation summary
+- **Output**: Implementation conclusion and transition to review phase
+
+### `open-pr`
+
+- **Purpose**: Automatically create pull request with all changes
+- **Actions**: Commit changes, create PR with description, link to original issue
+- **Output**: Created pull request ready for review
+
+## Reviewer Subgraph Integration
+
+Before concluding, the Programmer invokes the **Reviewer subgraph** for quality assurance:
+
+### Review Invocation
+
+- **Embedded Subgraph**: Reviewer runs as integrated subgraph within Programmer workflow
+- **Quality Gate**: Ensures code quality before final completion
+- **Feedback Loop**: Enables iterative improvement based on review feedback
+
+### Review Process
+
+1. **Code Analysis**: Reviewer analyzes all code changes and implementations
+2. **Quality Assessment**: Evaluates code quality, correctness, and adherence to standards
+3. **Feedback Generation**: Provides specific feedback and improvement suggestions
+4. **Iteration Control**: Limits review cycles via `maxReviewCount` (default 3)
+
+### Review Outcomes
+
+- **Approval**: Code meets quality standards, proceed to PR creation
+- **Feedback**: Specific improvements needed, loop back to implementation
+- **Iteration Limit**: Maximum reviews reached, proceed with current state
+
+## Automatic PR Creation
+
+The Programmer automatically creates pull requests upon completion:
+
+### PR Generation Process
+
+- **Change Compilation**: Gathers all code changes and modifications
+- **Description Generation**: Creates comprehensive PR description with context
+- **Issue Linking**: Links PR to original GitHub issue
+- **Branch Management**: Handles branch creation and commit organization
+
+### PR Content
+
+- **Implementation Summary**: Overview of changes and implementations
+- **Plan Reference**: Links back to original approved plan
+- **Review Results**: Includes reviewer feedback and resolutions
+- **Testing Information**: Documents test results and validation
+
+## Complete Implementation Workflow
+
+The Programmer follows a structured workflow from invocation to completion:
+
+1. **Initialization**: Set up environment and validate plan context
+2. **Systematic Execution**: Implement plan tasks using comprehensive toolset
+3. **Progress Management**: Track completion and handle plan updates
+4. **Quality Review**: Invoke Reviewer subgraph for code quality assurance
+5. **Feedback Integration**: Address reviewer feedback through iteration
+6. **Conclusion**: Generate implementation summary and prepare for completion
+7. **PR Creation**: Automatically create pull request with all changes
+
+This comprehensive approach ensures that approved plans are implemented systematically while maintaining high code quality standards and providing complete traceability from request to pull request.

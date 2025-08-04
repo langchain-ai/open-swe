@@ -1,0 +1,60 @@
+---
+title: "Agents Overview"
+description: "Introduction to the four-agent system architecture"
+---
+
+# Agents Overview
+
+Open SWE uses a sophisticated four-agent system to handle complex coding tasks from initial request to final implementation. This architecture mirrors how experienced development teams work together, with each agent specializing in a specific aspect of the software development lifecycle.
+
+## The Four-Agent System
+
+### **Manager Agent**
+
+**Role**: Entry point and intelligent router  
+**Purpose**: Receives user requests, initializes GitHub issues, and routes messages to the appropriate specialized agents based on context and current system state.
+
+### **Planner Agent**
+
+**Role**: Strategic planning and analysis  
+**Purpose**: Analyzes codebases, gathers context, and generates comprehensive implementation plans that break down complex requests into actionable tasks.
+
+### **Programmer Agent**
+
+**Role**: Code implementation and execution  
+**Purpose**: Executes approved plans by making code changes, running tests, managing dependencies, and handling all implementation details.
+
+### **Reviewer Agent**
+
+**Role**: Quality assurance and feedback  
+**Purpose**: Reviews code changes, provides feedback, and ensures quality standards are met before completion.
+
+## Agent Workflow
+
+The agents collaborate in a structured workflow that ensures thorough analysis, careful implementation, and quality assurance:
+
+```
+User Request   →   Manager   →   Planner   →   Programmer   →   Reviewer   →   Pull Request
+                    ↑               ↑              ↑                 ↑      ↓
+                    Routes to       Generates      Implements        Provides
+                    appropriate       plan           changes         feedback
+                    agent
+```
+
+### Detailed Flow
+
+1. **Request Reception**: Manager receives and classifies user requests, determining the appropriate routing strategy
+2. **Plan Generation**: Planner analyzes the codebase, gathers context, and creates detailed implementation plans
+3. **Plan Approval**: Plans are presented for human review and approval (unless in auto mode)
+4. **Implementation**: Programmer executes the approved plan through systematic code changes
+5. **Quality Review**: Reviewer analyzes changes and provides feedback for improvements
+6. **Iteration**: Programmer addresses feedback until quality standards are met
+7. **Completion**: Automatic pull request creation with all changes and documentation
+
+## Key Benefits
+
+- **Separation of Concerns**: Each agent focuses on its specialized domain
+- **Quality Assurance**: Built-in review process ensures code quality
+- **Scalability**: Complex tasks are systematically broken down and executed
+
+This architecture enables Open SWE to handle sophisticated coding requests while maintaining high quality standards.
