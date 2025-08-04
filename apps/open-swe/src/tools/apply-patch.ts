@@ -301,7 +301,6 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         }
       }
 
-
       let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
       logger.info(resultMessage);
       if (fixedDiff) {
