@@ -61,13 +61,17 @@ Before starting, ensure you have the following installed:
     Fill in the following variables (GitHub App values will be added in the next step):
 
     ```bash Environment Variables [expandable]
+    # API URLs for development
+    NEXT_PUBLIC_API_URL="http://localhost:3000/api"
+    LANGGRAPH_API_URL="http://localhost:2024"
+
+    # Encryption key for secrets (generate with: openssl rand -hex 32)
+    SECRETS_ENCRYPTION_KEY=""
+
     # GitHub App OAuth settings (will be filled after creating GitHub App)
     NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=""
     GITHUB_APP_CLIENT_SECRET=""
     GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
-
-    # Encryption key for secrets (generate with: openssl rand -hex 32)
-    SECRETS_ENCRYPTION_KEY=""
 
     # GitHub App details (will be filled after creating GitHub App)
     GITHUB_APP_NAME="open-swe-dev"
@@ -76,10 +80,6 @@ Before starting, ensure you have the following installed:
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
-
-    # API URLs for development
-    NEXT_PUBLIC_API_URL="http://localhost:3000/api"
-    LANGGRAPH_API_URL="http://localhost:2024"
     ```
 
     ### Agent Environment Variables (`apps/open-swe/.env`)
@@ -117,6 +117,9 @@ Before starting, ensure you have the following installed:
     PORT="2024"
     OPEN_SWE_APP_URL="http://localhost:3000"
     SECRETS_ENCRYPTION_KEY=""  # Must match web app value
+
+    # CI/CD. See the /labs/swe/setup/ci for more information
+    SKIP_CI_UNTIL_LAST_COMMIT="true"
     ```
 
     <Tip>
@@ -174,6 +177,15 @@ Before starting, ensure you have the following installed:
 
     **Account permissions:** None
 
+    This gif shows how/where to enable the permissions on the GitHub App:
+    <iframe
+      className="w-full aspect-video rounded-xl"
+      src="https://www.youtube.com/embed/FP02bprNtrA"
+      title="Permissions Walkthrough"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowFullScreen
+    ></iframe>
+
     ### Subscribe to Events
 
     - ✅ **Issues** - Required for webhook functionality
@@ -204,6 +216,28 @@ Before starting, ensure you have the following installed:
       2. Click "Generate a private key"
       3. Download the `.pem` file and copy its contents
       4. Format as a single line with `\\n` for line breaks, or use the multiline format shown in the example
+    - **GITHUB_APP_REDIRECT_URI**: Should be `http://localhost:3000/api/auth/github/callback` for local development, or `https://your-production-url.com/api/auth/github/callback` for production.
+    - **GITHUB_WEBHOOK_SECRET**: Generate and save this value:
+      ```bash
+      openssl rand -hex 32
+      ```
+      Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/open-swe/.env` and `apps/web/.env`.
+
+    Below are screenshots showing where in the GitHub App settings you can find the values for the environment variables.
+
+    <Accordion title="GitHub App OAuth Settings">
+      The following screenshots show where to find the following values:
+
+      - `GITHUB_APP_ID`
+      - `NEXT_PUBLIC_GITHUB_APP_CLIENT_ID`
+      - `GITHUB_APP_CLIENT_SECRET`
+      - `GITHUB_APP_REDIRECT_URI`
+      - `GITHUB_APP_PRIVATE_KEY`
+
+      ![GitHub Secrets Screenshot 1](/images/gh_app_token_screenshot_1.png)
+      ![GitHub Secrets Screenshot 2](/images/gh_app_token_screenshot_2.png)
+      ![GitHub Secrets Screenshot 3](/images/gh_app_token_screenshot_3.png)
+    </Accordion>
 
     <Tip>
     Keep your GitHub App credentials secure and never commit them to version control. The `.env` files are already included in `.gitignore`.

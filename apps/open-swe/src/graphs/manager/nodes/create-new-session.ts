@@ -6,6 +6,9 @@ import {
 } from "@open-swe/shared/open-swe/manager/types";
 import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js";
 import {
+  GITHUB_INSTALLATION_ID,
+  GITHUB_INSTALLATION_TOKEN_COOKIE,
+  LOCAL_MODE_HEADER,
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
 } from "@open-swe/shared/constants";
@@ -24,6 +27,11 @@ import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "../../../utils/config.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { createLogger, LogLevel } from "../../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "CreateNewSession");
 
 /**
  * Create new manager session.
@@ -73,8 +81,20 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     }),
   ];
 
+  const isLocal = isLocalMode(config);
+  const defaultHeaders = isLocal
+    ? { [LOCAL_MODE_HEADER]: "true" }
+    : getDefaultHeaders(config);
+
+  if (!isLocal) {
+    logger.info("Regenerating installation token before starting new session.");
+    defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
+      await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
+    logger.info("Regenerated installation token before starting new session.");
+  }
+
   const langGraphClient = createLangGraphClient({
-    defaultHeaders: getDefaultHeaders(config),
+    defaultHeaders,
   });
 
   const newManagerThreadId = uuidv4();

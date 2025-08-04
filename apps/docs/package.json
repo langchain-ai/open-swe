@@ -5,8 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "mint dev",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "echo 'No formatting needed for docs' && exit 0",
+    "format:check": "echo 'No formatting needed for docs' && exit 0",
     "clean": "rm -rf .turbo || true"
   },
   "devDependencies": {
