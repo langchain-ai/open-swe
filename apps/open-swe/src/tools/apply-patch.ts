@@ -86,7 +86,10 @@ async function applyPatchWithGit(
       );
     } else {
       if (!sandbox) {
-        throw new Error("Sandbox is required for non-local mode");
+        return {
+          success: false,
+          output: "Sandbox is required for non-local mode but not available",
+        };
       }
       response = await sandbox.process.executeCommand(
         `git apply --verbose "${tempPatchFile}"`,
@@ -159,9 +162,6 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
           workDir,
           config,
         });
-        if (!readFileResult.success) {
-          throw new Error(readFileResult.output);
-        }
 
         // First try to apply the patch using Git CLI for better error messages
         logger.info(
@@ -208,12 +208,11 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
             filePath: file_path,
             workDir,
           });
-        }
-
-        if (!readUpdatedResult.success) {
-          throw new Error(
-            `Failed to read updated file after applying patch: ${readUpdatedResult.output}`,
-          );
+          if (!readUpdatedResult.success) {
+            throw new Error(
+              `Failed to read updated file after applying patch: ${readUpdatedResult.output}`,
+            );
+          }
         }
 
         logger.info(`Successfully applied diff to ${file_path} using Git CLI`);
@@ -296,11 +295,12 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
           content: patchedContent,
           workDir,
         });
+
+        if (!writeFileResult.success) {
+          throw new Error(writeFileResult.output);
+        }
       }
 
-      if (!writeFileResult.success) {
-        throw new Error(writeFileResult.output);
-      }
 
       let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;
       logger.info(resultMessage);
