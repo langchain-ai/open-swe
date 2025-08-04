@@ -7,6 +7,7 @@ import {
   createTextEditorTool,
   createShellTool,
   createSearchDocumentForTool,
+  createWriteDefaultTsConfigTool,
 } from "../../../tools/index.js";
 import {
   GraphState,
@@ -59,11 +60,16 @@ export async function takeAction(
   const getURLContentTool = createGetURLContentTool(state);
   const searchDocumentForTool = createSearchDocumentForTool(state, config);
   const mcpTools = await getMcpTools(config);
+  const writeDefaultTsConfigTool = createWriteDefaultTsConfigTool(
+    state,
+    config,
+  );
 
   const higherContextLimitToolNames = [
     ...mcpTools.map((t) => t.name),
     getURLContentTool.name,
     searchDocumentForTool.name,
+    writeDefaultTsConfigTool.name,
   ];
 
   const allTools = [
@@ -74,6 +80,7 @@ export async function takeAction(
     applyPatchTool,
     getURLContentTool,
     searchDocumentForTool,
+    writeDefaultTsConfigTool,
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

@@ -579,3 +579,25 @@ export function createViewToolFields(
     schema: viewSchema,
   };
 }
+
+export function createWriteDefaultTsConfigToolFields(
+  targetRepository: TargetRepository,
+) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+
+  const writeDefaultTsConfigToolSchema = z.object({
+    workdir: z
+      .string()
+      .default(repoRoot)
+      .describe(
+        `The directory which the tsconfig.json file will be written to. The default value is the root of the repository: \`${repoRoot}\`.`,
+      ),
+  });
+
+  return {
+    name: "write_default_tsconfig",
+    description:
+      "Writes a default tsconfig.json file to the specified directory. This should ONLY be called when creating a new TypeScript project.",
+    schema: writeDefaultTsConfigToolSchema,
+  };
+}

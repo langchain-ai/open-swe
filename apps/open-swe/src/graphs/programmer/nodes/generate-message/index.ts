@@ -19,6 +19,7 @@ import {
   createUpdatePlanToolFields,
   createGetURLContentTool,
   createSearchDocumentForTool,
+  createWriteDefaultTsConfigTool,
 } from "../../../../tools/index.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
@@ -181,6 +182,7 @@ async function createToolsAndPrompt(
     createInstallDependenciesTool(state, config),
     createMarkTaskCompletedToolFields(),
     createSearchDocumentForTool(state, config),
+    createWriteDefaultTsConfigTool(state, config),
     ...mcpTools,
   ];
 
