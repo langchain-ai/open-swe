@@ -1,6 +1,3 @@
-> [!WARNING]
-> Open SWE is under active development and is not yet ready for production use.
-
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
@@ -19,6 +16,9 @@ Open SWE is an open-source cloud-based coding agent built with [LangGraph](https
 > Try out Open SWE yourself using our [public demo](https://swe.langchain.com)!
 >
 > **Note: you're required to set your own LLM API keys to use the demo.**
+
+> [!INFO]
+> Read the Open SWE documentation [here](https://docs.langchain.com/labs/swe/).
 
 # Features
 
