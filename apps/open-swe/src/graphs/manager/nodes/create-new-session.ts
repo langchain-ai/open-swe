@@ -87,14 +87,10 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     : getDefaultHeaders(config);
 
   if (!isLocal) {
-    logger.info(
-      "Regenerating installation token before starting programmer run.",
-    );
+    logger.info("Regenerating installation token before starting new session.");
     defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
       await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
-    logger.info(
-      "Regenerated installation token before starting programmer run.",
-    );
+    logger.info("Regenerated installation token before starting new session.");
   }
 
   const langGraphClient = createLangGraphClient({

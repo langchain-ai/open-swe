@@ -45,14 +45,10 @@ export async function startPlanner(
     : getDefaultHeaders(config);
 
   if (!localMode) {
-    logger.info(
-      "Regenerating installation token before starting programmer run.",
-    );
+    logger.info("Regenerating installation token before starting planner run.");
     defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
       await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
-    logger.info(
-      "Regenerated installation token before starting programmer run.",
-    );
+    logger.info("Regenerated installation token before starting planner run.");
   }
 
   try {
