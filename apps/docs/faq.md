@@ -16,6 +16,12 @@ description: "Frequently Asked Questions"
   Yes. When using Anthropic models, all input tokens are cached on Anthropic's servers.
 </Accordion>
 
+<Accordion title="My run failed midway through. What now?">
+  We're sorry you're experiencing this! Open SWE will automatically commit any changes it makes to a draft pull request. Please check the draft pull request and make any necessary changes.
+
+  If a run fails, you will need to start over.
+</Accordion>
+
 <Accordion title="Can I use Open SWE in a production environment?">
   Yes! We've been using Open SWE internally at LangChain for a while now, and it's been giving us great results.
 
