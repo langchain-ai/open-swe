@@ -42,6 +42,13 @@ function AuthStatusContent() {
     fetchGitHubToken,
   ]);
 
+  useEffect(() => {
+    if (githubToken) {
+      console.log("redirecting to chat");
+      router.push("/chat");
+    }
+  }, [githubToken]);
+
   const checkAuthStatus = async () => {
     try {
       const response = await fetch("/api/auth/status");
@@ -172,6 +179,8 @@ function AuthStatusContent() {
       </div>
     );
   }
+
+  console.log("returning null", githubToken);
   return null;
 }
 
