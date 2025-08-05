@@ -1,0 +1,83 @@
+---
+title: Best Practices
+description: Guidelines for effective use of Open SWE
+---
+
+# Best Practices
+
+Follow these guidelines to get the best results from Open SWE.
+
+## Prompting Tips
+
+### Be Clear and Direct
+
+- Include specific file paths and function names in your requests. Open SWE preforms best when its given a clear starting point.
+- Provide concrete examples of what you want to achieve. Describe the end state you want to reach so Open SWE knows what it's working towards.
+
+### Create Custom Rules
+
+Create an `AGENTS.md` file in your repository root to provide project-specific context. This helps Open SWE understand your codebase conventions and requirements.
+
+<Tip>
+  See the [Custom Rules](/labs/swe/usage/custom-rules) page for detailed guidance on
+  setting up your `AGENTS.md` file.
+</Tip>
+
+### Keep Tasks Well-Scoped
+
+- Focus on one specific feature or fix per request
+- Break large changes into smaller, manageable tasks
+- Avoid combining multiple unrelated changes in a single request
+
+### Avoid Multiple Tasks
+
+Submit separate requests for different features or fixes. This allows Open SWE to:
+
+- Generate more focused plans
+- Provide better error handling
+- Make changes easier to review
+
+## Model Selection
+
+- **Claude Sonnet 4 (Default)**: The default model for planning, writing code, and reviewing changes. This model offers the best balance of performance, speed and cost.
+- **Claude Opus 4**: A larger, more powerful model for difficult, or open-ended tasks. Opus 4 is more expensive and slower, but will provide better results for complex tasks.
+
+### Avoid Other Models
+
+Although Open SWE allows you to select any model from Anthropic, OpenAI and Google, its prompts are tuned specifically for Anthropic models, and other providers will not preform as well.
+
+## Mode Selection
+
+### `open-swe` vs `open-swe-max`
+
+**`open-swe`**: Uses Claude Sonnet 4
+
+- Suitable for most development tasks
+- Faster execution
+- Cost-effective
+
+**`open-swe-max`**: Uses Claude Opus 4 (only for the planning and code writing agents)
+
+- For complex tasks requiring advanced reasoning
+- Higher quality output for challenging problems
+- More expensive but better for difficult tasks
+
+### Auto vs Manual Labels
+
+**Auto Mode (`-auto` labels)**
+
+It's recommended to use the auto mode for most tasks. Open SWE is very good at planning, and in most cases it does not need a manual review before execution.
+
+If you're running Open SWE against an open-ended or very complex task, you may want to use manual mode to review the plan before execution.
+
+## Label Reference
+
+- `open-swe`: Manual mode with Sonnet 4
+- `open-swe-auto`: Auto mode with Sonnet 4
+- `open-swe-max`: Manual mode with Opus 4
+- `open-swe-max-auto`: Auto mode with Opus 4
+
+<Note>
+  In development environments, append `-dev` to all labels (e.g.,
+  `open-swe-dev`, `open-swe-auto-dev`).
+</Note>

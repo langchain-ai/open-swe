@@ -1,5 +1,8 @@
 import { generateJWT } from "../jwt.js";
 
+const replaceNewlinesWithBackslashN = (str: string) =>
+  str.replace(/\n/g, "\\n");
+
 /**
  * Gets an installation access token for a GitHub App installation
  */
@@ -8,7 +11,10 @@ export async function getInstallationToken(
   appId: string,
   privateKey: string,
 ): Promise<string> {
-  const jwtToken = generateJWT(appId, privateKey);
+  const jwtToken = generateJWT(
+    appId,
+    replaceNewlinesWithBackslashN(privateKey),
+  );
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,

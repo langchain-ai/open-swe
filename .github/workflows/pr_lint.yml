@@ -30,14 +30,10 @@ jobs:
             revert
             release
           scopes: |
-            checkpoint
-            checkpoint-postgres
-            checkpoint-sqlite
+            shared
             cli
-            langgraph
-            prebuilt
-            scheduler-kafka
-            sdk-py
+            web
+            open-swe
             docs
           requireScope: false
           ignoreLabels: |

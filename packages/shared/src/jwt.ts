@@ -1,4 +1,4 @@
-import * as jwt from "jsonwebtoken";
+import jsonwebtoken from "jsonwebtoken";
 
 /**
  * Generates a JWT for GitHub App authentication
@@ -12,5 +12,5 @@ export function generateJWT(appId: string, privateKey: string): string {
     iss: appId,
   };
 
-  return jwt.sign(payload, privateKey, { algorithm: "RS256" });
+  return jsonwebtoken.sign(payload, privateKey, { algorithm: "RS256" });
 }

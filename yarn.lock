@@ -4114,6 +4114,7 @@ __metadata:
     "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/jest": ^29.5.0
+    "@types/jsonwebtoken": ^9.0.10
     "@types/node": ^22.13.5
     diff: ^8.0.1
     dotenv: ^16.4.7
@@ -4124,6 +4125,7 @@ __metadata:
     eslint-plugin-prettier: ^4.2.1
     hono: ^4.8.3
     jest: ^29.7.0
+    jsonwebtoken: ^9.0.2
     langchain: ^0.3.26
     langsmith: ^0.3.29
     prettier: ^3.5.2
@@ -4191,6 +4193,7 @@ __metadata:
     "@octokit/types": ^12.0.0
     "@tsconfig/recommended": ^1.0.8
     "@types/jest": ^29.5.0
+    "@types/jsonwebtoken": ^9.0.10
     "@types/node": ^22.13.5
     dotenv: ^16.4.7
     eslint: ^9.19.0
@@ -4235,7 +4238,7 @@ __metadata:
     "@radix-ui/react-tabs": ^1.1.12
     "@radix-ui/react-tooltip": ^1.1.8
     "@tailwindcss/postcss": ^4.0.13
-    "@types/jsonwebtoken": ^9.0.9
+    "@types/jsonwebtoken": ^9.0.10
     "@types/lodash": ^4.17.16
     "@types/node": ^22.13.5
     "@types/react": ^19.0.8
@@ -4256,6 +4259,7 @@ __metadata:
     eslint-plugin-react-refresh: ^0.4.18
     framer-motion: ^12.4.9
     globals: ^15.14.0
+    jsonwebtoken: ^9.0.2
     katex: ^0.16.21
     langgraph-nextjs-api-passthrough: ^0.1.4
     lodash: ^4.17.21
@@ -6910,7 +6914,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/jsonwebtoken@npm:^9.0.9":
+"@types/jsonwebtoken@npm:^9.0.10":
   version: 9.0.10
   resolution: "@types/jsonwebtoken@npm:9.0.10"
   dependencies:

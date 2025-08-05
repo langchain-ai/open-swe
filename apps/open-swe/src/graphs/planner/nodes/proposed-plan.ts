@@ -28,6 +28,7 @@ import {
   LOCAL_MODE_HEADER,
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_PAT,
 } from "@open-swe/shared/constants";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
@@ -95,7 +96,9 @@ async function startProgrammerRun(input: {
     ? { [LOCAL_MODE_HEADER]: "true" }
     : getDefaultHeaders(config);
 
-  if (!isLocal) {
+  // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
+  // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
+  if (!isLocal && !(GITHUB_PAT in defaultHeaders)) {
     logger.info(
       "Regenerating installation token before starting programmer run.",
     );
