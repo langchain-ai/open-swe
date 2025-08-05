@@ -121,7 +121,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
 
       // Read the file using unified readFile function
       const readFileResult = await readFile({
-        sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+        sandbox,
         filePath: file_path,
         workDir,
         config,
@@ -140,7 +140,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
       // If Git successfully applied the patch, read the updated file and return success
       if (gitResult.success) {
         const readUpdatedResult = await readFile({
-          sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+          sandbox,
           filePath: file_path,
           workDir,
           config,
@@ -216,7 +216,7 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
 
       // Write the patched content using unified writeFile function
       const writeFileResult = await writeFile({
-        sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+        sandbox,
         filePath: file_path,
         content: patchedContent,
         workDir,
