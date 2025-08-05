@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
@@ -41,6 +42,13 @@ function AuthStatusContent() {
     isTokenLoading,
     fetchGitHubToken,
   ]);
+
+  useEffect(() => {
+    if (githubToken) {
+      console.log("redirecting to chat");
+      router.push("/chat");
+    }
+  }, [githubToken]);
 
   const checkAuthStatus = async () => {
     try {
@@ -172,6 +180,7 @@ function AuthStatusContent() {
       </div>
     );
   }
+
   return null;
 }
 

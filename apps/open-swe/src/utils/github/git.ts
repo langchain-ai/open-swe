@@ -258,14 +258,45 @@ export async function checkoutBranchAndCommit(
   );
 
   if (pushRes instanceof Error) {
-    logger.info("Failed to push changes, attempting to pull and push again");
+    const errorFields =
+      pushRes instanceof Error
+        ? {
+            message: pushRes.message,
+            name: pushRes.name,
+          }
+        : pushRes;
+
+    logger.error("Failed to push changes, attempting to pull and push again", {
+      ...errorFields,
+    });
+
     // attempt to git pull, then push again
-    await sandbox.git.pull(
-      absoluteRepoDir,
-      "git",
-      options.githubInstallationToken,
+    const pullRes = await withRetry(
+      async () => {
+        return await sandbox.git.pull(
+          absoluteRepoDir,
+          "git",
+          options.githubInstallationToken,
+        );
+      },
+      { retries: 1, delay: 0 },
     );
-    logger.info("Successfully pulled changes. Pushing again.");
+
+    if (pullRes instanceof Error) {
+      const errorFields =
+        pullRes instanceof Error
+          ? {
+              message: pullRes.message,
+              name: pullRes.name,
+            }
+          : pullRes;
+      logger.error("Failed to pull changes after a push failed.", {
+        ...errorFields,
+      });
+    } else {
+      logger.info("Successfully pulled changes. Pushing again.");
+    }
+
     const pushRes2 = await withRetry(
       async () => {
         return await sandbox.git.push(
@@ -276,6 +307,7 @@ export async function checkoutBranchAndCommit(
       },
       { retries: 3, delay: 0 },
     );
+
     if (pushRes2 instanceof Error) {
       const gitStatus = await sandbox.git.status(absoluteRepoDir);
       const errorFields = {

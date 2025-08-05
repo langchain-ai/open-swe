@@ -1,7 +1,7 @@
 import { generateJWT } from "../jwt.js";
 
-const replaceNewlinesWithBackslashN = (str: string) =>
-  str.replace(/\n/g, "\\n");
+const convertEscapedNewlinesToNewlines = (str: string) =>
+  str.replace(/\\n/g, "\n");
 
 /**
  * Gets an installation access token for a GitHub App installation
@@ -13,7 +13,7 @@ export async function getInstallationToken(
 ): Promise<string> {
   const jwtToken = generateJWT(
     appId,
-    replaceNewlinesWithBackslashN(privateKey),
+    convertEscapedNewlinesToNewlines(privateKey),
   );
 
   const response = await fetch(
