@@ -8,6 +8,7 @@ import {
 import { getLocalShellExecutor } from "./local-shell-executor.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { ExecuteCommandOptions, LocalExecuteResponse } from "./types.js";
+import { getSandboxSessionOrThrow } from "../../tools/utils/get-sandbox-id.js";
 
 const logger = createLogger(LogLevel.INFO, "ShellExecutor");
 
@@ -93,11 +94,14 @@ export class ShellExecutor {
     timeout?: number,
     sandbox?: Sandbox,
   ): Promise<LocalExecuteResponse> {
-    if (!sandbox) {
-      throw new Error("Sandbox is required for sandbox mode execution");
-    }
+    const sandbox_ = sandbox ?? (await getSandboxSessionOrThrow({}));
 
-    return await sandbox.process.executeCommand(command, workdir, env, timeout);
+    return await sandbox_.process.executeCommand(
+      command,
+      workdir,
+      env,
+      timeout,
+    );
   }
 
   /**

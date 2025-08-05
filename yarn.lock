@@ -2692,15 +2692,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/anthropic@npm:^0.3.25":
-  version: 0.3.25
-  resolution: "@langchain/anthropic@npm:0.3.25"
+"@langchain/anthropic@npm:^0.3.26":
+  version: 0.3.26
+  resolution: "@langchain/anthropic@npm:0.3.26"
   dependencies:
     "@anthropic-ai/sdk": ^0.56.0
     fast-xml-parser: ^4.4.1
   peerDependencies:
     "@langchain/core": ">=0.3.58 <0.4.0"
-  checksum: e7a48d130379f7d26b415ac3eb8ee9a9d44c3b51f1333568e2fa97b82c272e18057a8ee10a2bb0d8a0c18c69ee7d8945cf7aebd05198afc0da86540b38bc3dc0
+  checksum: 971d29847f437e1fcd486479346da5682d182386e27637b5806de1fa4fdd3de7b2b5283d93e95d8562c8b0db79830f0ad5458d1fed6438534b087db2cca616fb
   languageName: node
   linkType: hard
 
@@ -4097,7 +4097,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/anthropic": ^0.3.25
+    "@langchain/anthropic": ^0.3.26
     "@langchain/community": ^0.3.47
     "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
