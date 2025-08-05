@@ -31,9 +31,7 @@ import {
   getCodebaseTree,
 } from "../../../utils/tree.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import {
-  isLocalMode,
-} from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";

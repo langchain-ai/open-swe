@@ -24,10 +24,7 @@ import {
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import {
-  isLocalMode,
-  getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
@@ -37,6 +34,7 @@ import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -176,9 +174,8 @@ export async function takeReviewerActions(
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  // Only check for changed files and commit in local mode
-  if (isLocalMode(config)) {
-    const repoPath = getLocalWorkingDirectory();
+  if (!isLocalMode(config)) {
+    const repoPath = getRepoAbsolutePath(state.targetRepository, config);
     const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
     if (changedFiles.length > 0) {
