@@ -38,6 +38,13 @@ export function ApiKeyBanner() {
     userIsAllowed ||
     hasApiKeySet(config)
   ) {
+    console.log("Banner not shown", {
+      isLoading,
+      user,
+      dismissed,
+      userIsAllowed,
+      hasApiKeySet: hasApiKeySet(config),
+    });
     return null;
   }
 
