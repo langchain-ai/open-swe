@@ -227,12 +227,6 @@ function formatToolResult(message: ToolMessage): string {
     case "str_replace_based_edit_tool":
       return "File edited successfully";
 
-    case "search_documents_for":
-      if (content.includes("No content found")) {
-        return "No content found at URL";
-      }
-      return `${content.length} characters of search results`;
-
     case "get_url_content":
       return `${content.length} characters of content`;
 

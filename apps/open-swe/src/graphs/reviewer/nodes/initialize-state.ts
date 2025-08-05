@@ -11,11 +11,7 @@ import { v4 as uuidv4 } from "uuid";
 import { createReviewStartedToolFields } from "@open-swe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
 import { Sandbox } from "@daytonaio/sdk";
-import {
-  isLocalMode,
-  getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
-import { getLocalShellExecutor } from "../../../utils/shell-executor/local-shell-executor.js";
+import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
@@ -57,35 +53,19 @@ async function getChangedFiles(
   config: GraphConfig,
 ): Promise<string> {
   try {
-    if (isLocalMode(config)) {
-      // Local mode: use LocalShellExecutor
-      const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-      const changedFilesRes = await executor.executeCommand(
-        `git diff ${baseBranchName} --name-only`,
-        {
-          workdir: repoRoot,
-          timeout: 30,
-        },
-      );
-      if (changedFilesRes.exitCode !== 0) {
-        logger.error(`Failed to get changed files: ${changedFilesRes.result}`);
-        return "Failed to get changed files.";
-      }
-      return changedFilesRes.result.trim();
-    } else {
-      // Sandbox mode: use sandbox.process
-      const changedFilesRes = await sandbox.process.executeCommand(
-        `git diff ${baseBranchName} --name-only`,
-        repoRoot,
-      );
-      if (changedFilesRes.exitCode !== 0) {
-        const errorFields = getSandboxErrorFields(changedFilesRes);
-        logger.error(
-          `Failed to get changed files: ${JSON.stringify(errorFields, null, 2)}`,
-        );
-      }
-      return changedFilesRes.result.trim();
+    const executor = createShellExecutor(config);
+    const changedFilesRes = await executor.executeCommand({
+      command: `git diff ${baseBranchName} --name-only`,
+      workdir: repoRoot,
+      timeout: 30,
+      sandbox,
+    });
+
+    if (changedFilesRes.exitCode !== 0) {
+      logger.error(`Failed to get changed files: ${changedFilesRes.result}`);
+      return "Failed to get changed files.";
     }
+    return changedFilesRes.result.trim();
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error("Failed to get changed files.", {
@@ -101,38 +81,21 @@ async function getBaseBranchName(
   config: GraphConfig,
 ): Promise<string> {
   try {
-    if (isLocalMode(config)) {
-      // Local mode: use LocalShellExecutor
-      const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-      const baseBranchNameRes = await executor.executeCommand(
-        "git config init.defaultBranch",
-        {
-          workdir: repoRoot,
-          timeout: 30,
-        },
-      );
-      if (baseBranchNameRes.exitCode !== 0) {
-        logger.error("Failed to get base branch name", {
-          result: baseBranchNameRes.result,
-        });
-        return "";
-      }
-      return baseBranchNameRes.result.trim();
-    } else {
-      // Sandbox mode: use sandbox.process
-      const baseBranchNameRes = await sandbox.process.executeCommand(
-        "git config init.defaultBranch",
-        repoRoot,
-      );
-      if (baseBranchNameRes.exitCode !== 0) {
-        const errorFields = getSandboxErrorFields(baseBranchNameRes);
-        logger.error("Failed to get base branch name", {
-          ...(errorFields ?? baseBranchNameRes),
-        });
-        return "";
-      }
-      return baseBranchNameRes.result.trim();
+    const executor = createShellExecutor(config);
+    const baseBranchNameRes = await executor.executeCommand({
+      command: "git config init.defaultBranch",
+      workdir: repoRoot,
+      timeout: 30,
+      sandbox,
+    });
+
+    if (baseBranchNameRes.exitCode !== 0) {
+      logger.error("Failed to get base branch name", {
+        result: baseBranchNameRes.result,
+      });
+      return "";
     }
+    return baseBranchNameRes.result.trim();
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
     logger.error("Failed to get base branch name.", {

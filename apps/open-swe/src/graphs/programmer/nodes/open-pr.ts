@@ -35,7 +35,6 @@ import {
   getActivePlanItems,
   getPullRequestNumberFromActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
@@ -115,29 +114,32 @@ export async function openPullRequest(
     );
   }
 
-  const repoPath = isLocalMode(config)
-    ? getLocalWorkingDirectory()
-    : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
-  if (changedFiles.length > 0) {
-    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-      changedFiles,
-    });
-    const result = await checkoutBranchAndCommit(
-      config,
-      state.targetRepository,
-      sandbox,
-      {
-        branchName,
-        githubInstallationToken,
-        taskPlan: state.taskPlan,
-        githubIssueId: state.githubIssueId,
-      },
-    );
-    branchName = result.branchName;
-    updatedTaskPlan = result.updatedTaskPlan;
+
+  // Only check for changed files and commit in local mode
+  if (isLocalMode(config)) {
+    const repoPath = getLocalWorkingDirectory();
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+
+    if (changedFiles.length > 0) {
+      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+        changedFiles,
+      });
+      const result = await checkoutBranchAndCommit(
+        config,
+        state.targetRepository,
+        sandbox,
+        {
+          branchName,
+          githubInstallationToken,
+          taskPlan: state.taskPlan,
+          githubIssueId: state.githubIssueId,
+        },
+      );
+      branchName = result.branchName;
+      updatedTaskPlan = result.updatedTaskPlan;
+    }
   }
 
   const openPrTool = createOpenPrToolFields();

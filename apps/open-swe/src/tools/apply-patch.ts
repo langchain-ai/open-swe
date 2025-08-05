@@ -13,7 +13,6 @@ import {
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../utils/shell-executor/shell-executor.js";
-import { promises as fs } from "fs";
 import { join } from "path";
 
 type FileOperationResult = {
@@ -46,31 +45,23 @@ async function applyPatchWithGit(
     : `/tmp/patch_${Date.now()}_${Math.random().toString(36).substring(2)}.diff`;
 
   try {
-    // Create the patch file (different method based on mode)
-    if (isLocalMode(config)) {
-      await fs.writeFile(tempPatchFile, diffContent, "utf-8");
-    } else {
-      if (!sandbox) {
-        throw new Error("Sandbox is required for non-local mode");
-      }
+    // Create the patch file using unified shell executor
+    const executor = createShellExecutor(config);
+    const createFileResponse = await executor.executeCommand({
+      command: `cat > "${tempPatchFile}" << 'EOF'\n${diffContent}\nEOF`,
+      workdir: workDir,
+      timeout: 10, // 10 seconds timeout for file creation
+      sandbox: sandbox || undefined,
+    });
 
-      const createFileResponse = await sandbox.process.executeCommand(
-        `cat > "${tempPatchFile}" << 'EOF'\n${diffContent}\nEOF`,
-        workDir,
-        {},
-        10, // 10 seconds timeout for file creation
-      );
-
-      if (createFileResponse.exitCode !== 0) {
-        return {
-          success: false,
-          output: `Failed to create patch file: ${createFileResponse.result || "Unknown error"}`,
-        };
-      }
+    if (createFileResponse.exitCode !== 0) {
+      return {
+        success: false,
+        output: `Failed to create patch file: ${createFileResponse.result || "Unknown error"}`,
+      };
     }
 
-    // Execute git apply with --verbose for detailed error messages using unified executor
-    const executor = createShellExecutor(config);
+    // Execute git apply with --verbose for detailed error messages
     const response = await executor.executeCommand({
       command: `git apply --verbose "${tempPatchFile}"`,
       workdir: workDir,
@@ -98,15 +89,19 @@ async function applyPatchWithGit(
           : "Unknown error applying patch with git",
     };
   } finally {
-    // Clean up temp file (same for both modes)
-    if (isLocalMode(config)) {
-      try {
-        await fs.unlink(tempPatchFile);
-      } catch (cleanupError) {
-        logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
-          cleanupError,
-        });
-      }
+    // Clean up temp file using unified shell executor
+    try {
+      const executor = createShellExecutor(config);
+      await executor.executeCommand({
+        command: `rm -f "${tempPatchFile}"`,
+        workdir: workDir,
+        timeout: 5, // 5 seconds timeout for cleanup
+        sandbox: sandbox || undefined,
+      });
+    } catch (cleanupError) {
+      logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
+        cleanupError,
+      });
     }
   }
 }
@@ -119,68 +114,42 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         ? getLocalWorkingDirectory()
         : getRepoAbsolutePath(state.targetRepository);
 
-      let readFileResult: FileOperationResult;
-      let gitResult: FileOperationResult;
+      // Get sandbox for sandbox mode (will be undefined for local mode)
+      const sandbox = isLocalMode(config)
+        ? null
+        : await getSandboxSessionOrThrow(input);
 
-      if (isLocalMode(config)) {
-        // Local mode: use local file operations
-        readFileResult = await readFile({
-          sandbox: {} as Sandbox, // Dummy sandbox for local mode
-          filePath: file_path,
-          workDir,
-          config,
-        });
+      // Read the file using unified readFile function
+      const readFileResult = await readFile({
+        sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+        filePath: file_path,
+        workDir,
+        config,
+      });
 
-        // First try to apply the patch using Git CLI for better error messages
-        logger.info(
-          `Attempting to apply patch to ${file_path} using Git CLI (local mode)`,
-        );
-        gitResult = await applyPatchWithGit(null, workDir, diff, config);
-      } else {
-        // Sandbox mode: use existing sandbox operations
-        const sandbox = await getSandboxSessionOrThrow(input);
-
-        readFileResult = await readFile({
-          sandbox,
-          filePath: file_path,
-          workDir,
-        });
-        if (!readFileResult.success) {
-          throw new Error(readFileResult.output);
-        }
-
-        // First try to apply the patch using Git CLI for better error messages
-        logger.info(
-          `Attempting to apply patch to ${file_path} using Git CLI (sandbox mode)`,
-        );
-        gitResult = await applyPatchWithGit(sandbox, workDir, diff, config);
+      if (!readFileResult.success) {
+        throw new Error(readFileResult.output);
       }
+
+      // Apply the patch using Git CLI for better error messages
+      logger.info(`Attempting to apply patch to ${file_path} using Git CLI`);
+      const gitResult = await applyPatchWithGit(sandbox, workDir, diff, config);
 
       const readFileOutput = readFileResult.output;
 
       // If Git successfully applied the patch, read the updated file and return success
       if (gitResult.success) {
-        let readUpdatedResult: FileOperationResult;
+        const readUpdatedResult = await readFile({
+          sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+          filePath: file_path,
+          workDir,
+          config,
+        });
 
-        if (isLocalMode(config)) {
-          readUpdatedResult = await readFile({
-            sandbox: {} as Sandbox, // Dummy sandbox for local mode
-            filePath: file_path,
-            workDir,
-            config,
-          });
-        } else {
-          const sandbox = await getSandboxSessionOrThrow(input);
-          readUpdatedResult = await readFile({
-            sandbox,
-            filePath: file_path,
-            workDir,
-          });
-          if (!readUpdatedResult.success) {
-            throw new Error(
-              `Failed to read updated file after applying patch: ${readUpdatedResult.output}`,
-            );
-          }
+        if (!readUpdatedResult.success) {
+          throw new Error(
+            `Failed to read updated file after applying patch: ${readUpdatedResult.output}`,
+          );
         }
 
         logger.info(`Successfully applied diff to ${file_path} using Git CLI`);
@@ -245,28 +214,17 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
         );
       }
 
-      let writeFileResult: FileOperationResult;
+      // Write the patched content using unified writeFile function
+      const writeFileResult = await writeFile({
+        sandbox: sandbox || ({} as Sandbox), // Dummy sandbox for local mode
+        filePath: file_path,
+        content: patchedContent,
+        workDir,
+        config,
+      });
 
-      if (isLocalMode(config)) {
-        writeFileResult = await writeFile({
-          sandbox: {} as Sandbox, // Dummy sandbox for local mode
-          filePath: file_path,
-          content: patchedContent,
-          workDir,
-          config,
-        });
-      } else {
-        const sandbox = await getSandboxSessionOrThrow(input);
-        writeFileResult = await writeFile({
-          sandbox,
-          filePath: file_path,
-          content: patchedContent,
-          workDir,
-        });
-
-        if (!writeFileResult.success) {
-          throw new Error(writeFileResult.output);
-        }
+      if (!writeFileResult.success) {
+        throw new Error(writeFileResult.output);
       }
 
       let resultMessage = `Successfully applied diff to \`${file_path}\` and saved changes.`;

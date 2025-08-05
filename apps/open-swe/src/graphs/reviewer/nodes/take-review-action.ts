@@ -23,7 +23,6 @@ import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   isLocalMode,
@@ -73,30 +72,19 @@ export async function takeReviewerActions(
     throw new Error("No tool calls found.");
   }
 
-  // Filter out unsafe commands
-  const { filteredToolCalls, wasFiltered } = await filterUnsafeCommands(
-    toolCalls,
-    config,
-  );
-
+  // Filter out unsafe commands only in local mode
   let modifiedMessage: AIMessage | undefined;
-  if (wasFiltered) {
-    if (filteredToolCalls.length === 0) {
-      // If all tool calls were filtered out, create a modified message with no tool calls
-      modifiedMessage = new AIMessage({
-        ...lastMessage,
-        tool_calls: [],
-      });
-      toolCalls = [];
-    } else {
-      // Create a modified message with only safe tool calls
-      modifiedMessage = new AIMessage({
-        ...lastMessage,
-        tool_calls: filteredToolCalls,
-      });
+  let wasFiltered = false;
+  if (isLocalMode(config)) {
+    const filterResult = await filterUnsafeCommands(toolCalls, config);
 
-      // Continue with the filtered tool calls
-      toolCalls = filteredToolCalls;
+    if (filterResult.wasFiltered) {
+      wasFiltered = true;
+      modifiedMessage = new AIMessage({
+        ...lastMessage,
+        tool_calls: filterResult.filteredToolCalls,
+      });
+      toolCalls = filterResult.filteredToolCalls;
     }
   }
 
@@ -183,20 +171,21 @@ export async function takeReviewerActions(
   });
 
   const toolCallResults = await Promise.all(toolCallResultsPromise);
-  const repoPath = isLocalMode(config)
-    ? getLocalWorkingDirectory()
-    : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  if (changedFiles.length > 0) {
-    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-      changedFiles,
-    });
-    if (!isLocalMode(config)) {
+  // Only check for changed files and commit in local mode
+  if (isLocalMode(config)) {
+    const repoPath = getLocalWorkingDirectory();
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+
+    if (changedFiles.length > 0) {
+      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+        changedFiles,
+      });
+
       const { githubInstallationToken } = getGitHubTokensFromConfig(config);
       const result = await checkoutBranchAndCommit(
         config,
@@ -214,8 +203,6 @@ export async function takeReviewerActions(
         ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
         : undefined;
       updatedTaskPlan = result.updatedTaskPlan;
-    } else {
-      logger.info("Skipping commit operations in local mode");
     }
   }
 

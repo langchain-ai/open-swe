@@ -30,7 +30,6 @@ import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
 } from "../../../utils/tree.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import {
   isLocalMode,
@@ -97,29 +96,19 @@ export async function takeAction(
     throw new Error("No tool calls found.");
   }
 
-  // Filter out unsafe commands
-  const { filteredToolCalls, wasFiltered } = await filterUnsafeCommands(
-    toolCalls,
-    config,
-  );
+  // Filter out unsafe commands only in local mode
   let modifiedMessage: AIMessage | undefined;
-  if (wasFiltered) {
-    if (filteredToolCalls.length === 0) {
-      // If all tool calls were filtered out, create a modified message with no tool calls
-      modifiedMessage = new AIMessage({
-        ...lastMessage,
-        tool_calls: [],
-      });
-      toolCalls = [];
-    } else {
-      // Create a modified message with only safe tool calls
-      modifiedMessage = new AIMessage({
-        ...lastMessage,
-        tool_calls: filteredToolCalls,
-      });
+  let wasFiltered = false;
+  if (isLocalMode(config)) {
+    const filterResult = await filterUnsafeCommands(toolCalls, config);
 
-      // Continue with the filtered tool calls
-      toolCalls = filteredToolCalls;
+    if (filterResult.wasFiltered) {
+      wasFiltered = true;
+      modifiedMessage = new AIMessage({
+        ...lastMessage,
+        tool_calls: filterResult.filteredToolCalls,
+      });
+      toolCalls = filterResult.filteredToolCalls;
     }
   }
 
@@ -152,9 +141,8 @@ export async function takeAction(
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke({
           ...toolCall.args,
-          // Pass in the existing/new sandbox session ID to the tool call.
-          // use `x` prefix to avoid name conflicts with tool args.
-          xSandboxSessionId: sandbox.id,
+          // Only pass sandbox session ID in sandbox mode, not local mode
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
         });
       if (typeof toolResult === "string") {
         result = toolResult;
@@ -239,21 +227,20 @@ export async function takeAction(
     }
   });
 
-  // Always check if there are changed files after running a tool.
-  // If there are, commit them.
-  const repoPath = isLocalMode(config)
-    ? getLocalWorkingDirectory()
-    : getRepoAbsolutePath(state.targetRepository);
-  const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
-
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
-  if (changedFiles.length > 0) {
-    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-      changedFiles,
-    });
-    if (!isLocalMode(config)) {
+
+  // Only check for changed files and commit in local mode
+  if (isLocalMode(config)) {
+    const repoPath = getLocalWorkingDirectory();
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+
+    if (changedFiles.length > 0) {
+      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+        changedFiles,
+      });
+
       const { githubInstallationToken } = getGitHubTokensFromConfig(config);
       const result = await checkoutBranchAndCommit(
         config,
@@ -271,8 +258,6 @@ export async function takeAction(
         ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
         : undefined;
       updatedTaskPlan = result.updatedTaskPlan;
-    } else {
-      logger.info("Skipping commit operations in local mode");
     }
   }
 

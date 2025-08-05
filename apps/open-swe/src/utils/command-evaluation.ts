@@ -9,41 +9,33 @@ import {
   formatGetURLContentCommand,
   formatStrReplaceEditCommand,
   GrepCommand,
+  createShellToolFields,
+  createViewToolFields,
+  createSearchDocumentForToolFields,
+  createGetURLContentToolFields,
+  createTextEditorToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import { ToolCall } from "@langchain/core/messages/tool";
+import { z } from "zod";
 
 const logger = createLogger(LogLevel.INFO, "CommandEvaluation");
 
-// Type definitions for tool call arguments
-interface ShellToolArgs {
-  command: string[];
-  workdir?: string;
-}
+// Type definitions for tool call arguments - derived from actual tool schemas. Undescores so the linter doesn't complain.
+const dummyRepo = { owner: "dummy", repo: "dummy" };
+const _shellTool = createShellToolFields(dummyRepo);
+type ShellToolArgs = z.infer<typeof _shellTool.schema>;
 
-interface ViewToolArgs {
-  command: string;
-  path: string;
-  view_range?: number[];
-}
+const _viewTool = createViewToolFields(dummyRepo);
+type ViewToolArgs = z.infer<typeof _viewTool.schema>;
 
-interface SearchDocumentsToolArgs {
-  query: string;
-  url: string;
-}
+const _searchDocumentsTool = createSearchDocumentForToolFields();
+type SearchDocumentsToolArgs = z.infer<typeof _searchDocumentsTool.schema>;
 
-interface GetURLContentToolArgs {
-  url: string;
-}
+const _getURLContentTool = createGetURLContentToolFields();
+type GetURLContentToolArgs = z.infer<typeof _getURLContentTool.schema>;
 
-interface StrReplaceEditToolArgs {
-  command: string;
-  path: string;
-  view_range?: [number, number];
-  old_str?: string;
-  new_str?: string;
-  file_text?: string;
-  insert_line?: number;
-}
+const _textEditorTool = createTextEditorToolFields(dummyRepo, {});
+type StrReplaceEditToolArgs = z.infer<typeof _textEditorTool.schema>;
 
 export interface CommandEvaluation {
   toolCall: ToolCall;
@@ -151,7 +143,7 @@ export function getCommandString(toolCall: ToolCall): {
 }
 
 export async function evaluateCommands(
-  commandToolCalls: any[],
+  commandToolCalls: ToolCall[],
   config: GraphConfig,
 ): Promise<CommandEvaluationResult> {
   const commandExecutingTools = [
@@ -235,9 +227,9 @@ export async function evaluateCommands(
 }
 
 export async function filterUnsafeCommands(
-  allToolCalls: any[],
+  allToolCalls: ToolCall[],
   config: GraphConfig,
-): Promise<{ filteredToolCalls: any[]; wasFiltered: boolean }> {
+): Promise<{ filteredToolCalls: ToolCall[]; wasFiltered: boolean }> {
   const commandExecutingTools = [
     "shell",
     "grep",
