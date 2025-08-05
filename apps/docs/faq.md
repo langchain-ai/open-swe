@@ -7,7 +7,7 @@ description: "Frequently Asked Questions"
   The cost per run varies greatly based on the complexity of the task, the size of the repository, and the number of files that need to be changed.
 
   For most tasks, you can expect to pay between `$0.50` -> `$3.00` when using Claude Sonnet 4.
-  For the same tasks running on Claude Opus 4, you can expect to pay between `$1.50` -> `$6.00`.
+  For the same tasks running on Claude Opus 4, you can expect to pay between `$1.50` -> `$9.00`.
 
   Always remember to monitor your runs if you're cost conscious. The most expensive run I've seen Open SWE complete was ~50M Opus 4 tokens, costing `$25.00`.
 </Accordion>
