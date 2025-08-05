@@ -33,7 +33,6 @@ import {
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
 import {
   isLocalMode,
-  getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
@@ -43,6 +42,7 @@ import { processToolCallContent } from "../../../utils/tool-output-processing.js
 import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -232,7 +232,7 @@ export async function takeAction(
   let updatedTaskPlan: TaskPlan | undefined;
 
   if (!isLocalMode(config)) {
-    const repoPath = getLocalWorkingDirectory();
+    const repoPath = getRepoAbsolutePath(state.targetRepository);
     const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
     if (changedFiles.length > 0) {
