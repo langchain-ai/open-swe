@@ -35,7 +35,6 @@ import {
   getActivePlanItems,
   getPullRequestNumberFromActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { getLocalWorkingDirectory } from "@open-swe/shared/open-swe/local-mode";
 import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
@@ -44,6 +43,7 @@ import {
   GitHubPullRequestList,
   GitHubPullRequestUpdate,
 } from "../../../utils/github/types.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -114,7 +114,7 @@ export async function openPullRequest(
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  const repoPath = getLocalWorkingDirectory();
+  const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   if (changedFiles.length > 0) {
