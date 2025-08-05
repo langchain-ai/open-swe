@@ -181,7 +181,6 @@ function AuthStatusContent() {
     );
   }
 
-  console.log("returning null", githubToken);
   return null;
 }
 
