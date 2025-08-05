@@ -231,8 +231,7 @@ export async function takeAction(
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  // Only check for changed files and commit in local mode
-  if (isLocalMode(config)) {
+  if (!isLocalMode(config)) {
     const repoPath = getLocalWorkingDirectory();
     const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
