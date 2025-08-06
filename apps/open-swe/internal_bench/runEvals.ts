@@ -14,26 +14,27 @@ import { PRData, PRProcessResult } from "./types.js";
 dotenv.config();
 const logger = createLogger(LogLevel.INFO, "PR Processor");
 
-
 /**
  * Clone repository and checkout specific commit using the cloneRepo helper
  */
 async function cloneAndCheckoutRepo(
   sandbox: Sandbox,
   prData: PRData,
-  targetCommit: string
+  targetCommit: string,
 ): Promise<void> {
   const targetRepository: TargetRepository = {
     owner: prData.repo_owner,
     repo: prData.repo_name,
-    branch: "main", 
-    baseCommit: targetCommit
+    branch: "main",
+    baseCommit: targetCommit,
   };
 
-  logger.info(`Cloning repository: ${prData.repo_owner}/${prData.repo_name} at commit ${targetCommit}`);
+  logger.info(
+    `Cloning repository: ${prData.repo_owner}/${prData.repo_name} at commit ${targetCommit}`,
+  );
 
   await cloneRepo(sandbox, targetRepository, {
-    githubInstallationToken: process.env.GITHUB_TOKEN || "dummy_token"
+    githubInstallationToken: process.env.GITHUB_TOKEN || "dummy_token",
   });
 
   logger.info(`Successfully cloned and checked out commit: ${targetCommit}`);
@@ -50,60 +51,64 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     evals_found: false,
     evals_files: [],
   };
-  console.log(process.env.DAYTONA_ORGANIZATION_ID);
   const daytona = new Daytona({
     organizationId: process.env.DAYTONA_ORGANIZATION_ID,
   });
   let sandbox: Sandbox | undefined;
-  
+
   try {
     logger.info(`Processing PR #${prData.pr_number}: ${prData.title}`);
-    
+
     // Create sandbox
     sandbox = await daytona.create(DEFAULT_SANDBOX_CREATE_PARAMS);
     result.workspace_id = sandbox.id;
-    
+
     logger.info(`Created sandbox: ${sandbox.id}`);
-    
+
     const targetRepository: TargetRepository = {
       owner: prData.repo_owner,
       repo: prData.repo_name,
       branch: "main",
-      baseCommit: undefined
+      baseCommit: undefined,
     };
     const repoDir = getRepoAbsolutePath(targetRepository);
-    
+
     // First, clone and checkout the merge commit to get the parent
     await cloneAndCheckoutRepo(sandbox, prData, prData.merge_commit_sha);
-    
+
     // Get the pre-merge commit (parent of merge commit)
-    const preMergeSha = await getPreMergeCommit(sandbox, repoDir, prData.merge_commit_sha);
+    const preMergeSha = await getPreMergeCommit(
+      sandbox,
+      repoDir,
+      prData.merge_commit_sha,
+    );
     result.pre_merge_sha = preMergeSha;
-    
+
     logger.info(`Pre-merge commit: ${preMergeSha}`);
-    
+
     // Checkout the pre-merge commit to see the state before the PR was merged
     const checkoutPreMergeResult = await sandbox.process.executeCommand(
       `git checkout ${preMergeSha}`,
       repoDir,
       undefined,
-      TIMEOUT_SEC
+      TIMEOUT_SEC,
     );
-    
+
     if (checkoutPreMergeResult.exitCode !== 0) {
-      throw new Error(`Failed to checkout pre-merge commit: ${checkoutPreMergeResult.result}`);
+      throw new Error(
+        `Failed to checkout pre-merge commit: ${checkoutPreMergeResult.result}`,
+      );
     }
-    
+
     // Setup Python environment
     logger.info("Setting up Python environment...");
     const envSetupSuccess = await setupEnv(sandbox, repoDir);
     if (!envSetupSuccess) {
       logger.warn("Failed to setup Python environment, continuing anyway");
     }
-    
+
     result.success = true;
     logger.info(`Successfully processed PR #${prData.pr_number}`);
-    
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
     logger.error(`Failed to process PR #${prData.pr_number}:`, { error });
@@ -114,11 +119,13 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
         await sandbox.delete();
         logger.info(`Deleted sandbox: ${sandbox.id}`);
       } catch (cleanupError) {
-        logger.warn(`Failed to cleanup sandbox ${sandbox.id}:`, { cleanupError });
+        logger.warn(`Failed to cleanup sandbox ${sandbox.id}:`, {
+          cleanupError,
+        });
       }
     }
   }
-  
+
   return result;
 }
 
@@ -127,82 +134,88 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
  */
 async function main() {
   const args = process.argv.slice(2);
-  
+
   if (args.length === 0) {
-    console.log("Usage:");
-    console.log("  npm run process-prs [--single PR_NUMBER]");
     process.exit(1);
   }
   // Load PRs data
-  const prsData: PRData[] = JSON.parse(readFileSync("static/langgraph_prs.json", "utf8"));
+  const prsData: PRData[] = JSON.parse(
+    readFileSync("static/langgraph_prs.json", "utf8"),
+  );
   logger.info(`Loaded ${prsData.length} PRs`);
-  
+
   let prsToProcess: PRData[];
-  
+
   if (args.includes("--single")) {
     const prNumberIndex = args.indexOf("--single") + 1;
     if (prNumberIndex >= args.length) {
       logger.error("PR number not specified after --single flag");
       process.exit(1);
     }
-    
+
     const targetPrNumber = parseInt(args[prNumberIndex]);
-    const targetPr = prsData.find(pr => pr.pr_number === targetPrNumber);
-    
+    const targetPr = prsData.find((pr) => pr.pr_number === targetPrNumber);
+
     if (!targetPr) {
       logger.error(`PR #${targetPrNumber} not found in dataset`);
       process.exit(1);
     }
-    
+
     prsToProcess = [targetPr];
     logger.info(`Processing single PR: #${targetPrNumber}`);
   } else {
     prsToProcess = prsData;
     logger.info(`Processing all ${prsData.length} PRs`);
   }
-  
+
   const results: PRProcessResult[] = [];
-  
+
   for (let i = 0; i < prsToProcess.length; i++) {
     const pr = prsToProcess[i];
-    logger.info(`\n=== Processing PR ${i + 1}/${prsToProcess.length}: #${pr.pr_number} ===`);
-    
+    logger.info(
+      `\n=== Processing PR ${i + 1}/${prsToProcess.length}: #${pr.pr_number} ===`,
+    );
+
     const result = await processPR(pr);
     results.push(result);
-    
+
     // Save results after each PR in case of interruption
-    const outputFile = args.includes("--single") 
-      ? `pr_${pr.pr_number}_result.json` 
+    const outputFile = args.includes("--single")
+      ? `pr_${pr.pr_number}_result.json`
       : "pr_processing_results.json";
-    
+
     writeFileSync(outputFile, JSON.stringify(results, null, 2));
     logger.info(`Results saved to: ${outputFile}`);
-    
+
     // Small delay between processing
     if (i < prsToProcess.length - 1) {
       logger.info("Waiting 2 seconds before next PR...");
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
-  
+
   // Summary
-  const successful = results.filter(r => r.success).length;
-  const withEvals = results.filter(r => r.evals_found).length;
-  
+  const successful = results.filter((r) => r.success).length;
+  const withEvals = results.filter((r) => r.evals_found).length;
+
   logger.info(`\n=== Processing Complete ===`);
   logger.info(`Successfully processed: ${successful}/${results.length} PRs`);
   logger.info(`PRs with evals/ directory: ${withEvals}/${results.length} PRs`);
-  
+
   if (withEvals > 0) {
     logger.info("\nPRs with evals directories:");
-    results.filter(r => r.evals_found).forEach(r => {
-      logger.info(`  PR #${r.pr_number} (${r.repo_name}): ${r.evals_files.length} files`);
-    });
+    results
+      .filter((r) => r.evals_found)
+      .forEach((r) => {
+        logger.info(
+          `  PR #${r.pr_number} (${r.repo_name}): ${r.evals_files.length} files`,
+        );
+      });
   }
 }
 
 // Run the main function
-main().catch(error => {
+main().catch((error) => {
   logger.error("Script failed:", { error });
   process.exit(1);
 });
