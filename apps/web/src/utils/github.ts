@@ -213,6 +213,7 @@ export interface Repository {
     triage: boolean;
     pull: boolean;
   };
+  has_issues: boolean;
 }
 
 /**

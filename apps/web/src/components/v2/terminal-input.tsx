@@ -23,6 +23,7 @@ import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
+import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -74,7 +75,7 @@ export function TerminalInput({
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
   const { getConfig } = useConfigStore();
-  const { selectedRepository } = useGitHubAppProvider();
+  const { selectedRepository, repositories } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
 
@@ -109,6 +110,24 @@ export function TerminalInput({
         MISSING_API_KEYS_TOAST_CONTENT,
         MISSING_API_KEYS_TOAST_OPTIONS,
       );
+    }
+
+    const selectedRepo = repositories.find(
+      (repo) =>
+        repo.full_name ===
+        `${selectedRepository.owner}/${selectedRepository.repo}`,
+    );
+    const issuesDisabled = selectedRepo && !repoHasIssuesEnabled(selectedRepo);
+    if (issuesDisabled) {
+      toast.error(
+        "Open SWE requires issues to be enabled on the repository. Please enable issues on the repository to use Open SWE.",
+        {
+          richColors: true,
+          closeButton: true,
+          duration: 30_000,
+        },
+      );
+      return;
     }
 
     setLoading(true);

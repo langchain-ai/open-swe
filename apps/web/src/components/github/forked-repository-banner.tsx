@@ -1,32 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { X, AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AlertTriangle } from "lucide-react";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
 
-const FORKED_REPOSITORY_BANNER_DISMISSED_KEY =
-  "forked_repository_banner_dismissed";
+const GITHUB_DOCS_LINK_ENABLING_ISSUES =
+  "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/disabling-issues";
 
-export function ForkedRepositoryBanner() {
+export function IssuesRequiredBanner() {
   const { selectedRepository, repositories } = useGitHubAppProvider();
-  const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    // Check if user has previously dismissed the banner
-    const hasDismissed = localStorage.getItem(
-      FORKED_REPOSITORY_BANNER_DISMISSED_KEY,
-    );
-    if (hasDismissed === "true") {
-      setDismissed(true);
-    }
-  }, []);
-
-  // Find the selected repository in the repositories list to check if it's a fork
   const currentRepo = repositories.find(
     (repo) =>
       selectedRepository &&
@@ -34,21 +18,14 @@ export function ForkedRepositoryBanner() {
         `${selectedRepository.owner}/${selectedRepository.repo}`,
   );
 
-  // Don't show banner if:
-  // - User has dismissed the banner
-  // - No repository is selected
-  // - Current repository is not a fork
-  if (dismissed || !selectedRepository || !currentRepo?.fork) {
+  // If the repo has issues enabled, we support it.
+  if (
+    !selectedRepository ||
+    !currentRepo ||
+    repoHasIssuesEnabled(currentRepo)
+  ) {
     return null;
   }
-
-  const handleDismiss = () => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    setDismissed(true);
-    localStorage.setItem(FORKED_REPOSITORY_BANNER_DISMISSED_KEY, "true");
-  };
 
   return (
     <Alert
@@ -56,20 +33,25 @@ export function ForkedRepositoryBanner() {
       className="relative"
     >
       <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>Forked Repository Detected</AlertTitle>
+      <AlertTitle>Issues Must Be Enabled</AlertTitle>
       <AlertDescription>
-        Open SWE does not currently work with forked repositories since issues
-        cannot be created on them. Please select the original repository or
-        create your own repository to use Open SWE.
+        <p>
+          Open SWE requires issues to be enabled on the repository. Please
+          enable issues on the repository to use Open SWE.
+        </p>
+        <p>
+          See{" "}
+          <a
+            className="font-semibold underline underline-offset-2"
+            href={GITHUB_DOCS_LINK_ENABLING_ISSUES}
+            target="_blank"
+          >
+            here
+          </a>{" "}
+          for how to enable issues (docs show how to disable them, but the
+          process is the same).
+        </p>
       </AlertDescription>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleDismiss}
-        className="absolute top-2 right-2 h-8 w-8 p-0 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200"
-      >
-        <X className="h-4 w-4" />
-      </Button>
     </Alert>
   );
 }
