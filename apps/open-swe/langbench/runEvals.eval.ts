@@ -15,7 +15,7 @@ const logger = createLogger(LogLevel.INFO, "PR Processor");
 
 // Load PRs data
 const prsData: PRData[] = JSON.parse(
-  readFileSync("static/langgraph_prs.json", "utf8"),
+  readFileSync("langbench/static/langgraph_prs.json", "utf8"),
 );
 
 const DATASET = prsData.map((pr) => ({ inputs: pr }));
