@@ -62,54 +62,6 @@ async function cloneAndCheckoutRepo(
   logger.info(`Successfully cloned and checked out commit: ${targetCommit}`);
 }
 
-
-/**
- * Check for evals directory and list relevant files
- */
-async function checkEvalsDirectory(
-  sandbox: Sandbox,
-  repoDir: string
-): Promise<{ found: boolean; files: string[] }> {
-  logger.info("Checking for evals/ directory");
-  
-  // Check if evals directory exists
-  const evalsExistsResult = await sandbox.process.executeCommand(
-    `find . -name "evals" -type d`,
-    repoDir,
-    undefined,
-    TIMEOUT_SEC
-  );
-  
-  if (evalsExistsResult.exitCode !== 0) {
-    return { found: false, files: [] };
-  }
-  
-  const evalsDirs = evalsExistsResult.result.trim().split('\n').filter(d => d.trim());
-  
-  if (evalsDirs.length === 0) {
-    return { found: false, files: [] };
-  }
-  
-  // List files in evals directories
-  const allFiles: string[] = [];
-  
-  for (const evalsDir of evalsDirs) {
-    const listFilesResult = await sandbox.process.executeCommand(
-      `find ${evalsDir.trim()} -type f \\( -name "*.ts" -o -name "*.js" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.py" \\)`,
-      repoDir,
-      undefined,
-      TIMEOUT_SEC
-    );
-    
-    if (listFilesResult.exitCode === 0) {
-      const files = listFilesResult.result.trim().split('\n').filter(f => f.trim());
-      allFiles.push(...files);
-    }
-  }
-  
-  return { found: true, files: allFiles };
-}
-
 /**
  * Process a single PR
  */
