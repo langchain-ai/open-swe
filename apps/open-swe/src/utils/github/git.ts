@@ -612,3 +612,27 @@ async function performClone(
 
   return branchName;
 }
+
+/**
+ * Get the parent commit (pre-merge state) of a merge commit
+ */
+export async function getPreMergeCommit(
+  sandbox: Sandbox,
+  repoDir: string,
+  mergeCommitSha: string
+): Promise<string> {
+  // Get the parent commit (first parent is the target branch, second parent is the feature branch)
+  // We want the first parent to see the state before the merge
+  const parentResult = await sandbox.process.executeCommand(
+    `git rev-parse ${mergeCommitSha}^1`,
+    repoDir,
+    undefined,
+    TIMEOUT_SEC
+  );
+  
+  if (parentResult.exitCode !== 0) {
+    throw new Error(`Failed to get parent commit: ${parentResult.result}`);
+  }
+  
+  return parentResult.result.trim();
+}

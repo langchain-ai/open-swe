@@ -3,7 +3,7 @@
   "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langchain-ai/open-swe.git"
+    "url": "git+https://github.com/langchain-ai/open-swe.git"
   },
   "private": true,
   "version": "0.0.0",
@@ -24,7 +24,7 @@
     "postinstall": "turbo build"
   },
   "dependencies": {
-    "@daytonaio/sdk": "^0.25.4",
+    "@daytonaio/sdk": "^0.25.5",
     "@langchain/anthropic": "^0.3.25",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",
@@ -71,5 +71,13 @@
     "typescript-eslint": "^8.22.0",
     "vitest": "^3.2.3"
   },
-  "packageManager": "yarn@3.5.1"
+  "packageManager": "yarn@3.5.1",
+  "description": "The core LangGraph agent application that powers Open SWE's autonomous code understanding, planning, and execution capabilities.",
+  "main": "eslint.config.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/langchain-ai/open-swe/issues"
+  }
 }
