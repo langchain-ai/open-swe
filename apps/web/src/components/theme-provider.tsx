@@ -43,8 +43,7 @@ export function ThemeProvider({
     // Determine the target theme
     let targetTheme: string;
     if (theme === "system") {
-      targetTheme = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
+      targetTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
         ? "dark"
         : "light";
     } else {
@@ -85,4 +84,3 @@ export const useTheme = () => {
 
   return context;
 };
-
