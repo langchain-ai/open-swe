@@ -62,9 +62,9 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     const repoDir = getRepoAbsolutePath(targetRepository);
 
     // Clone and checkout the repository at the pre-merge commit
-    const githubToken = process.env.GITHUB_TOKEN;
+    const githubToken = process.env.GITHUB_PAT;
     if (!githubToken) {
-      throw new Error("GITHUB_TOKEN environment variable is required");
+      throw new Error("GITHUB_PAT environment variable is required");
     }
 
     await cloneRepo(sandbox, targetRepository, {
