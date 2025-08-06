@@ -3,7 +3,7 @@
   "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/langchain-ai/open-swe.git"
+    "url": "https://github.com/langchain-ai/open-swe.git"
   },
   "private": true,
   "version": "0.0.0",
