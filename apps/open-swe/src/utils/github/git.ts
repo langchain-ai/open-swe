@@ -15,7 +15,7 @@ import {
   getActiveTask,
   getPullRequestNumberFromActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { branchExistsOnRemote, createPullRequest, getBranch } from "./api.js";
+import { createPullRequest, getBranch } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
