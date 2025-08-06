@@ -110,8 +110,9 @@ export function APIKeysTab() {
       <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20">
         <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
         <AlertDescription className="text-blue-800 dark:text-blue-300">
-          Open SWE uses Anthropic models by default. Configure your Anthropic
-          API key below to get started.
+          <p>Open SWE uses Anthropic models by default. Configure your Anthropic
+          API key below to get started.</p>
+          <p>Only an Anthropic API key is required to get started.</p>
         </AlertDescription>
       </Alert>
       {Object.entries(apiKeySections).map(([sectionKey, section]) => (
