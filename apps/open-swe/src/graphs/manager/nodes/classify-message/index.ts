@@ -34,6 +34,7 @@ import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import {
+  LOCAL_MODE_HEADER,
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
 } from "@open-swe/shared/constants";
@@ -45,6 +46,7 @@ import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
+import { getCustomConfigurableFields } from "../../../../utils/config.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -300,6 +302,14 @@ export async function classifyMessage(
             resume: plannerResume,
           },
           streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+          config: {
+            configurable: {
+              ...getCustomConfigurableFields(config),
+              ...(isLocalMode(config) && {
+                [LOCAL_MODE_HEADER]: "true",
+              }),
+            },
+          }
         },
       );
       newPlannerId = newPlannerRun.run_id;
