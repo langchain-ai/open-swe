@@ -1,12 +1,13 @@
 export const MODEL_OPTIONS = [
-  {
-    label: "Claude Sonnet 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-sonnet-4-0",
-  },
-  {
-    label: "Claude Opus 4 (Extended Thinking)",
-    value: "anthropic:extended-thinking:claude-opus-4-0",
-  },
+  // TODO: Test these then re-enable
+  // {
+  //   label: "Claude Sonnet 4 (Extended Thinking)",
+  //   value: "anthropic:extended-thinking:claude-sonnet-4-0",
+  // },
+  // {
+  //   label: "Claude Opus 4 (Extended Thinking)",
+  //   value: "anthropic:extended-thinking:claude-opus-4-0",
+  // },
   {
     label: "Claude Sonnet 4",
     value: "anthropic:claude-sonnet-4-0",
