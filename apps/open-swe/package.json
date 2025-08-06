@@ -75,10 +75,7 @@
   },
   "packageManager": "yarn@3.5.1",
   "description": "The core LangGraph agent application that powers Open SWE's autonomous code understanding, planning, and execution capabilities.",
-  "main": "eslint.config.js",
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/langchain-ai/open-swe/issues"
   }
