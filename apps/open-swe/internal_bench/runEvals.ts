@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import dotenv from "dotenv";
+import { Command } from "commander";
 import { Daytona, Sandbox } from "@daytonaio/sdk";
-import { createLogger, LogLevel } from "../../src/utils/logger.js";
+import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../src/constants.js";
-import { readFileSync, writeFileSync } from "fs";
-import { cloneRepo, getPreMergeCommit } from "../../src/utils/github/git.js";
+import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
+import { readFileSync } from "fs";
+import { cloneRepo, getPreMergeCommit } from "../src/utils/github/git.js";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { setupEnv } from "../../src/utils/env-setup.js";
+import { setupEnv } from "../src/utils/env-setup.js";
 import { PRData, PRProcessResult } from "./types.js";
 
 dotenv.config();
@@ -132,12 +133,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
 /**
  * Process all PRs or a single PR
  */
-async function main() {
-  const args = process.argv.slice(2);
-
-  if (args.length === 0) {
-    process.exit(1);
-  }
+async function processCommand(options: { single?: number }) {
   // Load PRs data
   const prsData: PRData[] = JSON.parse(
     readFileSync("static/langgraph_prs.json", "utf8"),
@@ -146,14 +142,8 @@ async function main() {
 
   let prsToProcess: PRData[];
 
-  if (args.includes("--single")) {
-    const prNumberIndex = args.indexOf("--single") + 1;
-    if (prNumberIndex >= args.length) {
-      logger.error("PR number not specified after --single flag");
-      process.exit(1);
-    }
-
-    const targetPrNumber = parseInt(args[prNumberIndex]);
+  if (options.single !== undefined) {
+    const targetPrNumber = options.single;
     const targetPr = prsData.find((pr) => pr.pr_number === targetPrNumber);
 
     if (!targetPr) {
@@ -178,15 +168,6 @@ async function main() {
 
     const result = await processPR(pr);
     results.push(result);
-
-    // Save results after each PR in case of interruption
-    const outputFile = args.includes("--single")
-      ? `pr_${pr.pr_number}_result.json`
-      : "pr_processing_results.json";
-
-    writeFileSync(outputFile, JSON.stringify(results, null, 2));
-    logger.info(`Results saved to: ${outputFile}`);
-
     // Small delay between processing
     if (i < prsToProcess.length - 1) {
       logger.info("Waiting 2 seconds before next PR...");
@@ -214,8 +195,23 @@ async function main() {
   }
 }
 
-// Run the main function
-main().catch((error) => {
-  logger.error("Script failed:", { error });
-  process.exit(1);
-});
+// Setup Commander.js program
+const program = new Command();
+
+program
+  .name("runEvals")
+  .description("Process PRs from the LangGraph dataset")
+  .version("1.0.0");
+
+program
+  .option("-s, --single <number>", "Process a single PR by number", parseInt)
+  .action(async (options) => {
+    try {
+      await processCommand(options);
+    } catch (error) {
+      logger.error("Script failed:", { error });
+      process.exit(1);
+    }
+  });
+
+program.parse();
