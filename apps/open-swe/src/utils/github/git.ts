@@ -15,7 +15,7 @@ import {
   getActiveTask,
   getPullRequestNumberFromActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { createPullRequest } from "./api.js";
+import { createPullRequest, getBranch } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
@@ -523,11 +523,32 @@ async function performClone(
     baseCommit: targetRepository.baseCommit,
   });
 
+  if (!branchName && !targetRepository.baseCommit) {
+    throw new Error(
+      "Can not create new branch or checkout existing branch without branch name",
+    );
+  }
+
+  const branchExists = branchName
+    ? !!(await getBranch({
+        owner: targetRepository.owner,
+        repo: targetRepository.repo,
+        branchName,
+        githubInstallationToken,
+      }))
+    : false;
+
+  if (branchExists) {
+    logger.info("Branch already exists on remote. Cloning existing branch.", {
+      branch: branchName,
+    });
+  }
+
   await sandbox.git.clone(
     cloneUrl,
     absoluteRepoDir,
-    targetRepository.branch,
-    targetRepository.baseCommit,
+    branchExists ? branchName : targetRepository.branch,
+    branchExists ? undefined : targetRepository.baseCommit,
     "git",
     githubInstallationToken,
   );
@@ -543,45 +564,51 @@ async function performClone(
   }
 
   if (!branchName) {
-    throw new Error(
-      "Can not create new branch or checkout existing branch without branch name",
-    );
+    throw new Error("Branch name is required");
+  }
+
+  if (branchExists) {
+    return branchName;
   }
 
   try {
+    logger.info("Creating branch", {
+      branch: branchName,
+    });
+
     await sandbox.git.createBranch(absoluteRepoDir, branchName);
+
     logger.info("Created branch", {
       branch: branchName,
     });
-
-    // push an empty commit so that the branch exists in the remote
-    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
-    logger.info("Pushed empty commit to remote", {
+  } catch (error) {
+    logger.error("Failed to create branch, checking out branch", {
       branch: branchName,
-    });
-
-    return branchName;
-  } catch {
-    logger.info("Failed to create branch, checking out branch", {
-      branch: branchName,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
     });
   }
 
-  await sandbox.git.checkoutBranch(absoluteRepoDir, branchName);
-  logger.info("Checked out branch", {
-    branch: branchName,
-  });
-
-  const setUpstreamBranchRes = await sandbox.process.executeCommand(
-    `git branch --set-upstream-to=origin/${branchName}`,
-    absoluteRepoDir,
-  );
-  if (setUpstreamBranchRes.exitCode !== 0) {
-    logger.error("Failed to set upstream branch", {
-      setUpstreamBranchRes,
+  try {
+    // push an empty commit so that the branch exists in the remote
+    logger.info("Pushing empty commit to remote", {
+      branch: branchName,
     });
-  } else {
-    logger.info("Set upstream branch");
+    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
+
+    logger.info("Pushed empty commit to remote", {
+      branch: branchName,
+    });
+  } catch (error) {
+    logger.error("Failed to push an empty commit to branch", {
+      branch: branchName,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
+    });
   }
 
   return branchName;

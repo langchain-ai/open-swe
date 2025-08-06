@@ -286,10 +286,13 @@ export async function initializeSandbox(
         stateBranchName: branchName,
       });
     },
-    { retries: 3, delay: 0 },
+    { retries: 0, delay: 0 },
   );
 
-  if (cloneRepoRes instanceof Error) {
+  if (
+    cloneRepoRes instanceof Error &&
+    !cloneRepoRes.message.includes("repository already exists")
+  ) {
     emitStepEvent(
       baseCloneRepoAction,
       "error",

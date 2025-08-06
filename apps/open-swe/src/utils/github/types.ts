@@ -14,3 +14,6 @@ export type GitHubPullRequestUpdate =
 
 export type GitHubPullRequestList =
   RestEndpointMethodTypes["pulls"]["list"]["response"]["data"];
+
+export type GitHubBranch =
+  RestEndpointMethodTypes["repos"]["getBranch"]["response"]["data"];
