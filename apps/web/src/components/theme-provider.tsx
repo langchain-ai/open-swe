@@ -40,16 +40,21 @@ export function ThemeProvider({
   useEffect(() => {
     const root = window.document.documentElement;
 
-    root.classList.remove("light", "dark");
-
+    // Determine the target theme
+    let targetTheme: string;
     if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
+      targetTheme = window.matchMedia("(prefers-color-scheme: dark)")
         .matches
         ? "dark"
         : "light";
-      root.classList.add(systemTheme);
     } else {
-      root.classList.add(theme);
+      targetTheme = theme;
+    }
+
+    // Only apply theme if it's not already present
+    if (!root.classList.contains(targetTheme)) {
+      root.classList.remove("light", "dark");
+      root.classList.add(targetTheme);
     }
   }, [theme]);
 
@@ -80,3 +85,4 @@ export const useTheme = () => {
 
   return context;
 };
+
