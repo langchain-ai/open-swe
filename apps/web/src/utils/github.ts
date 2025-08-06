@@ -203,6 +203,7 @@ export interface Repository {
   full_name: string;
   description: string | null;
   private: boolean;
+  fork: boolean;
   html_url: string;
   default_branch: string;
   permissions: {
@@ -270,3 +271,4 @@ export async function getPullRequest(inputs: {
     return null;
   }
 }
+
