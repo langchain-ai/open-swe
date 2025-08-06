@@ -109,6 +109,7 @@ export function TerminalInput({
         MISSING_API_KEYS_TOAST_CONTENT,
         MISSING_API_KEYS_TOAST_OPTIONS,
       );
+      return;
     }
 
     setLoading(true);
