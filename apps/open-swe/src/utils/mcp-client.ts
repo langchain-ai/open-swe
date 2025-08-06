@@ -51,7 +51,7 @@ function validateMcpServers(mcpServers: McpServers): McpServers {
 
     return validatedServers;
   } catch (error) {
-    console.error("Failed to validate MCP servers: ", error);
+    logger.error("Failed to validate MCP servers: ", error);
     return {};
   }
 }
