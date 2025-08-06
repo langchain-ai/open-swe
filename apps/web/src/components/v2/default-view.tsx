@@ -143,6 +143,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           <GitHubInstallationBanner />
           <ApiKeyBanner />
+          <ForkedRepositoryBanner />
           {/* Terminal Chat Input */}
           <Card
             className={cn(
@@ -245,4 +246,5 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
+
 
