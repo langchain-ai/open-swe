@@ -631,4 +631,3 @@ export async function getPreMergeCommit({
     1,
   );
 }
-
