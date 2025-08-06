@@ -7,6 +7,7 @@ export interface PRData {
   repo_name: string;
   pr_number: number;
   merge_commit_sha: string;
+  pre_merge_commit_sha: string;
   title: string;
   body: string;
   created_at: string;

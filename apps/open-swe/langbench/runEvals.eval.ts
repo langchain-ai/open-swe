@@ -7,7 +7,6 @@ import { readFileSync } from "fs";
 import { cloneRepo } from "../src/utils/github/git.js";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { getPreMergeCommit } from "../src/utils/github/api.js";
 import { setupEnv } from "../src/utils/env-setup.js";
 import { PRData, PRProcessResult } from "./types.js";
 
@@ -23,32 +22,6 @@ const DATASET = prsData.map((pr) => ({ inputs: pr }));
 const DATASET_NAME = "langgraph-prs";
 
 logger.info(`Starting evals over ${DATASET.length} PRs...`);
-
-/**
- * Clone repository and checkout specific commit using the cloneRepo helper
- */
-async function cloneAndCheckoutRepo(
-  sandbox: Sandbox,
-  prData: PRData,
-  targetCommit: string,
-): Promise<void> {
-  const targetRepository: TargetRepository = {
-    owner: prData.repo_owner,
-    repo: prData.repo_name,
-    branch: "main",
-    baseCommit: targetCommit,
-  };
-
-  logger.info(
-    `Cloning repository: ${prData.repo_owner}/${prData.repo_name} at commit ${targetCommit}`,
-  );
-
-  await cloneRepo(sandbox, targetRepository, {
-    githubInstallationToken: process.env.GITHUB_TOKEN || "dummy_token",
-  });
-
-  logger.info(`Successfully cloned and checked out commit: ${targetCommit}`);
-}
 
 /**
  * Process a single PR
@@ -75,33 +48,28 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
 
     logger.info(`Created sandbox: ${sandbox.id}`);
 
-    // Get the pre-merge commit from the merge commit
-    const preMergeCommit = await getPreMergeCommit({
-      owner: prData.repo_owner,
-      repo: prData.repo_name,
-      mergeCommitSha: prData.merge_commit_sha,
-      githubInstallationToken: process.env.GITHUB_TOKEN || "dummy_token",
-    });
-
-    if (!preMergeCommit) {
-      throw new Error(
-        `Failed to get pre-merge commit for PR #${prData.pr_number}`,
-      );
-    }
-
-    logger.info(`Found pre-merge commit: ${preMergeCommit}`);
+    // Use the hardcoded pre-merge commit SHA from the dataset
+    const preMergeCommit = prData.pre_merge_commit_sha;
+    logger.info(`Using pre-merge commit: ${preMergeCommit}`);
     result.pre_merge_sha = preMergeCommit;
 
     const targetRepository: TargetRepository = {
       owner: prData.repo_owner,
       repo: prData.repo_name,
-      branch: "main",
-      baseCommit: prData.merge_commit_sha,
+      branch: undefined,
+      baseCommit: preMergeCommit,
     };
     const repoDir = getRepoAbsolutePath(targetRepository);
 
     // Clone and checkout the repository at the pre-merge commit
-    await cloneAndCheckoutRepo(sandbox, prData, preMergeCommit);
+    const githubToken = process.env.GITHUB_TOKEN;
+    if (!githubToken) {
+      throw new Error("GITHUB_TOKEN environment variable is required");
+    }
+
+    await cloneRepo(sandbox, targetRepository, {
+      githubInstallationToken: githubToken,
+    });
 
     // Setup Python environment
     logger.info("Setting up Python environment...");
