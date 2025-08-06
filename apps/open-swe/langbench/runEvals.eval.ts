@@ -7,6 +7,7 @@ import { readFileSync } from "fs";
 import { cloneRepo } from "../src/utils/github/git.js";
 import { TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getPreMergeCommit } from "../src/utils/github/api.js";
 import { setupEnv } from "../src/utils/env-setup.js";
 import { PRData, PRProcessResult } from "./types.js";
 
@@ -74,6 +75,23 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
 
     logger.info(`Created sandbox: ${sandbox.id}`);
 
+    // Get the pre-merge commit from the merge commit
+    const preMergeCommit = await getPreMergeCommit({
+      owner: prData.repo_owner,
+      repo: prData.repo_name,
+      mergeCommitSha: prData.merge_commit_sha,
+      githubInstallationToken: process.env.GITHUB_TOKEN || "dummy_token",
+    });
+
+    if (!preMergeCommit) {
+      throw new Error(
+        `Failed to get pre-merge commit for PR #${prData.pr_number}`,
+      );
+    }
+
+    logger.info(`Found pre-merge commit: ${preMergeCommit}`);
+    result.pre_merge_sha = preMergeCommit;
+
     const targetRepository: TargetRepository = {
       owner: prData.repo_owner,
       repo: prData.repo_name,
@@ -82,8 +100,8 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     };
     const repoDir = getRepoAbsolutePath(targetRepository);
 
-    // Clone and checkout the repository at the merge commit
-    await cloneAndCheckoutRepo(sandbox, prData, prData.merge_commit_sha);
+    // Clone and checkout the repository at the pre-merge commit
+    await cloneAndCheckoutRepo(sandbox, prData, preMergeCommit);
 
     // Setup Python environment
     logger.info("Setting up Python environment...");

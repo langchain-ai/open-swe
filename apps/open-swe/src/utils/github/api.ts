@@ -588,3 +588,47 @@ export async function getBranch({
     1,
   );
 }
+
+export async function getPreMergeCommit({
+  owner,
+  repo,
+  mergeCommitSha,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  mergeCommitSha: string;
+  githubInstallationToken: string;
+}): Promise<string | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: commit } = await octokit.repos.getCommit({
+        owner,
+        repo,
+        ref: mergeCommitSha,
+      });
+
+      // For merge commits, the first parent is usually the base branch (main/master)
+      // and the second parent is the feature branch (pre-merge state)
+      if (commit.parents && commit.parents.length >= 2) {
+        return commit.parents[1].sha;
+      }
+
+      // If it's not a merge commit or has only one parent, return the first parent
+      if (commit.parents && commit.parents.length === 1) {
+        return commit.parents[0].sha;
+      }
+
+      return null;
+    },
+    githubInstallationToken,
+    "Failed to get pre-merge commit",
+    { mergeCommitSha },
+    1,
+  );
+}
+
