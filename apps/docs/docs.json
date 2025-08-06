@@ -39,6 +39,10 @@
             ]
           },
           {
+            "group": "Secrets",
+            "pages": ["secrets"]
+          },
+          {
             "group": "FAQ",
             "pages": ["faq"]
           }
