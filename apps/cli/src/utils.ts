@@ -25,7 +25,7 @@ export async function submitFeedback({
   plannerFeedback: string;
   plannerThreadId: string;
   setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars
-  setPlannerFeedback: () => void; // eslint-disable-line no-unused-vars
+  setPlannerFeedback: () => void;  
   setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void; // eslint-disable-line no-unused-vars
 }) {
   try {
