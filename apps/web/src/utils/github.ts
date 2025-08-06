@@ -271,4 +271,3 @@ export async function getPullRequest(inputs: {
     return null;
   }
 }
-

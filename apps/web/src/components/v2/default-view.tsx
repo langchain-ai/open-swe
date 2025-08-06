@@ -246,5 +246,3 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     </div>
   );
 }
-
-
