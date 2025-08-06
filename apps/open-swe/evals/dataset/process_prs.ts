@@ -75,7 +75,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     evals_found: false,
     evals_files: [],
   };
-  console.log(process.env.DAYTONA_ORGANIZATION_ID);
+
   const daytona = new Daytona({
     organizationId: process.env.DAYTONA_ORGANIZATION_ID,
   });
@@ -161,8 +161,6 @@ async function main() {
   const args = process.argv.slice(2);
 
   if (args.length === 0) {
-    console.log("Usage:");
-    console.log("  npm run process-prs [--single PR_NUMBER]");
     process.exit(1);
   }
   // Load PRs data
