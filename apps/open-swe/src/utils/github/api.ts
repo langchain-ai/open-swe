@@ -612,13 +612,10 @@ export async function getPreMergeCommit({
         ref: mergeCommitSha,
       });
 
-      // For merge commits, the first parent is usually the base branch (main/master)
-      // and the second parent is the feature branch (pre-merge state)
       if (commit.parents && commit.parents.length >= 2) {
         return commit.parents[1].sha;
       }
 
-      // If it's not a merge commit or has only one parent, return the first parent
       if (commit.parents && commit.parents.length === 1) {
         return commit.parents[0].sha;
       }
