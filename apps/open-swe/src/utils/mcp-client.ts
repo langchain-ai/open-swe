@@ -27,28 +27,33 @@ function isLangGraphDocsServer(server: McpServerConfig): boolean {
 }
 
 function validateMcpServers(mcpServers: McpServers): McpServers {
-  const validatedServers: McpServers = {};
+  try {
+    const validatedServers: McpServers = {};
 
-  for (const [serverName, config] of Object.entries(mcpServers)) {
-    // Check if the server has http or sse transport/type
-    const transport = config.transport || config.type;
+    for (const [serverName, config] of Object.entries(mcpServers)) {
+      // Check if the server has http or sse transport/type
+      const transport = config.transport || config.type;
 
-    if (transport === "http" || transport === "sse") {
-      validatedServers[serverName] = config;
-    } else if (
-      serverName === Object.keys(DEFAULT_MCP_SERVERS)[0] &&
-      isLangGraphDocsServer(config)
-    ) {
-      // Allow LangGraphDocs server to be specified as a stdio server
-      validatedServers[serverName] = config;
-    } else {
-      logger.info(
-        `Skipping MCP server "${serverName}" - only http and sse transports are supported, got: ${transport || "undefined"}`,
-      );
+      if (transport === "http" || transport === "sse") {
+        validatedServers[serverName] = config;
+      } else if (
+        serverName === Object.keys(DEFAULT_MCP_SERVERS)[0] &&
+        isLangGraphDocsServer(config)
+      ) {
+        // Allow LangGraphDocs server to be specified as a stdio server
+        validatedServers[serverName] = config;
+      } else {
+        logger.info(
+          `Skipping MCP server "${serverName}" - only http and sse transports are supported, got: ${transport || "undefined"}`,
+        );
+      }
     }
-  }
 
-  return validatedServers;
+    return validatedServers;
+  } catch (error) {
+    console.error("Failed to validate MCP servers: ", error);
+    return {};
+  }
 }
 
 /**
