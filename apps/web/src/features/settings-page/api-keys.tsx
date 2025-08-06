@@ -53,6 +53,14 @@ const API_KEY_DEFINITIONS = {
   // ],
 };
 
+const shouldAutofocus = (apiKeyId: string, hasValue: boolean): boolean => {
+  if (apiKeyId === "anthropicApiKey") {
+    return !hasValue;
+  }
+
+  return false;
+};
+
 export function APIKeysTab() {
   const { getConfig, updateConfig } = useConfigStore();
   const config = getConfig(DEFAULT_CONFIG_KEY);
@@ -186,6 +194,7 @@ export function APIKeysTab() {
                           }
                           placeholder={`Enter your ${apiKey.name} API key`}
                           className="font-mono text-sm"
+                          autoFocus={shouldAutofocus(apiKey.id, !!apiKey.value)}
                         />
                         <Button
                           variant="ghost"
