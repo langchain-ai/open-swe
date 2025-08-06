@@ -4,7 +4,6 @@ import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
@@ -13,7 +12,6 @@ import {
   createGrepToolFields,
   formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
-import { Sandbox } from "@daytonaio/sdk";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
@@ -36,18 +34,11 @@ export function createGrepTool(
           workDir,
         });
 
-        // Get sandbox if needed for sandbox mode
-        let sandbox: Sandbox | undefined;
-        if (!isLocalMode(config)) {
-          sandbox = await getSandboxSessionOrThrow(input);
-        }
-
         const executor = createShellExecutor(config);
         const response = await executor.executeCommand({
           command,
           workdir: workDir,
           timeout: TIMEOUT_SEC,
-          sandbox,
         });
 
         let successResult = response.result;
@@ -69,18 +60,21 @@ export function createGrepTool(
           result: successResult,
           status: "success",
         };
-      } catch (error: any) {
-        const errorFields = getSandboxErrorFields(error);
+      } catch (e) {
+        const errorFields = getSandboxErrorFields(e);
         if (errorFields) {
+          const errorResult =
+            errorFields.result ?? errorFields.artifacts?.stdout;
           return {
-            result: `Error: ${errorFields.result ?? errorFields.artifacts?.stdout}`,
-            status: "error",
+            result: `Failed to run search command. Exit code: ${errorFields.exitCode}\nError: ${errorResult}`,
+            status: "error" as const,
           };
         }
 
+        const errorMessage = e instanceof Error ? e.message : String(e);
         return {
-          result: `Error: ${error.message || String(error)}`,
-          status: "error",
+          result: `Failed to run grep search command: ${errorMessage}`,
+          status: "error" as const,
         };
       }
     },

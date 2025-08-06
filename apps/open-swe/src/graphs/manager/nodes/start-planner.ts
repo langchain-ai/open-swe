@@ -77,10 +77,14 @@ export async function startPlanner(
         input: runInput,
         config: {
           recursion_limit: 400,
-          configurable: getCustomConfigurableFields(config),
+          configurable: {
+            ...getCustomConfigurableFields(config),
+            ...(isLocalMode(config) && {
+              [LOCAL_MODE_HEADER]: "true",
+            }),
+          },
         },
         ifNotExists: "create",
-        multitaskStrategy: "enqueue",
         streamResumable: true,
         streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
       },

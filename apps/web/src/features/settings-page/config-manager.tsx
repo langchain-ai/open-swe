@@ -208,45 +208,6 @@ export function ConfigManager() {
                         updateConfig(DEFAULT_CONFIG_KEY, config.label, value);
                       }}
                     />
-
-                    <div className="flex items-center justify-between">
-                      {(() => {
-                        const currentValue =
-                          configs[DEFAULT_CONFIG_KEY]?.[config.label];
-                        const defaultValue = defaultConfig.find(
-                          (c) => c.label === config.label,
-                        )?.default;
-                        const isModified =
-                          currentValue !== undefined &&
-                          currentValue !== defaultValue;
-
-                        return (
-                          isModified && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                // Remove the config value to revert to default
-                                // This effectively "unsets" the user's custom value
-                                const existingConfig =
-                                  getConfig(DEFAULT_CONFIG_KEY) || {};
-                                const {
-                                  [config.label]: _,
-                                  ...remainingConfig
-                                } = existingConfig;
-                                updateConfig(
-                                  DEFAULT_CONFIG_KEY,
-                                  "",
-                                  remainingConfig,
-                                );
-                              }}
-                            >
-                              Reset to Default
-                            </Button>
-                          )
-                        );
-                      })()}
-                    </div>
                   </div>
                 </div>
               ),

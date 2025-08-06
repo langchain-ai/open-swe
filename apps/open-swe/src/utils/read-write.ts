@@ -46,7 +46,7 @@ async function handleCreateFile(
 }
 
 async function readFileFunc(inputs: {
-  sandbox: Sandbox;
+  sandbox: Sandbox | null;
   filePath: string;
   workDir?: string;
   config?: GraphConfig;
@@ -58,6 +58,10 @@ async function readFileFunc(inputs: {
 
   if (config && isLocalMode(config)) {
     return readFileLocal(filePath, workDir);
+  }
+
+  if (!sandbox) {
+    throw new Error("Sandbox is required when not in local mode");
   }
 
   try {
@@ -139,7 +143,7 @@ export const readFile = traceable(readFileFunc, {
 });
 
 async function writeFileFunc(inputs: {
-  sandbox: Sandbox;
+  sandbox: Sandbox | null;
   filePath: string;
   content: string;
   workDir?: string;
@@ -154,6 +158,11 @@ async function writeFileFunc(inputs: {
   if (config && isLocalMode(config)) {
     return writeFileLocal(filePath, content, workDir);
   }
+
+  if (!sandbox) {
+    throw new Error("Sandbox is required when not in local mode");
+  }
+
   try {
     const delimiter = "EOF_" + Date.now() + "_" + Math.random().toString(36);
     const writeCommand = `cat > "${filePath}" << '${delimiter}'

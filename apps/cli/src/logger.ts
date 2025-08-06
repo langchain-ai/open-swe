@@ -5,13 +5,190 @@ import {
   isHumanMessage,
   isToolMessage,
 } from "@langchain/core/messages";
+
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+
+export type ToolCall = {
+  name: string;
+  args: Record<string, any>;
+  id?: string;
+  type?: "tool_call";
+};
 
 interface LogChunk {
   event: string;
   data: any;
   ops?: Array<{ value: string }>;
+}
+
+/**
+ * Format a tool call arguments into a clean, readable string
+ */
+function formatToolCallArgs(tool: ToolCall): string {
+  const toolName = tool.name || "unknown tool";
+
+  if (!tool.args) return toolName;
+
+  switch (toolName.toLowerCase()) {
+    case "shell": {
+      if (Array.isArray(tool.args.command)) {
+        return `${toolName}: ${tool.args.command.join(" ")}`;
+      }
+      return `${toolName}: ${tool.args.command || ""}`;
+    }
+
+    case "grep": {
+      const query = tool.args.query || "";
+      return `${toolName}: "${query}"`;
+    }
+
+    case "view": {
+      return `${toolName}: ${tool.args.path || ""}`;
+    }
+
+    case "str_replace_based_edit_tool": {
+      const command = tool.args.command || "";
+
+      switch (command) {
+        case "insert": {
+          const insertLine = tool.args.insert_line;
+          const newStr = tool.args.new_str || "";
+          return `${toolName}: insert_line=${insertLine}, new_str="${newStr}"`;
+        }
+        case "str_replace": {
+          const oldStr = tool.args.old_str || "";
+          const newStr = tool.args.new_str || "";
+          return `${toolName}: old_str="${oldStr}", new_str="${newStr}"`;
+        }
+        case "create": {
+          const fileText = tool.args.file_text || "";
+          return `${toolName}: file_text="${fileText}"`;
+        }
+        case "view": {
+          const viewRange = tool.args.view_range;
+          if (viewRange) {
+            return `${toolName}: view_range=[${viewRange[0]}, ${viewRange[1]}]`;
+          }
+          return `${toolName}: view`;
+        }
+        default:
+          return `${toolName}: ${command}`;
+      }
+    }
+
+    case "search_documents_for": {
+      const query = tool.args.query || "";
+      const url = tool.args.url || "";
+      return `${toolName}: "${query}" in ${url}`;
+    }
+
+    case "get_url_content": {
+      return `${toolName}: ${tool.args.url || ""}`;
+    }
+
+    case "session_plan": {
+      const title = tool.args.title || "";
+      const planSteps = tool.args.plan || [];
+      if (title) {
+        return `${toolName}: "${title}" (${planSteps.length} steps)`;
+      }
+      return `${toolName}: ${planSteps.length} plan steps`;
+    }
+
+    case "apply_patch": {
+      const filePath = tool.args.file_path || "";
+      const diff = tool.args.diff || "";
+      const diffLines = diff.split("\n").length;
+      return `${toolName}: applied ${diffLines} line diff to ${filePath}`;
+    }
+
+    case "install_dependencies": {
+      const command = tool.args.command || [];
+      if (Array.isArray(command)) {
+        return `${toolName}: ${command.join(" ")}`;
+      }
+      return `${toolName}: ${command}`;
+    }
+
+    case "scratchpad": {
+      const scratchpad = tool.args.scratchpad || [];
+      if (Array.isArray(scratchpad)) {
+        return `${toolName}: ${scratchpad.length} notes`;
+      }
+      return `${toolName}: ${scratchpad}`;
+    }
+
+    case "command_safety_evaluator": {
+      const command = tool.args.command || "";
+      return `${toolName}: evaluating "${command}"`;
+    }
+
+    case "respond_and_route": {
+      const response = tool.args.response || "";
+      const route = tool.args.route || "";
+      if (response && route) {
+        return `${toolName}: "${response}" → ${route}`;
+      } else if (response) {
+        return `${toolName}: "${response}"`;
+      } else if (route) {
+        return `${toolName}: → ${route}`;
+      }
+      return `${toolName}: routing decision`;
+    }
+
+    case "request_human_help": {
+      const helpRequest = tool.args.help_request || "";
+      return `${toolName}: "${helpRequest}"`;
+    }
+
+    case "update_plan": {
+      const reasoning = tool.args.update_plan_reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "mark_task_completed": {
+      const summary = tool.args.completed_task_summary || "";
+      return `${toolName}: ${summary.slice(0, 50)}...`;
+    }
+
+    case "mark_task_not_completed": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "diagnose_error": {
+      const diagnosis = tool.args.diagnosis || "";
+      return `${toolName}: ${diagnosis.slice(0, 50)}...`;
+    }
+
+    case "write_technical_notes": {
+      const notes = tool.args.notes || "";
+      return `${toolName}: ${notes.slice(0, 50)}...`;
+    }
+
+    case "summarize_conversation_history": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_completed": {
+      const review = tool.args.review || "";
+      return `${toolName}: ${review.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_not_complete": {
+      const review = tool.args.review || "";
+      const actions = tool.args.additional_actions || [];
+      return `${toolName}: ${review.slice(0, 30)}... (${actions.length} actions)`;
+    }
+
+    case "review_started": {
+      const started = tool.args.review_started || false;
+      return `${toolName}: ${started ? "started" : "not started"}`;
+    }
+  }
+  return "";
 }
 
 /**
@@ -22,26 +199,53 @@ function formatToolResult(message: ToolMessage): string {
 
   if (!content) return "";
 
-  // For successful tool executions, format nicely
+  const isError = message.status === "error";
   const toolName = message.name || "tool";
+
+  // If it's an error, return error message immediately
+  if (isError) return `Error: ${content}`;
+
   switch (toolName.toLowerCase()) {
     case "shell":
-    case "grep_search":
-    case "search":
       return content;
-    case "apply_patch":
-      return content.includes("Error")
-        ? `Error: ${content}`
-        : "Patch applied successfully";
-    case "install_dependencies":
-      return content.includes("Error")
-        ? `Error: ${content}`
-        : "Dependencies installed successfully";
-    default:
-      if (content.length > 200) {
-        return content.slice(0, 200) + "...";
+
+    case "grep": {
+      if (content.includes("Exit code 1. No results found.")) {
+        return "No results found";
       }
-      return content;
+      const lines = content.split("\n").filter((line) => line.trim());
+      return `${lines.length} matches found`;
+    }
+
+    case "view": {
+      const contentLength = content.length;
+      return contentLength > 1000
+        ? `${contentLength} characters (truncated)`
+        : `${contentLength} characters`;
+    }
+
+    case "str_replace_based_edit_tool":
+      return "File edited successfully";
+
+    case "get_url_content":
+      return `${content.length} characters of content`;
+
+    case "apply_patch":
+      return "Patch applied successfully";
+
+    case "install_dependencies":
+      return "Dependencies installed successfully";
+
+    case "command_safety_evaluator":
+      try {
+        const evaluation = JSON.parse(content);
+        return `Safety: ${evaluation.is_safe ? "SAFE" : "UNSAFE"} (${evaluation.risk_level} risk)`;
+      } catch {
+        return content;
+      }
+
+    default:
+      return content.length > 200 ? content.slice(0, 200) + "..." : content;
   }
 }
 
@@ -148,24 +352,8 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
               createWriteTechnicalNotesToolFields().name;
 
             message.tool_calls.forEach((tool) => {
-              let argsString = "";
-              if (typeof tool.args === "string") {
-                argsString = tool.args;
-              } else if (tool.args !== undefined) {
-                try {
-                  argsString = JSON.stringify(tool.args, null, 2);
-                } catch {
-                  argsString = String(tool.args);
-                }
-              }
-              // Truncate the string if too long
-              const maxLength = 150;
-              const truncatedArgs =
-                argsString.length > maxLength
-                  ? argsString.slice(0, maxLength) + "... [trunc]"
-                  : argsString;
-              const toolName = tool.name || "unknown";
-              logs.push(`[TOOL CALL] ${toolName}: ${truncatedArgs}`);
+              const formattedArgs = formatToolCallArgs(tool);
+              logs.push(`[TOOL CALL] ${formattedArgs}`);
 
               // Handle technical notes from tool call
               if (

@@ -101,7 +101,7 @@ export class LocalShellExecutor {
             result: stdout,
             artifacts: {
               stdout,
-              stderr: stderr || undefined,
+              stderr,
             },
           });
         });

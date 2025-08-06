@@ -15,18 +15,12 @@ import {
   getActiveTask,
   getPullRequestNumberFromActiveTask,
 } from "@open-swe/shared/open-swe/tasks";
-import { createPullRequest } from "./api.js";
+import { createPullRequest, getBranch } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
-import {
-  getLocalWorkingDirectory,
-  isLocalMode,
-} from "@open-swe/shared/open-swe/local-mode";
-import {
-  getLocalShellExecutor,
-  LocalExecuteResponse,
-} from "../shell-executor/index.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { createShellExecutor } from "../shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -49,28 +43,17 @@ export function parseGitStatusOutput(gitStatusOutput: string): string[] {
 async function getValidFilesToCommit(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  config: GraphConfig,
   excludePatterns: string[] = DEFAULT_EXCLUDED_PATTERNS,
 ): Promise<string[]> {
-  let gitStatusOutput: LocalExecuteResponse;
-
-  // Check if we're in local mode (sandbox doesn't have process)
-  if (!sandbox.process) {
-    // Local mode: use LocalShellExecutor
-    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-    gitStatusOutput = await executor.executeCommand("git status --porcelain", {
-      workdir: absoluteRepoDir,
-      timeout: TIMEOUT_SEC,
-      localMode: true,
-    });
-  } else {
-    // Sandbox mode: use sandbox.process
-    gitStatusOutput = await sandbox.process.executeCommand(
-      "git status --porcelain",
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
-  }
+  // Use unified shell executor
+  const executor = createShellExecutor(config);
+  const gitStatusOutput = await executor.executeCommand({
+    command: "git status --porcelain",
+    workdir: absoluteRepoDir,
+    timeout: TIMEOUT_SEC,
+    sandbox,
+  });
 
   if (gitStatusOutput.exitCode !== 0) {
     logger.error(`Failed to get git status for file validation`, {
@@ -141,27 +124,16 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
 export async function getChangedFilesStatus(
   absoluteRepoDir: string,
   sandbox: Sandbox,
+  config: GraphConfig,
 ): Promise<string[]> {
-  let gitStatusOutput: LocalExecuteResponse;
-
-  // Check if we're in local mode (sandbox doesn't have process)
-  if (!sandbox.process) {
-    // Local mode: use LocalShellExecutor
-    const executor = getLocalShellExecutor(getLocalWorkingDirectory());
-    gitStatusOutput = await executor.executeCommand("git status --porcelain", {
-      workdir: absoluteRepoDir,
-      timeout: TIMEOUT_SEC,
-      localMode: true,
-    });
-  } else {
-    // Sandbox mode: use sandbox.process
-    gitStatusOutput = await sandbox.process.executeCommand(
-      "git status --porcelain",
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
-  }
+  // Use unified shell executor
+  const executor = createShellExecutor(config);
+  const gitStatusOutput = await executor.executeCommand({
+    command: "git status --porcelain",
+    workdir: absoluteRepoDir,
+    timeout: TIMEOUT_SEC,
+    sandbox,
+  });
 
   if (gitStatusOutput.exitCode !== 0) {
     logger.error(`Failed to get changed files status`, {
@@ -188,16 +160,14 @@ export async function stashAndClearChanges(
   }
 
   try {
-    // Sandbox mode: use existing sandbox logic
-    if (!sandbox) {
-      throw new Error("Sandbox is required in non-local mode");
-    }
-    const gitStashOutput = await sandbox.process.executeCommand(
-      "git add -A && git stash && git reset --hard",
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
+    // Use unified shell executor
+    const executor = createShellExecutor(config);
+    const gitStashOutput = await executor.executeCommand({
+      command: "git add -A && git stash && git reset --hard",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      sandbox: sandbox || undefined,
+    });
 
     if (gitStashOutput.exitCode !== 0) {
       logger.error(`Failed to stash and clear changes`, {
@@ -206,7 +176,7 @@ export async function stashAndClearChanges(
     }
     return gitStashOutput;
   } catch (e) {
-    // Sandbox mode error handling
+    // Unified error handling
     const errorFields = getSandboxErrorFields(e);
     logger.error(`Failed to stash and clear changes`, {
       ...(errorFields && { errorFields }),
@@ -247,7 +217,11 @@ export async function checkoutBranchAndCommit(
   logger.info(`Committing changes to branch ${branchName}`);
 
   // Validate and filter files before committing
-  const validFiles = await getValidFilesToCommit(absoluteRepoDir, sandbox);
+  const validFiles = await getValidFilesToCommit(
+    absoluteRepoDir,
+    sandbox,
+    config,
+  );
 
   if (validFiles.length === 0) {
     logger.info("No valid files to commit after filtering");
@@ -549,11 +523,32 @@ async function performClone(
     baseCommit: targetRepository.baseCommit,
   });
 
+  if (!branchName && !targetRepository.baseCommit) {
+    throw new Error(
+      "Can not create new branch or checkout existing branch without branch name",
+    );
+  }
+
+  const branchExists = branchName
+    ? !!(await getBranch({
+        owner: targetRepository.owner,
+        repo: targetRepository.repo,
+        branchName,
+        githubInstallationToken,
+      }))
+    : false;
+
+  if (branchExists) {
+    logger.info("Branch already exists on remote. Cloning existing branch.", {
+      branch: branchName,
+    });
+  }
+
   await sandbox.git.clone(
     cloneUrl,
     absoluteRepoDir,
-    targetRepository.branch,
-    targetRepository.baseCommit,
+    branchExists ? branchName : targetRepository.branch,
+    branchExists ? undefined : targetRepository.baseCommit,
     "git",
     githubInstallationToken,
   );
@@ -569,45 +564,51 @@ async function performClone(
   }
 
   if (!branchName) {
-    throw new Error(
-      "Can not create new branch or checkout existing branch without branch name",
-    );
+    throw new Error("Branch name is required");
+  }
+
+  if (branchExists) {
+    return branchName;
   }
 
   try {
+    logger.info("Creating branch", {
+      branch: branchName,
+    });
+
     await sandbox.git.createBranch(absoluteRepoDir, branchName);
+
     logger.info("Created branch", {
       branch: branchName,
     });
-
-    // push an empty commit so that the branch exists in the remote
-    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
-    logger.info("Pushed empty commit to remote", {
+  } catch (error) {
+    logger.error("Failed to create branch, checking out branch", {
       branch: branchName,
-    });
-
-    return branchName;
-  } catch {
-    logger.info("Failed to create branch, checking out branch", {
-      branch: branchName,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
     });
   }
 
-  await sandbox.git.checkoutBranch(absoluteRepoDir, branchName);
-  logger.info("Checked out branch", {
-    branch: branchName,
-  });
-
-  const setUpstreamBranchRes = await sandbox.process.executeCommand(
-    `git branch --set-upstream-to=origin/${branchName}`,
-    absoluteRepoDir,
-  );
-  if (setUpstreamBranchRes.exitCode !== 0) {
-    logger.error("Failed to set upstream branch", {
-      setUpstreamBranchRes,
+  try {
+    // push an empty commit so that the branch exists in the remote
+    logger.info("Pushing empty commit to remote", {
+      branch: branchName,
     });
-  } else {
-    logger.info("Set upstream branch");
+    await sandbox.git.push(absoluteRepoDir, "git", githubInstallationToken);
+
+    logger.info("Pushed empty commit to remote", {
+      branch: branchName,
+    });
+  } catch (error) {
+    logger.error("Failed to push an empty commit to branch", {
+      branch: branchName,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message }
+          : String(error),
+    });
   }
 
   return branchName;

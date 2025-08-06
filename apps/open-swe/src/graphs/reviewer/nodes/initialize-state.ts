@@ -11,6 +11,7 @@ import { v4 as uuidv4 } from "uuid";
 import { createReviewStartedToolFields } from "@open-swe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
 import { Sandbox } from "@daytonaio/sdk";
+import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");
 
@@ -49,17 +50,20 @@ async function getChangedFiles(
   sandbox: Sandbox,
   baseBranchName: string,
   repoRoot: string,
+  config: GraphConfig,
 ): Promise<string> {
   try {
-    const changedFilesRes = await sandbox.process.executeCommand(
-      `git diff ${baseBranchName} --name-only`,
-      repoRoot,
-    );
+    const executor = createShellExecutor(config);
+    const changedFilesRes = await executor.executeCommand({
+      command: `git diff ${baseBranchName} --name-only`,
+      workdir: repoRoot,
+      timeout: 30,
+      sandbox,
+    });
+
     if (changedFilesRes.exitCode !== 0) {
-      const errorFields = getSandboxErrorFields(changedFilesRes);
-      logger.error(
-        `Failed to get changed files: ${JSON.stringify(errorFields, null, 2)}`,
-      );
+      logger.error(`Failed to get changed files: ${changedFilesRes.result}`);
+      return "Failed to get changed files.";
     }
     return changedFilesRes.result.trim();
   } catch (e) {
@@ -74,16 +78,20 @@ async function getChangedFiles(
 async function getBaseBranchName(
   sandbox: Sandbox,
   repoRoot: string,
+  config: GraphConfig,
 ): Promise<string> {
   try {
-    const baseBranchNameRes = await sandbox.process.executeCommand(
-      "git config init.defaultBranch",
-      repoRoot,
-    );
+    const executor = createShellExecutor(config);
+    const baseBranchNameRes = await executor.executeCommand({
+      command: "git config init.defaultBranch",
+      workdir: repoRoot,
+      timeout: 30,
+      sandbox,
+    });
+
     if (baseBranchNameRes.exitCode !== 0) {
-      const errorFields = getSandboxErrorFields(baseBranchNameRes);
       logger.error("Failed to get base branch name", {
-        ...(errorFields ?? baseBranchNameRes),
+        result: baseBranchNameRes.result,
       });
       return "";
     }
@@ -101,7 +109,7 @@ export async function initializeState(
   state: ReviewerGraphState,
   config: GraphConfig,
 ): Promise<ReviewerGraphUpdate> {
-  const repoRoot = getRepoAbsolutePath(state.targetRepository);
+  const repoRoot = getRepoAbsolutePath(state.targetRepository, config);
   logger.info("Initializing state for reviewer");
   // get the base branch name, then get the changed files
   const { sandbox, codebaseTree, dependenciesInstalled } =
@@ -114,10 +122,10 @@ export async function initializeState(
 
   let baseBranchName = state.targetRepository.branch;
   if (!baseBranchName) {
-    baseBranchName = await getBaseBranchName(sandbox, repoRoot);
+    baseBranchName = await getBaseBranchName(sandbox, repoRoot, config);
   }
   const changedFiles = baseBranchName
-    ? await getChangedFiles(sandbox, baseBranchName, repoRoot)
+    ? await getChangedFiles(sandbox, baseBranchName, repoRoot, config)
     : "";
 
   logger.info("Finished getting state for reviewer");

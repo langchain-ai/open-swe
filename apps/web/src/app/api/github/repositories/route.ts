@@ -97,6 +97,8 @@ export async function GET(request: NextRequest) {
       html_url: repo.html_url,
       default_branch: repo.default_branch,
       permissions: repo.permissions,
+      fork: repo.fork,
+      has_issues: repo.has_issues,
     }));
 
     return NextResponse.json({

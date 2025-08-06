@@ -17,6 +17,7 @@ import { ThemeToggle } from "../theme-toggle";
 import { ThreadCard, ThreadCardLoading } from "./thread-card";
 import { GitHubInstallationBanner } from "../github/installation-banner";
 import { ApiKeyBanner } from "../api-key-banner";
+import { IssuesRequiredBanner } from "../github/forked-repository-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
@@ -142,6 +143,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           <GitHubInstallationBanner />
           <ApiKeyBanner />
+          <IssuesRequiredBanner />
           {/* Terminal Chat Input */}
           <Card
             className={cn(

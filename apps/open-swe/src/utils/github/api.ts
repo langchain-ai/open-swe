@@ -1,6 +1,7 @@
 import { Octokit } from "@octokit/rest";
 import { createLogger, LogLevel } from "../logger.js";
 import {
+  GitHubBranch,
   GitHubIssue,
   GitHubIssueComment,
   GitHubPullRequest,
@@ -553,5 +554,37 @@ export async function updateIssueComment({
     "Failed to update issue comment",
     undefined,
     numRetries,
+  );
+}
+
+export async function getBranch({
+  owner,
+  repo,
+  branchName,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  branchName: string;
+  githubInstallationToken: string;
+}): Promise<GitHubBranch | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: branch } = await octokit.repos.getBranch({
+        owner,
+        repo,
+        branch: branchName,
+      });
+
+      return branch;
+    },
+    githubInstallationToken,
+    "Failed to get branch",
+    undefined,
+    1,
   );
 }

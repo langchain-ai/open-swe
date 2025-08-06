@@ -3,18 +3,13 @@
  */
 
 import { Client, StreamMode } from "@langchain/langgraph-sdk";
-import { encryptSecret } from "@open-swe/shared/crypto";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
   LOCAL_MODE_HEADER,
 } from "@open-swe/shared/constants";
-import {
-  getAccessToken,
-  getInstallationAccessToken,
-  getInstallationId,
-} from "./auth-server.js";
 import { formatDisplayLog } from "./logger.js";
+
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 /**
@@ -23,66 +18,27 @@ const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 export async function submitFeedback({
   plannerFeedback,
   plannerThreadId,
-  selectedRepo,
   setLogs,
   setPlannerFeedback,
   setStreamingPhase,
 }: {
   plannerFeedback: string;
   plannerThreadId: string;
-  selectedRepo: any;
-  // eslint-disable-next-line no-unused-vars
-  setLogs: (updater: (prev: string[]) => string[]) => void;
+  setLogs: (updater: (prev: string[]) => string[]) => void; // eslint-disable-line no-unused-vars
   setPlannerFeedback: () => void;
-  // eslint-disable-next-line no-unused-vars
-  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void;
+  setStreamingPhase: (phase: "streaming" | "awaitingFeedback" | "done") => void; // eslint-disable-line no-unused-vars
 }) {
   try {
     // Set streaming phase back to streaming when feedback submission starts
     setStreamingPhase("streaming");
 
-    const isLocalMode = process.env.OPEN_SWE_LOCAL_MODE === "true";
-    let client: Client;
-
-    if (isLocalMode) {
-      // In local mode, create client without GitHub authentication
-      client = new Client({
-        apiUrl: LANGGRAPH_URL,
-        defaultHeaders: {
-          [LOCAL_MODE_HEADER]: "true", // Signal to server this is local mode
-        },
-      });
-    } else {
-      const userAccessToken = getAccessToken();
-      const installationAccessToken = await getInstallationAccessToken();
-      const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-
-      if (!userAccessToken || !installationAccessToken || !encryptionKey) {
-        setLogs((prev) => [
-          ...prev,
-          "Missing access tokens for feedback submission",
-        ]);
-        return;
-      }
-
-      const encryptedUserToken = encryptSecret(userAccessToken, encryptionKey);
-      const encryptedInstallationToken = encryptSecret(
-        installationAccessToken,
-        encryptionKey,
-      );
-      const [owner] = selectedRepo?.full_name.split("/") || [];
-
-      const installationId = getInstallationId();
-      client = new Client({
-        apiUrl: LANGGRAPH_URL,
-        defaultHeaders: {
-          "x-github-access-token": encryptedUserToken,
-          "x-github-installation-token": encryptedInstallationToken,
-          "x-github-installation-name": owner,
-          "x-github-installation-id": installationId,
-        },
-      });
-    }
+    // Create client for local mode
+    const client = new Client({
+      apiUrl: LANGGRAPH_URL,
+      defaultHeaders: {
+        [LOCAL_MODE_HEADER]: "true",
+      },
+    });
 
     const formatted = formatDisplayLog(`Human feedback: ${plannerFeedback}`);
     if (formatted.length > 0) {
