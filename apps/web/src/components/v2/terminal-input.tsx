@@ -104,6 +104,7 @@ export function TerminalInput({
     }
 
     const defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
+    console.log("DEFAULT CONFIG", defaultConfig);
 
     if (!isAllowedUser(user.login) && !hasApiKeySet(defaultConfig)) {
       toast.error(

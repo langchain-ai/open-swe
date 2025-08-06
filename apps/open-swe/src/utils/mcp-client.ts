@@ -59,7 +59,7 @@ function validateMcpServers(mcpServers: McpServers): McpServers {
 /**
  * Returns a shared MCP client instance
  */
-export function mcpClient(mcpServers: McpServers): MultiServerMCPClient {
+function mcpClient(mcpServers: McpServers): MultiServerMCPClient {
   const serversToUse = validateMcpServers(mcpServers);
   const configHash = JSON.stringify(serversToUse);
 

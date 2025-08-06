@@ -126,9 +126,9 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     messages: [
       new AIMessage({
         id: uuidv4(),
-        content: `Success! I just created a new session for your request. Thread ID: ${newManagerThreadId}
-      
-  TODO: Replace with link to new thread.`,
+        content: `Success! I just created a new session for your request. Thread ID: \`${newManagerThreadId}\`
+
+Click [here](/chat/${newManagerThreadId}) to view the thread.`,
       }),
     ],
   };
