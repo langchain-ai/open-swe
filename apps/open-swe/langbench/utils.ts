@@ -1,7 +1,6 @@
-import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { ENV_CONSTANTS } from "../src/utils/env-setup.js";
-import { TestResults, PytestJsonReport } from "./types.js";
+import { TestResults, PytestJsonReport, RunPytestOptions } from "./types.js";
 import { readFile } from "../src/utils/read-write.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
@@ -58,13 +57,6 @@ const PYTEST_INSTALL_COMMANDS = [
   `${RUN_PIP_IN_VENV} install pytest pytest-mock pytest-asyncio syrupy pytest-json-report`,
   `${RUN_PIP_IN_VENV} install -e ./libs/langgraph`,
 ];
-
-export interface RunPytestOptions {
-  sandbox: Sandbox;
-  testFiles: string[];
-  repoDir: string;
-  timeoutSec?: number;
-}
 
 /**
  * Run pytest on specific test files and return structured results

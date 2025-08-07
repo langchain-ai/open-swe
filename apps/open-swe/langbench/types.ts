@@ -1,3 +1,5 @@
+import { Sandbox } from "@daytonaio/sdk";
+
 export interface PRData {
   url: string;
   htmlUrl: string;
@@ -52,4 +54,11 @@ export interface PRProcessResult {
   testResults?: TestResults;
   error?: string;
   preMergeSha?: string;
+}
+
+export interface RunPytestOptions {
+  sandbox: Sandbox;
+  testFiles: string[];
+  repoDir: string;
+  timeoutSec?: number;
 }
