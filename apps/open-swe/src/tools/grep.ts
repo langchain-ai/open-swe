@@ -23,7 +23,7 @@ export function createGrepTool(
   const grepTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const command = formatGrepCommand(input as any);
+        const command = formatGrepCommand(input);
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
         const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
