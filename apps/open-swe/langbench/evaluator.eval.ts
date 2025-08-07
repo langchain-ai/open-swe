@@ -30,12 +30,12 @@ logger.info(`Starting evals over ${DATASET.length} PRs...`);
  */
 async function processPR(prData: PRData): Promise<PRProcessResult> {
   const result: PRProcessResult = {
-    pr_number: prData.pr_number,
-    repo_name: prData.repo_name,
+    prNumber: prData.prNumber,
+    repoName: prData.repoName,
     success: false,
-    evals_found: false,
-    evals_files: [],
-    test_files: [],
+    evalsFound: false,
+    evalsFiles: [],
+    testFiles: [],
   };
   const daytona = new Daytona({
     organizationId: process.env.DAYTONA_ORGANIZATION_ID,
@@ -43,11 +43,11 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
   let sandbox: Sandbox | undefined;
 
   try {
-    logger.info(`Processing PR #${prData.pr_number}: ${prData.title}`);
+    logger.info(`Processing PR #${prData.prNumber}: ${prData.title}`);
 
     // Use test files from PR data (already fetched and stored)
-    const testFiles = prData.test_files || [];
-    result.test_files = testFiles;
+    const testFiles = prData.testFiles || [];
+    result.testFiles = testFiles;
     // Create sandbox
     sandbox = await daytona.create(DEFAULT_SANDBOX_CREATE_PARAMS);
 
@@ -58,17 +58,17 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       );
     }
 
-    result.workspace_id = sandbox.id;
+    result.workspaceId = sandbox.id;
     logger.info(`Created sandbox: ${sandbox.id}`);
 
     // Use the hardcoded pre-merge commit SHA from the dataset
-    const preMergeCommit = prData.pre_merge_commit_sha;
+    const preMergeCommit = prData.preMergeCommitSha;
     logger.info(`Using pre-merge commit: ${preMergeCommit}`);
-    result.pre_merge_sha = preMergeCommit;
+    result.preMergeSha = preMergeCommit;
 
     const targetRepository: TargetRepository = {
-      owner: prData.repo_owner,
-      repo: prData.repo_name,
+      owner: prData.repoOwner,
+      repo: prData.repoName,
       branch: undefined,
       baseCommit: preMergeCommit,
     };
@@ -94,12 +94,12 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     // Checkout test files from the merge commit to get the updated test files
     if (testFiles.length > 0) {
       logger.info(
-        `Checking out test files from merge commit: ${prData.merge_commit_sha}`,
+        `Checking out test files from merge commit: ${prData.mergeCommitSha}`,
       );
       await checkoutFilesFromCommit({
         sandbox,
         repoDir,
-        commitSha: prData.merge_commit_sha,
+        commitSha: prData.mergeCommitSha,
         filePaths: testFiles,
       });
     }
@@ -115,23 +115,23 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
         repoDir,
         timeoutSec: 300,
       });
-      result.test_results = testResults;
+      result.testResults = testResults;
 
-      logger.info(`Test execution completed for PR #${prData.pr_number}`, {
+      logger.info(`Test execution completed for PR #${prData.prNumber}`, {
         totalTests: testResults.totalTests,
         passedTests: testResults.passedTests,
         failedTests: testResults.failedTests,
         success: testResults.success,
       });
     } else {
-      logger.info(`No test files to run for PR #${prData.pr_number}`);
+      logger.info(`No test files to run for PR #${prData.prNumber}`);
     }
 
     result.success = true;
-    logger.info(`Successfully processed PR #${prData.pr_number}`);
+    logger.info(`Successfully processed PR #${prData.prNumber}`);
   } catch (error) {
     result.error = error instanceof Error ? error.message : String(error);
-    logger.error(`Failed to process PR #${prData.pr_number}:`, { error });
+    logger.error(`Failed to process PR #${prData.prNumber}:`, { error });
   } finally {
     // Cleanup sandbox
     if (sandbox) {
@@ -153,28 +153,28 @@ ls.describe(DATASET_NAME, () => {
   ls.test.each(DATASET)(
     "Can process PR successfully",
     async ({ inputs: prData }) => {
-      logger.info(`Processing PR #${prData.pr_number}: ${prData.title}`);
+      logger.info(`Processing PR #${prData.prNumber}: ${prData.title}`);
 
       const result = await processPR(prData);
 
       // Log results for visibility
-      logger.info(`PR #${prData.pr_number} processing completed`, {
+      logger.info(`PR #${prData.prNumber} processing completed`, {
         success: result.success,
-        evals_found: result.evals_found,
-        evals_files_count: result.evals_files.length,
-        test_files_count: result.test_files.length,
-        test_files: result.test_files,
-        test_results: result.test_results
+        evalsFound: result.evalsFound,
+        evalsFilesCount: result.evalsFiles.length,
+        testFilesCount: result.testFiles.length,
+        testFiles: result.testFiles,
+        testResults: result.testResults
           ? {
-              totalTests: result.test_results.totalTests,
-              passedTests: result.test_results.passedTests,
-              failedTests: result.test_results.failedTests,
-              success: result.test_results.success,
+              totalTests: result.testResults.totalTests,
+              passedTests: result.testResults.passedTests,
+              failedTests: result.testResults.failedTests,
+              success: result.testResults.success,
             }
           : null,
         error: result.error,
-        workspace_id: result.workspace_id,
-        pre_merge_sha: result.pre_merge_sha,
+        workspaceId: result.workspaceId,
+        preMergeSha: result.preMergeSha,
       });
 
       // Assert that processing was successful

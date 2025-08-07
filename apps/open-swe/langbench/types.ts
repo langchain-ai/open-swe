@@ -1,18 +1,18 @@
 export interface PRData {
   url: string;
-  html_url: string;
-  diff_url: string;
-  patch_url: string;
-  repo_owner: string;
-  repo_name: string;
-  pr_number: number;
-  merge_commit_sha: string;
-  pre_merge_commit_sha: string;
+  htmlUrl: string;
+  diffUrl: string;
+  patchUrl: string;
+  repoOwner: string;
+  repoName: string;
+  prNumber: number;
+  mergeCommitSha: string;
+  preMergeCommitSha: string;
   title: string;
   body: string;
-  created_at: string;
-  merged_at: string;
-  test_files: string[];
+  createdAt: string;
+  mergedAt: string;
+  testFiles: string[];
 }
 
 export interface TestResults {
@@ -42,14 +42,14 @@ export interface PytestJsonReport {
 }
 
 export interface PRProcessResult {
-  pr_number: number;
-  repo_name: string;
-  workspace_id?: string;
+  prNumber: number;
+  repoName: string;
+  workspaceId?: string;
   success: boolean;
-  evals_found: boolean;
-  evals_files: string[];
-  test_files: string[];
-  test_results?: TestResults;
+  evalsFound: boolean;
+  evalsFiles: string[];
+  testFiles: string[];
+  testResults?: TestResults;
   error?: string;
-  pre_merge_sha?: string;
+  preMergeSha?: string;
 }
