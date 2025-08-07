@@ -142,16 +142,10 @@ export const runPytestOnFiles = async (
         parsed = parsePytestJsonReport(jsonReport);
         logger.debug("Successfully parsed JSON report", { jsonReport });
       } else {
-        logger.warn("Failed to read JSON report, falling back to text parsing");
-        const output = execution.result || "";
-        parsed = parsePytestOutput(output);
+        throw new Error("Failed to read JSON report");
       }
     } catch (jsonError) {
-      logger.warn("Failed to parse JSON report, falling back to text parsing", {
-        jsonError,
-      });
-      const output = execution.result || "";
-      parsed = parsePytestOutput(output);
+      throw new Error("Failed to parse JSON report", { cause: jsonError });
     }
 
     logger.info("Pytest execution completed", {
