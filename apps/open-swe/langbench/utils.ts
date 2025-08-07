@@ -52,10 +52,8 @@ function isLangGraphTestFile(filePath: string): boolean {
 const { RUN_PYTHON_IN_VENV, RUN_PIP_IN_VENV } = ENV_CONSTANTS;
 
 // Installation commands for pytest and dependencies
-const PYTEST_INSTALL_COMMANDS = [
-  `${RUN_PIP_IN_VENV} install pytest pytest-mock pytest-asyncio syrupy pytest-json-report`,
-  `${RUN_PIP_IN_VENV} install -e ./libs/langgraph`,
-];
+const PIP_INSTALL_COMMAND = `${RUN_PIP_IN_VENV} install pytest pytest-mock pytest-asyncio syrupy pytest-json-report`;
+const LANGGRAPH_INSTALL_COMMAND = `${RUN_PIP_IN_VENV} install -e ./libs/langgraph`;
 
 /**
  * Run pytest on specific test files and return structured results
@@ -89,29 +87,50 @@ export async function runPytestOnFiles(
     "Installing pytest, pytest-mock, pytest-asyncio, syrupy, pytest-json-report, and langgraph in virtual environment...",
   );
 
-  for (const [index, command] of PYTEST_INSTALL_COMMANDS.entries()) {
-    logger.info(
-      `Running install command ${index + 1}/${PYTEST_INSTALL_COMMANDS.length}: ${command}`,
-    );
-    const installResult = await sandbox.process.executeCommand(
-      command,
-      repoDir,
-      undefined,
-      timeoutSec * 2,
-    );
+  // Execute pip install command
+  logger.info(`Running pip install command: ${PIP_INSTALL_COMMAND}`);
+  const pipInstallResult = await sandbox.process.executeCommand(
+    PIP_INSTALL_COMMAND,
+    repoDir,
+    undefined,
+    timeoutSec * 2,
+  );
 
-    logger.info(`Install command ${index + 1} completed`, {
-      exitCode: installResult.exitCode,
-      output: installResult.result?.slice(0, 500),
+  logger.info(`Pip install command completed`, {
+    exitCode: pipInstallResult.exitCode,
+    output: pipInstallResult.result?.slice(0, 500),
+  });
+
+  if (pipInstallResult.exitCode !== 0) {
+    logger.error(`Pip install command failed`, {
+      command: PIP_INSTALL_COMMAND,
+      exitCode: pipInstallResult.exitCode,
+      output: pipInstallResult.result,
     });
+  }
 
-    if (installResult.exitCode !== 0) {
-      logger.error(`Install command ${index + 1} failed`, {
-        command,
-        exitCode: installResult.exitCode,
-        output: installResult.result,
-      });
-    }
+  // Execute langgraph install command
+  logger.info(
+    `Running langgraph install command: ${LANGGRAPH_INSTALL_COMMAND}`,
+  );
+  const langgraphInstallResult = await sandbox.process.executeCommand(
+    LANGGRAPH_INSTALL_COMMAND,
+    repoDir,
+    undefined,
+    timeoutSec * 2,
+  );
+
+  logger.info(`Langgraph install command completed`, {
+    exitCode: langgraphInstallResult.exitCode,
+    output: langgraphInstallResult.result?.slice(0, 500),
+  });
+
+  if (langgraphInstallResult.exitCode !== 0) {
+    logger.error(`Langgraph install command failed`, {
+      command: LANGGRAPH_INSTALL_COMMAND,
+      exitCode: langgraphInstallResult.exitCode,
+      output: langgraphInstallResult.result,
+    });
   }
 
   try {
