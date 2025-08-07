@@ -171,7 +171,7 @@ export function ManagerChat({
           initial={true}
         >
           <StickyToBottomContent
-            className="h-full overflow-x-hidden overflow-y-auto"
+            className="scrollbar-pretty-auto h-full"
             contentClassName="space-y-4 p-4"
             content={
               <>
