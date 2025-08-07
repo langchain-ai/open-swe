@@ -18,7 +18,11 @@ Open SWE is an open-source cloud-based asynchronous coding agent built with [Lan
 > **Note: you're required to set your own LLM API keys to use the demo.**
 
 > [!NOTE]
-> Read the Open SWE documentation [here](https://docs.langchain.com/labs/swe/).
+> 📚 See the **Open SWE documentation [here](https://docs.langchain.com/labs/swe/)**
+>
+> 💬 Read the **announcement blog post [here](https://blog.langchain.com/introducing-open-swe-an-open-source-asynchronous-coding-agent/)**
+>
+> 📺 Watch the **announcement video [here](https://youtu.be/TaYVvXbOs8c)**
 
 # Features
 
