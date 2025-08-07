@@ -15,7 +15,6 @@ dotenv.config();
 
 const logger = createLogger(LogLevel.INFO, "PR Processor");
 
-
 // Load PRs data
 const prsData: PRData[] = JSON.parse(
   readFileSync("langbench/static/langgraph_prs.json", "utf8"),

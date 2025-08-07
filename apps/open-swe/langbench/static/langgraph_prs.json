@@ -54,9 +54,7 @@
     "created_at": "2025-01-21T17:58:50Z",
     "merged_at": "2025-01-31T17:20:59Z",
     "pre_merge_commit_sha": "4b3e07b67aa5a992531cab169286c3cda0c38a0a",
-    "test_files": [
-      "libs/langgraph/tests/test_prebuilt.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_prebuilt.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/3095",
@@ -72,9 +70,7 @@
     "created_at": "2025-01-17T23:35:26Z",
     "merged_at": "2025-01-17T23:44:52Z",
     "pre_merge_commit_sha": "e4a5c8fd28ceca30171073aebd64b802699c54ba",
-    "test_files": [
-      "libs/langgraph/tests/test_pregel_async.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_pregel_async.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/2848",
@@ -90,9 +86,7 @@
     "created_at": "2024-12-20T20:31:20Z",
     "merged_at": "2025-01-10T16:06:59Z",
     "pre_merge_commit_sha": "35c3ba0104804bee045675ee8bce754deccacfc2",
-    "test_files": [
-      "libs/langgraph/tests/test_prebuilt.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_prebuilt.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/1004",
@@ -108,9 +102,7 @@
     "created_at": "2024-07-12T16:42:14Z",
     "merged_at": "2024-07-12T19:53:17Z",
     "pre_merge_commit_sha": "558a513a1acbc0ae88ae24d6e5cc13325ab00ad1",
-    "test_files": [
-      "libs/langgraph/tests/test_interruption.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_interruption.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/5801",
@@ -126,9 +118,7 @@
     "created_at": "2025-08-01T18:31:32Z",
     "merged_at": "2025-08-03T11:12:54Z",
     "pre_merge_commit_sha": "db8ed4e9e424ed29c8165602f17ee800c671681b",
-    "test_files": [
-      "libs/langgraph/tests/test_managed_values.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_managed_values.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/5796",
@@ -144,9 +134,7 @@
     "created_at": "2025-08-01T14:27:51Z",
     "merged_at": "2025-08-01T14:33:46Z",
     "pre_merge_commit_sha": "38bbd92e01d8437b70c45355b6005fa40c204844",
-    "test_files": [
-      "libs/langgraph/tests/test_deprecation.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_deprecation.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/5708",
@@ -162,9 +150,7 @@
     "created_at": "2025-07-29T19:14:10Z",
     "merged_at": "2025-07-29T20:11:37Z",
     "pre_merge_commit_sha": "479373bd81f538b81362ae8bea9d1b6923e1f60e",
-    "test_files": [
-      "libs/langgraph/tests/test_runnable.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_runnable.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/4983",
@@ -203,9 +189,7 @@
     "created_at": "2025-03-18T03:32:30Z",
     "merged_at": "2025-03-18T04:26:34Z",
     "pre_merge_commit_sha": "dd16ae4ba5243b4f0e4228f9a00aac477146c301",
-    "test_files": [
-      "libs/langgraph/tests/test_pregel.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_pregel.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/3110",
@@ -221,9 +205,7 @@
     "created_at": "2025-01-20T19:41:44Z",
     "merged_at": "2025-01-21T18:16:10Z",
     "pre_merge_commit_sha": "d48b25420ba7553a7154d3960fb1bf327d497e9d",
-    "test_files": [
-      "libs/langgraph/tests/test_large_cases.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_large_cases.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/3037",
@@ -297,9 +279,7 @@
     "created_at": "2024-09-17T01:04:29Z",
     "merged_at": "2024-09-17T17:14:26Z",
     "pre_merge_commit_sha": "f59435a892e96fb9092e0055a6df2e1dfc5111a9",
-    "test_files": [
-      "libs/langgraph/tests/test_pregel_async.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_pregel_async.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/1630",
@@ -334,9 +314,7 @@
     "created_at": "2024-06-25T21:38:27Z",
     "merged_at": "2024-06-26T23:24:59Z",
     "pre_merge_commit_sha": "6ae59581643b51751731ae64c609a8bc21779714",
-    "test_files": [
-      "libs/langgraph/tests/test_pregel.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_pregel.py"]
   },
   {
     "url": "https://api.github.com/repos/langchain-ai/langgraph/pulls/651",
@@ -352,8 +330,6 @@
     "created_at": "2024-06-12T14:35:51Z",
     "merged_at": "2024-07-03T05:43:54Z",
     "pre_merge_commit_sha": "5e8aa5d9f2e24b197ffa187c6b7b36602761d1a4",
-    "test_files": [
-      "libs/langgraph/tests/test_pregel.py"
-    ]
+    "test_files": ["libs/langgraph/tests/test_pregel.py"]
   }
 ]

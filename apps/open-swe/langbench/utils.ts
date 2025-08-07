@@ -111,7 +111,7 @@ export const runPytestOnFiles = async (
     installCommand,
     repoDir,
     undefined,
-    timeoutSec * 2, 
+    timeoutSec * 2,
   );
 
   logger.info("Installation completed", {

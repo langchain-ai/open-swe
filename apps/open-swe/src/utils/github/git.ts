@@ -645,7 +645,9 @@ export async function checkoutFilesFromCommit(
           `Failed to checkout file ${filePath} from commit ${commitSha}: ${result.result || "Unknown error"}`,
         );
       } else {
-        logger.info(`Successfully checked out ${filePath} from commit ${commitSha}`);
+        logger.info(
+          `Successfully checked out ${filePath} from commit ${commitSha}`,
+        );
       }
     } catch (error) {
       logger.warn(`Error checking out file ${filePath}:`, { error });
