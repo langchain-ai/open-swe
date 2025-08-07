@@ -98,7 +98,6 @@ export async function runPytestOnFiles(
     "Installing pytest, pytest-mock, pytest-asyncio, syrupy, pytest-json-report, and langgraph in virtual environment...",
   );
 
-  // Execute install commands separately for better error identification
   for (const [index, command] of PYTEST_INSTALL_COMMANDS.entries()) {
     logger.info(
       `Running install command ${index + 1}/${PYTEST_INSTALL_COMMANDS.length}: ${command}`,
