@@ -53,9 +53,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
 
     // Validate sandbox was created properly
     if (!sandbox || !sandbox.id) {
-      throw new Error(
-        "Failed to create valid sandbox",
-      );
+      throw new Error("Failed to create valid sandbox");
     }
 
     result.workspaceId = sandbox.id;
