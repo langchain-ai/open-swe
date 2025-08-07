@@ -2,53 +2,36 @@ import { Sandbox } from "@daytonaio/sdk";
 import { readFile, writeFile } from "../../utils/read-write.js";
 import { getSandboxErrorFields } from "../../utils/sandbox-error-fields.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import {
-  createShellExecutor,
-  LocalExecuteResponse,
-} from "../../utils/shell-executor/index.js";
+import { createShellExecutor } from "../../utils/shell-executor/index.js";
+
+interface ViewCommandInputs {
+  path: string;
+  workDir: string;
+  viewRange?: [number, number];
+}
 
 export async function handleViewCommand(
   sandbox: Sandbox,
-  path: string,
-  workDir: string,
-  viewRange?: [number, number],
-  config?: GraphConfig,
+  config: GraphConfig,
+  inputs: ViewCommandInputs,
 ): Promise<string> {
+  const { path, workDir, viewRange } = inputs;
   try {
     // Check if path is a directory
-    let statOutput: LocalExecuteResponse;
-    if (!config) {
-      // Fallback to direct sandbox execution if no config provided
-      statOutput = await sandbox.process.executeCommand(
-        `stat -c %F "${path}"`,
-        workDir,
-      );
-    } else {
-      const executor = createShellExecutor(config);
-      statOutput = await executor.executeCommand({
-        command: `stat -c %F "${path}"`,
-        workdir: workDir,
-        sandbox,
-      });
-    }
+    const executor = createShellExecutor(config);
+    const statOutput = await executor.executeCommand({
+      command: `stat -c %F "${path}"`,
+      workdir: workDir,
+      sandbox,
+    });
 
     if (statOutput.exitCode === 0 && statOutput.result?.includes("directory")) {
       // List directory contents
-      let lsOutput: LocalExecuteResponse;
-      if (!config) {
-        // Fallback to direct sandbox execution if no config provided
-        lsOutput = await sandbox.process.executeCommand(
-          `ls -la "${path}"`,
-          workDir,
-        );
-      } else {
-        const executor = createShellExecutor(config);
-        lsOutput = await executor.executeCommand({
-          command: `ls -la "${path}"`,
-          workdir: workDir,
-          sandbox,
-        });
-      }
+      const lsOutput = await executor.executeCommand({
+        command: `ls -la "${path}"`,
+        workdir: workDir,
+        sandbox,
+      });
 
       if (lsOutput.exitCode !== 0) {
         throw new Error(`Failed to list directory: ${lsOutput.result}`);
@@ -99,17 +82,24 @@ export async function handleViewCommand(
   }
 }
 
+interface StrReplaceCommandInputs {
+  path: string;
+  workDir: string;
+  oldStr: string;
+  newStr: string;
+}
+
 export async function handleStrReplaceCommand(
   sandbox: Sandbox,
-  path: string,
-  workDir: string,
-  oldStr: string,
-  newStr: string,
+  config: GraphConfig,
+  inputs: StrReplaceCommandInputs,
 ): Promise<string> {
+  const { path, workDir, oldStr, newStr } = inputs;
   const { success: readSuccess, output: fileContent } = await readFile({
     sandbox,
     filePath: path,
     workDir,
+    config,
   });
 
   if (!readSuccess) {
@@ -152,17 +142,24 @@ export async function handleStrReplaceCommand(
   return `Successfully replaced text in ${path} at exactly one location.`;
 }
 
+interface CreateCommandInputs {
+  path: string;
+  workDir: string;
+  fileText: string;
+}
+
 export async function handleCreateCommand(
   sandbox: Sandbox,
-  path: string,
-  workDir: string,
-  fileText: string,
+  config: GraphConfig,
+  inputs: CreateCommandInputs,
 ): Promise<string> {
+  const { path, workDir, fileText } = inputs;
   // Check if file already exists
   const { success: readSuccess } = await readFile({
     sandbox,
     filePath: path,
     workDir,
+    config,
   });
 
   if (readSuccess) {
@@ -185,17 +182,24 @@ export async function handleCreateCommand(
   return `Successfully created file ${path}.`;
 }
 
+interface InsertCommandInputs {
+  path: string;
+  workDir: string;
+  insertLine: number;
+  newStr: string;
+}
+
 export async function handleInsertCommand(
   sandbox: Sandbox,
-  path: string,
-  workDir: string,
-  insertLine: number,
-  newStr: string,
+  config: GraphConfig,
+  inputs: InsertCommandInputs,
 ): Promise<string> {
+  const { path, workDir, insertLine, newStr } = inputs;
   const { success: readSuccess, output: fileContent } = await readFile({
     sandbox,
     filePath: path,
     workDir,
+    config,
   });
 
   if (!readSuccess) {

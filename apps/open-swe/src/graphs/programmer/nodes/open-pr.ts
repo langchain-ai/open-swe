@@ -173,7 +173,7 @@ export async function openPullRequest(
   }
 
   if (process.env.SKIP_CI_UNTIL_LAST_COMMIT === "true") {
-    await pushEmptyCommit(state.targetRepository, sandbox, {
+    await pushEmptyCommit(state.targetRepository, sandbox, config, {
       githubInstallationToken,
     });
   }

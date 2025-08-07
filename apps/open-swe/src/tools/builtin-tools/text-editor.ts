@@ -169,12 +169,11 @@ export function createTextEditorTool(
 
           switch (command) {
             case "view":
-              result = await handleViewCommand(
-                sandbox,
+              result = await handleViewCommand(sandbox, config, {
                 path,
                 workDir,
-                view_range,
-              );
+                viewRange: view_range,
+              });
               break;
             case "str_replace":
               if (!old_str || new_str === undefined) {
@@ -182,24 +181,22 @@ export function createTextEditorTool(
                   "str_replace command requires both old_str and new_str parameters",
                 );
               }
-              result = await handleStrReplaceCommand(
-                sandbox,
+              result = await handleStrReplaceCommand(sandbox, config, {
                 path,
                 workDir,
-                old_str,
-                new_str,
-              );
+                oldStr: old_str,
+                newStr: new_str,
+              });
               break;
             case "create":
               if (!file_text) {
                 throw new Error("create command requires file_text parameter");
               }
-              result = await handleCreateCommand(
-                sandbox,
+              result = await handleCreateCommand(sandbox, config, {
                 path,
                 workDir,
-                file_text,
-              );
+                fileText: file_text,
+              });
               break;
             case "insert":
               if (insert_line === undefined || new_str === undefined) {
@@ -207,13 +204,12 @@ export function createTextEditorTool(
                   "insert command requires both insert_line and new_str parameters",
                 );
               }
-              result = await handleInsertCommand(
-                sandbox,
+              result = await handleInsertCommand(sandbox, config, {
                 path,
                 workDir,
-                insert_line,
-                new_str,
-              );
+                insertLine: insert_line,
+                newStr: new_str,
+              });
               break;
             default:
               throw new Error(`Unknown command: ${command}`);

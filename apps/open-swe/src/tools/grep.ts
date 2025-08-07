@@ -47,6 +47,13 @@ export function createGrepTool(
           response.exitCode === 1 ||
           (response.exitCode === 127 && response.result.startsWith("sh: 1: "))
         ) {
+          logger.info("No results found", {
+            command: command.join(" "),
+            workDir,
+            exitCode: response.exitCode,
+            result: response.result,
+            artifacts: response.artifacts,
+          });
           const errorResult = response.result ?? response.artifacts?.stdout;
           successResult = `Exit code 1. No results found.\n\n${errorResult}`;
         } else if (response.exitCode > 1) {

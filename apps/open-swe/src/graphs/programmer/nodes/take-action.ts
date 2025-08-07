@@ -263,7 +263,7 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree(undefined, undefined, config);
+  const codebaseTree = await getCodebaseTree(config);
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE

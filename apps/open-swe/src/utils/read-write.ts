@@ -9,27 +9,29 @@ import {
 import { promises as fs } from "fs";
 import { join, isAbsolute } from "path";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { createShellExecutor } from "./shell-executor/shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "ReadWriteUtil");
 
 async function handleCreateFile(
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
   filePath: string,
+  config: GraphConfig,
   args?: {
     workDir?: string;
   },
-  config?: GraphConfig,
 ) {
-  if (config && isLocalMode(config)) {
+  if (isLocalMode(config)) {
     return handleCreateFileLocal(filePath, args?.workDir);
   }
 
   try {
-    const touchCommand = `touch "${filePath}"`;
-    const touchOutput = await sandbox.process.executeCommand(
-      touchCommand,
-      args?.workDir,
-    );
+    const executor = createShellExecutor(config);
+    const touchOutput = await executor.executeCommand({
+      command: `touch "${filePath}"`,
+      workdir: args?.workDir,
+      sandbox: sandbox ?? undefined,
+    });
     return touchOutput;
   } catch (e) {
     const errorFields = getSandboxErrorFields(e);
@@ -49,26 +51,25 @@ async function readFileFunc(inputs: {
   sandbox: Sandbox | null;
   filePath: string;
   workDir?: string;
-  config?: GraphConfig;
+  config: GraphConfig;
 }): Promise<{
   success: boolean;
   output: string;
 }> {
   const { sandbox, filePath, workDir, config } = inputs;
 
-  if (config && isLocalMode(config)) {
+  if (isLocalMode(config)) {
     return readFileLocal(filePath, workDir);
   }
 
-  if (!sandbox) {
-    throw new Error("Sandbox is required when not in local mode");
-  }
+  const executor = createShellExecutor(config);
 
   try {
-    const readOutput = await sandbox.process.executeCommand(
-      `cat "${filePath}"`,
-      workDir,
-    );
+    const readOutput = await executor.executeCommand({
+      command: `cat "${filePath}"`,
+      workdir: workDir,
+      sandbox: sandbox ?? undefined,
+    });
 
     if (readOutput.exitCode !== 0) {
       const errorResult = readOutput.result ?? readOutput.artifacts?.stdout;
@@ -90,7 +91,7 @@ async function readFileFunc(inputs: {
         createOutput = await handleCreateFileLocal(filePath, workDir);
       } else {
         // Sandbox mode: use handleCreateFile
-        createOutput = await handleCreateFile(sandbox, filePath, {
+        createOutput = await handleCreateFile(sandbox, filePath, config, {
           workDir,
         });
       }
@@ -168,10 +169,12 @@ async function writeFileFunc(inputs: {
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
 ${content}
 ${delimiter}`;
-    const writeOutput = await sandbox.process.executeCommand(
-      writeCommand,
-      workDir,
-    );
+    const executor = createShellExecutor(config);
+    const writeOutput = await executor.executeCommand({
+      command: writeCommand,
+      workdir: workDir,
+      sandbox: sandbox ?? undefined,
+    });
 
     if (writeOutput.exitCode !== 0) {
       const errorResult = writeOutput.result ?? writeOutput.artifacts?.stdout;
