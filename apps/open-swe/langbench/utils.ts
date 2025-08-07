@@ -44,7 +44,7 @@ export async function getTestFilesFromDiff(diffUrl: string): Promise<string[]> {
 /**
  * Check if a file path represents a test file in libs/langgraph/tests/
  */
-export function isLangGraphTestFile(filePath: string): boolean {
+function isLangGraphTestFile(filePath: string): boolean {
   return filePath.includes("libs/langgraph/tests/") && filePath.endsWith(".py");
 }
 
