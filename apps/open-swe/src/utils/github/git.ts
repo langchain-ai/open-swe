@@ -628,7 +628,7 @@ export async function checkoutFilesFromCommit(
   options: CheckoutFilesOptions,
 ): Promise<void> {
   const { sandbox, repoDir, commitSha, filePaths } = options;
-  
+
   if (filePaths.length === 0) {
     return;
   }
