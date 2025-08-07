@@ -9,7 +9,6 @@ import { getLocalShellExecutor } from "./local-shell-executor.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { ExecuteCommandOptions, LocalExecuteResponse } from "./types.js";
 import { getSandboxSessionOrThrow } from "../../tools/utils/get-sandbox-id.js";
-import { wrapScript } from "../wrap-script.js";
 
 const logger = createLogger(LogLevel.INFO, "ShellExecutor");
 
@@ -105,7 +104,7 @@ export class ShellExecutor {
       }));
 
     return await sandbox_.process.executeCommand(
-      wrapScript(command),
+      command,
       workdir,
       env,
       timeout,

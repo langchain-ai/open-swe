@@ -13,6 +13,7 @@ import {
   formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
+import { wrapScript } from "../utils/wrap-script.js";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
 
@@ -36,7 +37,7 @@ export function createGrepTool(
 
         const executor = createShellExecutor(config);
         const response = await executor.executeCommand({
-          command,
+          command: wrapScript(command.join(" ")),
           workdir: workDir,
           timeout: TIMEOUT_SEC,
         });
