@@ -41,6 +41,7 @@ export class ShellExecutor {
       env = {},
       timeout = TIMEOUT_SEC,
       sandbox,
+      sandboxSessionId,
     } = options;
 
     const commandString = Array.isArray(command) ? command.join(" ") : command;
@@ -61,6 +62,7 @@ export class ShellExecutor {
         environment,
         timeout,
         sandbox,
+        sandboxSessionId,
       );
     }
   }
@@ -94,8 +96,13 @@ export class ShellExecutor {
     env?: Record<string, string>,
     timeout?: number,
     sandbox?: Sandbox,
+    sandboxSessionId?: string,
   ): Promise<LocalExecuteResponse> {
-    const sandbox_ = sandbox ?? (await getSandboxSessionOrThrow({}));
+    const sandbox_ =
+      sandbox ??
+      (await getSandboxSessionOrThrow({
+        xSandboxSessionId: sandboxSessionId,
+      }));
 
     return await sandbox_.process.executeCommand(
       wrapScript(command),

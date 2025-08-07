@@ -15,4 +15,5 @@ export interface ExecuteCommandOptions {
   env?: Record<string, string>;
   timeout?: number;
   sandbox?: Sandbox;
+  sandboxSessionId?: string;
 }

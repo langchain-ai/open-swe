@@ -11,7 +11,7 @@ export async function getSandboxSessionOrThrow(
 ): Promise<Sandbox> {
   let sandboxSessionId = "";
   // Attempt to extract from input.
-  if ("xSandboxSessionId" in input) {
+  if ("xSandboxSessionId" in input && input.xSandboxSessionId) {
     sandboxSessionId = input.xSandboxSessionId as string;
   } else {
     const state = getCurrentTaskInput<GraphState>();

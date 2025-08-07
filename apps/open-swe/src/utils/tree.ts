@@ -58,6 +58,7 @@ export async function getCodebaseTree(
       command,
       workdir: repoDir,
       timeout: TIMEOUT_SEC,
+      sandboxSessionId,
     });
 
     if (response.exitCode !== 0) {
