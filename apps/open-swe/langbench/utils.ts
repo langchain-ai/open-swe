@@ -7,7 +7,6 @@ const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
 
 /**
  * Fetch diff content from a diff URL and extract test file names, this function is used in one-off situtations to get the test files from the diff url.
- *
  */
 export async function getTestFilesFromDiff(diffUrl: string): Promise<string[]> {
   try {
