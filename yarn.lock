@@ -4112,9 +4112,11 @@ __metadata:
     "@octokit/webhooks": ^14.0.2
     "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
+    "@types/commander": ^2.12.5
     "@types/jest": ^29.5.0
     "@types/jsonwebtoken": ^9.0.10
     "@types/node": ^22.13.5
+    commander: ^14.0.0
     diff: ^8.0.1
     dotenv: ^16.4.7
     eslint: ^9.19.0
@@ -6704,6 +6706,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/commander@npm:^2.12.5":
+  version: 2.12.5
+  resolution: "@types/commander@npm:2.12.5"
+  dependencies:
+    commander: "*"
+  checksum: 5b70bf09366f778f54cd0b831417aa1f749cdd9e95e81016d0537b801ad14275973b04c34ff4dfaa344986aa93b4518c2df12647ecf8b499b636585335ae3edc
+  languageName: node
+  linkType: hard
+
 "@types/cookie@npm:^0.6.0":
   version: 0.6.0
   resolution: "@types/cookie@npm:0.6.0"
@@ -9047,6 +9058,13 @@ __metadata:
   version: 2.0.3
   resolution: "comma-separated-tokens@npm:2.0.3"
   checksum: e3bf9e0332a5c45f49b90e79bcdb4a7a85f28d6a6f0876a94f1bb9b2bfbdbbb9292aac50e1e742d8c0db1e62a0229a106f57917e2d067fca951d81737651700d
+  languageName: node
+  linkType: hard
+
+"commander@npm:*, commander@npm:^14.0.0":
+  version: 14.0.0
+  resolution: "commander@npm:14.0.0"
+  checksum: 6e9bdaf2e8e4f512855ffc10579eeae2e84c4a7697a91b1a5f62aab3c9849182207855268dd7c3952ae7a2334312a7138f58e929e4b428aef5bf8af862685c9b
   languageName: node
   linkType: hard
 

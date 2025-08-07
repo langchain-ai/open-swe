@@ -26,3 +26,7 @@ dist-ssr
 # LangGraph API
 .langgraph_api
 .env
+
+evals/dataset/scripts/*
+langbench/scripts/*
+scripts/
