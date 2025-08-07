@@ -5,7 +5,8 @@ import { ENV_CONSTANTS } from "../src/utils/env-setup.js";
 const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
 
 /**
- * Fetch diff content from a diff URL and extract test file names
+ * Fetch diff content from a diff URL and extract test file names, this function is used in one-off situtations to get the test files from the diff url.
+ *
  */
 export async function getTestFilesFromDiff(diffUrl: string): Promise<string[]> {
   try {
@@ -22,7 +23,6 @@ export async function getTestFilesFromDiff(diffUrl: string): Promise<string[]> {
     for (const line of lines) {
       // Look for diff file headers
       if (line.startsWith("diff --git ")) {
-        // Extract file path from "diff --git a/path/to/file.py b/path/to/file.py"
         const match = line.match(/diff --git a\/(.+?) b\//);
         if (match) {
           const filePath = match[1];
@@ -226,46 +226,6 @@ export const parsePytestJsonReport = (
     failedTests,
     detailsCount: testDetails.length,
   });
-
-  return {
-    totalTests,
-    passedTests,
-    failedTests,
-    testDetails,
-  };
-};
-
-/**
- * Fallback: Parse pytest text output to extract test results (legacy)
- */
-export const parsePytestOutput = (
-  output: string,
-): Omit<TestResult, "success" | "error"> => {
-  const lines = output.split("\n");
-  let totalTests = 0;
-  let passedTests = 0;
-  let failedTests = 0;
-  const testDetails: string[] = [];
-
-  // Collect test details and count results from individual test lines
-  for (const line of lines) {
-    if (
-      line.includes("::") &&
-      (line.includes("PASSED") ||
-        line.includes("FAILED") ||
-        line.includes("ERROR"))
-    ) {
-      testDetails.push(line.trim());
-
-      if (line.includes("PASSED")) {
-        passedTests++;
-      } else if (line.includes("FAILED") || line.includes("ERROR")) {
-        failedTests++;
-      }
-    }
-  }
-
-  totalTests = passedTests + failedTests;
 
   return {
     totalTests,
