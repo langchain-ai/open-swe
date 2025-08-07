@@ -96,12 +96,12 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       logger.info(
         `Checking out test files from merge commit: ${prData.merge_commit_sha}`,
       );
-      await checkoutFilesFromCommit(
+      await checkoutFilesFromCommit({
         sandbox,
         repoDir,
-        prData.merge_commit_sha,
-        testFiles,
-      );
+        commitSha: prData.merge_commit_sha,
+        filePaths: testFiles,
+      });
     }
 
     // Run tests on detected test files

@@ -614,15 +614,21 @@ async function performClone(
   return branchName;
 }
 
+export interface CheckoutFilesOptions {
+  sandbox: Sandbox;
+  repoDir: string;
+  commitSha: string;
+  filePaths: string[];
+}
+
 /**
  * Checkout specific files from a given commit
  */
 export async function checkoutFilesFromCommit(
-  sandbox: Sandbox,
-  repoDir: string,
-  commitSha: string,
-  filePaths: string[],
+  options: CheckoutFilesOptions,
 ): Promise<void> {
+  const { sandbox, repoDir, commitSha, filePaths } = options;
+  
   if (filePaths.length === 0) {
     return;
   }
