@@ -62,7 +62,7 @@ function CollapsibleAlert({
         <div className="line-clamp-1 min-h-4 font-medium tracking-tight">
           {title}
         </div>
-        <div className="text-muted-foreground data-[variant=destructive]:text-destructive/90 text-sm data-[variant=info]:text-blue-800 data-[variant=success]:text-green-800 data-[variant=warning]:text-yellow-800 dark:data-[variant=destructive]:text-red-200 dark:data-[variant=info]:text-blue-200 dark:data-[variant=success]:text-green-200 dark:data-[variant=warning]:text-yellow-200 [&_p]:leading-relaxed">
+        <div className="text-muted-foreground data-[variant=destructive]:text-destructive/90 text-sm break-all data-[variant=info]:text-blue-800 data-[variant=success]:text-green-800 data-[variant=warning]:text-yellow-800 dark:data-[variant=destructive]:text-red-200 dark:data-[variant=info]:text-blue-200 dark:data-[variant=success]:text-green-200 dark:data-[variant=warning]:text-yellow-200 [&_p]:leading-relaxed">
           {errorState.message}
         </div>
 
@@ -78,7 +78,7 @@ function CollapsibleAlert({
                   transition={{ duration: 0.2, ease: "easeInOut" }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-2 rounded border border-current/20 bg-current/5 p-2 font-mono text-xs">
+                  <div className="mt-2 rounded border border-current/20 bg-current/5 p-2 font-mono text-xs break-all">
                     {errorState.details}
                   </div>
                 </motion.div>

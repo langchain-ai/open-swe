@@ -164,14 +164,14 @@ export function ManagerChat({
   githubUser,
 }: ManagerChatProps) {
   return (
-    <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col border-r">
+    <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
       <div className="relative flex-1">
         <StickToBottom
           className="absolute inset-0"
           initial={true}
         >
           <StickyToBottomContent
-            className="scrollbar-pretty-auto h-full"
+            className="h-full overflow-x-hidden overflow-y-auto"
             contentClassName="space-y-4 p-4"
             content={
               <>
