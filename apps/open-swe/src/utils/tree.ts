@@ -4,7 +4,6 @@ import {
   TargetRepository,
   GraphConfig,
 } from "@open-swe/shared/open-swe/types";
-import { daytonaClient } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import path from "node:path";
 import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";
@@ -18,9 +17,9 @@ export const FAILED_TO_GENERATE_TREE_MESSAGE =
   "Failed to generate tree. Please try again.";
 
 export async function getCodebaseTree(
+  config: GraphConfig,
   sandboxSessionId_?: string,
   targetRepository_?: TargetRepository,
-  config?: GraphConfig,
 ): Promise<string> {
   try {
     const command = `git ls-files | tree --fromfile -L 3`;
@@ -28,7 +27,7 @@ export async function getCodebaseTree(
     let targetRepository = targetRepository_;
 
     // Check if we're in local mode
-    if (config && isLocalMode(config)) {
+    if (isLocalMode(config)) {
       return getCodebaseTreeLocal(config);
     }
 
@@ -53,14 +52,14 @@ export async function getCodebaseTree(
       throw new Error("Failed generate tree: No target repository provided");
     }
 
-    const sandbox = await daytonaClient().get(sandboxSessionId);
+    const executor = createShellExecutor(config);
     const repoDir = path.join(SANDBOX_ROOT_DIR, targetRepository.repo);
-    const response = await sandbox.process.executeCommand(
+    const response = await executor.executeCommand({
       command,
-      repoDir,
-      undefined,
-      TIMEOUT_SEC,
-    );
+      workdir: repoDir,
+      timeout: TIMEOUT_SEC,
+      sandboxSessionId,
+    });
 
     if (response.exitCode !== 0) {
       logger.error("Failed to generate tree", {

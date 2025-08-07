@@ -13,6 +13,7 @@ import {
   formatGrepCommand,
 } from "@open-swe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
+import { wrapScript } from "../utils/wrap-script.js";
 
 const logger = createLogger(LogLevel.INFO, "GrepTool");
 
@@ -23,7 +24,7 @@ export function createGrepTool(
   const grepTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       try {
-        const command = formatGrepCommand(input as any);
+        const command = formatGrepCommand(input);
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
         const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
@@ -36,7 +37,7 @@ export function createGrepTool(
 
         const executor = createShellExecutor(config);
         const response = await executor.executeCommand({
-          command,
+          command: wrapScript(command.join(" ")),
           workdir: workDir,
           timeout: TIMEOUT_SEC,
         });

@@ -59,12 +59,11 @@ export function createViewTool(
         } else {
           // Sandbox mode: use existing handler
           const sandbox = await getSandboxSessionOrThrow(input);
-          result = await handleViewCommand(
-            sandbox,
+          result = await handleViewCommand(sandbox, config, {
             path,
             workDir,
-            view_range as [number, number] | undefined,
-          );
+            viewRange: view_range as [number, number] | undefined,
+          });
         }
 
         logger.info(`View command executed successfully on ${path}`);

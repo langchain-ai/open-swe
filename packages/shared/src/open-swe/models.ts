@@ -33,6 +33,18 @@ export const MODEL_OPTIONS = [
     value: "anthropic:claude-3-5-haiku-latest",
   },
   {
+    label: "GPT 5",
+    value: "openai:gpt-5",
+  },
+  {
+    label: "GPT 5 mini",
+    value: "openai:gpt-5-mini",
+  },
+  {
+    label: "GPT 5 nano",
+    value: "openai:gpt-5-nano",
+  },
+  {
     label: "o4",
     value: "openai:o4",
   },
