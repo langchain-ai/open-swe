@@ -361,11 +361,11 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
-        [LLMTask.PLANNER]: "o3",
-        [LLMTask.PROGRAMMER]: "gpt-4.1",
-        [LLMTask.REVIEWER]: "o3",
-        [LLMTask.ROUTER]: "gpt-4o-mini",
-        [LLMTask.SUMMARIZER]: "gpt-4.1-mini",
+        [LLMTask.PLANNER]: "gpt-5",
+        [LLMTask.PROGRAMMER]: "gpt-5",
+        [LLMTask.REVIEWER]: "gpt-5",
+        [LLMTask.ROUTER]: "gpt-5-nano",
+        [LLMTask.SUMMARIZER]: "gpt-5-mini",
       },
     };
 
