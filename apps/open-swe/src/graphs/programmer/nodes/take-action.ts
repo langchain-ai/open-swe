@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { isAIMessage, ToolMessage } from "@langchain/core/messages";
+import { isAIMessage, ToolMessage, AIMessage } from "@langchain/core/messages";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   createApplyPatchTool,
@@ -30,8 +30,8 @@ import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
 } from "../../../utils/tree.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
@@ -39,6 +39,8 @@ import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
+import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
+import { getRepoAbsolutePath } from "@open-swe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -52,7 +54,7 @@ export async function takeAction(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
-  const applyPatchTool = createApplyPatchTool(state);
+  const applyPatchTool = createApplyPatchTool(state, config);
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const textEditorTool = createTextEditorTool(state, config);
@@ -87,9 +89,25 @@ export async function takeAction(
     allTools.map((tool) => [tool.name, tool]),
   );
 
-  const toolCalls = lastMessage.tool_calls;
+  let toolCalls = lastMessage.tool_calls;
   if (!toolCalls?.length) {
     throw new Error("No tool calls found.");
+  }
+
+  // Filter out unsafe commands only in local mode
+  let modifiedMessage: AIMessage | undefined;
+  let wasFiltered = false;
+  if (isLocalMode(config)) {
+    const filterResult = await filterUnsafeCommands(toolCalls, config);
+
+    if (filterResult.wasFiltered) {
+      wasFiltered = true;
+      modifiedMessage = new AIMessage({
+        ...lastMessage,
+        tool_calls: filterResult.filteredToolCalls,
+      });
+      toolCalls = filterResult.filteredToolCalls;
+    }
   }
 
   const { sandbox, dependenciesInstalled } = await getSandboxWithErrorHandling(
@@ -121,9 +139,8 @@ export async function takeAction(
         // @ts-expect-error tool.invoke types are weird here...
         await tool.invoke({
           ...toolCall.args,
-          // Pass in the existing/new sandbox session ID to the tool call.
-          // use `x` prefix to avoid name conflicts with tool args.
-          xSandboxSessionId: sandbox.id,
+          // Only pass sandbox session ID in sandbox mode, not local mode
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
         });
       if (typeof toolResult === "string") {
         result = toolResult;
@@ -208,37 +225,37 @@ export async function takeAction(
     }
   });
 
-  // Always check if there are changed files after running a tool.
-  // If there are, commit them.
-  const changedFiles = await getChangedFilesStatus(
-    getRepoAbsolutePath(state.targetRepository),
-    sandbox,
-  );
-
   let branchName: string | undefined = state.branchName;
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
-  if (changedFiles.length > 0) {
-    logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-      changedFiles,
-    });
-    const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-    const result = await checkoutBranchAndCommit(
-      config,
-      state.targetRepository,
-      sandbox,
-      {
-        branchName,
-        githubInstallationToken,
-        taskPlan: state.taskPlan,
-        githubIssueId: state.githubIssueId,
-      },
-    );
-    branchName = result.branchName;
-    pullRequestNumber = result.updatedTaskPlan
-      ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-      : undefined;
-    updatedTaskPlan = result.updatedTaskPlan;
+
+  if (!isLocalMode(config)) {
+    const repoPath = getRepoAbsolutePath(state.targetRepository);
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
+
+    if (changedFiles.length > 0) {
+      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
+        changedFiles,
+      });
+
+      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const result = await checkoutBranchAndCommit(
+        config,
+        state.targetRepository,
+        sandbox,
+        {
+          branchName,
+          githubInstallationToken,
+          taskPlan: state.taskPlan,
+          githubIssueId: state.githubIssueId,
+        },
+      );
+      branchName = result.branchName;
+      pullRequestNumber = result.updatedTaskPlan
+        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
+        : undefined;
+      updatedTaskPlan = result.updatedTaskPlan;
+    }
   }
 
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
@@ -246,7 +263,7 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree();
+  const codebaseTree = await getCodebaseTree(undefined, undefined, config);
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE
@@ -272,9 +289,16 @@ export async function takeAction(
         )
       : []),
   ];
+
+  // Include the modified message if it was filtered
+  const internalMessagesUpdate =
+    wasFiltered && modifiedMessage
+      ? [modifiedMessage, ...toolCallResults]
+      : toolCallResults;
+
   const commandUpdate: GraphUpdate = {
     messages: userFacingMessagesUpdate,
-    internalMessages: toolCallResults,
+    internalMessages: internalMessagesUpdate,
     ...(branchName && { branchName }),
     ...(updatedTaskPlan && {
       taskPlan: updatedTaskPlan,

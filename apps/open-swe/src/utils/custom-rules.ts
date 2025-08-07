@@ -184,7 +184,7 @@ async function getCustomRulesLocal(
         return parseCustomRulesFromString(agentsMdContent);
       }
     } catch (error) {
-      logger.error("Failed to read AGENTS.md", { error });
+      logger.debug("AGENTS.md not found, trying other files", { error });
     }
 
     // Try to read AGENT.md, CLAUDE.md, CURSOR.md

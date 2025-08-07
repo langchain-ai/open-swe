@@ -37,6 +37,14 @@
               "setup/monorepo",
               "setup/ci"
             ]
+          },
+          {
+            "group": "Secrets",
+            "pages": ["secrets"]
+          },
+          {
+            "group": "FAQ",
+            "pages": ["faq"]
           }
         ]
       }

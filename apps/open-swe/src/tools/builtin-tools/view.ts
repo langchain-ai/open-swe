@@ -11,7 +11,7 @@ import {
   getLocalWorkingDirectory,
 } from "@open-swe/shared/open-swe/local-mode";
 import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
+import { createShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
@@ -27,15 +27,14 @@ export function createViewTool(
           throw new Error(`Unknown command: ${command}`);
         }
 
-        const localMode = isLocalMode(config);
-        const localAbsolutePath = getLocalWorkingDirectory();
-        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
-        const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
-        let result: string;
+        const workDir = isLocalMode(config)
+          ? getLocalWorkingDirectory()
+          : getRepoAbsolutePath(state.targetRepository);
 
-        if (localMode) {
-          // Local mode: use LocalShellExecutor for file viewing
-          const executor = getLocalShellExecutor(localAbsolutePath);
+        let result: string;
+        if (isLocalMode(config)) {
+          // Local mode: use ShellExecutor for file viewing
+          const executor = createShellExecutor(config);
 
           // Convert sandbox path to local path
           let localPath = path;
@@ -46,10 +45,10 @@ export function createViewTool(
           const filePath = join(workDir, localPath);
 
           // Use cat command to view file content
-          const response = await executor.executeCommand(`cat "${filePath}"`, {
+          const response = await executor.executeCommand({
+            command: `cat "${filePath}"`,
             workdir: workDir,
             timeout: TIMEOUT_SEC,
-            localMode: true,
           });
 
           if (response.exitCode !== 0) {

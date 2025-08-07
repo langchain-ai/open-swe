@@ -10,11 +10,10 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Settings, AlertTriangle } from "lucide-react";
+import { Settings, AlertTriangle, CircleAlert } from "lucide-react";
 import { ConfigField } from "@/components/configuration/config-field";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
 import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-metadata";
 import { GraphConfigurationMetadata } from "@open-swe/shared/open-swe/types";
 import { cn } from "@/lib/utils";
@@ -183,6 +182,21 @@ export function ConfigManager() {
                   </div>
 
                   <div className="space-y-3">
+                    {config.label === "mcpServers" && (
+                      <Alert className="border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-400">
+                        <CircleAlert className="h-4 w-4" />
+                        <AlertDescription>
+                          <p>
+                            <strong>Notice:</strong> Open SWE{" "}
+                            <i className="underline underline-offset-2">only</i>{" "}
+                            supports MCP servers with <strong>HTTP</strong> or{" "}
+                            <strong>SSE</strong> transports (with the exception
+                            of the default LangGraph documentation MCP server).
+                            Other transports will be <strong>ignored</strong>.
+                          </p>
+                        </AlertDescription>
+                      </Alert>
+                    )}
                     <ConfigField
                       id={config.label}
                       label={config.label}
@@ -208,45 +222,6 @@ export function ConfigManager() {
                         updateConfig(DEFAULT_CONFIG_KEY, config.label, value);
                       }}
                     />
-
-                    <div className="flex items-center justify-between">
-                      {(() => {
-                        const currentValue =
-                          configs[DEFAULT_CONFIG_KEY]?.[config.label];
-                        const defaultValue = defaultConfig.find(
-                          (c) => c.label === config.label,
-                        )?.default;
-                        const isModified =
-                          currentValue !== undefined &&
-                          currentValue !== defaultValue;
-
-                        return (
-                          isModified && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                // Remove the config value to revert to default
-                                // This effectively "unsets" the user's custom value
-                                const existingConfig =
-                                  getConfig(DEFAULT_CONFIG_KEY) || {};
-                                const {
-                                  [config.label]: _,
-                                  ...remainingConfig
-                                } = existingConfig;
-                                updateConfig(
-                                  DEFAULT_CONFIG_KEY,
-                                  "",
-                                  remainingConfig,
-                                );
-                              }}
-                            >
-                              Reset to Default
-                            </Button>
-                          )
-                        );
-                      })()}
-                    </div>
                   </div>
                 </div>
               ),

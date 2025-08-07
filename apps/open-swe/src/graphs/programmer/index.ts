@@ -141,7 +141,9 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
       "route-to-review-or-conclusion",
     ],
   })
-  .addNode("generate-conclusion", generateConclusion)
+  .addNode("generate-conclusion", generateConclusion, {
+    ends: ["open-pr", END],
+  })
   .addNode("request-help", requestHelp, {
     ends: ["generate-action", END],
   })
@@ -169,7 +171,6 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     "generate-action",
   ])
   .addEdge("summarize-history", "generate-action")
-  .addEdge("generate-conclusion", "open-pr")
   .addEdge("open-pr", END);
 
 // Zod types are messed up

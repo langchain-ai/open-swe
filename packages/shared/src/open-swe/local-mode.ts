@@ -1,11 +1,13 @@
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import path from "path";
 
 /**
  * Checks if the current execution context is in local mode
  * (working on local files instead of sandbox/Daytona)
  */
-export function isLocalMode(config: GraphConfig): boolean {
+export function isLocalMode(config?: GraphConfig): boolean {
+  if (!config) {
+    return isLocalModeFromEnv();
+  }
   return (config.configurable as any)?.["x-local-mode"] === "true";
 }
 
@@ -15,8 +17,9 @@ export function isLocalMode(config: GraphConfig): boolean {
  */
 export function getLocalWorkingDirectory(): string {
   return (
+    process.env.OPEN_SWE_LOCAL_PROJECT_PATH ||
     process.env.OPEN_SWE_PROJECT_PATH ||
-    path.join(process.env.HOME || "", "Desktop", "test")
+    process.cwd()
   );
 }
 

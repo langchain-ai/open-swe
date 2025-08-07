@@ -52,6 +52,9 @@ export function createTextEditorTool(
           if (path.startsWith("/home/daytona/project/")) {
             // Remove the sandbox prefix to get the relative path
             localPath = path.replace("/home/daytona/project/", "");
+          } else if (path.startsWith("/home/daytona/local/")) {
+            // Remove the local sandbox prefix to get the relative path
+            localPath = path.replace("/home/daytona/local/", "");
           }
           const filePath = join(workDir, localPath);
 
@@ -231,7 +234,7 @@ export function createTextEditorTool(
         };
       }
     },
-    createTextEditorToolFields(state.targetRepository),
+    createTextEditorToolFields(state.targetRepository, config),
   );
 
   return textEditorTool;

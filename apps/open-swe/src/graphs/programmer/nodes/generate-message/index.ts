@@ -200,7 +200,10 @@ async function createToolsAndPrompt(
   ];
   const nonAnthropicModelTools = [
     ...sharedTools,
-    { ...createApplyPatchTool(state), cache_control: { type: "ephemeral" } },
+    {
+      ...createApplyPatchTool(state, config),
+      cache_control: { type: "ephemeral" },
+    },
   ];
 
   const inputMessages = filterMessagesWithoutContent([

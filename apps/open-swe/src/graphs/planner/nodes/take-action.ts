@@ -119,9 +119,8 @@ export async function takeActions(
         // @ts-expect-error tool.invoke types are weird here...
         (await tool.invoke({
           ...toolCall.args,
-          // Pass in the existing/new sandbox session ID to the tool call.
-          // use `x` prefix to avoid name conflicts with tool args.
-          xSandboxSessionId: sandbox.id,
+          // Only pass sandbox session ID in sandbox mode, not local mode
+          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
         })) as {
           result: string;
           status: "success" | "error";
@@ -206,7 +205,7 @@ export async function takeActions(
     const repoPath = isLocalMode(config)
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox);
+    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
     if (changedFiles?.length > 0) {
       logger.warn(
         "Changes found in the codebase after taking action. Reverting.",

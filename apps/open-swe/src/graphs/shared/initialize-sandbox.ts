@@ -189,7 +189,11 @@ export async function initializeSandbox(
       };
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
       try {
-        const codebaseTree = await getCodebaseTree(existingSandbox.id);
+        const codebaseTree = await getCodebaseTree(
+          existingSandbox.id,
+          undefined,
+          config,
+        );
         if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
           emitStepEvent(
             baseGenerateCodebaseTreeAction,
@@ -282,10 +286,13 @@ export async function initializeSandbox(
         stateBranchName: branchName,
       });
     },
-    { retries: 3, delay: 0 },
+    { retries: 0, delay: 0 },
   );
 
-  if (cloneRepoRes instanceof Error) {
+  if (
+    cloneRepoRes instanceof Error &&
+    !cloneRepoRes.message.includes("repository already exists")
+  ) {
     emitStepEvent(
       baseCloneRepoAction,
       "error",
@@ -340,7 +347,7 @@ export async function initializeSandbox(
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
   let codebaseTree: string | undefined;
   try {
-    codebaseTree = await getCodebaseTree(sandbox.id);
+    codebaseTree = await getCodebaseTree(sandbox.id, undefined, config);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(

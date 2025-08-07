@@ -2,6 +2,7 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import {
+  McpServerConfig,
   McpServerConfigSchema,
   McpServers,
 } from "@open-swe/shared/open-swe/mcp";
@@ -14,11 +15,52 @@ const logger = createLogger(LogLevel.INFO, "MCP Client");
 let mcpClientInstance: MultiServerMCPClient | null = null;
 let lastConfigHash: string | null = null;
 
+function isLangGraphDocsServer(server: McpServerConfig): boolean {
+  if (!("command" in server) || !("args" in server)) return false;
+
+  const langgraphMcpServer = Object.values(DEFAULT_MCP_SERVERS)[0];
+
+  return (
+    server.command === langgraphMcpServer.command &&
+    server.args.every((arg, index) => arg === langgraphMcpServer.args[index])
+  );
+}
+
+function validateMcpServers(mcpServers: McpServers): McpServers {
+  try {
+    const validatedServers: McpServers = {};
+
+    for (const [serverName, config] of Object.entries(mcpServers)) {
+      // Check if the server has http or sse transport/type
+      const transport = config.transport || config.type;
+
+      if (transport === "http" || transport === "sse") {
+        validatedServers[serverName] = config;
+      } else if (
+        serverName === Object.keys(DEFAULT_MCP_SERVERS)[0] &&
+        isLangGraphDocsServer(config)
+      ) {
+        // Allow LangGraphDocs server to be specified as a stdio server
+        validatedServers[serverName] = config;
+      } else {
+        logger.info(
+          `Skipping MCP server "${serverName}" - only http and sse transports are supported, got: ${transport || "undefined"}`,
+        );
+      }
+    }
+
+    return validatedServers;
+  } catch (error) {
+    logger.error("Failed to validate MCP servers: ", error);
+    return {};
+  }
+}
+
 /**
  * Returns a shared MCP client instance
  */
-export function mcpClient(mcpServers: McpServers): MultiServerMCPClient {
-  const serversToUse = mcpServers;
+function mcpClient(mcpServers: McpServers): MultiServerMCPClient {
+  const serversToUse = validateMcpServers(mcpServers);
   const configHash = JSON.stringify(serversToUse);
 
   // Recreate client if configuration changed

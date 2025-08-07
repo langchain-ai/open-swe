@@ -203,6 +203,7 @@ export interface Repository {
   full_name: string;
   description: string | null;
   private: boolean;
+  fork: boolean;
   html_url: string;
   default_branch: string;
   permissions: {
@@ -212,6 +213,7 @@ export interface Repository {
     triage: boolean;
     pull: boolean;
   };
+  has_issues: boolean;
 }
 
 /**

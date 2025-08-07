@@ -175,15 +175,15 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       },
       autoAcceptPlan: isAutoAcceptLabel,
     };
-    // Create config object with Claude Opus 4 model configuration for max labels
+    // Create config object with Claude Opus 4.1 model configuration for max labels
     const config: Record<string, any> = {
       recursion_limit: 400,
     };
 
     if (isMaxLabel) {
       config.configurable = {
-        plannerModelName: "anthropic:claude-opus-4-0",
-        programmerModelName: "anthropic:claude-opus-4-0",
+        plannerModelName: "anthropic:claude-opus-4-1",
+        programmerModelName: "anthropic:claude-opus-4-1",
       };
     }
 
