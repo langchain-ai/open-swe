@@ -80,7 +80,7 @@ export async function runPytestOnFiles(
 
   // Join test files for pytest command
   const testFilesArg = testFiles.join(" ");
-  const runTestCommand = `${RUN_PYTHON_IN_VENV} -m pytest ${testFilesArg} -v --tb=short --json-report --json-report-file=/tmp/pytest_report.json`;
+  const command = `${RUN_PYTHON_IN_VENV} -m pytest ${testFilesArg} -v --tb=short --json-report --json-report-file=/tmp/pytest_report.json`;
   logger.info("Running pytest command", { command });
 
   logger.info(
