@@ -48,15 +48,6 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     // Use test files from PR data (already fetched and stored)
     const testFiles = prData.test_files || [];
     result.test_files = testFiles;
-
-    if (testFiles.length > 0) {
-      logger.info(
-        `Found ${testFiles.length} test files modified in PR #${prData.pr_number}:`,
-      );
-      testFiles.forEach((file) => logger.info(`  - ${file}`));
-    } else {
-      logger.info(`No test files found in PR #${prData.pr_number}`);
-    }
     // Create sandbox
     sandbox = await daytona.create(DEFAULT_SANDBOX_CREATE_PARAMS);
 
@@ -118,12 +109,12 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       logger.info(
         `Running pytest on ${testFiles.length} detected test files...`,
       );
-      const testResults = await runPytestOnFiles(
+      const testResults = await runPytestOnFiles({
         sandbox,
         testFiles,
         repoDir,
-        300,
-      );
+        timeoutSec: 300,
+      });
       result.test_results = testResults;
 
       logger.info(`Test execution completed for PR #${prData.pr_number}`, {

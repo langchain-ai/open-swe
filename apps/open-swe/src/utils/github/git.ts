@@ -634,10 +634,10 @@ export async function checkoutFilesFromCommit(
   for (const filePath of filePaths) {
     try {
       const result = await sandbox.process.executeCommand(
-        `git checkout ${commitSha} -- "${filePath}"`,
+        `git checkout --force ${commitSha} -- "${filePath}"`,
         repoDir,
         undefined,
-        30, // 30 second timeout for git checkout
+        30,
       );
 
       if (result.exitCode !== 0) {

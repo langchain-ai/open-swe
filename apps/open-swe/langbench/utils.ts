@@ -1,6 +1,8 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { ENV_CONSTANTS } from "../src/utils/env-setup.js";
+import { TestResults, PytestJsonReport } from "./types.js";
+import { readFile } from "../src/utils/read-write.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
 
@@ -57,33 +59,22 @@ const PYTEST_INSTALL_COMMANDS = [
   `${RUN_PIP_IN_VENV} install -e ./libs/langgraph`,
 ];
 
-export interface TestResult {
-  success: boolean;
-  error: string | null;
-  totalTests: number;
-  passedTests: number;
-  failedTests: number;
-  testDetails: string[];
-}
-
-export interface ExecOptions {
-  command: string;
-  workingDir: string;
-  env?: Record<string, string>;
-  timeoutSec: number;
+export interface RunPytestOptions {
+  sandbox: Sandbox;
+  testFiles: string[];
+  repoDir: string;
+  timeoutSec?: number;
 }
 
 /**
  * Run pytest on specific test files and return structured results
  */
-export const runPytestOnFiles = async (
-  sandbox: Sandbox,
-  testFiles: string[],
-  repoDir: string,
-  timeoutSec: number = 300,
-): Promise<TestResult> => {
+export async function runPytestOnFiles(
+  options: RunPytestOptions,
+): Promise<TestResults> {
+  const { sandbox, testFiles, repoDir, timeoutSec = 300 } = options;
   if (testFiles.length === 0) {
-    logger.info("No test files provided, skipping pytest execution");
+    logger.warn("No test files provided, skipping pytest execution");
     return {
       success: true,
       error: null,
@@ -106,18 +97,32 @@ export const runPytestOnFiles = async (
   logger.info(
     "Installing pytest, pytest-mock, pytest-asyncio, syrupy, pytest-json-report, and langgraph in virtual environment...",
   );
-  const installCommand = PYTEST_INSTALL_COMMANDS.join(" && ");
-  const installResult = await sandbox.process.executeCommand(
-    installCommand,
-    repoDir,
-    undefined,
-    timeoutSec * 2,
-  );
 
-  logger.info("Installation completed", {
-    exitCode: installResult.exitCode,
-    output: installResult.result?.slice(0, 500),
-  });
+  // Execute install commands separately for better error identification
+  for (const [index, command] of PYTEST_INSTALL_COMMANDS.entries()) {
+    logger.info(
+      `Running install command ${index + 1}/${PYTEST_INSTALL_COMMANDS.length}: ${command}`,
+    );
+    const installResult = await sandbox.process.executeCommand(
+      command,
+      repoDir,
+      undefined,
+      timeoutSec * 2,
+    );
+
+    logger.info(`Install command ${index + 1} completed`, {
+      exitCode: installResult.exitCode,
+      output: installResult.result?.slice(0, 500),
+    });
+
+    if (installResult.exitCode !== 0) {
+      logger.error(`Install command ${index + 1} failed`, {
+        command,
+        exitCode: installResult.exitCode,
+        output: installResult.result,
+      });
+    }
+  }
 
   try {
     const execution = await sandbox.process.executeCommand(
@@ -128,21 +133,22 @@ export const runPytestOnFiles = async (
     );
 
     // Read the JSON report file
-    let parsed: Omit<TestResult, "success" | "error">;
+    let parsed: Omit<TestResults, "success" | "error">;
     try {
-      const jsonReportResult = await sandbox.process.executeCommand(
-        "cat /tmp/pytest_report.json",
-        repoDir,
-        undefined,
-        30,
-      );
+      const jsonReportResult = await readFile({
+        sandbox,
+        filePath: "/tmp/pytest_report.json",
+        workDir: repoDir,
+      });
 
-      if (jsonReportResult.exitCode === 0 && jsonReportResult.result) {
-        const jsonReport = JSON.parse(jsonReportResult.result);
+      if (jsonReportResult.success && jsonReportResult.output) {
+        const jsonReport = JSON.parse(jsonReportResult.output);
         parsed = parsePytestJsonReport(jsonReport);
         logger.debug("Successfully parsed JSON report", { jsonReport });
       } else {
-        throw new Error("Failed to read JSON report");
+        throw new Error(
+          `Failed to read JSON report: ${jsonReportResult.output}`,
+        );
       }
     } catch (jsonError) {
       throw new Error("Failed to parse JSON report", { cause: jsonError });
@@ -175,14 +181,14 @@ export const runPytestOnFiles = async (
       testDetails: [],
     };
   }
-};
+}
 
 /**
  * Parse pytest JSON report to extract test results
  */
-export const parsePytestJsonReport = (
-  jsonReport: any,
-): Omit<TestResult, "success" | "error"> => {
+export function parsePytestJsonReport(
+  jsonReport: PytestJsonReport,
+): Omit<TestResults, "success" | "error"> {
   let totalTests = 0;
   let passedTests = 0;
   let failedTests = 0;
@@ -227,4 +233,4 @@ export const parsePytestJsonReport = (
     failedTests,
     testDetails,
   };
-};
+}

@@ -24,6 +24,23 @@ export interface TestResults {
   testDetails: string[];
 }
 
+export interface PytestJsonTest {
+  nodeid: string;
+  outcome: "passed" | "failed" | "error" | "skipped";
+}
+
+export interface PytestJsonSummary {
+  passed?: number;
+  failed?: number;
+  error?: number;
+  skipped?: number;
+}
+
+export interface PytestJsonReport {
+  tests?: PytestJsonTest[];
+  summary?: PytestJsonSummary;
+}
+
 export interface PRProcessResult {
   pr_number: number;
   repo_name: string;
