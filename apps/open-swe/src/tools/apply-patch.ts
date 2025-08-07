@@ -14,6 +14,7 @@ import {
 } from "@open-swe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../utils/shell-executor/shell-executor.js";
 import { join } from "path";
+import { v4 as uuidv4 } from "uuid";
 
 type FileOperationResult = {
   success: boolean;
@@ -38,11 +39,8 @@ async function applyPatchWithGit(
 ): Promise<FileOperationResult> {
   // Generate temp patch file path
   const tempPatchFile = isLocalMode(config)
-    ? join(
-        workDir,
-        `patch_${Date.now()}_${Math.random().toString(36).substring(2)}.diff`,
-      )
-    : `/tmp/patch_${Date.now()}_${Math.random().toString(36).substring(2)}.diff`;
+    ? join(workDir, `patch_${uuidv4()}.diff`)
+    : `/tmp/patch_${uuidv4()}.diff`;
 
   try {
     // Create the patch file using unified shell executor

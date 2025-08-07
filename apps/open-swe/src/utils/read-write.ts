@@ -10,6 +10,7 @@ import { promises as fs } from "fs";
 import { join, isAbsolute } from "path";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
+import { v4 as uuidv4 } from "uuid";
 
 const logger = createLogger(LogLevel.INFO, "ReadWriteUtil");
 
@@ -165,7 +166,7 @@ async function writeFileFunc(inputs: {
   }
 
   try {
-    const delimiter = "EOF_" + Date.now() + "_" + Math.random().toString(36);
+    const delimiter = `EOF_${uuidv4()}`;
     const writeCommand = `cat > "${filePath}" << '${delimiter}'
 ${content}
 ${delimiter}`;

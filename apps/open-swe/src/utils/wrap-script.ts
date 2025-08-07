@@ -1,6 +1,7 @@
+import { v4 as uuidv4 } from "uuid";
+
 export function wrapScript(command: string): string {
-  const makeDelim = () =>
-    `OPEN_SWE_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const makeDelim = () => `OPEN_SWE_${uuidv4()}`;
 
   // Ensure the delimiter does not appear as a standalone line in the command
   let delim = makeDelim();
