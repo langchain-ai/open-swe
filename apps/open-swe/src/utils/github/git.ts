@@ -613,3 +613,42 @@ async function performClone(
 
   return branchName;
 }
+
+/**
+ * Checkout specific files from a given commit
+ */
+export async function checkoutFilesFromCommit(
+  sandbox: Sandbox,
+  repoDir: string,
+  commitSha: string,
+  filePaths: string[],
+): Promise<void> {
+  if (filePaths.length === 0) {
+    return;
+  }
+
+  logger.info(
+    `Checking out ${filePaths.length} files from commit ${commitSha}`,
+  );
+
+  for (const filePath of filePaths) {
+    try {
+      const result = await sandbox.process.executeCommand(
+        `git checkout ${commitSha} -- "${filePath}"`,
+        repoDir,
+        undefined,
+        30, // 30 second timeout for git checkout
+      );
+
+      if (result.exitCode !== 0) {
+        logger.warn(
+          `Failed to checkout file ${filePath} from commit ${commitSha}: ${result.result || "Unknown error"}`,
+        );
+      } else {
+        logger.info(`Successfully checked out ${filePath} from commit ${commitSha}`);
+      }
+    } catch (error) {
+      logger.warn(`Error checking out file ${filePath}:`, { error });
+    }
+  }
+}

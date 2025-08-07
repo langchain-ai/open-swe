@@ -12,6 +12,16 @@ export interface PRData {
   body: string;
   created_at: string;
   merged_at: string;
+  test_files: string[];
+}
+
+export interface TestResults {
+  success: boolean;
+  error: string | null;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  testDetails: string[];
 }
 
 export interface PRProcessResult {
@@ -21,6 +31,8 @@ export interface PRProcessResult {
   success: boolean;
   evals_found: boolean;
   evals_files: string[];
+  test_files: string[];
+  test_results?: TestResults;
   error?: string;
   pre_merge_sha?: string;
 }
