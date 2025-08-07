@@ -53,7 +53,7 @@ const { RUN_PYTHON_IN_VENV, RUN_PIP_IN_VENV } = ENV_CONSTANTS;
 
 // Installation commands for pytest and dependencies
 const PYTEST_INSTALL_COMMANDS = [
-  `${RUN_PIP_IN_VENV} install pytest pytest-mock pytest-asyncio syrupy`,
+  `${RUN_PIP_IN_VENV} install pytest pytest-mock pytest-asyncio syrupy pytest-json-report`,
   `${RUN_PIP_IN_VENV} install -e ./libs/langgraph`,
 ];
 
@@ -100,11 +100,11 @@ export const runPytestOnFiles = async (
 
   // Join test files for pytest command
   const testFilesArg = testFiles.join(" ");
-  const command = `${RUN_PYTHON_IN_VENV} -m pytest ${testFilesArg} -v --tb=short`;
+  const command = `${RUN_PYTHON_IN_VENV} -m pytest ${testFilesArg} -v --tb=short --json-report --json-report-file=/tmp/pytest_report.json`;
   logger.info("Running pytest command", { command });
 
   logger.info(
-    "Installing pytest, pytest-mock, pytest-asyncio, syrupy, and langgraph in virtual environment...",
+    "Installing pytest, pytest-mock, pytest-asyncio, syrupy, pytest-json-report, and langgraph in virtual environment...",
   );
   const installCommand = PYTEST_INSTALL_COMMANDS.join(" && ");
   const installResult = await sandbox.process.executeCommand(
@@ -127,8 +127,32 @@ export const runPytestOnFiles = async (
       timeoutSec,
     );
 
-    const output = execution.result || "";
-    const parsed = parsePytestOutput(output);
+    // Read the JSON report file
+    let parsed: Omit<TestResult, "success" | "error">;
+    try {
+      const jsonReportResult = await sandbox.process.executeCommand(
+        "cat /tmp/pytest_report.json",
+        repoDir,
+        undefined,
+        30,
+      );
+
+      if (jsonReportResult.exitCode === 0 && jsonReportResult.result) {
+        const jsonReport = JSON.parse(jsonReportResult.result);
+        parsed = parsePytestJsonReport(jsonReport);
+        logger.debug("Successfully parsed JSON report", { jsonReport });
+      } else {
+        logger.warn("Failed to read JSON report, falling back to text parsing");
+        const output = execution.result || "";
+        parsed = parsePytestOutput(output);
+      }
+    } catch (jsonError) {
+      logger.warn("Failed to parse JSON report, falling back to text parsing", {
+        jsonError,
+      });
+      const output = execution.result || "";
+      parsed = parsePytestOutput(output);
+    }
 
     logger.info("Pytest execution completed", {
       exitCode: execution.exitCode,
@@ -136,7 +160,7 @@ export const runPytestOnFiles = async (
       passedTests: parsed.passedTests,
       failedTests: parsed.failedTests,
       command,
-      stdout: output,
+      stdout: execution.result,
       fullExecution: JSON.stringify(execution, null, 2), // Show full execution object
     });
 
@@ -160,7 +184,59 @@ export const runPytestOnFiles = async (
 };
 
 /**
- * Parse pytest output to extract test results
+ * Parse pytest JSON report to extract test results
+ */
+export const parsePytestJsonReport = (
+  jsonReport: any,
+): Omit<TestResult, "success" | "error"> => {
+  let totalTests = 0;
+  let passedTests = 0;
+  let failedTests = 0;
+  const testDetails: string[] = [];
+
+  if (jsonReport && jsonReport.tests) {
+    totalTests = jsonReport.tests.length;
+
+    for (const test of jsonReport.tests) {
+      const testName = `${test.nodeid}`;
+      const outcome = test.outcome;
+
+      if (outcome === "passed") {
+        passedTests++;
+        testDetails.push(`${testName} PASSED`);
+      } else if (outcome === "failed" || outcome === "error") {
+        failedTests++;
+        testDetails.push(`${testName} ${outcome.toUpperCase()}`);
+      }
+    }
+  }
+
+  // Use summary data if available
+  if (jsonReport && jsonReport.summary) {
+    const summary = jsonReport.summary;
+    if (summary.passed !== undefined) passedTests = summary.passed;
+    if (summary.failed !== undefined) failedTests = summary.failed;
+    if (summary.error !== undefined) failedTests += summary.error;
+    totalTests = passedTests + failedTests;
+  }
+
+  logger.debug("Parsed pytest JSON report", {
+    totalTests,
+    passedTests,
+    failedTests,
+    detailsCount: testDetails.length,
+  });
+
+  return {
+    totalTests,
+    passedTests,
+    failedTests,
+    testDetails,
+  };
+};
+
+/**
+ * Fallback: Parse pytest text output to extract test results (legacy)
  */
 export const parsePytestOutput = (
   output: string,
@@ -190,35 +266,6 @@ export const parsePytestOutput = (
   }
 
   totalTests = passedTests + failedTests;
-
-  // If we didn't find individual test results, try parsing summary line
-  if (totalTests === 0) {
-    const summaryLine = lines.find(
-      (line) =>
-        line.includes("passed") ||
-        line.includes("failed") ||
-        line.includes("error"),
-    );
-
-    if (summaryLine) {
-      const passedMatch = summaryLine.match(/(\d+)\s+passed/);
-      const failedMatch = summaryLine.match(/(\d+)\s+failed/);
-      const errorMatch = summaryLine.match(/(\d+)\s+error/);
-
-      if (passedMatch) passedTests = parseInt(passedMatch[1], 10);
-      if (failedMatch) failedTests = parseInt(failedMatch[1], 10);
-      if (errorMatch) failedTests += parseInt(errorMatch[1], 10);
-
-      totalTests = passedTests + failedTests;
-    }
-  }
-
-  logger.debug("Parsed pytest output", {
-    totalTests,
-    passedTests,
-    failedTests,
-    detailsCount: testDetails.length,
-  });
 
   return {
     totalTests,
