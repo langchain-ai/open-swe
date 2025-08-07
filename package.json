@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "start:local": "node start-local.js",
     "turbo:command": "turbo",
     "format": "turbo format",
     "clean": "rm -rf .turbo || true && turbo clean",
@@ -27,5 +28,8 @@
     "langsmith": "^0.3.48",
     "jsonwebtoken": "^9.0.2"
   },
-  "packageManager": "yarn@3.5.1"
+  "packageManager": "yarn@3.5.1",
+  "dependencies": {
+    "inquirer": "^12.9.0"
+  }
 }

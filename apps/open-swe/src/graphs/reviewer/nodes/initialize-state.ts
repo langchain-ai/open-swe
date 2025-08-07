@@ -2,7 +2,6 @@ import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
 } from "@open-swe/shared/open-swe/reviewer/types";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";

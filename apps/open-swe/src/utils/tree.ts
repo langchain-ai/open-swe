@@ -4,7 +4,6 @@ import {
   TargetRepository,
   GraphConfig,
 } from "@open-swe/shared/open-swe/types";
-import { daytonaClient } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import path from "node:path";
 import { SANDBOX_ROOT_DIR, TIMEOUT_SEC } from "@open-swe/shared/constants";

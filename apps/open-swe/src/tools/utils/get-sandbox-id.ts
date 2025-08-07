@@ -1,7 +1,6 @@
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { daytonaClient } from "../../utils/sandbox.js";
 import { Sandbox } from "@daytonaio/sdk";
 
 const logger = createLogger(LogLevel.INFO, "GetSandboxSessionOrThrow");

@@ -16,7 +16,6 @@ import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
 } from "../../utils/followup.js";
-import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";

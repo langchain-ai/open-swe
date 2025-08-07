@@ -13,7 +13,6 @@ import {
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@open-swe/shared/open-swe/tasks";
 import {
   getInitialUserRequest,

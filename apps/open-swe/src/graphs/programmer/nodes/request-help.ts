@@ -14,7 +14,7 @@ import {
 import {
   getSandboxWithErrorHandling,
   stopSandbox,
-} from "../../../utils/sandbox.js";
+} from "../../../utils/shell.js";
 import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
 import {
   CustomNodeEvent,

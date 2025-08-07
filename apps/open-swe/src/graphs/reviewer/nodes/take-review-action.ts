@@ -23,7 +23,6 @@ import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";

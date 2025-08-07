@@ -29,7 +29,7 @@ import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
 import {
   deleteSandbox,
   getSandboxWithErrorHandling,
-} from "../../../utils/sandbox.js";
+} from "../../../utils/shell.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import {
   getActivePlanItems,

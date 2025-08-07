@@ -8,9 +8,7 @@ import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@open-swe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { decryptSecret } from "@open-swe/shared/crypto";
-import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+import { initOllama } from "./ollama.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -28,8 +26,6 @@ interface ModelLoadConfig {
   modelName: string;
   temperature?: number;
   maxTokens?: number;
-  thinkingModel?: boolean;
-  thinkingBudgetTokens?: number;
 }
 
 export enum CircuitState {
@@ -43,11 +39,7 @@ export enum CircuitState {
   OPEN = "OPEN",
 }
 
-export const PROVIDER_FALLBACK_ORDER = [
-  "openai",
-  "anthropic",
-  "google-genai",
-] as const;
+export const PROVIDER_FALLBACK_ORDER = ["ollama"] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
 export interface ModelManagerConfig {
@@ -69,23 +61,6 @@ export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
 };
 
 const MAX_RETRIES = 3;
-const THINKING_BUDGET_TOKENS = 5000;
-
-const providerToApiKey = (
-  providerName: string,
-  apiKeys: Record<string, string>,
-): string => {
-  switch (providerName) {
-    case "openai":
-      return apiKeys.openaiApiKey;
-    case "anthropic":
-      return apiKeys.anthropicApiKey;
-    case "google-genai":
-      return apiKeys.googleApiKey;
-    default:
-      throw new Error(`Unknown provider: ${providerName}`);
-  }
-};
 
 export class ModelManager {
   private config: ModelManagerConfig;
@@ -109,48 +84,6 @@ export class ModelManager {
     return model;
   }
 
-  private getUserApiKey(
-    graphConfig: GraphConfig,
-    provider: Provider,
-  ): string | null {
-    const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
-      ?.display_name;
-    const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-
-    if (!secretsEncryptionKey) {
-      throw new Error(
-        "SECRETS_ENCRYPTION_KEY environment variable is required",
-      );
-    }
-    if (!userLogin) {
-      throw new Error("User login not found in config");
-    }
-
-    // If the user is allowed, we can return early
-    if (isAllowedUser(userLogin)) {
-      return null;
-    }
-
-    const apiKeys = graphConfig.configurable?.apiKeys;
-    if (!apiKeys) {
-      throw new Error(API_KEY_REQUIRED_MESSAGE);
-    }
-
-    const missingProviderKeyMessage = `No API key found for provider: ${provider}. Please add one in the settings page.`;
-
-    const providerApiKey = providerToApiKey(provider, apiKeys);
-    if (!providerApiKey) {
-      throw new Error(missingProviderKeyMessage);
-    }
-
-    const apiKey = decryptSecret(providerApiKey, secretsEncryptionKey);
-    if (!apiKey) {
-      throw new Error(missingProviderKeyMessage);
-    }
-
-    return apiKey;
-  }
-
   /**
    * Initialize the model instance
    */
@@ -158,37 +91,17 @@ export class ModelManager {
     config: ModelLoadConfig,
     graphConfig: GraphConfig,
   ) {
-    const {
-      provider,
-      modelName,
-      temperature,
-      maxTokens,
-      thinkingModel,
-      thinkingBudgetTokens,
-    } = config;
+    const { provider, modelName, temperature, maxTokens } = config;
 
-    const thinkingMaxTokens = thinkingBudgetTokens
-      ? thinkingBudgetTokens * 4
-      : undefined;
-
-    let finalMaxTokens = maxTokens ?? 10_000;
-    if (modelName.includes("claude-3-5-haiku")) {
-      finalMaxTokens = finalMaxTokens > 8_192 ? 8_192 : finalMaxTokens;
+    if (provider === "ollama") {
+      return initOllama();
     }
-
-    const apiKey = this.getUserApiKey(graphConfig, provider);
 
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
-      temperature: thinkingModel ? undefined : temperature,
+      temperature,
       max_retries: MAX_RETRIES,
-      ...(apiKey ? { apiKey } : {}),
-      ...(thinkingModel && provider === "anthropic"
-        ? {
-            thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
-            maxTokens: thinkingMaxTokens,
-          }
-        : { maxTokens: finalMaxTokens }),
+      maxTokens,
     };
 
     logger.debug("Initializing model", {
@@ -215,18 +128,11 @@ export class ModelManager {
       const modelName = defaultConfig.model;
 
       if (provider && modelName) {
-        const isThinkingModel = baseConfig.thinkingModel;
         selectedModelConfig = {
           provider,
           modelName,
           temperature: defaultConfig.temperature ?? baseConfig.temperature,
           maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
-          ...(isThinkingModel
-            ? {
-                thinkingModel: true,
-                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
-              }
-            : {}),
         };
         configs.push(selectedModelConfig);
       }
@@ -240,21 +146,10 @@ export class ModelManager {
         (!selectedModelConfig ||
           fallbackModel.modelName !== selectedModelConfig.modelName)
       ) {
-        // Check if fallback model is a thinking model
-        const isThinkingModel =
-          (provider === "openai" && fallbackModel.modelName.startsWith("o")) ||
-          fallbackModel.modelName.includes("extended-thinking");
-
         const fallbackConfig = {
           ...fallbackModel,
-          temperature: isThinkingModel ? undefined : baseConfig.temperature,
-          maxTokens: baseConfig.maxTokens,
-          ...(isThinkingModel
-            ? {
-                thinkingModel: true,
-                thinkingBudgetTokens: THINKING_BUDGET_TOKENS,
-              }
-            : {}),
+          temperature: baseConfig.temperature,
+          maxTokens: base.maxTokens,
         };
         configs.push(fallbackConfig);
       }
@@ -278,63 +173,11 @@ export class ModelManager {
     config: GraphConfig,
     task: LLMTask,
   ): ModelLoadConfig {
-    const taskMap = {
-      [LLMTask.PLANNER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-      [LLMTask.PROGRAMMER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-      [LLMTask.REVIEWER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-      [LLMTask.ROUTER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-      [LLMTask.SUMMARIZER]: {
-        modelName:
-          config.configurable?.[`${task}ModelName`] ??
-          TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
-      },
-    };
-
-    const taskConfig = taskMap[task];
-    const modelStr = taskConfig.modelName;
-    const [modelProvider, ...modelNameParts] = modelStr.split(":");
-
-    let thinkingModel = false;
-    if (modelNameParts[0] === "extended-thinking") {
-      thinkingModel = true;
-      modelNameParts.shift();
-    }
-
-    const modelName = modelNameParts.join(":");
-    if (modelProvider === "openai" && modelName.startsWith("o")) {
-      thinkingModel = true;
-    }
-
-    const thinkingBudgetTokens = THINKING_BUDGET_TOKENS;
-
     return {
-      modelName,
-      provider: modelProvider as Provider,
-      temperature: taskConfig.temperature,
-      maxTokens: config.configurable?.maxTokens ?? 10_000,
-      thinkingModel,
-      thinkingBudgetTokens,
+      modelName: process.env.OLLAMA_MODEL ?? "llama3",
+      provider: "ollama",
+      temperature: 0,
+      maxTokens: 10000,
     };
   }
 
@@ -346,26 +189,12 @@ export class ModelManager {
     task: LLMTask,
   ): ModelLoadConfig | null {
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
-      anthropic: {
-        [LLMTask.PLANNER]: "claude-sonnet-4-0",
-        [LLMTask.PROGRAMMER]: "claude-sonnet-4-0",
-        [LLMTask.REVIEWER]: "claude-sonnet-4-0",
-        [LLMTask.ROUTER]: "claude-3-5-haiku-latest",
-        [LLMTask.SUMMARIZER]: "claude-sonnet-4-0",
-      },
-      "google-genai": {
-        [LLMTask.PLANNER]: "gemini-2.5-flash",
-        [LLMTask.PROGRAMMER]: "gemini-2.5-pro",
-        [LLMTask.REVIEWER]: "gemini-2.5-flash",
-        [LLMTask.ROUTER]: "gemini-2.5-flash",
-        [LLMTask.SUMMARIZER]: "gemini-2.5-pro",
-      },
-      openai: {
-        [LLMTask.PLANNER]: "o3",
-        [LLMTask.PROGRAMMER]: "gpt-4.1",
-        [LLMTask.REVIEWER]: "o3",
-        [LLMTask.ROUTER]: "gpt-4o-mini",
-        [LLMTask.SUMMARIZER]: "gpt-4.1-mini",
+      ollama: {
+        [LLMTask.PLANNER]: process.env.OLLAMA_MODEL ?? "llama3",
+        [LLMTask.PROGRAMMER]: process.env.OLLAMA_MODEL ?? "llama3",
+        [LLMTask.REVIEWER]: process.env.OLLAMA_MODEL ?? "llama3",
+        [LLMTask.ROUTER]: process.env.OLLAMA_MODEL ?? "llama3",
+        [LLMTask.SUMMARIZER]: process.env.OLLAMA_MODEL ?? "llama3",
       },
     };
 

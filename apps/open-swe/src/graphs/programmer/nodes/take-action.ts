@@ -25,7 +25,6 @@ import {
 } from "../../../utils/zod-to-string.js";
 import { Command } from "@langchain/langgraph";
 
-import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
