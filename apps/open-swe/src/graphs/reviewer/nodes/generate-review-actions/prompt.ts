@@ -91,6 +91,134 @@ By reviewing these actions, and comparing them to the plan and original user req
     You should write to your scratchpad to record the names of the files, and the content inside the files which should be removed/updated.
     </changed_files>
 
+    # Fixed LangGraph Validation Section
+
+
+    <langgraph_validation>
+        **FOR LANGGRAPH AGENTS - CRITICAL CHECK**: If the request involves creating or modifying a LangGraph agent, you MUST verify:
+        
+        **CRITICAL: ALL SHELL COMMANDS MUST USE ARRAY FORMAT**
+        - CORRECT: \`shell\` tool with \`command: ["python3", "-c", "import agent; print('Success')"]\`
+        - WRONG: \`shell\` tool with \`command: "python3 -c import agent"\`
+        - WRONG: Running commands without proper array formatting
+    
+        **FILE STRUCTURE VALIDATION**:
+        - Check agent files exist: Use \`view\` tool to check for \`agent.py\` or \`agent.ts\` at project root
+        - Check config exists: Use \`view\` tool to verify \`langgraph.json\` exists
+        - Validate JSON syntax with shell tool:
+        \`\`\`
+        command: ["python3", "-c", "import json; json.load(open('langgraph.json')); print('Valid JSON')"]
+        \`\`\`
+        - Verify JSON structure with shell tool:
+        \`\`\`
+        command: ["grep", "-q", "graphs", "langgraph.json"]
+        \`\`\`
+        
+        **VALIDATION REQUIREMENTS - MANDATORY SHELL COMMAND EXAMPLES**:
+        
+        **For Python agents (\`agent.py\`)**:
+        
+        1. **Check ruff availability**:
+        \`\`\`
+        command: ["which", "ruff"]
+        \`\`\`
+        (Note if exit code is 1 - tool not available, continue anyway)
+        
+        2. **Check mypy availability**:
+        \`\`\`
+        command: ["which", "mypy"]  
+        \`\`\`
+        (Note if exit code is 1 - tool not available, continue anyway)
+        
+        3. **Run ruff if available**:
+        \`\`\`
+        command: ["ruff", "check", "agent.py"]
+        \`\`\`
+        
+        4. **Run mypy if available**:
+        \`\`\`
+        command: ["mypy", "agent.py", "--ignore-missing-imports"]
+        \`\`\`
+        
+        5. **CRITICAL COMPILATION TEST**:
+        \`\`\`
+        command: ["python3", "-c", "from agent import app; print('Agent compiles successfully')"]
+        \`\`\`
+        
+        **COMPILATION FAILURE DEBUGGING SEQUENCE**:
+        
+        If the critical compilation test fails, run these commands in order:
+        
+        1. **Check basic Python import**:
+        \`\`\`
+        command: ["python3", "-c", "import agent; print('Basic import works')"]
+        \`\`\`
+        
+        2. **Check LangGraph availability**:
+        \`\`\`
+        command: ["python3", "-c", "import langgraph; print('LangGraph available')"]
+        \`\`\`
+        
+        3. **Check syntax compilation**:
+        \`\`\`
+        command: ["python3", "-m", "py_compile", "agent.py"]
+        \`\`\`
+        
+        4. **Check for app variable existence**:
+        \`\`\`
+        command: ["python3", "-c", "import agent; print('app' in dir(agent))"]
+        \`\`\`
+        
+        **For TypeScript agents (\`agent.ts\`)**:
+        
+        1. **Check Node.js compilation**:
+        \`\`\`
+        command: ["node", "-e", "const {app} = require('./agent'); console.log('Agent compiles successfully')"]
+        \`\`\`
+        
+        **ALTERNATIVE TESTING METHOD** (if shell commands keep failing):
+        
+        Create a test file using the \`create\` tool:
+        \`\`\`python
+        # File: test_agent.py
+        try:
+            from agent import app
+            print("SUCCESS: Agent imports and app is available")
+            print(f"App type: {type(app)}")
+        except ImportError as e:
+            print(f"IMPORT ERROR: {e}")
+        except AttributeError as e:
+            print(f"ATTRIBUTE ERROR: {e}")
+        except Exception as e:
+            print(f"OTHER ERROR: {e}")
+        \`\`\`
+        
+        Then run:
+        \`\`\`
+        command: ["python3", "test_agent.py"]
+        \`\`\`
+        
+        **SUCCESS CRITERIA**:
+        - **BLOCKING**: Must successfully run \`["python3", "-c", "from agent import app; print('Agent compiles successfully')"]\` with exit code 0
+        - **BLOCKING**: No import errors or syntax errors
+        - **WARNING**: Linting issues (ruff/mypy warnings are not blocking)
+        
+        **COMMON SHELL COMMAND MISTAKES TO AVOID**:
+        - Wrong: \`python3 -c from agent import app\` (not an array)
+        - Wrong: \`python3 -c "from agent import app"\` (string instead of array)
+        - Wrong: \`python3 -c import agent\` (incomplete command)
+        - Correct: \`["python3", "-c", "from agent import app; print('Success')"]\` (correct array format)
+        
+        **IF SHELL COMMANDS CONTINUE TO FAIL**:
+        1. Create test files using \`create\` tool instead of inline shell commands
+        2. Use \`view\` tool to inspect agent.py structure manually
+        3. Report the specific shell command format issues to the developer
+        
+        **DO NOT MARK TASK COMPLETE UNTIL**:
+        - The critical compilation test passes successfully
+        - OR you have verified agent structure manually and created working test files
+    </langgraph_validation>
+
     You MUST perform the above actions. You should write your findings to the scratchpad, as you do not need to take action on your findings right now.
     Once you've completed your review you'll be given the chance to say whether or not the task has been successfully completed, and if not, you'll be able to provide a list of new actions to take.
 
@@ -107,6 +235,44 @@ By reviewing these actions, and comparing them to the plan and original user req
     You are ONLY gathering context. Any non-read actions you believe are necessary to take can be executed after you've provided your final review.
     Only gather context right now in order to inform your final review, and to provide any additional steps to take after the review.
 </instructions>
+
+<tool_usage>
+    ### Grep search tool
+        - Use the \`grep\` tool for all file searches. The \`grep\` tool allows for efficient simple and complex searches, and it respect .gitignore patterns.
+        - It accepts a query string, or regex to search for.
+        - It can search for specific file types using glob patterns.
+        - Returns a list of results, including file paths and line numbers
+        - It wraps the \`ripgrep\` command, which is significantly faster than alternatives like \`grep\` or \`ls -R\`.
+        - IMPORTANT: Never run \`grep\` via the \`shell\` tool. You should NEVER run \`grep\` commands via the \`shell\` tool as the same functionality is better provided by \`grep\` tool.
+
+    ### Shell tool
+        The \`shell\` tool allows Claude to execute shell commands.
+        Parameters:
+            - \`command\`: The shell command to execute. Accepts a list of strings which are joined with spaces to form the command to execute.
+            - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
+            - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
+
+    ### View file tool
+        The \`view\` tool allows Claude to examine the contents of a file or list the contents of a directory. It can read the entire file or a specific range of lines.
+        Parameters:
+            - \`command\`: Must be “view”
+            - \`path\`: The path to the file or directory to view
+            - \`view_range\` (optional): An array of two integers specifying the start and end line numbers to view. Line numbers are 1-indexed, and -1 for the end line means read to the end of the file. This parameter only applies when viewing files, not directories.
+
+    ### Install dependencies tool
+        The \`install_dependencies\` tool allows Claude to install dependencies for a project. This should only be called if dependencies have not been installed yet.
+        Parameters:
+            - \`command\`: The dependencies install command to execute. Ensure this command is properly formatted, using the correct package manager for this project, and the correct command to install dependencies. It accepts a list of strings which are joined with spaces to form the command to execute.
+            - \`workdir\` (optional): The working directory for the command. Defaults to the root of the repository.
+            - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
+
+    ### Scratchpad tool
+        The \`scratchpad\` tool allows you to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.
+        Parameters:
+            - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
+
+    {DEV_SERVER_USAGE_PROMPT}
+</tool_usage>
 
 <tool_usage>
     ### Grep search tool

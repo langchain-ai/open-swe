@@ -1,0 +1,75 @@
+---
+title: "Secrets"
+description: "Environment variables & secrets access in dev environments"
+---
+
+Open-SWE securely manages your API keys and environment variables with AES-256-GCM encryption.
+
+## How Your API Keys Are Protected
+
+Your API keys are encrypted both in transit and at rest:
+
+1. **Frontend**: Temporarily stored in browser localStorage
+2. **Transit**: Encrypted before sending to backend
+3. **Backend**: Stored encrypted in database
+4. **Runtime**: Decrypted only when needed
+
+<Accordion title="Technical Encryption Details">
+  - **Algorithm**: [AES-256-GCM](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf) (authenticated encryption)
+  - **Key Derivation**: SHA-256 hash of system `SECRETS_ENCRYPTION_KEY`
+  - **IV Generation**: Random 12-byte initialization vector per encryption
+  - **Authentication**: 16-byte authentication tag prevents tampering
+</Accordion>
+
+## Types of Environment Variables
+
+**System Variables** (for self-hosting):
+- Examples: `DAYTONA_API_KEY`, `SECRETS_ENCRYPTION_KEY`, `GITHUB_APP_PRIVATE_KEY`
+- Access: Server-side only, never exposed to users or sandboxes
+
+**User Variables** (your personal keys):
+- Examples: `ANTHROPIC_API_KEY`, `MY_DATABASE_URL`, `STRIPE_TEST_KEY`
+- Access: Controlled via settings page, encrypted storage
+
+## Sandbox Access Control
+
+**By default, your API keys are never exposed to sandbox environments.** They're only used for LLM initialization and system setup.
+
+To enable keys in development servers (for testing LangGraph agents, Next.js apps, etc.):
+
+1. Manually toggle "Include in Dev Server" for each key
+2. Key becomes available as environment variable in sandbox
+3. You control which keys are exposed
+
+<Note>
+  Use separate development API keys with limited permissions instead of production keys when enabling sandbox access.
+</Note>
+
+## Security & Isolation
+
+Each session runs in an isolated Daytona container that:
+- Cannot access other user sessions
+- Automatically deletes after 15 minutes of inactivity
+- Has no persistent storage across sessions
+
+<Accordion title="Detailed Isolation Features">
+  - **Container**: Separate container per user session
+  - **File System**: No shared file systems between containers
+  - **Process**: Sandboxed processes cannot access host system
+  - **Network**: Containers cannot communicate with each other
+  - **Temporal**: Fresh environment for each session
+</Accordion>
+
+<Warning>
+  When enabling "Include in Dev Server", the AI agent may inadvertently expose environment variables in generated code or logs. Only enable when necessary.
+</Warning>
+
+## Best Practices
+
+- Use minimum required permissions for each API key
+- Regularly rotate your API keys
+- Use separate development keys instead of production keys for sandbox access
+- Only enable "Include in Dev Server" when necessary
+- Never enable sandbox access for production database credentials
+- Review generated code for exposed environment variables before deploying
+- Monitor "Last Used" timestamps in settings

@@ -21,6 +21,18 @@ export interface OpenSWEInput {
    * If not provided, agent will create one (e.g., "open-swe/uuid")
    */
   branch: string;
+
+  /**
+   * Optional: Test input for LangGraph evaluation
+   * Simple string input to pass to the agent
+   */
+  test_input?: string;
+
+  /**
+   * Optional: Ground truth for LangGraph evaluation
+   * Expected answer or result for comparison
+   */
+  ground_truth?: string;
 }
 
 /**
@@ -99,6 +111,10 @@ export interface CodeTestDetails {
   };
   mypy: {
     issues: string[];
+    error: Error | null;
+  };
+  langGraph: {
+    explanation: string;
     error: Error | null;
   };
 }
