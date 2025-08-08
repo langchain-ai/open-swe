@@ -24,21 +24,22 @@ export function getGitHubTokensFromConfig(config: GraphConfig): {
 
   const isProd = process.env.NODE_ENV === "production";
 
-  const installationId = config.configurable[GITHUB_INSTALLATION_ID];
-  if (!installationId) {
-    throw new Error(
-      `Missing required ${GITHUB_INSTALLATION_ID} in configuration.`,
-    );
-  }
-
   const githubPat = getGitHubPatFromConfig(config.configurable, encryptionKey);
   if (githubPat && !isProd) {
     // check for PAT-only mode
     return {
       githubAccessToken: githubPat,
       githubInstallationToken: githubPat,
-      installationId,
+      // If PAT is defined, we're running in eval mode and installation ID shouldn't be used.
+      installationId: config.configurable[GITHUB_INSTALLATION_ID] ?? "",
     };
+  }
+
+  const installationId = config.configurable[GITHUB_INSTALLATION_ID];
+  if (!installationId) {
+    throw new Error(
+      `Missing required ${GITHUB_INSTALLATION_ID} in configuration.`,
+    );
   }
 
   const encryptedGitHubToken = config.configurable[GITHUB_TOKEN_COOKIE];
