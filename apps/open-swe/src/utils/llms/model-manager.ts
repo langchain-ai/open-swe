@@ -180,7 +180,6 @@ export class ModelManager {
 
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
-      temperature: thinkingModel ? undefined : temperature,
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
       ...(thinkingModel && provider === "anthropic"
@@ -188,7 +187,15 @@ export class ModelManager {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
             maxTokens: thinkingMaxTokens,
           }
-        : { maxTokens: finalMaxTokens }),
+        : modelName.includes("gpt-5")
+          ? {
+              max_completion_tokens: finalMaxTokens,
+              temperature: 1,
+            }
+          : {
+              maxTokens: finalMaxTokens,
+              temperature: thinkingModel ? undefined : temperature,
+            }),
     };
 
     logger.debug("Initializing model", {
@@ -219,8 +226,17 @@ export class ModelManager {
         selectedModelConfig = {
           provider,
           modelName,
-          temperature: defaultConfig.temperature ?? baseConfig.temperature,
-          maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
+          ...(modelName.includes("gpt-5")
+            ? {
+                max_completion_tokens:
+                  defaultConfig.maxTokens ?? baseConfig.maxTokens,
+                temperature: 1,
+              }
+            : {
+                maxTokens: defaultConfig.maxTokens ?? baseConfig.maxTokens,
+                temperature:
+                  defaultConfig.temperature ?? baseConfig.temperature,
+              }),
           ...(isThinkingModel
             ? {
                 thinkingModel: true,
@@ -247,8 +263,17 @@ export class ModelManager {
 
         const fallbackConfig = {
           ...fallbackModel,
-          temperature: isThinkingModel ? undefined : baseConfig.temperature,
-          maxTokens: baseConfig.maxTokens,
+          ...(fallbackModel.modelName.includes("gpt-5")
+            ? {
+                max_completion_tokens: baseConfig.maxTokens,
+                temperature: 1,
+              }
+            : {
+                maxTokens: baseConfig.maxTokens,
+                temperature: isThinkingModel
+                  ? undefined
+                  : baseConfig.temperature,
+              }),
           ...(isThinkingModel
             ? {
                 thinkingModel: true,
@@ -331,8 +356,15 @@ export class ModelManager {
     return {
       modelName,
       provider: modelProvider as Provider,
-      temperature: taskConfig.temperature,
-      maxTokens: config.configurable?.maxTokens ?? 10_000,
+      ...(modelName.includes("gpt-5")
+        ? {
+            max_completion_tokens: config.configurable?.maxTokens ?? 10_000,
+            temperature: 1,
+          }
+        : {
+            maxTokens: config.configurable?.maxTokens ?? 10_000,
+            temperature: taskConfig.temperature,
+          }),
       thinkingModel,
       thinkingBudgetTokens,
     };
@@ -361,11 +393,11 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gemini-2.5-pro",
       },
       openai: {
-        [LLMTask.PLANNER]: "o3",
-        [LLMTask.PROGRAMMER]: "gpt-4.1",
-        [LLMTask.REVIEWER]: "o3",
-        [LLMTask.ROUTER]: "gpt-4o-mini",
-        [LLMTask.SUMMARIZER]: "gpt-4.1-mini",
+        [LLMTask.PLANNER]: "gpt-5",
+        [LLMTask.PROGRAMMER]: "gpt-5",
+        [LLMTask.REVIEWER]: "gpt-5",
+        [LLMTask.ROUTER]: "gpt-5-nano",
+        [LLMTask.SUMMARIZER]: "gpt-5-mini",
       },
     };
 

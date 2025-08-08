@@ -9,6 +9,7 @@ import {
 import { promises as fs } from "fs";
 import { join } from "path";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { createShellExecutor } from "./shell-executor/shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "CustomRules");
 
@@ -124,18 +125,21 @@ export function parseCustomRulesFromString(
 export async function getCustomRules(
   sandbox: Sandbox,
   rootDir: string,
-  config?: GraphConfig,
+  config: GraphConfig,
 ): Promise<CustomRules | undefined> {
   try {
-    if (config && isLocalMode(config)) {
+    if (isLocalMode(config)) {
       return getCustomRulesLocal(rootDir);
     }
 
+    const executor = createShellExecutor(config);
+
     const catAgentsMdFileCommand = ["cat", "AGENTS.md"];
-    const agentsMdRes = await sandbox.process.executeCommand(
-      catAgentsMdFileCommand.join(" "),
-      rootDir,
-    );
+    const agentsMdRes = await executor.executeCommand({
+      command: catAgentsMdFileCommand.join(" "),
+      workdir: rootDir,
+      sandbox,
+    });
     if (agentsMdRes.exitCode === 0 && agentsMdRes.result?.length > 0) {
       return parseCustomRulesFromString(agentsMdRes.result);
     }
@@ -144,9 +148,21 @@ export async function getCustomRules(
     const catClaudeMdFileCommand = ["cat", "CLAUDE.md"];
     const catCursorMdFileCommand = ["cat", "CURSOR.md"];
     const [agentMdRes, claudeMdRes, cursorMdRes] = await Promise.all([
-      sandbox.process.executeCommand(catAgentMdFileCommand.join(" "), rootDir),
-      sandbox.process.executeCommand(catClaudeMdFileCommand.join(" "), rootDir),
-      sandbox.process.executeCommand(catCursorMdFileCommand.join(" "), rootDir),
+      executor.executeCommand({
+        command: catAgentMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandbox,
+      }),
+      executor.executeCommand({
+        command: catClaudeMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandbox,
+      }),
+      executor.executeCommand({
+        command: catCursorMdFileCommand.join(" "),
+        workdir: rootDir,
+        sandbox,
+      }),
     ]);
     if (agentMdRes.exitCode === 0 && agentMdRes.result?.length > 0) {
       return parseCustomRulesFromString(agentMdRes.result);

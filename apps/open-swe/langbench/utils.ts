@@ -145,6 +145,7 @@ export async function runPytestOnFiles(
     let parsed: Omit<TestResults, "success" | "error">;
     try {
       const jsonReportResult = await readFile({
+        config: {},
         sandbox,
         filePath: "/tmp/pytest_report.json",
         workDir: repoDir,

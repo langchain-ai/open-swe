@@ -189,11 +189,7 @@ export async function initializeSandbox(
       };
       emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
       try {
-        const codebaseTree = await getCodebaseTree(
-          existingSandbox.id,
-          undefined,
-          config,
-        );
+        const codebaseTree = await getCodebaseTree(config, existingSandbox.id);
         if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
           emitStepEvent(
             baseGenerateCodebaseTreeAction,
@@ -208,7 +204,11 @@ export async function initializeSandbox(
           sandboxSessionId: existingSandbox.id,
           codebaseTree,
           messages: createEventsMessage(),
-          customRules: await getCustomRules(existingSandbox, absoluteRepoDir),
+          customRules: await getCustomRules(
+            existingSandbox,
+            absoluteRepoDir,
+            config,
+          ),
         };
       } catch {
         emitStepEvent(
@@ -220,7 +220,11 @@ export async function initializeSandbox(
           sandboxSessionId: existingSandbox.id,
           codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
           messages: createEventsMessage(),
-          customRules: await getCustomRules(existingSandbox, absoluteRepoDir),
+          customRules: await getCustomRules(
+            existingSandbox,
+            absoluteRepoDir,
+            config,
+          ),
         };
       }
     } catch {
@@ -347,7 +351,7 @@ export async function initializeSandbox(
   emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
   let codebaseTree: string | undefined;
   try {
-    codebaseTree = await getCodebaseTree(sandbox.id, undefined, config);
+    codebaseTree = await getCodebaseTree(config, sandbox.id);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(
@@ -363,7 +367,7 @@ export async function initializeSandbox(
     codebaseTree,
     messages: createEventsMessage(),
     dependenciesInstalled: false,
-    customRules: await getCustomRules(sandbox, absoluteRepoDir),
+    customRules: await getCustomRules(sandbox, absoluteRepoDir, config),
     branchName: newBranchName,
   };
 }
@@ -455,7 +459,7 @@ async function initializeSandboxLocal(
 
   let codebaseTree = undefined;
   try {
-    codebaseTree = await getCodebaseTree(undefined, targetRepository, config);
+    codebaseTree = await getCodebaseTree(config, undefined, targetRepository);
     emitStepEvent(baseGenerateCodebaseTreeAction, "success");
   } catch (_) {
     emitStepEvent(
