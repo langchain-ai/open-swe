@@ -3,7 +3,6 @@ import "dotenv/config";
 import { Client } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-// Note: bearer auth used instead of custom encrypted key
 
 interface TraceUrls {
   managerTraceUrl: string;

@@ -10,27 +10,34 @@ function bcryptHash(value: string): string {
 function getConfiguredApiTokens(): string[] {
   const single = process.env.API_BEARER_TOKEN || "";
   const many = process.env.API_BEARER_TOKENS || ""; // comma-separated
+
   const tokens: string[] = [];
-  if (single.trim()) tokens.push(single.trim());
+
+  if (single.trim()) {
+    tokens.push(single.trim());
+  }
+
   if (many.trim()) {
     for (const t of many.split(",")) {
       const v = t.trim();
       if (v) tokens.push(v);
     }
   }
+
   return tokens;
 }
 
 // Pre-hash configured tokens for constant length comparisons
 let cachedAllowedTokenHashes: string[] | null = null;
 function getAllowedTokenHashes(): string[] {
-  if (cachedAllowedTokenHashes) return cachedAllowedTokenHashes;
+  if (cachedAllowedTokenHashes) {
+    return cachedAllowedTokenHashes;
+  }
+
   const tokens = getConfiguredApiTokens();
   cachedAllowedTokenHashes = tokens.map((t) => bcryptHash(t));
   return cachedAllowedTokenHashes;
 }
-
-// bcrypt.compareSync is timing-safe, so we no longer need this function.
 
 export function validateApiBearerToken(token: string) {
   const allowed = getAllowedTokenHashes();
@@ -38,6 +45,7 @@ export function validateApiBearerToken(token: string) {
     // Not configured; treat as invalid
     return null;
   }
+
   // Compare the token against each allowed hash using bcrypt
   const isValid = allowed.some((h) => bcrypt.compareSync(token, h));
   if (isValid) {
