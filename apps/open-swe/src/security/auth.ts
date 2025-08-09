@@ -18,6 +18,9 @@ import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
+import {
+  validateApiBearerToken,
+} from "./custom.js";
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -64,15 +67,31 @@ export const auth = new Auth()
       };
     }
 
-    const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
-    if (ghSecretHashHeader) {
-      // This will either return a valid user, or throw an error
-      return await verifyGitHubWebhookOrThrow(request);
+    // Bearer token auth (simple API key) — only when header is present
+    const authorizationHeader = request.headers.get("authorization");
+    if (authorizationHeader && authorizationHeader.toLowerCase().startsWith("bearer ")) {
+      const token = authorizationHeader.slice(7).trim();
+      if (!token) {
+        throw new HTTPException(401, { message: "Missing bearer token" });
+      }
+
+      const user = validateApiBearerToken(token);
+      if (user) {
+        console.log("VERIFIED USER!")
+        return user;
+      }
+      throw new HTTPException(401, { message: "Invalid API token" });
     }
 
     const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
     if (!encryptionKey) {
       throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
+    }
+
+    const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
+    if (ghSecretHashHeader) {
+      // This will either return a valid user, or throw an error
+      return await verifyGitHubWebhookOrThrow(request);
     }
 
     // Check for GitHub PAT authentication (simpler mode for evals, etc.)
