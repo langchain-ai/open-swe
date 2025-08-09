@@ -5,3 +5,4 @@ export * from "./notetaker.js";
 export * from "./proposed-plan.js";
 export * from "./prepare-state.js";
 export * from "./determine-needs-context.js";
+export * from "./update-issue-token-data.js";

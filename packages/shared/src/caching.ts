@@ -50,8 +50,9 @@ export function calculateCostSavings(metrics: CacheMetrics): {
 export function tokenDataReducer(
   state: ModelTokenData[] | undefined,
   update: ModelTokenData[],
+  replaceMode: boolean = false,
 ): ModelTokenData[] {
-  if (!state) {
+  if (!state || replaceMode) {
     return update;
   }
 

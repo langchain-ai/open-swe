@@ -59,6 +59,8 @@ export async function startPlanner(
       defaultHeaders,
     });
 
+    // Explicitly exclude tokenData from runInput to prevent it from being passed to the planner graph
+    // Token data should be read from the issue at the start of each graph run
     const runInput: PlannerGraphUpdate = {
       // github issue ID & target repo so the planning agent can fetch the user's request, and clone the repo.
       githubIssueId: state.githubIssueId,

@@ -15,6 +15,8 @@ import {
   updatePlan,
   summarizeHistory,
   handleCompletedTask,
+  initializeTokenData,
+  updateIssueTokenData,
 } from "./nodes/index.js";
 import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
@@ -129,6 +131,7 @@ function routeToReviewOrConclusion(
 
 const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("initialize", initializeSandbox)
+  .addNode("initialize-token-data", initializeTokenData)
   .addNode("generate-action", generateAction)
   .addNode("take-action", takeAction, {
     ends: ["generate-action", "diagnose-error"],
@@ -142,10 +145,13 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
     ],
   })
   .addNode("generate-conclusion", generateConclusion, {
+    ends: ["update-issue-token-data"],
+  })
+  .addNode("update-issue-token-data", updateIssueTokenData, {
     ends: ["open-pr", END],
   })
   .addNode("request-help", requestHelp, {
-    ends: ["generate-action", END],
+    ends: ["generate-action", "update-issue-token-data"],
   })
   .addNode("route-to-review-or-conclusion", routeToReviewOrConclusion, {
     ends: ["generate-conclusion", "reviewer-subgraph"],
@@ -155,7 +161,8 @@ const workflow = new StateGraph(GraphAnnotation, GraphConfiguration)
   .addNode("diagnose-error", diagnoseError)
   .addNode("summarize-history", summarizeHistory)
   .addEdge(START, "initialize")
-  .addEdge("initialize", "generate-action")
+  .addEdge("initialize", "initialize-token-data")
+  .addEdge("initialize-token-data", "generate-action")
   .addConditionalEdges("generate-action", routeGeneratedAction, [
     "take-action",
     "request-help",

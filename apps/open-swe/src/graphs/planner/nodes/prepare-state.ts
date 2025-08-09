@@ -21,6 +21,7 @@ import {
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { extractTokenDataFromIssueContent } from "../../../utils/github/issue-task.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
@@ -57,6 +58,11 @@ export async function prepareGraphState(
     throw new Error(`Issue not found. Issue ID: ${state.githubIssueId}`);
   }
 
+  // Extract token data from the issue body
+  const tokenData = issue.body
+    ? extractTokenDataFromIssueContent(issue.body)
+    : null;
+
   // Ensure the main issue & all comments are included in the state;
 
   // If the messages state is empty, we can just include all comments as human messages.
@@ -83,6 +89,9 @@ export async function prepareGraphState(
             }),
         ),
       ],
+      ...(tokenData && {
+        tokenData: { data: tokenData, replaceMode: true },
+      }),
     };
     return new Command({
       update: commandUpdate,
@@ -120,6 +129,9 @@ export async function prepareGraphState(
     ],
     // Reset plan context summary as it's now included in the messages array.
     contextGatheringNotes: "",
+    ...(tokenData && {
+      tokenData: { data: tokenData, replaceMode: true },
+    }),
   };
 
   return new Command({

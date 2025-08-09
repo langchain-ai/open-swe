@@ -2,6 +2,7 @@ import {
   GraphConfig,
   TargetRepository,
   TaskPlan,
+  ModelTokenData,
 } from "@open-swe/shared/open-swe/types";
 import { getIssue, updateIssue } from "./api.js";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
@@ -14,6 +15,9 @@ export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
 
 export const PROPOSED_PLAN_OPEN_TAG = "<open-swe-do-not-edit-proposed-plan>";
 export const PROPOSED_PLAN_CLOSE_TAG = "</open-swe-do-not-edit-proposed-plan>";
+
+export const TOKEN_DATA_OPEN_TAG = "<open-swe-do-not-edit-token-data>";
+export const TOKEN_DATA_CLOSE_TAG = "</open-swe-do-not-edit-token-data>";
 
 export const DETAILS_OPEN_TAG = "<details>";
 export const DETAILS_CLOSE_TAG = "</details>";
@@ -28,6 +32,29 @@ function typeNarrowTaskPlan(taskPlan: unknown): taskPlan is TaskPlan {
     Array.isArray(taskPlan.tasks) &&
     "activeTaskIndex" in taskPlan &&
     typeof taskPlan.activeTaskIndex === "number"
+  );
+}
+
+function typeNarrowTokenData(
+  tokenData: unknown,
+): tokenData is ModelTokenData[] {
+  return !!(
+    Array.isArray(tokenData) &&
+    tokenData.every(
+      (item) =>
+        typeof item === "object" &&
+        item &&
+        "model" in item &&
+        typeof item.model === "string" &&
+        "cacheCreationInputTokens" in item &&
+        typeof item.cacheCreationInputTokens === "number" &&
+        "cacheReadInputTokens" in item &&
+        typeof item.cacheReadInputTokens === "number" &&
+        "inputTokens" in item &&
+        typeof item.inputTokens === "number" &&
+        "outputTokens" in item &&
+        typeof item.outputTokens === "number",
+    )
   );
 }
 
@@ -47,6 +74,37 @@ export function extractTasksFromIssueContent(content: string): TaskPlan | null {
   } catch (e) {
     logger.error("Failed to parse task plan", {
       taskPlanString,
+      ...(e instanceof Error && {
+        name: e.name,
+        message: e.message,
+        stack: e.stack,
+      }),
+    });
+    return null;
+  }
+}
+
+export function extractTokenDataFromIssueContent(
+  content: string,
+): ModelTokenData[] | null {
+  if (
+    !content.includes(TOKEN_DATA_OPEN_TAG) ||
+    !content.includes(TOKEN_DATA_CLOSE_TAG)
+  ) {
+    return null;
+  }
+  const tokenDataString = content
+    .split(TOKEN_DATA_OPEN_TAG)?.[1]
+    ?.split(TOKEN_DATA_CLOSE_TAG)?.[0];
+  try {
+    const parsedTokenData = JSON.parse(tokenDataString.trim());
+    if (!typeNarrowTokenData(parsedTokenData)) {
+      throw new Error("Invalid token data parsed.");
+    }
+    return parsedTokenData;
+  } catch (e) {
+    logger.error("Failed to parse token data", {
+      tokenDataString,
       ...(e instanceof Error && {
         name: e.name,
         message: e.message,
@@ -125,12 +183,20 @@ export async function getPlansFromIssue(
 function insertPlanToIssueBody(
   issueBody: string,
   planString: string,
-  planType: "taskPlan" | "proposedPlan",
+  planType: "taskPlan" | "proposedPlan" | "tokenData",
 ) {
   const openingPlanTag =
-    planType === "taskPlan" ? TASK_OPEN_TAG : PROPOSED_PLAN_OPEN_TAG;
+    planType === "taskPlan"
+      ? TASK_OPEN_TAG
+      : planType === "proposedPlan"
+        ? PROPOSED_PLAN_OPEN_TAG
+        : TOKEN_DATA_OPEN_TAG;
   const closingPlanTag =
-    planType === "taskPlan" ? TASK_CLOSE_TAG : PROPOSED_PLAN_CLOSE_TAG;
+    planType === "taskPlan"
+      ? TASK_CLOSE_TAG
+      : planType === "proposedPlan"
+        ? PROPOSED_PLAN_CLOSE_TAG
+        : TOKEN_DATA_CLOSE_TAG;
 
   const wrappedPlan = `${openingPlanTag}
 ${planString}
@@ -236,6 +302,42 @@ export async function addTaskPlanToIssue(
 
   const taskPlanString = JSON.stringify(taskPlan, null, 2);
   const newBody = insertPlanToIssueBody(issue.body, taskPlanString, "taskPlan");
+
+  await updateIssue({
+    owner: input.targetRepository.owner,
+    repo: input.targetRepository.repo,
+    issueNumber: input.githubIssueId,
+    githubInstallationToken:
+      getGitHubTokensFromConfig(config).githubInstallationToken,
+    body: newBody,
+  });
+}
+
+export async function addTokenDataToIssue(
+  input: GetIssueTaskPlanInput,
+  config: GraphConfig,
+  tokenData: ModelTokenData[],
+): Promise<void> {
+  const issue = await getIssue({
+    owner: input.targetRepository.owner,
+    repo: input.targetRepository.repo,
+    issueNumber: input.githubIssueId,
+    githubInstallationToken:
+      getGitHubTokensFromConfig(config).githubInstallationToken,
+  });
+
+  if (!issue || !issue.body) {
+    throw new Error(
+      "No issue found when attempting to add token data to issue",
+    );
+  }
+
+  const tokenDataString = JSON.stringify(tokenData, null, 2);
+  const newBody = insertPlanToIssueBody(
+    issue.body,
+    tokenDataString,
+    "tokenData",
+  );
 
   await updateIssue({
     owner: input.targetRepository.owner,

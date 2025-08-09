@@ -285,8 +285,33 @@ export const GraphAnnotation = MessagesZodState.extend({
 
   tokenData: withLangGraph(z.custom<ModelTokenData[]>().optional(), {
     reducer: {
-      schema: z.custom<ModelTokenData[]>().optional(),
-      fn: tokenDataReducer,
+      schema: z
+        .custom<
+          ModelTokenData[] | { data: ModelTokenData[]; replaceMode: boolean }
+        >()
+        .optional(),
+      fn: (state, update) => {
+        const typedState = state as ModelTokenData[] | undefined;
+        // Check if update contains a replace flag
+        if (
+          update &&
+          typeof update === "object" &&
+          "replaceMode" in update &&
+          "data" in update
+        ) {
+          const typedUpdate = update as {
+            data: ModelTokenData[];
+            replaceMode: boolean;
+          };
+          return tokenDataReducer(
+            typedState,
+            typedUpdate.data,
+            typedUpdate.replaceMode,
+          );
+        }
+        // Default behavior - merge mode
+        return tokenDataReducer(typedState, (update || []) as ModelTokenData[]);
+      },
     },
   }),
 
@@ -302,7 +327,11 @@ export const GraphAnnotation = MessagesZodState.extend({
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;
-export type GraphUpdate = Partial<GraphState>;
+
+// Custom update type that supports the special tokenData format
+export type GraphUpdate = Partial<Omit<GraphState, "tokenData">> & {
+  tokenData?: ModelTokenData[] | { data: ModelTokenData[]; replaceMode: boolean };
+};
 
 export const GraphConfigurationMetadata: {
   [key: string]: {
@@ -690,3 +719,4 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
+
