@@ -130,7 +130,7 @@ export class ModelManager {
     }
 
     // If the user is allowed, we can return early
-    if (isAllowedUser(userLogin)) {
+    if (isAllowedUser(userLogin) && provider !== "openrouter") {
       return null;
     }
 
@@ -181,10 +181,25 @@ export class ModelManager {
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
 
+    // For OpenRouter, use 'openai' as the provider and configure baseURL and headers
+    const actualProvider = provider === "openrouter" ? "openai" : provider;
+
     const modelOptions: InitChatModelArgs = {
-      modelProvider: provider,
+      modelProvider: actualProvider,
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
+      // OpenRouter-specific configuration
+      ...(provider === "openrouter"
+        ? {
+            configuration: {
+              baseURL: "https://openrouter.ai/api/v1",
+              defaultHeaders: {
+                "HTTP-Referer": "https://swe.langchain.com",
+                "X-Title": "Open SWE",
+              },
+            },
+          }
+        : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -201,9 +216,12 @@ export class ModelManager {
             }),
     };
 
-    logger.debug("Initializing model", {
+    logger.info("Initializing model", {
       provider,
+      actualProvider,
       modelName,
+      hasApiKey: !!apiKey,
+      isOpenRouter: provider === "openrouter",
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -221,8 +239,14 @@ export class ModelManager {
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
-      const provider = defaultConfig.modelProvider as Provider;
+      let provider = defaultConfig.modelProvider as Provider;
       const modelName = defaultConfig.model;
+
+      // If the model was originally an OpenRouter model but got mapped to 'openai',
+      // we need to correct the provider back to 'openrouter'
+      if (provider === "openai" && baseConfig.provider === "openrouter") {
+        provider = "openrouter";
+      }
 
       if (provider && modelName) {
         const isThinkingModel = baseConfig.thinkingModel;
