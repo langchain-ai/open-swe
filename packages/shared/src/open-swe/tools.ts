@@ -662,3 +662,157 @@ export function createWriteDefaultTsConfigToolFields(
     schema: writeDefaultTsConfigToolSchema,
   };
 }
+export function createDevServerToolFields(targetRepository: TargetRepository) {
+  const repoRoot = getRepoAbsolutePath(targetRepository);
+  const devServerToolSchema = z.object({
+    serverStartupCommand: z.object({
+      command: z
+        .array(z.string())
+        .describe(
+          "The command to start the development server. Examples: ['langgraph', 'dev'], ['npm', 'run', 'dev'], ['yarn', 'dev'], ['python', 'app.py'], ['node', 'server.js']. Ensure the command is properly formatted with arguments in the correct order.",
+        ),
+      workdir: z
+        .string()
+        .default(repoRoot)
+        .describe(
+          `The working directory where the server command should be executed. Defaults to the root of the repository (${repoRoot}).`,
+        ),
+      waitTime: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "The time to wait for the server to start in seconds. The request or curl commands will be executed after this delay. Defaults to 5 seconds.",
+        ),
+    }),
+    requestCommand: z
+      .optional(
+        z.object({
+          command: z
+            .array(z.string())
+            .describe(
+              "The shell command to execute which will make a request to the server. This command will be executed after the server starts. Ensure the command is properly formatted with arguments in the correct order.",
+            ),
+          workdir: z
+            .string()
+            .default(repoRoot)
+            .describe(
+              `The working directory where the request script command should be executed. Defaults to the root of the repository (${repoRoot}).`,
+            ),
+          timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+              "The timeout to wait for the request to complete in seconds. Defaults to 60 (1 minute).",
+            ),
+        }),
+      )
+      .describe(
+        "A shell command to execute which makes a request to the server. This is optional, but one of either this (`requestCommand`) or the curl command (`curlCommand`) must be provided.",
+      ),
+    curlCommand: z
+      .optional(
+        z.object({
+          url: z.string().url().describe("The URL to send the request to."),
+          method: z.enum([
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS",
+          ]),
+          headers: z
+            .record(z.string())
+            .optional()
+            .describe("Optional headers to send with the request."),
+          body: z
+            .union([z.string(), z.record(z.unknown())])
+            .optional()
+            .describe("Optional body to send with the request."),
+          query: z
+            .record(z.string())
+            .optional()
+            .describe("Optional query parameters (?foo=bar)"),
+          timeout: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .default(60)
+            .describe(
+              "Time in seconds to wait for the request to complete. Defaults to 60 (1 minute).",
+            ),
+          followRedirects: z
+            .boolean()
+            .optional()
+            .describe("Whether or not to follow redirects. Defaults to false."),
+        }),
+      )
+      .describe(
+        "A curl request to send to the server. This is optional, but one of either this (`curlCommand`) or the request script (`requestCommand`) must be provided.",
+      ),
+  });
+  return {
+    name: "dev_server",
+    description:
+      "This tool will start a server (e.g. a development API server, or a web application via the `serverStartupCommand`) and send a network request (either triggered via a shell command: `requestCommand` or a via curl request: `curlCommand`) to the server.\n" +
+      "IMPORTANT: Only one of `requestCommand` or `curlCommand` must be provided.\n" +
+      "It will then return the response from the server, and the complete server logs for debugging.\n" +
+      "This tool should be used when making changes to a web application, API server, or other service which can be run locally.",
+    schema: devServerToolSchema,
+  };
+}
+
+function shellEscape(str: string): string {
+  return `'${str.replace(/'/g, `'\\''`)}'`;
+}
+
+type DevServerToolSchema = ReturnType<
+  typeof createDevServerToolFields
+>["schema"];
+
+export function formatCurlCommand(
+  request: z.infer<DevServerToolSchema>["curlCommand"],
+): string {
+  if (!request) {
+    throw new Error("No curl command provided");
+  }
+  const { url, method, headers, body, query, timeout, followRedirects } =
+    request;
+
+  const queryString = query ? "?" + new URLSearchParams(query).toString() : "";
+
+  const parts: string[] = ["curl"];
+
+  if (method !== "GET") {
+    parts.push(`-X ${method}`);
+  }
+
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      parts.push(`-H ${shellEscape(`${key}: ${value}`)}`);
+    }
+  }
+
+  if (body !== undefined) {
+    const bodyString = typeof body === "string" ? body : JSON.stringify(body);
+    parts.push(`--data ${shellEscape(bodyString)}`);
+  }
+
+  if (timeout !== undefined) {
+    parts.push(`--max-time ${Math.ceil(timeout / 1000)}`);
+  }
+
+  if (followRedirects) {
+    parts.push("-L");
+  }
+
+  parts.push(shellEscape(url + queryString));
+
+  return parts.join(" ");
+}

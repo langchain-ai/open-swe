@@ -5,7 +5,12 @@ import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../constants.js";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
 import { cloneRepo } from "./github/git.js";
 import { FAILED_TO_GENERATE_TREE_MESSAGE, getCodebaseTree } from "./tree.js";
+import { getUserEnvironmentVariables } from "./user-environment.js";
+import { createHash } from "crypto";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { getConfig } from "@langchain/langgraph";
+import { decryptSecret } from "@open-swe/shared/crypto";
+import { isEnvVarConfig } from "@open-swe/shared/env-config";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -13,11 +18,52 @@ const logger = createLogger(LogLevel.INFO, "Sandbox");
 let daytonaInstance: Daytona | null = null;
 
 /**
+ * Creates a fingerprint hash of environment variables for change detection
+ */
+function createEnvFingerprint(envVars: Record<string, string>): string {
+  const sortedEntries = Object.entries(envVars)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("|");
+
+  return createHash("sha256")
+    .update(sortedEntries)
+    .digest("hex")
+    .substring(0, 16);
+}
+
+/**
  * Returns a shared Daytona instance
  */
 export function daytonaClient(): Daytona {
   if (!daytonaInstance) {
-    daytonaInstance = new Daytona();
+    let daytonaApiKey;
+
+    // Try to get Daytona API key from LangGraph config (when running inside a graph)
+    try {
+      const config = getConfig();
+      if (!config) throw new Error("No LangGraph config found");
+
+      const apiKeys = config.configurable?.apiKeys;
+      if (apiKeys && typeof apiKeys === "object") {
+        const daytonaConfig = apiKeys.daytona;
+        if (isEnvVarConfig(daytonaConfig)) {
+          const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+          if (secretsEncryptionKey) {
+            daytonaApiKey = decryptSecret(
+              daytonaConfig.apiKey,
+              secretsEncryptionKey,
+            );
+          }
+        }
+      }
+      daytonaInstance = new Daytona({
+        apiKey: daytonaApiKey,
+      });
+      return daytonaInstance;
+    } catch {
+      daytonaInstance = new Daytona();
+    }
   }
   return daytonaInstance;
 }
@@ -65,9 +111,35 @@ export async function deleteSandbox(
   }
 }
 
-async function createSandbox(attempt: number): Promise<Sandbox | null> {
+async function createSandbox(
+  attempt: number,
+  config: GraphConfig,
+): Promise<Sandbox | null> {
   try {
-    return await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS, {
+    // Get user environment variables
+    const userEnvVars = config ? getUserEnvironmentVariables(config) : {};
+    const envFingerprint = createEnvFingerprint(userEnvVars);
+
+    const sandboxParams = {
+      ...DEFAULT_SANDBOX_CREATE_PARAMS,
+      labels: {
+        ...DEFAULT_SANDBOX_CREATE_PARAMS.labels,
+
+        envFingerprint: envFingerprint,
+      },
+      envVars: {
+        ...DEFAULT_SANDBOX_CREATE_PARAMS.envVars,
+        ...userEnvVars,
+      },
+    };
+
+    logger.info("Creating sandbox with environment variables", {
+      attempt,
+      userEnvCount: Object.keys(userEnvVars).length,
+      userEnvKeys: Object.keys(userEnvVars),
+    });
+
+    return await daytonaClient().create(sandboxParams, {
       timeout: 100, // 100s timeout on creation.
     });
   } catch (e) {
@@ -83,6 +155,7 @@ async function createSandbox(attempt: number): Promise<Sandbox | null> {
             error: e,
           }),
     });
+
     return null;
   }
 }
@@ -115,10 +188,22 @@ export async function getSandboxWithErrorHandling(
     }
 
     logger.info("Getting sandbox.");
-    // Try to get existing sandbox
     const sandbox = await daytonaClient().get(sandboxSessionId);
 
-    // Check sandbox state
+    // Check if environment variables have changed
+    const currentUserEnvs = getUserEnvironmentVariables(config);
+    const currentEnvFingerprint = createEnvFingerprint(currentUserEnvs);
+    const sandboxEnvFingerprint = sandbox.labels?.["envFingerprint"] || null;
+
+    if (sandboxEnvFingerprint !== currentEnvFingerprint) {
+      logger.info("Environment variables changed, forcing sandbox recreation", {
+        oldFingerprint: sandboxEnvFingerprint,
+        newFingerprint: currentEnvFingerprint,
+        currentUserEnvCount: Object.keys(currentUserEnvs).length,
+      });
+      throw new Error("Environment variables changed. Recreating sandbox.");
+    }
+
     const state = sandbox.state;
 
     if (state === "started") {
@@ -143,13 +228,13 @@ export async function getSandboxWithErrorHandling(
   } catch (error) {
     // Recreate sandbox if any step fails
     logger.info("Recreating sandbox due to error or unrecoverable state", {
-      error,
+      error: error instanceof Error ? error.message : String(error),
     });
 
     let sandbox: Sandbox | null = null;
     let numSandboxCreateAttempts = 0;
     while (!sandbox && numSandboxCreateAttempts < 3) {
-      sandbox = await createSandbox(numSandboxCreateAttempts);
+      sandbox = await createSandbox(numSandboxCreateAttempts, config);
       if (!sandbox) {
         numSandboxCreateAttempts++;
       }

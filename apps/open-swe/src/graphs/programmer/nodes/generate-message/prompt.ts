@@ -188,6 +188,8 @@ ${CORE_BEHAVIOR_PROMPT}
             The \`mark_task_completed\` tool allows Claude to mark a task as completed.
             Parameters:
                 - \`completed_task_summary\`: A summary of the completed task. This summary should include high level context about the actions you took to complete the task, and any other context which would be useful to another developer reviewing the actions you took. Ensure this is properly formatted using markdown.
+
+        {DEV_SERVER_USAGE_PROMPT}
     </tool_usage>
 
     ${TOOL_USE_BEST_PRACTICES_PROMPT}
@@ -215,7 +217,11 @@ ${CORE_BEHAVIOR_PROMPT}
 
     ${FILE_CODE_MANAGEMENT_PROMPT}
 
+    <tool_usage>
     ${TOOL_USE_BEST_PRACTICES_PROMPT}
+
+    {DEV_SERVER_USAGE_PROMPT}
+    </tool_usage>
 
     ${CODING_STANDARDS_PROMPT}
 

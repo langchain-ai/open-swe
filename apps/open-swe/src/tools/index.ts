@@ -3,6 +3,7 @@ export * from "./shell.js";
 export * from "./builtin-tools/text-editor.js";
 export * from "./url-content.js";
 export * from "./search-documents-for/index.js";
+export * from "./dev-server.js";
 export {
   createUpdatePlanToolFields,
   createSessionPlanToolFields,
