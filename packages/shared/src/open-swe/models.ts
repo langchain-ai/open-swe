@@ -2,12 +2,12 @@ import type { OpenrouterModelsResponse } from "./get-models.js";
 import { getOpenrouterModels } from "./get-models.js";
 
 const models: OpenrouterModelsResponse = await getOpenrouterModels();
-const openrouterModels: { label: string; value: string }[] = models.data.map(
-  (model) => ({
+const openrouterModels: { label: string; value: string }[] = models.data
+  .map((model) => ({
     label: `${model.name} (Openrouter)`,
     value: `openrouter:${model.id}`,
-  }),
-);
+  }))
+  .sort((a, b) => a.value.localeCompare(b.value));
 export const MODEL_OPTIONS = [
   // TODO: Test these then re-enable
   // {
