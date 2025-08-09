@@ -1,9 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
-import { Context } from "hono";
-import { BlankEnv, BlankInput } from "hono/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { GitHubApp } from "../../utils/github-app.js";
-import { Webhooks } from "@octokit/webhooks";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 import {
   GITHUB_INSTALLATION_ID,
@@ -27,60 +24,13 @@ import { RequestSource } from "../../constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
+import { createDevMetadataComment } from "./utils.js";
 
-const logger = createLogger(LogLevel.INFO, "GitHubIssueWebhook");
-
-const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET!;
+const logger = createLogger(LogLevel.INFO, "GitHubIssueHandler");
 
 const githubApp = new GitHubApp();
 
-const webhooks = new Webhooks({
-  secret: GITHUB_WEBHOOK_SECRET,
-});
-
-const getPayload = (body: string): Record<string, any> | null => {
-  try {
-    const payload = JSON.parse(body);
-    return payload;
-  } catch {
-    return null;
-  }
-};
-
-const createDevMetadataComment = (runId: string, threadId: string) => {
-  return `<details>
-  <summary>Dev Metadata</summary>
-  ${JSON.stringify(
-    {
-      runId,
-      threadId,
-    },
-    null,
-    2,
-  )}
-</details>`;
-};
-
-const getHeaders = (
-  c: Context,
-): {
-  id: string;
-  name: string;
-  installationId: string;
-  targetType: string;
-} | null => {
-  const headers = c.req.header();
-  const webhookId = headers["x-github-delivery"] || "";
-  const webhookEvent = headers["x-github-event"] || "";
-  const installationId = headers["x-github-hook-installation-target-id"] || "";
-  const targetType = headers["x-github-hook-installation-target-type"] || "";
-  if (!webhookId || !webhookEvent || !installationId || !targetType) {
-    return null;
-  }
-  return { id: webhookId, name: webhookEvent, installationId, targetType };
-};
-
-webhooks.on("issues.labeled", async ({ payload }) => {
+export async function handleIssueLabeled(payload: any) {
   if (!process.env.SECRETS_ENCRYPTION_KEY) {
     throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
   }
@@ -221,35 +171,6 @@ webhooks.on("issues.labeled", async ({ payload }) => {
       },
     );
   } catch (error) {
-    logger.error("Error processing webhook:", error);
-  }
-});
-
-export async function issueWebhookHandler(
-  c: Context<BlankEnv, "/webhooks/github", BlankInput>,
-) {
-  const payload = getPayload(await c.req.text());
-  if (!payload) {
-    logger.error("Missing payload");
-    return c.json({ error: "Missing payload" }, { status: 400 });
-  }
-
-  const eventHeaders = getHeaders(c);
-  if (!eventHeaders) {
-    logger.error("Missing webhook headers");
-    return c.json({ error: "Missing webhook headers" }, { status: 400 });
-  }
-
-  try {
-    await webhooks.receive({
-      id: eventHeaders.id,
-      name: eventHeaders.name as any,
-      payload,
-    });
-
-    return c.json({ received: true });
-  } catch (error) {
-    logger.error("Webhook error:", error);
-    return c.json({ error: "Webhook processing failed" }, { status: 400 });
+    logger.error("Error processing issue webhook:", error);
   }
 }
