@@ -43,6 +43,16 @@ export interface PytestJsonReport {
   summary?: PytestJsonSummary;
 }
 
+export interface OpenSWEStreamResults {
+  threadId?: string;
+  managerRunId?: string;
+  plannerRunId?: string;
+  programmerRunId?: string;
+  branchName?: string;
+  success: boolean;
+  error?: string;
+}
+
 export interface PRProcessResult {
   prNumber: number;
   repoName: string;
@@ -52,6 +62,7 @@ export interface PRProcessResult {
   evalsFiles: string[];
   testFiles: string[];
   testResults?: TestResults;
+  openSWEResults?: OpenSWEStreamResults;
   error?: string;
   preMergeSha?: string;
 }

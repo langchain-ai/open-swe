@@ -79,7 +79,7 @@ ls.describe(DATASET_NAME, () => {
 
       const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
       const githubPat = process.env.GITHUB_PAT;
-
+      
       if (!encryptionKey || !githubPat) {
         throw new Error(
           "SECRETS_ENCRYPTION_KEY and GITHUB_PAT environment variables are required",
