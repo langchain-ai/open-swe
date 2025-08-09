@@ -45,7 +45,8 @@ export const getOpenrouterModels =
   async (): Promise<OpenrouterModelsResponse> => {
     // List available models (GET /models)
     const response = await fetch(
-      "https://openrouter.ai/api/v1/models?category=programming",
+      // Custom filter to only get popular models
+      "https://openrouter.ai/api/v1/models",
       {
         method: "GET",
         headers: {},
