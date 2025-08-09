@@ -158,6 +158,38 @@ function getModelPricingPlaceholder(model: string): {
       outputPrice: 2.5,
       cachePrice: 0.3,
     },
+
+    // OpenRouter models (approximate pricing - varies by provider)
+    "openrouter:anthropic/claude-3.5-sonnet": {
+      inputPrice: 3.0,
+      outputPrice: 15.0,
+      cachePrice: 3.0,
+    },
+    "openrouter:anthropic/claude-3.5-haiku": {
+      inputPrice: 0.25,
+      outputPrice: 1.25,
+      cachePrice: 0.25,
+    },
+    "openrouter:openai/gpt-4o": {
+      inputPrice: 5.0,
+      outputPrice: 15.0,
+      cachePrice: 5.0,
+    },
+    "openrouter:openai/gpt-4o-mini": {
+      inputPrice: 0.15,
+      outputPrice: 0.6,
+      cachePrice: 0.15,
+    },
+    "openrouter:meta-llama/llama-3.1-405b-instruct": {
+      inputPrice: 3.0,
+      outputPrice: 3.0,
+      cachePrice: 3.0,
+    },
+    "openrouter:meta-llama/llama-3.1-70b-instruct": {
+      inputPrice: 0.9,
+      outputPrice: 0.9,
+      cachePrice: 0.9,
+    },
   };
 
   return (

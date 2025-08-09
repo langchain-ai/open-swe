@@ -47,6 +47,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "openrouter",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -82,6 +83,8 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "openrouter":
+      return apiKeys.openrouterApiKey;
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -398,6 +401,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      openrouter: {
+        [LLMTask.PLANNER]: "anthropic/claude-3.5-sonnet",
+        [LLMTask.PROGRAMMER]: "anthropic/claude-3.5-sonnet",
+        [LLMTask.REVIEWER]: "anthropic/claude-3.5-sonnet",
+        [LLMTask.ROUTER]: "anthropic/claude-3.5-haiku",
+        [LLMTask.SUMMARIZER]: "anthropic/claude-3.5-sonnet",
       },
     };
 

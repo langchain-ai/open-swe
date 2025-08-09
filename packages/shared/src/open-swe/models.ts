@@ -84,6 +84,30 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
+  {
+    label: "Claude 3.5 Sonnet (OpenRouter)",
+    value: "openrouter:anthropic/claude-3.5-sonnet",
+  },
+  {
+    label: "Claude 3.5 Haiku (OpenRouter)",
+    value: "openrouter:anthropic/claude-3.5-haiku",
+  },
+  {
+    label: "GPT-4o (OpenRouter)",
+    value: "openrouter:openai/gpt-4o",
+  },
+  {
+    label: "GPT-4o Mini (OpenRouter)",
+    value: "openrouter:openai/gpt-4o-mini",
+  },
+  {
+    label: "Llama 3.1 405B (OpenRouter)",
+    value: "openrouter:meta-llama/llama-3.1-405b-instruct",
+  },
+  {
+    label: "Llama 3.1 70B (OpenRouter)",
+    value: "openrouter:meta-llama/llama-3.1-70b-instruct",
+  },
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
