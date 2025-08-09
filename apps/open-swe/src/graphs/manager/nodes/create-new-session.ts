@@ -26,7 +26,7 @@ import {
 } from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";

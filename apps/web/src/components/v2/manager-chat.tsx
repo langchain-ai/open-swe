@@ -14,6 +14,7 @@ import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
 import { parsePartialJson } from "@langchain/core/output_parsers";
+import { RestartRun } from "./restart-run";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -70,6 +71,11 @@ interface ManagerChatProps {
   isLoading: boolean;
   cancelRun: () => void;
   errorState?: ErrorState | null;
+  // Restart-run controls
+  canRestartRun?: boolean;
+  managerThreadId?: string;
+  plannerThreadId?: string;
+  programmerThreadId?: string;
   githubUser?: {
     login: string;
     avatar_url: string;
@@ -161,6 +167,10 @@ export function ManagerChat({
   isLoading,
   cancelRun,
   errorState,
+  canRestartRun,
+  managerThreadId,
+  plannerThreadId,
+  programmerThreadId,
   githubUser,
 }: ManagerChatProps) {
   return (
@@ -231,6 +241,13 @@ export function ManagerChat({
                     variant="destructive"
                     errorState={errorState}
                     icon={<AlertCircle className="size-4" />}
+                  />
+                ) : null}
+                {canRestartRun && managerThreadId && plannerThreadId ? (
+                  <RestartRun
+                    managerThreadId={managerThreadId}
+                    plannerThreadId={plannerThreadId}
+                    programmerThreadId={programmerThreadId}
                   />
                 ) : null}
               </>
