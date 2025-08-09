@@ -77,7 +77,7 @@ try {
   openrouterPricing = Object.assign(
     {},
     ...openrouterModels.data.map((model) => ({
-      [model.id]: {
+      [`openrouter:${model.id}`]: {
         inputPrice: Number(model.pricing.prompt) * 1000000,
         outputPrice: Number(model.pricing.completion) * 1000000,
         cachePrice: Number(model.pricing.input_cache_read) * 1000000,
