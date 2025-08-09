@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { issueWebhookHandler } from "./github/issue-webhook.js";
+import { unifiedWebhookHandler } from "./github/unified-webhook.js";
 
 export const app = new Hono();
 
-app.post("/webhooks/github", issueWebhookHandler);
+app.post("/webhooks/github", unifiedWebhookHandler);
