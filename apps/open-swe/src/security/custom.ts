@@ -2,8 +2,6 @@ import { STUDIO_USER_ID } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import * as crypto from "node:crypto";
 
-// ----- Simple Bearer API Key Auth (timing-safe compare + rotation + rate limiting)
-
 function sha256(value: string): Buffer {
   return crypto.createHash("sha256").update(value, "utf8").digest();
 }

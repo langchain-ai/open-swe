@@ -18,9 +18,7 @@ import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { getGitHubPatFromRequest } from "../utils/github-pat.js";
-import {
-  validateApiBearerToken,
-} from "./custom.js";
+import { validateApiBearerToken } from "./custom.js";
 
 // TODO: Export from LangGraph SDK
 export interface BaseAuthReturn {
@@ -69,7 +67,10 @@ export const auth = new Auth()
 
     // Bearer token auth (simple API key) — only when header is present
     const authorizationHeader = request.headers.get("authorization");
-    if (authorizationHeader && authorizationHeader.toLowerCase().startsWith("bearer ")) {
+    if (
+      authorizationHeader &&
+      authorizationHeader.toLowerCase().startsWith("bearer ")
+    ) {
       const token = authorizationHeader.slice(7).trim();
       if (!token) {
         throw new HTTPException(401, { message: "Missing bearer token" });
@@ -77,7 +78,6 @@ export const auth = new Auth()
 
       const user = validateApiBearerToken(token);
       if (user) {
-        console.log("VERIFIED USER!")
         return user;
       }
       throw new HTTPException(401, { message: "Invalid API token" });
