@@ -23,6 +23,13 @@ export interface CircuitBreakerState {
   openedAt?: number;
 }
 
+export interface ApiKeyRotationState {
+  keys: string[];
+  currentIndex: number;
+  lastUsedTime: number;
+  cooldownUntil: number;
+}
+
 interface ModelLoadConfig {
   provider: Provider;
   modelName: string;
@@ -93,6 +100,9 @@ const providerToApiKey = (
 export class ModelManager {
   private config: ModelManagerConfig;
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+  private apiKeys: Map<Provider, ApiKeyRotationState> = new Map();
+  // Store the last reset time for daily rotation
+  private lastDailyReset: Map<Provider, number> = new Map();
 
   constructor(config: Partial<ModelManagerConfig> = {}) {
     this.config = { ...DEFAULT_MODEL_MANAGER_CONFIG, ...config };
