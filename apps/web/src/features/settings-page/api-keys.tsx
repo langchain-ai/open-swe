@@ -43,6 +43,9 @@ const API_KEY_DEFINITIONS = {
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
+    { id: "moonshotApiKey", name: "MoonshotAI" },
+    { id: "deepseekApiKey", name: "DeepSeek" },
+    { id: "qwenApiKey", name: "Qwen (Alibaba Cloud)" },
   ],
   // infrastructure: [
   //   {

@@ -84,6 +84,29 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
+  // MoonshotAI models
+  {
+    label: "Kimi K2 Preview",
+    value: "moonshot-ai:kimi-k2-0711-preview",
+  },
+  // DeepSeek models
+  {
+    label: "DeepSeek R1 (Reasoner)",
+    value: "deepseek:deepseek-reasoner",
+  },
+  {
+    label: "DeepSeek V3 (Chat)",
+    value: "deepseek:deepseek-chat",
+  },
+  // Qwen models
+  {
+    label: "Qwen Plus",
+    value: "qwen:qwen-plus",
+  },
+  {
+    label: "Qwen3 Coder Plus",
+    value: "qwen:qwen3-coder-plus",
+  },
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
