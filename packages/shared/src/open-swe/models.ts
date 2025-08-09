@@ -1,3 +1,13 @@
+import type { OpenrouterModelsResponse } from "./get-models.js";
+import { getOpenrouterModels } from "./get-models.js";
+
+const models: OpenrouterModelsResponse = await getOpenrouterModels();
+const openrouterModels: { label: string; value: string }[] = models.data.map(
+  (model) => ({
+    label: `${model.name} (Openrouter)`,
+    value: `openrouter:${model.id}`,
+  }),
+);
 export const MODEL_OPTIONS = [
   // TODO: Test these then re-enable
   // {
@@ -84,30 +94,7 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
-  {
-    label: "Claude 3.5 Sonnet (OpenRouter)",
-    value: "openrouter:anthropic/claude-3.5-sonnet",
-  },
-  {
-    label: "Claude 3.5 Haiku (OpenRouter)",
-    value: "openrouter:anthropic/claude-3.5-haiku",
-  },
-  {
-    label: "GPT-4o (OpenRouter)",
-    value: "openrouter:openai/gpt-4o",
-  },
-  {
-    label: "GPT-4o Mini (OpenRouter)",
-    value: "openrouter:openai/gpt-4o-mini",
-  },
-  {
-    label: "Llama 3.1 405B (OpenRouter)",
-    value: "openrouter:meta-llama/llama-3.1-405b-instruct",
-  },
-  {
-    label: "Llama 3.1 70B (OpenRouter)",
-    value: "openrouter:meta-llama/llama-3.1-70b-instruct",
-  },
+  ...openrouterModels,
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(

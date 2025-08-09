@@ -1,16 +1,16 @@
-import {
-  ConfigurableModel,
-  initChatModel,
-} from "langchain/chat_models/universal";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { createLogger, LogLevel } from "../logger.js";
+import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+import { decryptSecret } from "@open-swe/shared/crypto";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@open-swe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { decryptSecret } from "@open-swe/shared/crypto";
-import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  ConfigurableModel,
+  initChatModel,
+} from "langchain/chat_models/universal";
+import { createLogger, LogLevel } from "../logger.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -403,11 +403,11 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
       },
       openrouter: {
-        [LLMTask.PLANNER]: "anthropic/claude-3.5-sonnet",
-        [LLMTask.PROGRAMMER]: "anthropic/claude-3.5-sonnet",
-        [LLMTask.REVIEWER]: "anthropic/claude-3.5-sonnet",
-        [LLMTask.ROUTER]: "anthropic/claude-3.5-haiku",
-        [LLMTask.SUMMARIZER]: "anthropic/claude-3.5-sonnet",
+        [LLMTask.PLANNER]: "openai/gpt-5",
+        [LLMTask.PROGRAMMER]: "qwen/qwen3-coder",
+        [LLMTask.REVIEWER]: "z-ai/glm-4.5",
+        [LLMTask.ROUTER]: "openai/gpt-oss-120b",
+        [LLMTask.SUMMARIZER]: "z-ai/glm-4.5",
       },
     };
 
