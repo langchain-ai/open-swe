@@ -1,9 +1,10 @@
 import { STUDIO_USER_ID } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
-import * as crypto from "node:crypto";
+import * as bcrypt from "bcrypt";
 
-function sha256(value: string): Buffer {
-  return crypto.createHash("sha256").update(value, "utf8").digest();
+function bcryptHash(value: string): string {
+  // Use 12 salt rounds for reasonable security
+  return bcrypt.hashSync(value, 12);
 }
 
 function getConfiguredApiTokens(): string[] {
@@ -21,18 +22,15 @@ function getConfiguredApiTokens(): string[] {
 }
 
 // Pre-hash configured tokens for constant length comparisons
-let cachedAllowedTokenHashes: Buffer[] | null = null;
-function getAllowedTokenHashes(): Buffer[] {
+let cachedAllowedTokenHashes: string[] | null = null;
+function getAllowedTokenHashes(): string[] {
   if (cachedAllowedTokenHashes) return cachedAllowedTokenHashes;
   const tokens = getConfiguredApiTokens();
-  cachedAllowedTokenHashes = tokens.map((t) => sha256(t));
+  cachedAllowedTokenHashes = tokens.map((t) => bcryptHash(t));
   return cachedAllowedTokenHashes;
 }
 
-function timingSafeEqualBuffer(a: Buffer, b: Buffer): boolean {
-  // Both buffers are same length (32 bytes) since they are SHA-256 hashes
-  return crypto.timingSafeEqual(a, b);
-}
+// bcrypt.compareSync is timing-safe, so we no longer need this function.
 
 export function validateApiBearerToken(token: string) {
   const allowed = getAllowedTokenHashes();
@@ -40,8 +38,8 @@ export function validateApiBearerToken(token: string) {
     // Not configured; treat as invalid
     return null;
   }
-  const candidateHash = sha256(token);
-  const isValid = allowed.some((h) => timingSafeEqualBuffer(candidateHash, h));
+  // Compare the token against each allowed hash using bcrypt
+  const isValid = allowed.some((h) => bcrypt.compareSync(token, h));
   if (isValid) {
     return {
       identity: STUDIO_USER_ID,
