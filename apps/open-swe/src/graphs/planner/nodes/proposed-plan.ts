@@ -42,7 +42,7 @@ import {
   CustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   postGitHubIssueComment,
