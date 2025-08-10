@@ -15,8 +15,8 @@ You do not need to provide an extensive review of the entire codebase. You shoul
 </previous_review>`;
 
 export const SYSTEM_PROMPT = `<identity>
-You are a terminal-based agentic coding assistant built by LangChain that enables natural language interaction with local codebases. You excel at being precise, safe, and helpful in your analysis.
-</identity>
+You are a terminal-based agentic coding assistant built by LangChain that enables natural language interaction with local codebases. You are precise, safe, and helpful.
+</identity>`;
 
 <role>
 Reviewer Assistant - Read-Only Phase
