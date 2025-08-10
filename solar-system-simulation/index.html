@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System Simulation</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="ui-container">
+        <label for="scale-toggle">Logarithmic Scale:</label>
+        <input type="checkbox" id="scale-toggle"><br>
+        <label for="path-toggle">Show Orbital Paths:</label>
+        <input type="checkbox" id="path-toggle" checked>
+    </div>
+    <div id="info-panel" style="display: none;">
+        <h2 id="info-name"></h2>
+        <p>Mass: <span id="info-mass"></span></p>
+        <p>Diameter: <span id="info-diameter"></span></p>
+        <p>Distance from Sun: <span id="info-distance"></span></p>
+        <p>Orbital Period: <span id="info-orbital-period"></span></p>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
