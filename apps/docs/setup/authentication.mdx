@@ -35,6 +35,47 @@ The Next.js application includes a proxy route (`apps/web/src/app/api/[..._path]
   with the LangGraph server.
 </Tip>
 
+## Simple API Key (Bearer) Authentication
+
+For local development and scripted access, the LangGraph server also supports a simple bearer token scheme. When a request includes an `Authorization: Bearer <token>` header, this path is used and the rest of the auth flow is skipped.
+
+### Setup (development)
+
+- **Generate a token** (32+ bytes, URL-safe):
+  - OpenSSL: `openssl rand -hex 32`
+- **Add to your `.env` for the LangGraph server**:
+
+```bash
+API_BEARER_TOKEN=<your-generated-token>
+```
+
+- For multiple/rotation: use comma-separated tokens
+
+```bash
+API_BEARER_TOKENS=<token1>,<token2>,<token3>
+```
+
+Restart the LangGraph server after updating environment variables.
+
+### Usage
+
+```typescript
+import { Client } from "@langchain/langgraph-sdk";
+
+const client = new Client({
+  apiUrl: process.env.LANGGRAPH_API_URL,
+  defaultHeaders: {
+    authorization: `Bearer ${process.env.API_BEARER_TOKEN}`,
+  },
+});
+```
+
+### Notes
+
+- **Precedence**: If the `Authorization` header is present, bearer auth is used; otherwise the existing GitHub-based flow applies.
+- **Rotation**: Add a new token to `API_BEARER_TOKENS`, deploy/restart, migrate clients, then remove old tokens and redeploy.
+- **Scope**: All bearer tokens currently map to the same internal identity and permissions. If you need per-token identities/quotas, reach out to adjust the configuration.
+
 ### Header Injection System
 
 The proxy route automatically injects the following encrypted headers into each request:
