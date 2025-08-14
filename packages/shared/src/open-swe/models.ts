@@ -1,4 +1,14 @@
+import { getOpenRouterModels } from "./openrouter.js";
+
+const openRouterModels = await getOpenRouterModels(
+  process.env.OPENROUTER_API_KEY ?? "",
+);
+
 export const MODEL_OPTIONS = [
+  ...openRouterModels.map((model) => ({
+    label: model.name,
+    value: `openrouter:${model.id}`,
+  })),
   // TODO: Test these then re-enable
   // {
   //   label: "Claude Sonnet 4 (Extended Thinking)",
