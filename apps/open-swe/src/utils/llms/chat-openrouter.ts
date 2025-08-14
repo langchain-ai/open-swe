@@ -2,12 +2,16 @@ import {
   BaseChatModel,
   type BaseChatModelParams,
 } from "@langchain/core/language_models/chat_models";
-import { AIMessage, BaseMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  AIMessageChunk,
+  BaseMessage,
+} from "@langchain/core/messages";
 import { ChatResult } from "@langchain/core/outputs";
-import { getModelManager } from "./model-manager.js";
 import { OpenRouterKeyManager } from "@open-swe/shared/open-swe/openrouter";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { getMessageContentString } from "@open-swe/shared/messages";
 
 export interface ChatOpenRouterParams extends BaseChatModelParams {
   modelName: string;
@@ -23,7 +27,6 @@ export class ChatOpenRouter extends BaseChatModel {
   private maxTokens: number;
   private keyManager: OpenRouterKeyManager;
   private graphConfig: GraphConfig;
-  private task: LLMTask;
 
   constructor(fields: ChatOpenRouterParams) {
     super(fields);
@@ -31,7 +34,6 @@ export class ChatOpenRouter extends BaseChatModel {
     this.temperature = fields.temperature;
     this.maxTokens = fields.maxTokens;
     this.graphConfig = fields.graphConfig;
-    this.task = fields.task;
     const openRouterKeys =
       (this.graphConfig.configurable?.apiKeys?.openrouter as string[]) ?? [];
     this.keyManager = new OpenRouterKeyManager(openRouterKeys);
@@ -45,7 +47,6 @@ export class ChatOpenRouter extends BaseChatModel {
     messages: BaseMessage[],
     options: this["ParsedCallOptions"],
   ): Promise<ChatResult> {
-    const modelManager = getModelManager();
     let attempts = 0;
     const maxAttempts = this.keyManager.isAllKeysUsed()
       ? 1
@@ -58,11 +59,10 @@ export class ChatOpenRouter extends BaseChatModel {
         return {
           generations: [
             {
-              message: new AIMessage(response.content),
-              text:
-                typeof response.content === "string"
-                  ? response.content
-                  : JSON.stringify(response.content),
+              message: new AIMessage({
+                content: getMessageContentString(response.content),
+              }),
+              text: getMessageContentString(response.content),
             },
           ],
           llmOutput: {},
@@ -84,7 +84,7 @@ export class ChatOpenRouter extends BaseChatModel {
   public async invoke(
     messages: BaseMessage[],
     options: this["ParsedCallOptions"] & { apiKey: string },
-  ): Promise<AIMessage> {
+  ): Promise<AIMessageChunk> {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -110,13 +110,15 @@ export class ChatOpenRouter extends BaseChatModel {
       throw error;
     }
 
-    const json = await response.json();
-    return new AIMessage({
+    const json = (await response.json()) as {
+      choices: { message: { content: string } }[];
+    };
+    return new AIMessageChunk({
       content: json.choices[0].message.content,
     });
   }
 
-  public _combineLLMOutput(...llmOutputs: any[]): any {
+  public _combineLLMOutput(): any {
     return {};
   }
 }

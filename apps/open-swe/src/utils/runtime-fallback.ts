@@ -118,7 +118,7 @@ export class FallbackRunnable<
           graphConfig,
         );
         let runnableToUse: Runnable<BaseLanguageModelInput, AIMessageChunk> =
-          model;
+          model as any;
 
         // Check if provider-specific tools exist for this provider
         const providerSpecificTools =

@@ -42,7 +42,7 @@ export async function getOpenRouterModels(
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.statusText}`);
     }
-    const json = await response.json();
+    const json = (await response.json()) as { data: OpenRouterProvider[] };
     return json.data;
   } catch (error) {
     console.error("Error fetching OpenRouter models:", error);
@@ -74,5 +74,9 @@ export class OpenRouterKeyManager {
 
   public isAllKeysUsed(): boolean {
     return this.currentIndex === this.keys.length -1;
+  }
+
+  public getKeys(): string[] {
+    return this.keys;
   }
 }
