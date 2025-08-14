@@ -317,6 +317,44 @@ export async function markPullRequestReadyForReview({
   );
 }
 
+export async function updatePullRequest({
+  owner,
+  repo,
+  pullNumber,
+  title,
+  body,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  title?: string;
+  body?: string;
+  githubInstallationToken: string;
+}) {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: pullRequest } = await octokit.pulls.update({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        ...(title && { title }),
+        ...(body && { body }),
+      });
+
+      return pullRequest;
+    },
+    githubInstallationToken,
+    "Failed to update pull request",
+    { pullNumber, owner, repo },
+    1,
+  );
+}
+
 export async function getIssue({
   owner,
   repo,

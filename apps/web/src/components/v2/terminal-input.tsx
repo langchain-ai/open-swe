@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import {
   API_KEY_REQUIRED_MESSAGE,
+  GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
@@ -163,6 +164,7 @@ export function TerminalInput({
               recursion_limit: 400,
               configurable: {
                 ...defaultConfig,
+                [GITHUB_USER_LOGIN_HEADER]: user.login,
               },
             },
             ifNotExists: "create",
