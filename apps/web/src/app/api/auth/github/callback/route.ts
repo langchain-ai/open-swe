@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     // Verify state parameter to prevent CSRF attacks
     const storedState = request.cookies.get(GITHUB_AUTH_STATE_COOKIE)?.value;
 
-    if (storedState && state !== storedState) {
+    if (!storedState || state !== storedState) {
       return NextResponse.redirect(
         new URL("/?error=invalid_state", request.url),
       );
