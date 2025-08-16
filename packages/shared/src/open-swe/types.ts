@@ -1,31 +1,31 @@
-import "@langchain/langgraph/zod";
-import { z } from "zod";
+import { BaseMessage } from "@langchain/core/messages";
+import {
+  uiMessageReducer,
+  type RemoveUIMessage,
+  type UIMessage,
+} from "@langchain/langgraph-sdk/react-ui";
 import {
   LangGraphRunnableConfig,
   Messages,
   messagesStateReducer,
   MessagesZodState,
 } from "@langchain/langgraph/web";
-import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
+import "@langchain/langgraph/zod";
+import { withLangGraph } from "@langchain/langgraph/zod";
+import { z } from "zod";
+import { tokenDataReducer } from "../caching.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
 import {
-  uiMessageReducer,
-  type UIMessage,
-  type RemoveUIMessage,
-} from "@langchain/langgraph-sdk/react-ui";
-import {
+  DEFAULT_MCP_SERVERS,
+  GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
+  GITHUB_PAT,
   GITHUB_TOKEN_COOKIE,
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
-  GITHUB_PAT,
-  DEFAULT_MCP_SERVERS,
-  GITHUB_INSTALLATION_ID,
 } from "../constants.js";
-import { withLangGraph } from "@langchain/langgraph/zod";
-import { BaseMessage } from "@langchain/core/messages";
-import { tokenDataReducer } from "../caching.js";
+import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 
 export interface CacheMetrics {
   cacheCreationInputTokens: number;
@@ -338,7 +338,7 @@ export const GraphConfigurationMetadata: {
   },
   plannerModelName: {
     x_open_swe_ui_config: {
-      type: "select",
+      type: "combobox",
       default: "anthropic:claude-sonnet-4-0",
       description:
         "The model to use for planning tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
@@ -357,7 +357,7 @@ export const GraphConfigurationMetadata: {
   },
   programmerModelName: {
     x_open_swe_ui_config: {
-      type: "select",
+      type: "combobox",
       default: "anthropic:claude-sonnet-4-0",
       description:
         "The model to use for programming/other advanced technical tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
@@ -376,7 +376,7 @@ export const GraphConfigurationMetadata: {
   },
   reviewerModelName: {
     x_open_swe_ui_config: {
-      type: "select",
+      type: "combobox",
       default: "anthropic:claude-sonnet-4-0",
       description:
         "The model to use for reviewer tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
@@ -395,7 +395,7 @@ export const GraphConfigurationMetadata: {
   },
   routerModelName: {
     x_open_swe_ui_config: {
-      type: "select",
+      type: "combobox",
       default: "anthropic:claude-3-5-haiku-latest",
       description:
         "The model to use for routing tasks, and other simple generations. This model should be good at tool calling/structured output.",
@@ -414,7 +414,7 @@ export const GraphConfigurationMetadata: {
   },
   summarizerModelName: {
     x_open_swe_ui_config: {
-      type: "select",
+      type: "combobox",
       default: "anthropic:claude-sonnet-4-0",
       description:
         "The model to use for summarizing the conversation history, or extracting key context from large inputs. This model should have strong context retention/understanding capabilities, and should be good at tool calling/structured output.",

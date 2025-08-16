@@ -1,3 +1,13 @@
+import type { OpenrouterModelsResponse } from "./get-models.js";
+import { getOpenrouterModels } from "./get-models.js";
+
+const models: OpenrouterModelsResponse = await getOpenrouterModels();
+const openrouterModels: { label: string; value: string }[] = models.data
+  .map((model) => ({
+    label: `${model.name} (Openrouter)`,
+    value: `openrouter:${model.id}`,
+  }))
+  .sort((a, b) => a.value.localeCompare(b.value));
 export const MODEL_OPTIONS = [
   // TODO: Test these then re-enable
   // {
@@ -84,6 +94,7 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
+  ...openrouterModels,
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(

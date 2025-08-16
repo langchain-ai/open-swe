@@ -21,6 +21,7 @@ import _ from "lodash";
 import { cn } from "@/lib/utils";
 import { useQueryState } from "nuqs";
 import { BasicMarkdownText } from "../thread/markdown-text";
+import { Combobox } from "@/components/ui/combobox";
 
 interface Option {
   label: string;
@@ -37,6 +38,7 @@ interface ConfigFieldProps {
     | "switch"
     | "slider"
     | "select"
+    | "combobox"
     | "json";
   description?: string;
   placeholder?: string;
@@ -239,6 +241,19 @@ export function ConfigField({
             ))}
           </SelectContent>
         </Select>
+      )}
+
+      {type === "combobox" && (
+        <Combobox
+          id={id}
+          options={options}
+          value={currentValue ?? ""}
+          onValueChange={handleChange}
+          placeholder={placeholder || "Select an option"}
+          searchPlaceholder={`Search ${label.toLowerCase()}...`}
+          emptyText={`No ${label.toLowerCase()} found.`}
+          size="default"
+        />
       )}
 
       {type === "json" && (

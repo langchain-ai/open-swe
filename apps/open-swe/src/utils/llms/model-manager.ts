@@ -1,16 +1,16 @@
-import {
-  ConfigurableModel,
-  initChatModel,
-} from "langchain/chat_models/universal";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { createLogger, LogLevel } from "../logger.js";
+import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+import { decryptSecret } from "@open-swe/shared/crypto";
+import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@open-swe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { decryptSecret } from "@open-swe/shared/crypto";
-import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import {
+  ConfigurableModel,
+  initChatModel,
+} from "langchain/chat_models/universal";
+import { createLogger, LogLevel } from "../logger.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -47,6 +47,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "openrouter",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -82,6 +83,8 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "openrouter":
+      return apiKeys.openrouterApiKey;
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -127,7 +130,7 @@ export class ModelManager {
     }
 
     // If the user is allowed, we can return early
-    if (isAllowedUser(userLogin)) {
+    if (isAllowedUser(userLogin) && provider !== "openrouter") {
       return null;
     }
 
@@ -178,10 +181,25 @@ export class ModelManager {
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
 
+    // For OpenRouter, use 'openai' as the provider and configure baseURL and headers
+    const actualProvider = provider === "openrouter" ? "openai" : provider;
+
     const modelOptions: InitChatModelArgs = {
-      modelProvider: provider,
+      modelProvider: actualProvider,
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
+      // OpenRouter-specific configuration
+      ...(provider === "openrouter"
+        ? {
+            configuration: {
+              baseURL: "https://openrouter.ai/api/v1",
+              defaultHeaders: {
+                "HTTP-Referer": "https://swe.langchain.com",
+                "X-Title": "Open SWE",
+              },
+            },
+          }
+        : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -198,9 +216,12 @@ export class ModelManager {
             }),
     };
 
-    logger.debug("Initializing model", {
+    logger.info("Initializing model", {
       provider,
+      actualProvider,
       modelName,
+      hasApiKey: !!apiKey,
+      isOpenRouter: provider === "openrouter",
     });
 
     return await initChatModel(modelName, modelOptions);
@@ -218,8 +239,14 @@ export class ModelManager {
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
-      const provider = defaultConfig.modelProvider as Provider;
+      let provider = defaultConfig.modelProvider as Provider;
       const modelName = defaultConfig.model;
+
+      // If the model was originally an OpenRouter model but got mapped to 'openai',
+      // we need to correct the provider back to 'openrouter'
+      if (provider === "openai" && baseConfig.provider === "openrouter") {
+        provider = "openrouter";
+      }
 
       if (provider && modelName) {
         const isThinkingModel = baseConfig.thinkingModel;
@@ -398,6 +425,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      openrouter: {
+        [LLMTask.PLANNER]: "openai/gpt-5",
+        [LLMTask.PROGRAMMER]: "qwen/qwen3-coder",
+        [LLMTask.REVIEWER]: "z-ai/glm-4.5",
+        [LLMTask.ROUTER]: "openai/gpt-oss-120b",
+        [LLMTask.SUMMARIZER]: "z-ai/glm-4.5",
       },
     };
 

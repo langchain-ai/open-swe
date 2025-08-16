@@ -7,6 +7,7 @@ export type ConfigurableFieldUIType =
   | "boolean"
   | "slider"
   | "select"
+  | "combobox"
   | "json";
 
 /**

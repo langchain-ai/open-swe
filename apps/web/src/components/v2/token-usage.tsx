@@ -1,20 +1,8 @@
-import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
 import {
   calculateCostSavings,
   tokenDataReducer,
 } from "@open-swe/shared/caching";
-import { Badge } from "../ui/badge";
-import { Separator } from "../ui/separator";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../ui/hover-card";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "../ui/collapsible";
+import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
 import {
   ChartNoAxesColumnIncreasing,
   ChevronDown,
@@ -24,6 +12,19 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
+import { getOpenrouterModels } from "../../../../../packages/shared/src/open-swe/get-models";
+import { Badge } from "../ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../ui/collapsible";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "../ui/hover-card";
+import { Separator } from "../ui/separator";
 
 interface TokenUsageProps {
   tokenData?: ModelTokenData[] | CacheMetrics[];
@@ -64,16 +65,37 @@ function mergeModelTokenData(tokenData: ModelTokenData[]): ModelTokenData[] {
   return tokenDataReducer([firstTokenData], restTokenData);
 }
 
+// Get all available models on Openrouter and their pricing.
+type PricingMap = Record<
+  string,
+  { inputPrice: number; outputPrice: number; cachePrice: number }
+>;
+
+let openrouterPricing: PricingMap;
+try {
+  const openrouterModels = await getOpenrouterModels();
+  openrouterPricing = Object.assign(
+    {},
+    ...openrouterModels.data.map((model) => ({
+      [`openrouter:${model.id}`]: {
+        inputPrice: Number(model.pricing.prompt) * 1000000,
+        outputPrice: Number(model.pricing.completion) * 1000000,
+        cachePrice: Number(model.pricing.input_cache_read) * 1000000,
+      },
+    })),
+  );
+} catch (error) {
+  openrouterPricing = {};
+  console.error("Error fetching Openrouter models:", error);
+}
+
 function getModelPricingPlaceholder(model: string): {
   inputPrice: number;
   outputPrice: number;
   cachePrice: number;
 } {
   // Actual Claude pricing per 1M tokens based on official pricing table
-  const pricingMap: Record<
-    string,
-    { inputPrice: number; outputPrice: number; cachePrice: number }
-  > = {
+  const pricingMap: PricingMap = {
     // Claude 4 models
     "anthropic:claude-4-opus": {
       inputPrice: 15.0,
@@ -158,6 +180,8 @@ function getModelPricingPlaceholder(model: string): {
       outputPrice: 2.5,
       cachePrice: 0.3,
     },
+    // OpenRouter models (approximate pricing - varies by provider)
+    ...openrouterPricing,
   };
 
   return (
