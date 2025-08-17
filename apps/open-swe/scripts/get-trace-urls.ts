@@ -18,19 +18,19 @@ interface TraceUrls {
 async function getTraceUrls(managerThreadId: string): Promise<TraceUrls> {
   const {
     LANGGRAPH_API_URL: apiUrl,
-    LANGCHAIN_API_KEY: apiKey,
     LANGSMITH_WORKSPACE_ID: orgId,
     LANGSMITH_PROJECT_ID: projectId,
+    API_BEARER_TOKEN: apiBearerToken,
   } = process.env;
 
-  const missing = [apiUrl, apiKey, orgId, projectId]
+  const missing = [apiUrl, orgId, projectId, apiBearerToken]
     .map((val, i) =>
       !val
         ? [
             "LANGGRAPH_API_URL",
-            "LANGCHAIN_API_KEY",
             "LANGSMITH_WORKSPACE_ID",
             "LANGSMITH_PROJECT_ID",
+            "API_BEARER_TOKEN",
           ][i]
         : null,
     )
@@ -44,9 +44,8 @@ async function getTraceUrls(managerThreadId: string): Promise<TraceUrls> {
 
   const client = new Client({
     apiUrl: apiUrl!,
-    apiKey: apiKey!,
     defaultHeaders: {
-      "x-auth-scheme": "langsmith",
+      authorization: `Bearer ${apiBearerToken!}`,
     },
   });
   const constructUrl = (runId: string) =>
