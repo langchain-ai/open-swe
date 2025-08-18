@@ -25,6 +25,7 @@ import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
+import { migrateApiKeys, hasOldFormatApiKeys } from "@/lib/api-key-migration";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -75,7 +76,7 @@ export function TerminalInput({
 }: TerminalInputProps) {
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
-  const { getConfig } = useConfigStore();
+  const { getConfig, updateConfig } = useConfigStore();
   const { selectedRepository, repositories } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
@@ -104,7 +105,14 @@ export function TerminalInput({
       return;
     }
 
-    const defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
+    let defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
+    if (hasOldFormatApiKeys(defaultConfig)) {
+      defaultConfig = migrateApiKeys(defaultConfig);
+      if (defaultConfig.apiKeys) {
+        // persist in local storage
+        updateConfig(DEFAULT_CONFIG_KEY, "apiKeys", defaultConfig.apiKeys);
+      }
+    }
 
     if (!isAllowedUser(user.login) && !hasApiKeySet(defaultConfig)) {
       toast.error(

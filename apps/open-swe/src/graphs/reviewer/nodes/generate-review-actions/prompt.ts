@@ -139,9 +139,11 @@ By reviewing these actions, and comparing them to the plan and original user req
             - \`timeout\` (optional): The timeout for the command in seconds. Defaults to 60 seconds.
 
     ### Scratchpad tool
-        The \`scratchpad\` tool allows Claude to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.
+        The \`scratchpad\` tool allows you to write to a scratchpad. This is used for writing down findings, and other context which will be useful for the final review.
         Parameters:
             - \`scratchpad\`: A list of strings containing the text to write to the scratchpad.
+
+    {DEV_SERVER_USAGE_PROMPT}
 </tool_usage>
 
 <workspace_information>

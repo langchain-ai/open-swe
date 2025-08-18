@@ -9,14 +9,14 @@ export function hasApiKeySet(config: Record<string, any>) {
   const apiKeys = config.apiKeys || {};
 
   // No providers enabled means user is using default model: anthropic
-  if (enabledProviders.length === 0 && !apiKeys.anthropicApiKey) {
+  if (enabledProviders.length === 0 && !apiKeys.anthropic?.apiKey) {
     return false;
   }
 
   if (
-    (enabledProviders.includes("anthropic") && !apiKeys.anthropicApiKey) ||
-    (enabledProviders.includes("openai") && !apiKeys.openaiApiKey) ||
-    (enabledProviders.includes("google-genai") && !apiKeys.googleApiKey)
+    (enabledProviders.includes("anthropic") && !apiKeys.anthropic?.apiKey) ||
+    (enabledProviders.includes("openai") && !apiKeys.openai?.apiKey) ||
+    (enabledProviders.includes("google") && !apiKeys.google?.apiKey)
   ) {
     return false;
   }

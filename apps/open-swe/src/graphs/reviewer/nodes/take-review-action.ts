@@ -8,6 +8,7 @@ import {
 import {
   createInstallDependenciesTool,
   createShellTool,
+  createDevServerTool,
 } from "../../../tools/index.js";
 import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
 import {
@@ -49,17 +50,21 @@ export async function takeReviewerActions(
     throw new Error("Last message is not an AI message with tool calls.");
   }
 
+  const isLocal = isLocalMode(config);
+
   const shellTool = createShellTool(state, config);
   const searchTool = createGrepTool(state, config);
   const viewTool = createViewTool(state, config);
   const installDependenciesTool = createInstallDependenciesTool(state, config);
   const scratchpadTool = createScratchpadTool("");
+  const devServerTool = createDevServerTool(state);
   const allTools = [
     shellTool,
     searchTool,
     viewTool,
     installDependenciesTool,
     scratchpadTool,
+    ...(isLocal ? [] : [devServerTool]),
   ];
   const toolsMap = Object.fromEntries(
     allTools.map((tool) => [tool.name, tool]),
@@ -73,7 +78,7 @@ export async function takeReviewerActions(
   // Filter out unsafe commands only in local mode
   let modifiedMessage: AIMessage | undefined;
   let wasFiltered = false;
-  if (isLocalMode(config)) {
+  if (isLocal) {
     const filterResult = await filterUnsafeCommands(toolCalls, config);
 
     if (filterResult.wasFiltered) {
@@ -121,7 +126,7 @@ export async function takeReviewerActions(
         (await tool.invoke({
           ...toolCall.args,
           // Only pass sandbox session ID in sandbox mode, not local mode
-          ...(isLocalMode(config) ? {} : { xSandboxSessionId: sandbox.id }),
+          ...(isLocal ? {} : { xSandboxSessionId: sandbox.id }),
         })) as {
           result: string;
           status: "success" | "error";
@@ -174,7 +179,7 @@ export async function takeReviewerActions(
   let pullRequestNumber: number | undefined;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  if (!isLocalMode(config)) {
+  if (!isLocal) {
     const repoPath = getRepoAbsolutePath(state.targetRepository, config);
     const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 

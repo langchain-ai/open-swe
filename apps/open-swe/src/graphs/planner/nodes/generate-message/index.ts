@@ -8,6 +8,7 @@ import {
   createGetURLContentTool,
   createShellTool,
   createSearchDocumentForTool,
+  createDevServerTool,
 } from "../../../../tools/index.js";
 import {
   PlannerGraphState,
@@ -52,6 +53,9 @@ function formatSystemPrompt(
   const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
+
+  const isLocal = isLocalMode(config);
+
   return SYSTEM_PROMPT.replace(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
@@ -64,13 +68,13 @@ function formatSystemPrompt(
   )
     .replaceAll(
       "{CURRENT_WORKING_DIRECTORY}",
-      isLocalMode(config)
+      isLocal
         ? getLocalWorkingDirectory()
         : getRepoAbsolutePath(state.targetRepository),
     )
     .replaceAll(
       "{LOCAL_MODE_NOTE}",
-      isLocalMode(config)
+      isLocal
         ? "<local_mode_note>IMPORTANT: You are running in local mode. When specifying file paths, use relative paths from the current working directory or absolute paths that start with the current working directory. Do NOT use sandbox paths like '/home/daytona/project/'.</local_mode_note>"
         : "",
     )
@@ -95,6 +99,8 @@ export async function generateAction(
   );
   const mcpTools = await getMcpTools(config);
 
+  const isLocal = isLocalMode(config);
+
   const tools = [
     createGrepTool(state, config),
     createShellTool(state, config),
@@ -104,6 +110,7 @@ export async function generateAction(
     ),
     createGetURLContentTool(state),
     createSearchDocumentForTool(state, config),
+    ...(isLocal ? [] : [createDevServerTool(state)]),
     ...mcpTools,
   ];
   logger.info(
