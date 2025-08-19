@@ -32,6 +32,7 @@ import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
 import { OpenSWELogoSVG } from "../icons/openswe";
+import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
 function OpenSettingsButton() {
   return (
@@ -86,6 +87,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const [draftToLoad, setDraftToLoad] = useState("");
   const assistantId: string | undefined = MANAGER_GRAPH_ID;
+  const { getConfig } = useConfigStore();
+  const config = getConfig(DEFAULT_CONFIG_KEY);
   const {
     contentBlocks,
     setContentBlocks,
@@ -95,7 +98,9 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
-  const [shouldCreateIssue, setShouldCreateIssue] = useState(true);
+  const [shouldCreateIssue, setShouldCreateIssue] = useState(
+    config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
+  );
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const displayThreads = threadsMetadata.slice(0, 4);

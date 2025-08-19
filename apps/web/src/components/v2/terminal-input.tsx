@@ -204,7 +204,11 @@ export function TerminalInput({
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
-        setShouldCreateIssue(false);
+        setShouldCreateIssue(
+          defaultConfig?.shouldCreateIssue != null
+            ? !!defaultConfig.shouldCreateIssue
+            : true,
+        );
       } catch (e) {
         if (
           typeof e === "object" &&
