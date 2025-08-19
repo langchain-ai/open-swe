@@ -624,7 +624,7 @@ export const GraphConfiguration = z.object({
   }),
   /**
    * Whether or not to create an issue for this request.
-   * @default false
+   * @default true
    */
   shouldCreateIssue: withLangGraph(z.boolean().optional(), {
     metadata: GraphConfigurationMetadata.shouldCreateIssue,
