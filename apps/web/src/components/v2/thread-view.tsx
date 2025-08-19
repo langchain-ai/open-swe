@@ -409,7 +409,7 @@ export function ThreadView({
           cancelRun={cancelRun}
           errorState={errorState}
           githubUser={user || undefined}
-          disableInput={shouldDisableManagerInput}
+          disableSubmit={shouldDisableManagerInput}
         />
         {/* Right Side - Actions & Plan */}
         <div
