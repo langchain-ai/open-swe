@@ -45,6 +45,7 @@ import {
 } from "../../../utils/github/types.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -191,6 +192,9 @@ export async function openPullRequest(
     | GitHubPullRequestList[number]
     | GitHubPullRequestUpdate
     | null = null;
+
+  const prBody = `${shouldCreateIssue(config) ? `Fixes #${state.githubIssueId}` : ""}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`;
+
   if (!prForTask) {
     // No PR created yet. Shouldn't be possible, but we have a condition here anyway
     pullRequest = await createPullRequest({
@@ -198,7 +202,7 @@ export async function openPullRequest(
       repo,
       headBranch: branchName,
       title,
-      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
+      body: prBody,
       githubInstallationToken,
       baseBranch: state.targetRepository.branch,
     });
@@ -208,7 +212,7 @@ export async function openPullRequest(
       owner,
       repo,
       title,
-      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
+      body: prBody,
       pullNumber: prForTask,
       githubInstallationToken,
     });

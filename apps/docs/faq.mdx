@@ -16,6 +16,15 @@ description: Frequently Asked Questions
   Yes. When using Anthropic models, all input tokens are cached on Anthropic's servers.
 </Accordion>
 
+<Accordion title="Can I disable Open SWE from creating an issue when I submit a request?">
+  Yes. There's two ways to disable Open SWE from creating an issue when you submit a request:
+
+  1. Toggle the 'eye' icon in the main chat area when submitting a request.
+  2. In the configuration tab in settings, toggle the 'Should Create Issue' switch.
+
+  By default, it's set to `true`. By modifying this setting in the configuration tab, all runs will default to that setting. You may override this setting on a per-run basis by toggling the 'eye' icon in the main chat area.
+</Accordion>
+
 <Accordion title="My run failed midway through. What now?">
   We're sorry you're experiencing this! Open SWE will automatically commit any changes it makes to a draft pull request. Please check the draft pull request and make any necessary changes.
 

@@ -21,6 +21,7 @@ import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../shell-executor/index.js";
+import { shouldCreateIssue } from "../should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-Git");
 
@@ -336,33 +337,39 @@ export async function checkoutBranchAndCommit(
   let updatedTaskPlan: TaskPlan | undefined;
   const activeTask = getActiveTask(options.taskPlan);
   const prForTask = getPullRequestNumberFromActiveTask(options.taskPlan);
+
   if (!prForTask) {
     logger.info("First commit detected, creating a draft pull request.");
+    const hasIssue = shouldCreateIssue(config);
+
     const pullRequest = await createPullRequest({
       owner: targetRepository.owner,
       repo: targetRepository.repo,
       headBranch: branchName,
       title: `[WIP]: ${activeTask?.title ?? "Open SWE task"}`,
-      body: `**WORK IN PROGRESS OPEN SWE PR**\n\nFixes: #${options.githubIssueId}`,
+      body: `**WORK IN PROGRESS OPEN SWE PR**${hasIssue ? `\n\nFixes: #${options.githubIssueId}` : ""}`,
       githubInstallationToken: options.githubInstallationToken,
       draft: true,
       baseBranch: targetRepository.branch,
       nullOnError: true,
     });
+
     if (pullRequest) {
       updatedTaskPlan = addPullRequestNumberToActiveTask(
         options.taskPlan,
         pullRequest.number,
       );
-      await addTaskPlanToIssue(
-        {
-          githubIssueId: options.githubIssueId,
-          targetRepository,
-        },
-        config,
-        updatedTaskPlan,
-      );
-      logger.info(`Draft pull request created: #${pullRequest.number}`);
+      if (hasIssue) {
+        await addTaskPlanToIssue(
+          {
+            githubIssueId: options.githubIssueId,
+            targetRepository,
+          },
+          config,
+          updatedTaskPlan,
+        );
+        logger.info(`Draft pull request created: #${pullRequest.number}`);
+      }
     }
   }
 

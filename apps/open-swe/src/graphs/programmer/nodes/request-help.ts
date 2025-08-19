@@ -21,6 +21,8 @@ import {
   REQUEST_HELP_NODE_ID,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { postGitHubIssueComment } from "../../../utils/github/plan.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:
@@ -60,12 +62,13 @@ export async function requestHelp(
     throw new Error("Thread ID not found in config");
   }
 
-  const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
-  const userTag = userLogin ? `@${userLogin} ` : "";
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
+    const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
+    const userTag = userLogin ? `@${userLogin} ` : "";
+    const runUrl = getOpenSweAppUrl(threadId);
 
-  const runUrl = getOpenSweAppUrl(threadId);
-  const commentBody = runUrl
-    ? `### 🤖 Open SWE Needs Help
+    const commentBody = runUrl
+      ? `### 🤖 Open SWE Needs Help
 
 ${userTag}I've encountered a situation where I need human assistance to continue.
 
@@ -75,7 +78,7 @@ ${toolCall.args.help_request}
 You can view and respond to this request in the [Open SWE interface](${runUrl}).
 
 Please provide guidance so I can continue working on this issue.`
-    : `### 🤖 Open SWE Needs Help
+      : `### 🤖 Open SWE Needs Help
 
 ${userTag}I've encountered a situation where I need human assistance to continue.
 
@@ -84,12 +87,13 @@ ${toolCall.args.help_request}
 
 Please check the Open SWE interface to respond to this request.`;
 
-  await postGitHubIssueComment({
-    githubIssueId: state.githubIssueId,
-    targetRepository: state.targetRepository,
-    commentBody,
-    config,
-  });
+    await postGitHubIssueComment({
+      githubIssueId: state.githubIssueId,
+      targetRepository: state.targetRepository,
+      commentBody,
+      config,
+    });
+  }
 
   const interruptInput: HumanInterrupt = {
     action_request: {

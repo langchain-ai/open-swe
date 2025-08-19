@@ -25,6 +25,7 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "HandleCompletedTask");
 
@@ -88,7 +89,7 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  if (!isLocalMode(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,
