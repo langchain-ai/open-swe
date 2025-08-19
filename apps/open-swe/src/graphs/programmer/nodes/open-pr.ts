@@ -14,7 +14,7 @@ import {
 } from "../../../utils/github/git.js";
 import {
   createPullRequest,
-  markPullRequestReadyForReview,
+  updatePullRequest,
 } from "../../../utils/github/api.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
@@ -44,6 +44,7 @@ import {
   GitHubPullRequestUpdate,
 } from "../../../utils/github/types.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -180,6 +181,8 @@ export async function openPullRequest(
 
   const { title, body } = toolCall.args as z.infer<typeof openPrTool.schema>;
 
+  const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
+
   const prForTask = getPullRequestNumberFromActiveTask(
     updatedTaskPlan ?? state.taskPlan,
   );
@@ -195,17 +198,17 @@ export async function openPullRequest(
       repo,
       headBranch: branchName,
       title,
-      body: `Fixes #${state.githubIssueId}\n\n${body}`,
+      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
       githubInstallationToken,
       baseBranch: state.targetRepository.branch,
     });
   } else {
     // Ensure the PR is ready for review
-    pullRequest = await markPullRequestReadyForReview({
+    pullRequest = await updatePullRequest({
       owner,
       repo,
       title,
-      body: `Fixes #${state.githubIssueId}\n\n${body}`,
+      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
       pullNumber: prForTask,
       githubInstallationToken,
     });
