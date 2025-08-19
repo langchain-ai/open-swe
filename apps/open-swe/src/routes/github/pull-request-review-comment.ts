@@ -1,6 +1,12 @@
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { GitHubApp } from "../../utils/github-app.js";
-import { mentionsOpenSWE, extractLinkedIssues } from "./utils.js";
+import {
+  mentionsOpenSWE,
+  extractLinkedIssues,
+  getPrContext,
+  convertPRPayloadToPullRequestObj,
+} from "./utils.js";
+import { PullRequestReviewTriggerData } from "./types.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPRReviewCommentHandler");
 
@@ -42,97 +48,32 @@ export async function handlePullRequestReviewComment(
     const repo = payload.repository.name;
     const prNumber = payload.pull_request.number;
 
-    // Get all comments on the PR (issue comments)
-    const { data: issueComments } = await octokit.request(
-      "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
-      {
-        owner,
-        repo,
-        issue_number: prNumber,
-      },
-    );
+    const { reviews, prComments, linkedIssues } = await getPrContext(octokit, {
+      owner,
+      repo,
+      prNumber,
+      linkedIssueNumbers: extractLinkedIssues(payload.pull_request.body || ""),
+    });
 
-    // Get all review comments (inline code comments)
-    const { data: reviewComments } = await octokit.request(
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments",
-      {
-        owner,
-        repo,
-        pull_number: prNumber,
-      },
-    );
-
-    // Get all reviews
-    const { data: reviews } = await octokit.request(
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-      {
-        owner,
-        repo,
-        pull_number: prNumber,
-      },
-    );
-
-    // Extract linked issues from PR body
-    const linkedIssues = extractLinkedIssues(payload.pull_request.body || "");
-
-    // Create the data object
-    const prData = {
-      pullRequest: {
-        number: prNumber,
-        title: payload.pull_request.title,
-        body: payload.pull_request.body,
-        state: payload.pull_request.state,
-        author: payload.pull_request.user?.login,
-        created_at: payload.pull_request.created_at,
-        updated_at: payload.pull_request.updated_at,
-        head: {
-          ref: payload.pull_request.head.ref,
-          sha: payload.pull_request.head.sha,
-        },
-        base: {
-          ref: payload.pull_request.base.ref,
-          sha: payload.pull_request.base.sha,
-        },
-      },
-      triggerReviewComment: {
+    const prData: PullRequestReviewTriggerData = {
+      pullRequest: convertPRPayloadToPullRequestObj(
+        payload.pull_request,
+        prNumber,
+      ),
+      triggerComment: {
         id: payload.comment.id,
         body: commentBody,
         author: payload.comment.user?.login,
         path: payload.comment.path,
         line: payload.comment.line,
         diff_hunk: payload.comment.diff_hunk,
-        created_at: payload.comment.created_at,
-        updated_at: payload.comment.updated_at,
       },
-      issueComments: issueComments.map((comment) => ({
-        id: comment.id,
-        body: comment.body,
-        author: comment.user?.login,
-        created_at: comment.created_at,
-        updated_at: comment.updated_at,
-      })),
-      reviewComments: reviewComments.map((comment) => ({
-        id: comment.id,
-        body: comment.body,
-        author: comment.user?.login,
-        path: comment.path,
-        line: comment.line,
-        diff_hunk: comment.diff_hunk,
-        created_at: comment.created_at,
-        updated_at: comment.updated_at,
-      })),
-      reviews: reviews.map((review) => ({
-        id: review.id,
-        body: review.body,
-        author: review.user?.login,
-        state: review.state,
-        submitted_at: review.submitted_at,
-      })),
-      linkedIssues: linkedIssues,
+      prComments,
+      reviews,
+      linkedIssues,
       repository: {
         owner,
         name: repo,
-        full_name: payload.repository.full_name,
       },
     };
 
@@ -142,8 +83,11 @@ export async function handlePullRequestReviewComment(
         prNumber,
         commentPath: payload.comment.path,
         commentLine: payload.comment.line,
-        commentCount: issueComments.length,
-        reviewCommentCount: reviewComments.length,
+        commentCount: prComments.length,
+        reviewCommentCount: reviews.reduce(
+          (acc: number, r: any) => acc + (r.reviewComments?.length ?? 0),
+          0,
+        ),
         reviewCount: reviews.length,
         linkedIssuesCount: linkedIssues.length,
       },

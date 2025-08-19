@@ -1,17 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { GitHubApp } from "../../utils/github-app.js";
-import { createLangGraphClient } from "../../utils/langgraph-client.js";
-import {
-  GITHUB_INSTALLATION_ID,
-  GITHUB_INSTALLATION_NAME,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-  MANAGER_GRAPH_ID,
-  OPEN_SWE_STREAM_MODE,
-} from "@open-swe/shared/constants";
-import { encryptSecret } from "@open-swe/shared/crypto";
 import { HumanMessage } from "@langchain/core/messages";
 import {
   getOpenSWEAutoAcceptLabel,
@@ -23,8 +12,8 @@ import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
-import { StreamMode } from "@langchain/langgraph-sdk";
-import { createDevMetadataComment } from "./utils.js";
+import { createDevMetadataComment, createRunFromWebhook } from "./utils.js";
+import { GraphConfig } from "@open-swe/shared/open-swe/types";
 
 const logger = createLogger(LogLevel.INFO, "GitHubIssueHandler");
 
@@ -92,20 +81,6 @@ export async function handleIssueLabeled(payload: any) {
       return;
     }
 
-    const langGraphClient = createLangGraphClient({
-      defaultHeaders: {
-        [GITHUB_INSTALLATION_TOKEN_COOKIE]: encryptSecret(
-          token,
-          process.env.SECRETS_ENCRYPTION_KEY,
-        ),
-        [GITHUB_INSTALLATION_NAME]: issueData.owner,
-        [GITHUB_USER_ID_HEADER]: issueData.userId.toString(),
-        [GITHUB_USER_LOGIN_HEADER]: issueData.userLogin,
-        [GITHUB_INSTALLATION_ID]: installationId.toString(),
-      },
-    });
-
-    const threadId = uuidv4();
     const runInput: ManagerGraphUpdate = {
       messages: [
         new HumanMessage({
@@ -114,7 +89,7 @@ export async function handleIssueLabeled(payload: any) {
           additional_kwargs: {
             isOriginalIssue: true,
             githubIssueId: issueData.issueNumber,
-            requestSource: RequestSource.GITHUB_ISSUE_WEBHOOK,
+            requestSource: RequestSource.GITHUB_WEBHOOK,
           },
         }),
       ],
@@ -126,28 +101,26 @@ export async function handleIssueLabeled(payload: any) {
       autoAcceptPlan: isAutoAcceptLabel,
     };
     // Create config object with Claude Opus 4.1 model configuration for max labels
-    const config: Record<string, any> = {
-      recursion_limit: 400,
-    };
+    const configurable: Partial<GraphConfig["configurable"]> = isMaxLabel
+      ? {
+          plannerModelName: "anthropic:claude-opus-4-1",
+          programmerModelName: "anthropic:claude-opus-4-1",
+        }
+      : {};
 
-    if (isMaxLabel) {
-      config.configurable = {
-        plannerModelName: "anthropic:claude-opus-4-1",
-        programmerModelName: "anthropic:claude-opus-4-1",
-      };
-    }
-
-    const run = await langGraphClient.runs.create(threadId, MANAGER_GRAPH_ID, {
-      input: runInput,
-      config,
-      ifNotExists: "create",
-      streamResumable: true,
-      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+    const { runId, threadId } = await createRunFromWebhook({
+      installationId,
+      installationToken: token,
+      userId: issueData.userId,
+      userLogin: issueData.userLogin,
+      installationName: issueData.owner,
+      runInput,
+      configurable,
     });
 
     logger.info("Created new run from GitHub issue.", {
       threadId,
-      runId: run.run_id,
+      runId,
       issueNumber: issueData.issueNumber,
       owner: issueData.owner,
       repo: issueData.repo,
@@ -167,7 +140,7 @@ export async function handleIssueLabeled(payload: any) {
         owner: issueData.owner,
         repo: issueData.repo,
         issue_number: issueData.issueNumber,
-        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(run.run_id, threadId)}`,
+        body: `🤖 Open SWE has been triggered for this issue. Processing...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(runId, threadId)}`,
       },
     );
   } catch (error) {

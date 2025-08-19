@@ -170,7 +170,10 @@ export function getMessageContentFromIssue(
   issue: GitHubIssue | GitHubIssueComment,
 ): string {
   if ("title" in issue) {
-    return `[original issue]\n**${issue.title}**\n${extractContentFromIssueBody(issue.body ?? "")}`;
+    const formattedBody = extractContentWithoutDetailsFromIssueBody(
+      issue.body ?? "",
+    );
+    return `[original issue]\n**${issue.title}**\n${formattedBody}`;
   }
   return `[issue comment]\n${issue.body}`;
 }

@@ -43,22 +43,22 @@ const getHeaders = (
   return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
-// Handle issue labeling events
+// Issue labeling events
 webhooks.on("issues.labeled", async ({ payload }) => {
   await handleIssueLabeled(payload);
 });
 
-// Handle PR general comment events (discussion area)
+// PR general comment events (discussion area)
 webhooks.on("issue_comment.created", async ({ payload }) => {
   await handlePullRequestComment(payload);
 });
 
-// Handle PR review events (approve/request changes/comment)
+// PR review events (approve/request changes/comment)
 webhooks.on("pull_request_review.submitted", async ({ payload }) => {
   await handlePullRequestReview(payload);
 });
 
-// Handle PR review comment events (inline code comments)
+// PR review comment events (inline code comments)
 webhooks.on("pull_request_review_comment.created", async ({ payload }) => {
   await handlePullRequestReviewComment(payload);
 });
