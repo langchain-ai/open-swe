@@ -59,6 +59,7 @@ import {
   HumanMessage,
 } from "@langchain/core/messages";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
+import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -280,10 +281,14 @@ export async function generateAction(
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
 
-  const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
-    getMissingMessages(state, config),
-    getPlansFromIssue(state, config),
-  ]);
+  const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
+    config,
+  )
+    ? await Promise.all([
+        getMissingMessages(state, config),
+        getPlansFromIssue(state, config),
+      ])
+    : [[], { taskPlan: null }];
 
   const { providerTools, providerMessages } = await createToolsAndPrompt(
     state,

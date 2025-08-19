@@ -449,6 +449,13 @@ export const GraphConfigurationMetadata: {
         "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
     },
   },
+  shouldCreateIssue: {
+    x_open_swe_ui_config: {
+      type: "boolean",
+      default: false,
+      description: "Whether or not to create an issue for this request",
+    },
+  },
   apiKeys: {
     x_open_swe_ui_config: {
       type: "hidden",
@@ -613,6 +620,13 @@ export const GraphConfiguration = z.object({
    */
   maxTokens: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.maxTokens,
+  }),
+  /**
+   * Whether or not to create an issue for this request.
+   * @default false
+   */
+  shouldCreateIssue: withLangGraph(z.boolean().optional(), {
+    metadata: GraphConfigurationMetadata.shouldCreateIssue,
   }),
   /**
    * User defined API keys to use

@@ -22,6 +22,7 @@ import { getCustomConfigurableFields } from "../../../utils/config.js";
 import { getRecentUserRequest } from "../../../utils/user-request.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -68,6 +69,9 @@ export async function startPlanner(
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
       ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
+      ...(!shouldCreateIssue(config) && followupMessage
+        ? { internalMessages: [followupMessage] }
+        : {}),
     };
 
     const run = await langGraphClient.runs.create(

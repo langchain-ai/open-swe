@@ -38,6 +38,8 @@ interface TerminalInputProps {
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
   autoAcceptPlan: boolean;
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
+  shouldCreateIssue: boolean;
+  setShouldCreateIssue: Dispatch<SetStateAction<boolean>>;
   draftToLoad?: string;
 }
 
@@ -71,6 +73,8 @@ export function TerminalInput({
   setQuickActionPrompt,
   autoAcceptPlan,
   setAutoAcceptPlan,
+  shouldCreateIssue,
+  setShouldCreateIssue,
   draftToLoad,
 }: TerminalInputProps) {
   const { push } = useRouter();
@@ -164,6 +168,7 @@ export function TerminalInput({
               recursion_limit: 400,
               configurable: {
                 ...defaultConfig,
+                shouldCreateIssue,
                 [GITHUB_USER_LOGIN_HEADER]: user.login,
               },
             },
@@ -199,6 +204,7 @@ export function TerminalInput({
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
+        setShouldCreateIssue(false);
       } catch (e) {
         if (
           typeof e === "object" &&

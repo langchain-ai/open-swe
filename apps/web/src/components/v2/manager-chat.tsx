@@ -77,6 +77,7 @@ interface ManagerChatProps {
     name: string | null;
     email: string | null;
   };
+  disableInput?: boolean;
 }
 
 function extractResponseFromMessage(message: Message): string {
@@ -162,6 +163,7 @@ export function ManagerChat({
   cancelRun,
   errorState,
   githubUser,
+  disableInput,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
@@ -252,7 +254,12 @@ export function ManagerChat({
             placeholder="Type your message..."
             className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !isLoading &&
+                !disableInput
+              ) {
                 e.preventDefault();
                 handleSendMessage();
               }
@@ -270,7 +277,7 @@ export function ManagerChat({
           ) : (
             <Button
               onClick={handleSendMessage}
-              disabled={!chatInput.trim()}
+              disabled={!chatInput.trim() || disableInput}
               size="icon"
               variant="brand"
               className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"

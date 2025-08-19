@@ -45,6 +45,7 @@ import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
 import { GraphState } from "@open-swe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
+import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -183,6 +184,45 @@ export async function classifyMessage(
 
     throw new Error(
       `Unsupported route for local mode received: ${toolCallArgs.route}`,
+    );
+  }
+
+  if (!shouldCreateIssue(config)) {
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      const commandUpdate: ManagerGraphUpdate = {
+        messages: [userMessage, response],
+      };
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
+
+    if (toolCallArgs.route === "create_new_issue") {
+      const commandUpdate: ManagerGraphUpdate = {
+        messages: [...state.messages, response],
+      };
+      return new Command({
+        update: commandUpdate,
+        goto: "create-new-session",
+      });
+    }
+
+    if (toolCallArgs.route === "no_op") {
+      const commandUpdate: ManagerGraphUpdate = {
+        messages: [response],
+      };
+      return new Command({
+        update: commandUpdate,
+        goto: END,
+      });
+    }
+
+    throw new Error(
+      `Unsupported route received: ${toolCallArgs.route}\nUnable to route message there when not creating GitHub issues for request.`,
     );
   }
 

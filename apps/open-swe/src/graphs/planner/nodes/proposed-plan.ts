@@ -49,6 +49,7 @@ import {
   cleanTaskItems,
 } from "../../../utils/github/plan.js";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -149,7 +150,7 @@ async function startProgrammerRun(input: {
   );
 
   // Skip GitHub operations in local mode
-  if (!isLocalMode(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,
