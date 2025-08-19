@@ -1,3 +1,6 @@
+import { GraphConfig } from "./types.js";
+import { isLocalMode } from "./local-mode.js";
+
 export const MODEL_OPTIONS = [
   // TODO: Test these then re-enable
   // {
@@ -86,7 +89,79 @@ export const MODEL_OPTIONS = [
   },
 ];
 
+export const OLLAMA_MODELS = [
+  {
+    label: "Qwen2.5 Coder 7B",
+    value: "ollama:qwen2.5-coder:7b",
+  },
+  {
+    label: "Qwen2.5 Coder 14B",
+    value: "ollama:qwen2.5-coder:14b",
+  },
+  {
+    label: "Qwen2.5 Coder 32B",
+    value: "ollama:qwen2.5-coder:32b",
+  },
+  {
+    label: "GPT-OSS 20B",
+    value: "ollama:gpt-oss:20b",
+  },
+  {
+    label: "GPT-OSS 120B",
+    value: "ollama:gpt-oss:120b",
+  },
+  {
+    label: "DeepSeek R1 8B",
+    value: "ollama:deepseek-r1:8b",
+  },
+  {
+    label: "DeepSeek R1 14B",
+    value: "ollama:deepseek-r1:14b",
+  },
+  {
+    label: "DeepSeek R1 32B",
+    value: "ollama:deepseek-r1:32b",
+  },
+  {
+    label: "DeepSeek R1 70B",
+    value: "ollama:deepseek-r1:70b",
+  },
+];
+
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
   ({ value }) =>
     !value.includes("extended-thinking") || !value.startsWith("openai:o"),
 );
+
+/**
+ * Get available models based on configuration
+ * Returns MODEL_OPTIONS plus OLLAMA_MODELS when in local mode, otherwise just MODEL_OPTIONS
+ */
+export function getAvailableModels(config?: GraphConfig) {
+  const baseModels = MODEL_OPTIONS;
+
+  if (isLocalMode(config)) {
+    return [...baseModels, ...OLLAMA_MODELS];
+  }
+
+  return baseModels;
+}
+
+/**
+ * Get available models (no thinking) based on configuration
+ * Returns filtered models plus OLLAMA_MODELS when in local mode, otherwise just filtered models
+ */
+export function getAvailableModelsNoThinking(config?: GraphConfig) {
+  const baseModels = MODEL_OPTIONS_NO_THINKING;
+
+  if (isLocalMode(config)) {
+    // Filter out thinking models from Ollama models as well
+    const ollamaModelsNoThinking = OLLAMA_MODELS.filter(
+      ({ value }) =>
+        !value.includes("extended-thinking") && !value.startsWith("ollama:o"),
+    );
+    return [...baseModels, ...ollamaModelsNoThinking];
+  }
+
+  return baseModels;
+}

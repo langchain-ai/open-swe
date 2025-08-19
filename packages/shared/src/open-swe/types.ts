@@ -6,7 +6,7 @@ import {
   messagesStateReducer,
   MessagesZodState,
 } from "@langchain/langgraph/web";
-import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
+import { getAvailableModels, getAvailableModelsNoThinking } from "./models.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
 import {
   uiMessageReducer,
@@ -304,202 +304,207 @@ export const GraphAnnotation = MessagesZodState.extend({
 export type GraphState = z.infer<typeof GraphAnnotation>;
 export type GraphUpdate = Partial<GraphState>;
 
-export const GraphConfigurationMetadata: {
+export function getGraphConfigurationMetadata(config?: GraphConfig): {
   [key: string]: {
     x_open_swe_ui_config:
       | Omit<ConfigurableFieldUIMetadata, "label">
       | { type: "hidden" };
   };
-} = {
-  maxContextActions: {
-    x_open_swe_ui_config: {
-      type: "number",
-      default: 75,
-      min: 1,
-      max: 250,
-      description:
-        "Maximum number of actions allowed during the context gathering phase. An action consists of a tool call.",
+} {
+  return {
+    maxContextActions: {
+      x_open_swe_ui_config: {
+        type: "number",
+        default: 75,
+        min: 1,
+        max: 250,
+        description:
+          "Maximum number of actions allowed during the context gathering phase. An action consists of a tool call.",
+      },
     },
-  },
-  maxReviewActions: {
-    x_open_swe_ui_config: {
-      type: "number",
-      default: 30,
-      min: 1,
-      max: 250,
-      description:
-        "Maximum number of review actions allowed during the review phase. An action consists of a tool call.",
+    maxReviewActions: {
+      x_open_swe_ui_config: {
+        type: "number",
+        default: 30,
+        min: 1,
+        max: 250,
+        description:
+          "Maximum number of review actions allowed during the review phase. An action consists of a tool call.",
+      },
     },
-  },
-  maxReviewCount: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    maxReviewCount: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  plannerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description:
-        "The model to use for planning tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
-      options: MODEL_OPTIONS_NO_THINKING,
+    plannerModelName: {
+      x_open_swe_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description:
+          "The model to use for planning tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
+        options: getAvailableModelsNoThinking(config),
+      },
     },
-  },
-  plannerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    plannerTemperature: {
+      x_open_swe_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
     },
-  },
-  programmerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description:
-        "The model to use for programming/other advanced technical tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
-      options: MODEL_OPTIONS_NO_THINKING,
+    programmerModelName: {
+      x_open_swe_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description:
+          "The model to use for programming/other advanced technical tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
+        options: getAvailableModelsNoThinking(config),
+      },
     },
-  },
-  programmerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    programmerTemperature: {
+      x_open_swe_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
     },
-  },
-  reviewerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description:
-        "The model to use for reviewer tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
-      options: MODEL_OPTIONS_NO_THINKING,
+    reviewerModelName: {
+      x_open_swe_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description:
+          "The model to use for reviewer tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
+        options: getAvailableModelsNoThinking(config),
+      },
     },
-  },
-  reviewerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    reviewerTemperature: {
+      x_open_swe_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
     },
-  },
-  routerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-3-5-haiku-latest",
-      description:
-        "The model to use for routing tasks, and other simple generations. This model should be good at tool calling/structured output.",
-      options: MODEL_OPTIONS,
+    routerModelName: {
+      x_open_swe_ui_config: {
+        type: "select",
+        default: "anthropic:claude-3-5-haiku-latest",
+        description:
+          "The model to use for routing tasks, and other simple generations. This model should be good at tool calling/structured output.",
+        options: getAvailableModels(config),
+      },
     },
-  },
-  routerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    routerTemperature: {
+      x_open_swe_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
     },
-  },
-  summarizerModelName: {
-    x_open_swe_ui_config: {
-      type: "select",
-      default: "anthropic:claude-sonnet-4-0",
-      description:
-        "The model to use for summarizing the conversation history, or extracting key context from large inputs. This model should have strong context retention/understanding capabilities, and should be good at tool calling/structured output.",
-      options: MODEL_OPTIONS_NO_THINKING,
+    summarizerModelName: {
+      x_open_swe_ui_config: {
+        type: "select",
+        default: "anthropic:claude-sonnet-4-0",
+        description:
+          "The model to use for summarizing the conversation history, or extracting key context from large inputs. This model should have strong context retention/understanding capabilities, and should be good at tool calling/structured output.",
+        options: getAvailableModelsNoThinking(config),
+      },
     },
-  },
-  summarizerTemperature: {
-    x_open_swe_ui_config: {
-      type: "slider",
-      default: 0,
-      min: 0,
-      max: 2,
-      step: 0.1,
-      description: "Controls randomness (0 = deterministic, 2 = creative)",
+    summarizerTemperature: {
+      x_open_swe_ui_config: {
+        type: "slider",
+        default: 0,
+        min: 0,
+        max: 2,
+        step: 0.1,
+        description: "Controls randomness (0 = deterministic, 2 = creative)",
+      },
     },
-  },
-  maxTokens: {
-    x_open_swe_ui_config: {
-      type: "number",
-      default: 10_000,
-      min: 1,
-      max: 64_000,
-      description:
-        "The maximum number of tokens to generate in an individual LLM call. Increasing/decreasing this number _will_ effect how many tokens are generated by the model. It will _not_ simply cut off the generation after the specified number of tokens is reached.",
+    maxTokens: {
+      x_open_swe_ui_config: {
+        type: "number",
+        default: 10_000,
+        min: 1,
+        max: 64_000,
+        description:
+          "The maximum number of tokens to generate in an individual LLM call. Increasing/decreasing this number _will_ effect how many tokens are generated by the model. It will _not_ simply cut off the generation after the specified number of tokens is reached.",
+      },
     },
-  },
-  mcpServers: {
-    x_open_swe_ui_config: {
-      type: "json",
-      default: JSON.stringify(DEFAULT_MCP_SERVERS, null, 2),
-      description:
-        "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+    mcpServers: {
+      x_open_swe_ui_config: {
+        type: "json",
+        default: JSON.stringify(DEFAULT_MCP_SERVERS, null, 2),
+        description:
+          "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+      },
     },
-  },
-  apiKeys: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    apiKeys: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_TOKEN_COOKIE]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_TOKEN_COOKIE]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_INSTALLATION_TOKEN_COOKIE]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_INSTALLATION_TOKEN_COOKIE]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_USER_ID_HEADER]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_USER_ID_HEADER]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_USER_LOGIN_HEADER]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_USER_LOGIN_HEADER]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_INSTALLATION_NAME]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_INSTALLATION_NAME]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_INSTALLATION_ID]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_INSTALLATION_ID]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  [GITHUB_PAT]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    [GITHUB_PAT]: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  thread_id: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    thread_id: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-  run_id: {
-    x_open_swe_ui_config: {
-      type: "hidden",
+    run_id: {
+      x_open_swe_ui_config: {
+        type: "hidden",
+      },
     },
-  },
-};
+  };
+}
+
+// Static version for backward compatibility - uses default (non-local) mode
+export const GraphConfigurationMetadata = getGraphConfigurationMetadata();
 
 export const GraphConfiguration = z.object({
   /**

@@ -47,6 +47,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "ollama",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -82,6 +83,8 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "ollama":
+      return ""; // Ollama typically doesn't require API keys for local usage
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -398,6 +401,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      ollama: {
+        [LLMTask.PLANNER]: "qwen2.5-coder:32b",
+        [LLMTask.PROGRAMMER]: "qwen2.5-coder:32b",
+        [LLMTask.REVIEWER]: "qwen2.5-coder:14b",
+        [LLMTask.ROUTER]: "qwen2.5-coder:7b",
+        [LLMTask.SUMMARIZER]: "qwen2.5-coder:14b",
       },
     };
 

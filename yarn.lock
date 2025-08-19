@@ -3280,6 +3280,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@langchain/ollama@npm:^0.1.4":
+  version: 0.1.6
+  resolution: "@langchain/ollama@npm:0.1.6"
+  dependencies:
+    ollama: ^0.5.12
+    uuid: ^10.0.0
+    zod: ^3.24.1
+    zod-to-json-schema: ^3.24.1
+  peerDependencies:
+    "@langchain/core": ">=0.2.21 <0.4.0"
+  checksum: cd17d7767e18e85129e9f831aa2c601305e6eb74cc130aad43851d0e2b886ab54a64ef0d70aa749704fe8dc726fd96680cc6fc8eb7529be288d230df47bf9325
+  languageName: node
+  linkType: hard
+
 "@langchain/openai@npm:>=0.1.0 <0.7.0, @langchain/openai@npm:>=0.2.0 <0.7.0":
   version: 0.6.2
   resolution: "@langchain/openai@npm:0.6.2"
@@ -4104,6 +4118,7 @@ __metadata:
     "@langchain/langgraph-cli": ^0.0.47
     "@langchain/langgraph-sdk": ^0.0.95
     "@langchain/mcp-adapters": ^0.5.2
+    "@langchain/ollama": ^0.1.4
     "@langchain/openai": ^0.5.10
     "@mendable/firecrawl-js": ^1.29.1
     "@octokit/app": ^16.0.1
@@ -16101,6 +16116,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ollama@npm:^0.5.12":
+  version: 0.5.17
+  resolution: "ollama@npm:0.5.17"
+  dependencies:
+    whatwg-fetch: ^3.6.20
+  checksum: 151f1b0d69ea1f54927c4e92537f7dafa28f93d7b7d2d362387e046d5fea21eae07997b4c055f9a2579058bb88daad20a953ea300a93799d4ee78736e1a0af71
+  languageName: node
+  linkType: hard
+
 "on-finished@npm:2.4.1, on-finished@npm:^2.4.1":
   version: 2.4.1
   resolution: "on-finished@npm:2.4.1"
@@ -20603,6 +20627,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"whatwg-fetch@npm:^3.6.20":
+  version: 3.6.20
+  resolution: "whatwg-fetch@npm:3.6.20"
+  checksum: c58851ea2c4efe5c2235f13450f426824cf0253c1d45da28f45900290ae602a20aff2ab43346f16ec58917d5562e159cd691efa368354b2e82918c2146a519c5
+  languageName: node
+  linkType: hard
+
 "whatwg-url@npm:^5.0.0":
   version: 5.0.0
   resolution: "whatwg-url@npm:5.0.0"
@@ -21002,7 +21033,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^3.20.2, zod@npm:^3.20.6, zod@npm:^3.23.8, zod@npm:^3.24.2, zod@npm:^3.25.32":
+"zod@npm:^3.20.2, zod@npm:^3.20.6, zod@npm:^3.23.8, zod@npm:^3.24.1, zod@npm:^3.24.2, zod@npm:^3.25.32":
   version: 3.25.76
   resolution: "zod@npm:3.25.76"
   checksum: c9a403a62b329188a5f6bd24d5d935d2bba345f7ab8151d1baa1505b5da9f227fb139354b043711490c798e91f3df75991395e40142e6510a4b16409f302b849
