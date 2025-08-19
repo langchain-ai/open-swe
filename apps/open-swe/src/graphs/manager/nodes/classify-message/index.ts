@@ -188,13 +188,13 @@ export async function classifyMessage(
   }
 
   if (!shouldCreateIssue(config)) {
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: [response],
+    };
     if (
       toolCallArgs.route === "start_planner" ||
       toolCallArgs.route === "start_planner_for_followup"
     ) {
-      const commandUpdate: ManagerGraphUpdate = {
-        messages: [userMessage, response],
-      };
       return new Command({
         update: commandUpdate,
         goto: "start-planner",
@@ -202,9 +202,6 @@ export async function classifyMessage(
     }
 
     if (toolCallArgs.route === "create_new_issue") {
-      const commandUpdate: ManagerGraphUpdate = {
-        messages: [...state.messages, response],
-      };
       return new Command({
         update: commandUpdate,
         goto: "create-new-session",
@@ -212,9 +209,6 @@ export async function classifyMessage(
     }
 
     if (toolCallArgs.route === "no_op") {
-      const commandUpdate: ManagerGraphUpdate = {
-        messages: [response],
-      };
       return new Command({
         update: commandUpdate,
         goto: END,

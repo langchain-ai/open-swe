@@ -95,7 +95,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
-  const [shouldCreateIssue, setShouldCreateIssue] = useState(false);
+  const [shouldCreateIssue, setShouldCreateIssue] = useState(true);
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const displayThreads = threadsMetadata.slice(0, 4);
@@ -196,13 +196,13 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     )}
                   </TooltipIconButton>
                   <TooltipIconButton
-                    variant={shouldCreateIssue ? "default" : "ghost"}
+                    variant={shouldCreateIssue ? "ghost" : "default"}
                     tooltip="Whether or not to create a GitHub issue for the request"
                     className={cn(
                       "transition-colors duration-200",
                       shouldCreateIssue
-                        ? "bg-primary hover:bg-primary/90"
-                        : "text-muted-foreground hover:text-foreground",
+                        ? "text-muted-foreground hover:text-foreground"
+                        : "bg-primary hover:bg-primary/90",
                     )}
                     onClick={() => setShouldCreateIssue((prev) => !prev)}
                     side="bottom"
