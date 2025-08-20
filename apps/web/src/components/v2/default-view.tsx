@@ -123,7 +123,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   return (
     <div className="flex flex-1 flex-col">
       {/* Header */}
-      <div className="border-border bg-card border-b px-4 py-2">
+      <div className="border-border bg-card border-b px-3 py-2 sm:px-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <OpenSWELogoSVG
@@ -146,7 +146,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl space-y-6 p-4">
+        <div className="mx-auto max-w-4xl space-y-6 p-3 sm:p-4 md:p-6">
           <GitHubInstallationBanner />
           <ApiKeyBanner />
           <IssuesRequiredBanner />
@@ -160,7 +160,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
             )}
             ref={dropRef}
           >
-            <CardContent className="p-4">
+            <CardContent className="p-3 sm:p-4">
               <ContentBlocksPreview
                 blocks={contentBlocks}
                 onRemove={removeBlock}

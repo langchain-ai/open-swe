@@ -159,44 +159,48 @@ function AllThreadsPageContent() {
               className="border-border bg-background text-foreground placeholder:text-muted-foreground pl-10"
             />
           </div>
-          <div className="flex items-center gap-1">
-            <Filter className="text-muted-foreground h-4 w-4" />
-            <span className="text-muted-foreground mr-2 text-xs">Filter:</span>
-            {(
-              [
-                "all",
-                "running",
-                "completed",
-                "failed",
-                "pending",
-                "idle",
-                "paused",
-                "error",
-              ] as FilterStatus[]
-            ).map((status) => (
-              <Button
-                key={status}
-                variant={statusFilter === status ? "secondary" : "ghost"}
-                size="sm"
-                className={cn(
-                  "h-7 text-xs",
-                  statusFilter === status
-                    ? "bg-muted text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-                onClick={() => setStatusFilter(status)}
-              >
-                {status === "all"
-                  ? "All"
-                  : status.charAt(0).toUpperCase() + status.slice(1)}
-                <Badge
-                  variant="secondary"
-                  className="bg-muted/70 text-muted-foreground ml-1 text-xs"
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+            <Filter className="text-muted-foreground hidden h-4 w-4 sm:block" />
+            <span className="text-muted-foreground mr-2 hidden text-xs sm:inline">
+              Filter:
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  "all",
+                  "running",
+                  "completed",
+                  "failed",
+                  "pending",
+                  "idle",
+                  "paused",
+                  "error",
+                ] as FilterStatus[]
+              ).map((status) => (
+                <Button
+                  key={status}
+                  variant={statusFilter === status ? "secondary" : "ghost"}
+                  size="sm"
+                  className={cn(
+                    "h-7 text-xs",
+                    statusFilter === status
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                  onClick={() => setStatusFilter(status)}
                 >
-                  {statusCounts[status]}
-                </Badge>
-              </Button>
-            ))}
+                  {status === "all"
+                    ? "All"
+                    : status.charAt(0).toUpperCase() + status.slice(1)}
+                  <Badge
+                    variant="secondary"
+                    className="bg-muted/70 text-muted-foreground ml-1 text-xs"
+                  >
+                    {statusCounts[status]}
+                  </Badge>
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

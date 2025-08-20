@@ -77,6 +77,7 @@ interface ManagerChatProps {
     name: string | null;
     email: string | null;
   };
+  isMobile?: boolean;
   disableSubmit?: boolean;
 }
 
@@ -163,10 +164,13 @@ export function ManagerChat({
   cancelRun,
   errorState,
   githubUser,
+  isMobile = false,
   disableSubmit,
 }: ManagerChatProps) {
   return (
-    <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
+    <div
+      className={`border-border bg-muted/30 flex h-full flex-col overflow-hidden ${isMobile ? "w-full" : "w-1/3 border-r"}`}
+    >
       <div className="relative flex-1">
         <StickToBottom
           className="absolute inset-0"

@@ -4,7 +4,15 @@ import { v4 as uuidv4 } from "uuid";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
+import {
+  ArrowLeft,
+  GitBranch,
+  Terminal,
+  Clock,
+  MessageSquare,
+  Brain,
+  Code,
+} from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadMetadata } from "./types";
@@ -49,6 +57,7 @@ import { TokenUsage } from "./token-usage";
 import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@open-swe/shared/messages";
 import { useUser } from "@/hooks/useUser";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -95,10 +104,11 @@ export function ThreadView({
   onBackToHome,
 }: ThreadViewProps) {
   const { user } = useUser();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
   const [chatInput, setChatInput] = useState("");
-  const [selectedTab, setSelectedTab] = useState<"planner" | "programmer">(
-    "planner",
-  );
+  const [selectedTab, setSelectedTab] = useState<
+    "planner" | "programmer" | "manager"
+  >("manager");
   const [plannerSession, setPlannerSession] =
     useState<ManagerGraphState["plannerSession"]>();
   const [programmerSession, setProgrammerSession] =
@@ -398,203 +408,429 @@ export function ThreadView({
         </div>
       </div>
 
-      {/* Main Content - Split Layout */}
-      <div className="flex w-full pt-12">
-        <ManagerChat
-          messages={displayMessages}
-          chatInput={chatInput}
-          setChatInput={setChatInput}
-          handleSendMessage={handleSendMessage}
-          isLoading={stream.isLoading}
-          cancelRun={cancelRun}
-          errorState={errorState}
-          githubUser={user || undefined}
-          disableSubmit={shouldDisableManagerInput}
-        />
-        {/* Right Side - Actions & Plan */}
-        <div
-          className="flex flex-1 flex-col px-4 pt-4"
-          style={{ height: "calc(100vh - 3rem)" }}
-        >
-          <div className="min-h-0 flex-1">
-            <Tabs
-              defaultValue="planner"
-              className="flex h-full w-full flex-col"
-              value={selectedTab}
-              onValueChange={(value) =>
-                setSelectedTab(value as "planner" | "programmer")
-              }
-            >
-              <div className="flex flex-shrink-0 items-center gap-3">
-                <TabsList className="bg-muted/70">
-                  <TabsTrigger value="planner">Planner</TabsTrigger>
-                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
-                </TabsList>
+      {/* Main Content - Responsive Layout */}
+      {isDesktop ? (
+        // Desktop: Split Layout
+        <div className="flex w-full pt-12">
+          <ManagerChat
+            messages={displayMessages}
+            chatInput={chatInput}
+            setChatInput={setChatInput}
+            handleSendMessage={handleSendMessage}
+            isLoading={stream.isLoading}
+            cancelRun={cancelRun}
+            errorState={errorState}
+            githubUser={user || undefined}
+            isMobile={false}
+            disableSubmit={shouldDisableManagerInput}
+          />
+          {/* Right Side - Actions & Plan */}
+          <div
+            className="flex flex-1 flex-col px-4 pt-4"
+            style={{ height: "calc(100vh - 3rem)" }}
+          >
+            <div className="min-h-0 flex-1">
+              <Tabs
+                defaultValue="planner"
+                className="flex h-full w-full flex-col"
+                value={selectedTab === "manager" ? "planner" : selectedTab}
+                onValueChange={(value) =>
+                  setSelectedTab(value as "planner" | "programmer")
+                }
+              >
+                <div className="flex flex-shrink-0 items-center gap-3">
+                  <TabsList className="bg-muted/70">
+                    <TabsTrigger value="planner">Planner</TabsTrigger>
+                    <TabsTrigger value="programmer">Programmer</TabsTrigger>
+                  </TabsList>
 
-                {programmerTaskPlan && (
-                  <ProgressBar
-                    taskPlan={programmerTaskPlan}
-                    onOpenSidebar={() => setIsTaskSidebarOpen(true)}
-                  />
-                )}
-
-                <div className="ml-auto flex items-center justify-center gap-2">
-                  {selectedTab === "planner" && plannerStream.isLoading && (
-                    <CancelStreamButton
-                      stream={plannerStream}
-                      threadId={plannerSession?.threadId}
-                      runId={plannerSession?.runId}
-                      streamName="Planner"
+                  {programmerTaskPlan && (
+                    <ProgressBar
+                      taskPlan={programmerTaskPlan}
+                      onOpenSidebar={() => setIsTaskSidebarOpen(true)}
                     />
                   )}
 
-                  {selectedTab === "programmer" &&
-                    programmerStream.isLoading && (
+                  <div className="ml-auto flex items-center justify-center gap-2">
+                    {selectedTab === "planner" && plannerStream.isLoading && (
                       <CancelStreamButton
-                        stream={programmerStream}
-                        threadId={programmerSession?.threadId}
-                        runId={programmerSession?.runId}
-                        streamName="Programmer"
+                        stream={plannerStream}
+                        threadId={plannerSession?.threadId}
+                        runId={plannerSession?.runId}
+                        streamName="Planner"
                       />
                     )}
-                  <TokenUsage
-                    tokenData={joinTokenData(
-                      plannerStream.values.tokenData,
-                      programmerStream.values.tokenData,
-                    )}
-                  />
-                </div>
-              </div>
 
-              <TabsContent
-                value="planner"
-                className="mb-2"
-              >
-                <Card className="border-border bg-card relative h-full p-0">
-                  <CardContent className="h-full p-0">
-                    <StickToBottom
-                      className="absolute inset-0 h-full"
-                      initial={true}
-                    >
-                      <StickyToBottomContent
-                        className="scrollbar-pretty-auto h-full"
-                        content={
-                          <>
-                            {plannerSession ? (
-                              <div className="scrollbar-pretty-auto overflow-y-auto px-2">
-                                <ActionsRenderer<PlannerGraphState>
-                                  runId={plannerSession.runId}
-                                  customNodeEvents={customPlannerNodeEvents}
-                                  setCustomNodeEvents={
-                                    setCustomPlannerNodeEvents
-                                  }
-                                  stream={plannerStream}
-                                  threadId={plannerSession.threadId}
-                                />
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center gap-2 py-8">
-                                <Clock className="text-muted-foreground size-4" />
-                                <span className="text-muted-foreground text-sm">
-                                  No planner session
-                                </span>
-                              </div>
-                            )}
-                          </>
-                        }
-                        footer={
-                          <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
-                            <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
-                          </div>
-                        }
-                      />
-                    </StickToBottom>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent
-                value="programmer"
-                className="mb-2"
-              >
-                <Card className="border-border bg-card relative h-full p-0">
-                  <CardContent className="h-full p-0">
-                    <StickToBottom
-                      className="absolute inset-0 h-full"
-                      initial={true}
-                    >
-                      <StickyToBottomContent
-                        className="scrollbar-pretty-auto h-full"
-                        content={
-                          <>
-                            {programmerSession ? (
-                              <div className="scrollbar-pretty-auto overflow-y-auto px-2">
-                                <ActionsRenderer<GraphState>
-                                  runId={programmerSession.runId}
-                                  customNodeEvents={customProgrammerNodeEvents}
-                                  setCustomNodeEvents={
-                                    setCustomProgrammerNodeEvents
-                                  }
-                                  stream={programmerStream}
-                                  threadId={programmerSession.threadId}
-                                  modifyRunId={async (runId) => {
-                                    setProgrammerSession((prev) => {
-                                      if (!prev) {
+                    {selectedTab === "programmer" &&
+                      programmerStream.isLoading && (
+                        <CancelStreamButton
+                          stream={programmerStream}
+                          threadId={programmerSession?.threadId}
+                          runId={programmerSession?.runId}
+                          streamName="Programmer"
+                        />
+                      )}
+                    <TokenUsage
+                      tokenData={joinTokenData(
+                        plannerStream.values.tokenData,
+                        programmerStream.values.tokenData,
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <TabsContent
+                  value="planner"
+                  className="mb-2"
+                >
+                  <Card className="border-border bg-card relative h-full p-0">
+                    <CardContent className="h-full p-0">
+                      <StickToBottom
+                        className="absolute inset-0 h-full"
+                        initial={true}
+                      >
+                        <StickyToBottomContent
+                          className="scrollbar-pretty-auto h-full"
+                          content={
+                            <>
+                              {plannerSession ? (
+                                <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                                  <ActionsRenderer<PlannerGraphState>
+                                    runId={plannerSession.runId}
+                                    customNodeEvents={customPlannerNodeEvents}
+                                    setCustomNodeEvents={
+                                      setCustomPlannerNodeEvents
+                                    }
+                                    stream={plannerStream}
+                                    threadId={plannerSession.threadId}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-2 py-8">
+                                  <Clock className="text-muted-foreground size-4" />
+                                  <span className="text-muted-foreground text-sm">
+                                    No planner session
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          }
+                          footer={
+                            <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                              <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                            </div>
+                          }
+                        />
+                      </StickToBottom>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+                <TabsContent
+                  value="programmer"
+                  className="mb-2"
+                >
+                  <Card className="border-border bg-card relative h-full p-0">
+                    <CardContent className="h-full p-0">
+                      <StickToBottom
+                        className="absolute inset-0 h-full"
+                        initial={true}
+                      >
+                        <StickyToBottomContent
+                          className="scrollbar-pretty-auto h-full"
+                          content={
+                            <>
+                              {programmerSession ? (
+                                <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                                  <ActionsRenderer<GraphState>
+                                    runId={programmerSession.runId}
+                                    customNodeEvents={
+                                      customProgrammerNodeEvents
+                                    }
+                                    setCustomNodeEvents={
+                                      setCustomProgrammerNodeEvents
+                                    }
+                                    stream={programmerStream}
+                                    threadId={programmerSession.threadId}
+                                    modifyRunId={async (runId) => {
+                                      setProgrammerSession((prev) => {
+                                        if (!prev) {
+                                          return {
+                                            threadId:
+                                              programmerSession.threadId,
+                                            runId,
+                                          };
+                                        }
                                         return {
-                                          threadId: programmerSession.threadId,
+                                          ...prev,
                                           runId,
                                         };
-                                      }
-                                      return {
-                                        ...prev,
-                                        runId,
-                                      };
-                                    });
-                                    if (plannerSession?.threadId) {
-                                      try {
-                                        // Attempt to update the planner session with the new run ID of the programmer.
-                                        await programmerStream.client.threads.updateState(
-                                          plannerSession?.threadId,
-                                          {
-                                            values: {
-                                              programmerSession: {
-                                                threadId:
-                                                  programmerSession.threadId,
-                                                runId,
+                                      });
+                                      if (plannerSession?.threadId) {
+                                        try {
+                                          // Attempt to update the planner session with the new run ID of the programmer.
+                                          await programmerStream.client.threads.updateState(
+                                            plannerSession?.threadId,
+                                            {
+                                              values: {
+                                                programmerSession: {
+                                                  threadId:
+                                                    programmerSession.threadId,
+                                                  runId,
+                                                },
                                               },
                                             },
-                                          },
-                                        );
-                                      } catch {
-                                        // no-op
+                                          );
+                                        } catch {
+                                          // no-op
+                                        }
                                       }
-                                    }
-                                  }}
-                                />
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center gap-2 py-8">
-                                <Clock className="text-muted-foreground size-4" />
-                                <span className="text-muted-foreground text-sm">
-                                  No programmer session
-                                </span>
-                              </div>
-                            )}
-                          </>
-                        }
-                        footer={
-                          <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
-                            <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
-                          </div>
-                        }
-                      />
-                    </StickToBottom>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
+                                    }}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-2 py-8">
+                                  <Clock className="text-muted-foreground size-4" />
+                                  <span className="text-muted-foreground text-sm">
+                                    No programmer session
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          }
+                          footer={
+                            <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                              <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                            </div>
+                          }
+                        />
+                      </StickToBottom>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        // Mobile: Full-width tabs for all three sections
+        <div
+          className="flex w-full flex-col pt-12"
+          style={{ height: "calc(100vh - 3rem)" }}
+        >
+          <Tabs
+            defaultValue="manager"
+            className="flex h-full w-full flex-col"
+            value={selectedTab}
+            onValueChange={(value) =>
+              setSelectedTab(value as "manager" | "planner" | "programmer")
+            }
+          >
+            <div className="flex flex-shrink-0 items-center gap-2 px-4 pt-4">
+              <TabsList className="bg-muted/70 flex-1">
+                <TabsTrigger
+                  value="manager"
+                  className="flex-1"
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  <span className="ml-1">Chat</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="planner"
+                  className="flex-1"
+                >
+                  <Brain className="h-3 w-3" />
+                  <span className="ml-1">Planner</span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="programmer"
+                  className="flex-1"
+                >
+                  <Code className="h-3 w-3" />
+                  <span className="ml-1">Code</span>
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            {programmerTaskPlan && selectedTab === "programmer" && (
+              <div className="px-4 pt-2">
+                <ProgressBar
+                  taskPlan={programmerTaskPlan}
+                  onOpenSidebar={() => setIsTaskSidebarOpen(true)}
+                />
+              </div>
+            )}
+
+            <div className="ml-auto flex items-center justify-center gap-2 px-4">
+              {selectedTab === "planner" && plannerStream.isLoading && (
+                <CancelStreamButton
+                  stream={plannerStream}
+                  threadId={plannerSession?.threadId}
+                  runId={plannerSession?.runId}
+                  streamName="Planner"
+                />
+              )}
+
+              {selectedTab === "programmer" && programmerStream.isLoading && (
+                <CancelStreamButton
+                  stream={programmerStream}
+                  threadId={programmerSession?.threadId}
+                  runId={programmerSession?.runId}
+                  streamName="Programmer"
+                />
+              )}
+
+              <TokenUsage
+                tokenData={joinTokenData(
+                  plannerStream.values.tokenData,
+                  programmerStream.values.tokenData,
+                )}
+              />
+            </div>
+
+            <TabsContent
+              value="manager"
+              className="flex-1 overflow-hidden"
+            >
+              <ManagerChat
+                messages={displayMessages}
+                chatInput={chatInput}
+                setChatInput={setChatInput}
+                handleSendMessage={handleSendMessage}
+                isLoading={stream.isLoading}
+                cancelRun={cancelRun}
+                errorState={errorState}
+                githubUser={user || undefined}
+                isMobile={true}
+              />
+            </TabsContent>
+
+            <TabsContent
+              value="planner"
+              className="flex-1 overflow-hidden px-4 pb-2"
+            >
+              <Card className="border-border bg-card relative h-full p-0">
+                <CardContent className="h-full p-0">
+                  <StickToBottom
+                    className="absolute inset-0 h-full"
+                    initial={true}
+                  >
+                    <StickyToBottomContent
+                      className="scrollbar-pretty-auto h-full"
+                      content={
+                        <>
+                          {plannerSession ? (
+                            <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                              <ActionsRenderer<PlannerGraphState>
+                                runId={plannerSession.runId}
+                                customNodeEvents={customPlannerNodeEvents}
+                                setCustomNodeEvents={setCustomPlannerNodeEvents}
+                                stream={plannerStream}
+                                threadId={plannerSession.threadId}
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center gap-2 py-8">
+                              <Clock className="text-muted-foreground size-4" />
+                              <span className="text-muted-foreground text-sm">
+                                No planner session
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      }
+                      footer={
+                        <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                          <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                        </div>
+                      }
+                    />
+                  </StickToBottom>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent
+              value="programmer"
+              className="flex-1 overflow-hidden px-4 pb-2"
+            >
+              <Card className="border-border bg-card relative h-full p-0">
+                <CardContent className="h-full p-0">
+                  <StickToBottom
+                    className="absolute inset-0 h-full"
+                    initial={true}
+                  >
+                    <StickyToBottomContent
+                      className="scrollbar-pretty-auto h-full"
+                      content={
+                        <>
+                          {programmerSession ? (
+                            <div className="scrollbar-pretty-auto overflow-y-auto px-2">
+                              <ActionsRenderer<GraphState>
+                                runId={programmerSession.runId}
+                                customNodeEvents={customProgrammerNodeEvents}
+                                setCustomNodeEvents={
+                                  setCustomProgrammerNodeEvents
+                                }
+                                stream={programmerStream}
+                                threadId={programmerSession.threadId}
+                                modifyRunId={async (runId) => {
+                                  setProgrammerSession((prev) => {
+                                    if (!prev) {
+                                      return {
+                                        threadId: programmerSession.threadId,
+                                        runId,
+                                      };
+                                    }
+                                    return {
+                                      ...prev,
+                                      runId,
+                                    };
+                                  });
+                                  if (plannerSession?.threadId) {
+                                    try {
+                                      // Attempt to update the planner session with the new run ID of the programmer.
+                                      await programmerStream.client.threads.updateState(
+                                        plannerSession?.threadId,
+                                        {
+                                          values: {
+                                            programmerSession: {
+                                              threadId:
+                                                programmerSession.threadId,
+                                              runId,
+                                            },
+                                          },
+                                        },
+                                      );
+                                    } catch {
+                                      // no-op
+                                    }
+                                  }
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-center gap-2 py-8">
+                              <Clock className="text-muted-foreground size-4" />
+                              <span className="text-muted-foreground text-sm">
+                                No programmer session
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      }
+                      footer={
+                        <div className="absolute right-0 bottom-4 left-0 flex w-full justify-center">
+                          <ScrollToBottom className="animate-in fade-in-0 zoom-in-95" />
+                        </div>
+                      }
+                    />
+                  </StickToBottom>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
 
       {/* Task Sidebar */}
       {programmerTaskPlan && (
