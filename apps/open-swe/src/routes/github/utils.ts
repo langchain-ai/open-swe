@@ -243,7 +243,7 @@ export function constructLinkToPRReviewComment(inputs: {
   pullNumber: number;
   commentId: number;
 }) {
-  return `https://github.com/${inputs.owner}/${inputs.repo}/pull/${inputs.pullNumber}#discussion_r${inputs.reviewId}`;
+  return `https://github.com/${inputs.owner}/${inputs.repo}/pull/${inputs.pullNumber}#discussion_r${inputs.commentId}`;
 }
 
 export function constructLinkToPRReview(inputs: {
