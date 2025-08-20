@@ -19,6 +19,7 @@ import {
 } from "./types.js";
 import { GitHubPullRequestGet } from "../../utils/github/types.js";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GITHUB_TRIGGER_USERNAME } from "./constants.js";
 
 export interface PRWebhookContext extends WebhookHandlerContext {
   prNumber: number;
@@ -34,7 +35,7 @@ export abstract class PRWebhookHandlerBase extends WebhookHandlerBase {
   ): boolean {
     if (!mentionsGitHubUserForTrigger(content)) {
       this.logger.info(
-        `${logContext} does not mention @${process.env.GITHUB_TRIGGER_USERNAME || "no trigger username set"}, skipping`,
+        `${logContext} does not mention ${GITHUB_TRIGGER_USERNAME}, skipping`,
       );
       return false;
     }
