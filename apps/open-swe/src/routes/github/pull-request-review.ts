@@ -128,6 +128,9 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
         userLogin: payload.sender.login,
         installationName: payload.repository.owner.login,
         runInput,
+        configurable: {
+          shouldCreateIssue: false,
+        },
       });
 
       logger.info("Created new run from GitHub review.", {
