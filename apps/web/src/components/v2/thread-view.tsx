@@ -408,6 +408,10 @@ export function ThreadView({
           isLoading={stream.isLoading}
           cancelRun={cancelRun}
           errorState={errorState}
+          canRestartRun={Boolean(plannerStream.error || programmerStream.error)}
+          managerThreadId={displayThread.id}
+          plannerThreadId={plannerSession?.threadId}
+          programmerThreadId={programmerSession?.threadId}
           githubUser={user || undefined}
           disableSubmit={shouldDisableManagerInput}
         />
