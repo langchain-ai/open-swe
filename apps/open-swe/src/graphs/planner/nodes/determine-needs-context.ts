@@ -18,6 +18,7 @@ import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -118,7 +119,7 @@ export async function determineNeedsContext(
   config: GraphConfig,
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
-    getMissingMessages(state, config),
+    shouldCreateIssue(config) ? getMissingMessages(state, config) : [],
     loadModel(config, LLMTask.ROUTER),
   ]);
   const modelManager = getModelManager();

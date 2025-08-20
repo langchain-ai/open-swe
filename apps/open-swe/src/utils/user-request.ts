@@ -7,6 +7,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import { extractContentWithoutDetailsFromIssueBody } from "./github/issue-messages.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { shouldCreateIssue } from "./should-create-issue.js";
 
 // TODO: Might want a better way of doing this.
 // maybe add a new kwarg `isRequest` and have this return the last human message with that field?
@@ -55,7 +56,10 @@ export function getRecentUserRequest(
 ): string | HumanMessage {
   let recentUserMessage: HumanMessage | undefined;
 
-  if (options?.config && isLocalMode(options.config)) {
+  if (
+    options?.config &&
+    (isLocalMode(options.config) || !shouldCreateIssue(options.config))
+  ) {
     // In local mode, get the last human message regardless of flags
     recentUserMessage = messages.findLast(isHumanMessage);
   } else {

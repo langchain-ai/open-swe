@@ -114,6 +114,14 @@ export function ThreadView({
     });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
+  const [hasGitHubIssue, setHasGitHubIssue] = useState(false);
+
+  useEffect(() => {
+    stream.client.threads.get(displayThread.id).then((thread) => {
+      const configurable = (thread as Record<string, any>).config?.configurable;
+      setHasGitHubIssue(!!configurable?.shouldCreateIssue);
+    });
+  }, [displayThread.id]);
 
   // Load optimistic message from sessionStorage
   useEffect(() => {
@@ -348,6 +356,10 @@ export function ThreadView({
       ]
     : filteredMessages;
 
+  const shouldDisableManagerInput = !hasGitHubIssue
+    ? stream.isLoading || plannerStream.isLoading || programmerStream.isLoading
+    : false;
+
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
       {/* Header */}
@@ -401,6 +413,7 @@ export function ThreadView({
           plannerThreadId={plannerSession?.threadId}
           programmerThreadId={programmerSession?.threadId}
           githubUser={user || undefined}
+          disableSubmit={shouldDisableManagerInput}
         />
         {/* Right Side - Actions & Plan */}
         <div
