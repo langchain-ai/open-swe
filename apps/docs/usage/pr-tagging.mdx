@@ -1,6 +1,6 @@
 ---
 title: "PR Tagging"
-description: "How to trigger Open SWE runs by tagging in PR comments and reviews"
+description: "How to trigger Open SWE runs by tagging it in PR comments and reviews"
 ---
 
 <Warning>
@@ -37,7 +37,7 @@ You can trigger Open SWE by mentioning `@open-swe` in any of the following conte
 ## Context and Security Considerations
 
 <Warning>
-  **Security Notice**: When you tag Open SWE in a PR, it will have access to **all comments, reviews, and review comments** on that pull request. Be aware of potential prompt injection attacks and avoid including sensitive information in PR discussions when using this feature.
+  **Security Notice**: When you tag Open SWE in a PR, it will have access to **all comments, reviews, and review comments** on that pull request, along with any linked issues. Be aware of potential prompt injection attacks and avoid including sensitive information in PR discussions, or linked issues, when using this feature.
 </Warning>
 
 ### What Context is Included
@@ -47,7 +47,7 @@ When Open SWE processes a PR tagging request, it automatically gathers:
 - **All PR comments** (general discussion comments)
 - **All reviews** (including their associated review comments)
 - **All review comments** (line-by-line feedback)
-- **Linked issues** referenced in the PR description
+- **Linked issues** referenced in the PR description (issue title and description)
 
 ### Linked Issues Detection
 
