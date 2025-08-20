@@ -42,6 +42,7 @@ import { createPullRequestToolCallMessage } from "../../../utils/message/create-
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
+  createReplyToCommentTool,
   createReplyToReviewCommentTool,
   shouldIncludeReviewCommentTool,
 } from "../../../tools/reply-to-review-comment.js";
@@ -88,7 +89,10 @@ export async function takeAction(
     searchDocumentForTool,
     writeDefaultTsConfigTool,
     ...(shouldIncludeReviewCommentTool(state, config)
-      ? [createReplyToReviewCommentTool(state, config)]
+      ? [
+          createReplyToReviewCommentTool(state, config),
+          createReplyToCommentTool(state, config),
+        ]
       : []),
     ...mcpTools,
   ];

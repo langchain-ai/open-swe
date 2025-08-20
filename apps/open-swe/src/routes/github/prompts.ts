@@ -8,6 +8,7 @@ import {
   SimplePullRequest,
   SimplePullRequestComment,
   SimplePullRequestReview,
+  SimpleTriggerComment,
 } from "./types.js";
 
 // For PR review triggers
@@ -34,6 +35,8 @@ The context you're provided with to resolve the PR review is as follows:
   IMPORTANT: Keep in mind that some of these comments may already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the actual PR review which was left on the PR.
 - The reviews left on the PR. You're provided with all of the PR reviews left on this pull request. Each review may include a main review message, review comments, and a state (e.g. "approved", "changes requested"). You should focus on the latest review if there are multiple.
   - IMPORTANT: The comments on a review may reference specific lines of code. You should pay close attention to these comments and ensure you implement the changes in the simplest way possible.
+
+With all of this context in mind, ensure you focus on the content inside the <trigger-review> tag. This is the review you were tagged in, and it is what kicked off this process. Ensure this is the only review you're focused on, but still take into account the other comments/reviews for context.
 </context-overview>
 
 <pull-request-data>
@@ -64,6 +67,13 @@ If there are multiple, you should prioritize the reviews which are still "active
 {PR_REVIEWS}
 
 </pull-request-reviews>
+
+<trigger-review>
+Here is the review you were tagged in. Ensure you focus on resolving whatever request was made in the review.
+
+{TRIGGER_COMMENT}
+
+</trigger-review>
 
 Given all of this context, please resolve the PR review comments in the simplest ways possible. You are only to make the code changes as requested in the review. A pull request will be automatically created for you with these changes that points to the original branch the review was left on.
 You're already checked out on a new branch which is based on the original branch the review was left on. You should make all your changes on this branch.
@@ -96,6 +106,8 @@ The context you're provided with to resolve the PR review comment is as follows:
   IMPORTANT: Keep in mind that some of these comments may already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the actual PR review which was left on the PR.
 - The reviews left on the PR. You're provided with all of the PR reviews left on this pull request. Each review may include a main review message, review comments, and a state (e.g. "approved", "changes requested"). You should focus on the latest review you were tagged in.
   - IMPORTANT: The comments on a review may reference specific lines of code. You should pay close attention to these comments and ensure you implement the changes in the simplest way possible.
+
+With all of this context in mind, ensure you focus on the content inside the <trigger-review-comment> tag. This is the comment you were tagged in, and it is what kicked off this process. Ensure this is the only comment you're focused on, but still take into account the other comments/reviews for context.
 </context-overview>
 
 <pull-request-data>
@@ -128,6 +140,13 @@ Ensure you focus on the latest review comment which you were tagged in.
 
 </pull-request-reviews>
 
+<trigger-review-comment>
+Here is the review comment you were tagged in. Ensure you focus on resolving whatever request was made in the comment.
+
+{TRIGGER_COMMENT}
+
+</trigger-review-comment>
+
 Given all of this context, please resolve the latest PR review comment you were tagged in, in the simplest way possible. You are only to make the code changes as requested in the review comment. A pull request will be automatically created for you with these changes that points to the original branch the review was left on.
 You're already checked out on a new branch which is based on the original branch the review was left on. You should make all your changes on this branch.
 
@@ -154,8 +173,9 @@ The context you're provided with to resolve the PR review comment is as follows:
 - The issue(s) that the PR will close when merged. Ensure you read these issue titles/descriptions so you have an idea as to the purpose of the PR.
 - The reviews left on the PR. You're provided with all of the PR reviews left on this pull request. Each review may include a main review message, review comments, and a state (e.g. "approved", "changes requested").
 - The comments left on the PR. These are important as they may include context about the PR, or feedback on the code which you should resolve.
-  IMPORTANT: You should focus on the latest comment you were tagged in, as it is what kicked off this process. Ensure this is the only comment you're focused on, but still take into account the other comments/reviews for context.
   IMPORTANT: Keep in mind that some of these comments may already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the latest comment you were tagged in.
+
+With all of this context in mind, ensure you focus on the content inside the <trigger-comment> tag. This is the comment you were tagged in, and it is what kicked off this process. Ensure this is the only comment you're focused on, but still take into account the other comments/reviews for context.
 </context-overview>
 
 <pull-request-data>
@@ -187,6 +207,13 @@ Here are all of the comments which were left on the pull request. Ensure you foc
 {PR_COMMENTS}
 
 </pull-request-comments>
+
+<trigger-comment>
+Here is the comment you were tagged in. Ensure you focus on resolving whatever request was made in the comment.
+
+{TRIGGER_COMMENT}
+
+</trigger-comment>
 
 Given all of this context, please resolve the comment you were tagged in, in the simplest ways possible. You are only to make the code changes as requested in the comment. A pull request will be automatically created for you with these changes that points to the original branch the comment was left on.
 You're already checked out on a new branch which is based on the original branch the comment was left on. You should make all your changes on this branch.
@@ -264,6 +291,14 @@ function formatPRDataPrompt(prData: SimplePullRequest): string {
 <head-ref>${prData.head.ref}</head-ref>`;
 }
 
+function formatTriggerComment(comment: SimpleTriggerComment): string {
+  return `<author>${comment.author}</author>
+<body>${comment.body}</body>
+${comment.path ? `<path>${comment.path}</path>` : ""}
+${comment.line ? `<line>${comment.line}</line>` : ""}
+${comment.diff_hunk ? `<diff-hunk>${comment.diff_hunk}</diff-hunk>` : ""}`;
+}
+
 export function createPromptFromPRReviewTrigger(
   data: PullRequestReviewTriggerData,
 ): string {
@@ -273,7 +308,8 @@ export function createPromptFromPRReviewTrigger(
   )
     .replace("{LINKED_ISSUES}", formatLinkedIssuesPrompt(data.linkedIssues))
     .replace("{PR_COMMENTS}", formatPRCommentsPrompt(data.prComments))
-    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews));
+    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews))
+    .replace("{TRIGGER_COMMENT}", formatTriggerComment(data.triggerComment));
 }
 
 export function createPromptFromPRReviewCommentTrigger(
@@ -285,7 +321,8 @@ export function createPromptFromPRReviewCommentTrigger(
   )
     .replace("{LINKED_ISSUES}", formatLinkedIssuesPrompt(data.linkedIssues))
     .replace("{PR_COMMENTS}", formatPRCommentsPrompt(data.prComments))
-    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews));
+    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews))
+    .replace("{TRIGGER_COMMENT}", formatTriggerComment(data.triggerComment));
 }
 
 export function createPromptFromPRCommentTrigger(
@@ -297,5 +334,6 @@ export function createPromptFromPRCommentTrigger(
   )
     .replace("{LINKED_ISSUES}", formatLinkedIssuesPrompt(data.linkedIssues))
     .replace("{PR_COMMENTS}", formatPRCommentsPrompt(data.prComments))
-    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews));
+    .replace("{PR_REVIEWS}", formatPRReviewsPrompt(data.reviews))
+    .replace("{TRIGGER_COMMENT}", formatTriggerComment(data.triggerComment));
 }
