@@ -667,3 +667,50 @@ export async function replyToReviewComment({
     1,
   );
 }
+
+export async function quoteReplyToPullRequestComment({
+  owner,
+  repo,
+  commentId,
+  body,
+  pullNumber,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  commentId: number;
+  body: string;
+  pullNumber: number;
+  githubInstallationToken: string;
+}): Promise<GitHubIssueComment | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const originalComment = await octokit.issues.getComment({
+        owner,
+        repo,
+        comment_id: commentId,
+      });
+
+      const quoteReply = `${originalComment.data.body ? `> ${originalComment.data.body}` : ""}
+      
+${body}`;
+
+      const { data: comment } = await octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        body: quoteReply,
+      });
+
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to quote reply to pull request comment",
+    undefined,
+    1,
+  );
+}

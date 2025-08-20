@@ -15,7 +15,7 @@ import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { HumanMessage } from "@langchain/core/messages";
 import { RequestSource } from "../../constants.js";
-import { createPromptFromPRTrigger } from "./prompts.js";
+import { createPromptFromPRCommentTrigger } from "./prompts.js";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPRCommentHandler");
@@ -88,7 +88,7 @@ export async function handlePullRequestComment(payload: any): Promise<any> {
       },
     };
 
-    const prompt = createPromptFromPRTrigger(prData);
+    const prompt = createPromptFromPRCommentTrigger(prData);
 
     try {
       // Get installation ID from the webhook payload

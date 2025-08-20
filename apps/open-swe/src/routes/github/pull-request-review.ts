@@ -11,7 +11,7 @@ import {
   constructLinkToPRReview,
 } from "./utils.js";
 import { PullRequestReviewTriggerData } from "./types.js";
-import { createPromptFromPRTrigger } from "./prompts.js";
+import { createPromptFromPRReviewTrigger } from "./prompts.js";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { HumanMessage } from "@langchain/core/messages";
@@ -81,7 +81,7 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
       },
     };
 
-    const prompt = createPromptFromPRTrigger(prData);
+    const prompt = createPromptFromPRReviewTrigger(prData);
 
     try {
       // Get installation ID from the webhook payload
