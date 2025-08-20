@@ -5,7 +5,7 @@ import {
 import { RequestSource } from "../../constants.js";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import {
-  mentionsOpenSWE,
+  mentionsGitHubUserForTrigger,
   extractLinkedIssues,
   getPrContext,
   convertPRPayloadToPullRequestObj,
@@ -32,8 +32,10 @@ export abstract class PRWebhookHandlerBase extends WebhookHandlerBase {
     content: string,
     logContext: string,
   ): boolean {
-    if (!mentionsOpenSWE(content)) {
-      this.logger.info(`${logContext} does not mention @open-swe, skipping`);
+    if (!mentionsGitHubUserForTrigger(content)) {
+      this.logger.info(
+        `${logContext} does not mention @${process.env.GITHUB_TRIGGER_USERNAME || "no trigger username set"}, skipping`,
+      );
       return false;
     }
     return true;

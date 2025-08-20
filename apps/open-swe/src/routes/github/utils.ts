@@ -37,7 +37,7 @@ export function createDevMetadataComment(runId: string, threadId: string) {
 </details>`;
 }
 
-export function mentionsOpenSWE(commentBody: string): boolean {
+export function mentionsGitHubUserForTrigger(commentBody: string): boolean {
   return /@open-swe\b/.test(commentBody);
 }
 
