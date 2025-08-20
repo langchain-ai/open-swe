@@ -41,6 +41,12 @@ import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import {
+  createReplyToCommentTool,
+  createReplyToReviewCommentTool,
+  createReplyToReviewTool,
+  shouldIncludeReviewCommentTool,
+} from "../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -83,6 +89,13 @@ export async function takeAction(
     getURLContentTool,
     searchDocumentForTool,
     writeDefaultTsConfigTool,
+    ...(shouldIncludeReviewCommentTool(state, config)
+      ? [
+          createReplyToReviewCommentTool(state, config),
+          createReplyToCommentTool(state, config),
+          createReplyToReviewTool(state, config),
+        ]
+      : []),
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

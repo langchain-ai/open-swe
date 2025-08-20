@@ -42,13 +42,14 @@ import {
   CustomNodeEvent,
 } from "@open-swe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 import {
   postGitHubIssueComment,
   cleanTaskItems,
 } from "../../../utils/github/plan.js";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
 
@@ -149,7 +150,7 @@ async function startProgrammerRun(input: {
   );
 
   // Skip GitHub operations in local mode
-  if (!isLocalMode(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,

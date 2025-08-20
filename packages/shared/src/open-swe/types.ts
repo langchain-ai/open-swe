@@ -9,11 +9,6 @@ import {
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
 import {
-  uiMessageReducer,
-  type UIMessage,
-  type RemoveUIMessage,
-} from "@langchain/langgraph-sdk/react-ui";
-import {
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
@@ -289,16 +284,6 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: tokenDataReducer,
     },
   }),
-
-  // ---NOT USED---
-  ui: z
-    .custom<UIMessage[]>()
-    .default(() => [])
-    .langgraph.reducer<(UIMessage | RemoveUIMessage)[]>((state, update) =>
-      uiMessageReducer(state, update),
-    ),
-  // TODO: Not used, but can be used in the future for Gen UI artifacts
-  context: z.record(z.string(), z.unknown()),
 });
 
 export type GraphState = z.infer<typeof GraphAnnotation>;
@@ -447,6 +432,19 @@ export const GraphConfigurationMetadata: {
       default: JSON.stringify(DEFAULT_MCP_SERVERS, null, 2),
       description:
         "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+    },
+  },
+  shouldCreateIssue: {
+    x_open_swe_ui_config: {
+      type: "boolean",
+      default: true,
+      description:
+        "Whether or not to create GitHub issues for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
+    },
+  },
+  reviewPullNumber: {
+    x_open_swe_ui_config: {
+      type: "hidden",
     },
   },
   apiKeys: {
@@ -613,6 +611,20 @@ export const GraphConfiguration = z.object({
    */
   maxTokens: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.maxTokens,
+  }),
+  /**
+   * Whether or not to create an issue for this request.
+   * @default true
+   */
+  shouldCreateIssue: withLangGraph(z.boolean().optional(), {
+    metadata: GraphConfigurationMetadata.shouldCreateIssue,
+  }),
+  /**
+   * The pull request number that this run is associated with.
+   * @default undefined
+   */
+  reviewPullNumber: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.reviewPullNumber,
   }),
   /**
    * User defined API keys to use

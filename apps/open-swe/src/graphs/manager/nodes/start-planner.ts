@@ -18,10 +18,11 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
 import { getRecentUserRequest } from "../../../utils/user-request.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -68,6 +69,9 @@ export async function startPlanner(
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
       ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
+      ...(!shouldCreateIssue(config) && followupMessage
+        ? { internalMessages: [followupMessage] }
+        : {}),
     };
 
     const run = await langGraphClient.runs.create(
