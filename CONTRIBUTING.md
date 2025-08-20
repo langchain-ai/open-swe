@@ -2,39 +2,14 @@
 
 Thank you for your interest in contributing to Open SWE! This guide will help you get started.
 
-## Contents
-
-- [Code of conduct](#code-of-conduct)
-- [Directory structure](#directory-structure)
-- [Development setup](#development-setup)
-- [Development cycle](#development-cycle)
-- [Community PR Guidelines](#community-pr-guidelines)
-- [Test suite](#test-suite)
-- [Code quality tools](#code-quality-tools)
-- [Security](#security)
-
-## Code of conduct
-
-By participating in this project, you agree to uphold our community standards. Please report unacceptable behavior to the maintainers.
-
-## Directory structure
-
-Open SWE is organized as a Turborepo monorepo:
-
-- [`/apps/open-swe/`](/apps/open-swe/) - Core LangGraph agent application
-- [`/apps/web/`](/apps/web/) - Next.js web interface  
-- [`/apps/cli/`](/apps/cli/) - Terminal interface
-- [`/apps/docs/`](/apps/docs/) - Documentation website
-- [`/packages/shared/`](/packages/shared/) - Shared utilities and types
-
-## Development setup
+## Development Setup
 
 ### Requirements
 
-- **Node.js** 18.x or 20.x
-- **Yarn** 3.5.1+ (managed via package.json)
+- **Node.js** 18.x or 20.x  
+- **Yarn** (managed via package.json)
 
-### Setup steps
+### Setup Steps
 
 1. **Fork and clone** the repository:
    ```bash
@@ -45,131 +20,63 @@ Open SWE is organized as a Turborepo monorepo:
 
 2. **Install dependencies**:
    ```bash
-   yarn install --immutable
+   yarn install
    ```
 
-3. **Configure environment** (copy example files):
+3. **Copy environment files**:
    ```bash
    cp apps/web/.env.example apps/web/.env
    cp apps/open-swe/.env.example apps/open-swe/.env
    ```
 
-4. **Set up required API keys** in your `.env` files:
-   - `ANTHROPIC_API_KEY` - Primary LLM provider
-   - `LANGCHAIN_API_KEY` - For tracing (from LangSmith)
-   - `GITHUB_APP_*` - For GitHub integration
-   - `DAYTONA_API_KEY` - For cloud sandbox
+4. **Configure required API keys** in your `.env` files:
+   - `ANTHROPIC_API_KEY` - LLM provider (required)
+   - `DAYTONA_API_KEY` - Cloud sandboxes (required)
+   - `SECRETS_ENCRYPTION_KEY` - Generate with `openssl rand -hex 32` (required)
+   - GitHub App credentials (required for GitHub integration)
 
-   > See the [development setup docs](https://docs.langchain.com/labs/swe/setup/development) for detailed configuration.
+   > See the [development setup docs](https://docs.langchain.com/labs/swe/setup/development) for complete configuration details.
 
-5. **Build all packages**:
+5. **Start development servers**:
    ```bash
-   yarn build
+   yarn dev  # Starts both web app (port 3000) and agent (port 2024)
    ```
 
-6. **Start development servers**:
-   ```bash
-   yarn dev
-   ```
+## Before Submitting PRs
 
-## Development cycle
+Run these commands to ensure your changes are ready:
 
-### Basic workflow
+```bash
+yarn lint          # Check linting (may show warnings)
+yarn build         # Ensure TypeScript compilation
+yarn test          # Run tests
+```
 
-1. **Start development**:
-   ```bash
-   yarn dev  # Starts all apps in development mode
-   ```
+> **Note:** `yarn format:check` may fail on generated files in `/dist` directories. This is expected and won't block PRs.
 
-2. **Make changes** following existing code patterns
+All CI checks must pass before your PR can be merged.
 
-3. **Check code quality**:
-   ```bash
-   yarn lint          # Check linting
-   yarn format:check  # Check formatting
-   yarn test          # Run tests
-   ```
+## Project Structure
 
-4. **Build and verify**:
-   ```bash
-   yarn build
-   ```
+- `apps/open-swe/` - Core LangGraph agent
+- `apps/web/` - Next.js web interface
+- `apps/cli/` - Terminal interface  
+- `apps/docs/` - Documentation
 
-5. **Commit and open PR**
-
-## Community PR Guidelines
-
-### General Requirements
+## Guidelines
 
 - **Small, focused PRs** - One feature/fix per PR
-- **Follow TypeScript standards** - No `@ts-ignore`, proper typing
-- **Include tests** - Unit tests for core changes, integration tests for workflows
-- **No console logging** - Use logger utilities (enforced by ESLint)
 - **Follow existing patterns** - Study similar code before implementing
-
-### PR Process
-
-1. **Address feedback within 14 days** or PR will be auto-closed
-2. **Pass all CI checks**:
-   - Linting and formatting
-   - TypeScript compilation  
-   - Unit tests (Node 18.x/20.x)
-   - Spell checking
-3. **Clear PR description** with context and motivation
-
-### Automatic rejection criteria
-
-- Large, unfocused PRs
-- Missing tests
-- CI failures
-- Typo-only changes
-
-## Test suite
-
-### Unit tests
-```bash
-yarn test              # All packages
-cd apps/open-swe && yarn test  # Core agent only
-```
-
-### Integration tests
-```bash
-cd apps/open-swe && yarn test:int
-```
-
-### Evaluation tests
-```bash
-cd apps/open-swe && yarn eval:single
-```
-
-## Code quality tools
-
-### Linting
-```bash
-yarn lint      # Check issues
-yarn lint:fix  # Auto-fix issues
-```
-
-### Formatting
-```bash
-yarn format        # Format code
-yarn format:check  # Check formatting
-```
-
-### Build validation
-```bash
-yarn build  # Ensure TypeScript compilation
-```
+- **Include tests** for new functionality
+- **No `@ts-ignore`** - Use proper TypeScript types
+- **Clear PR descriptions** with context and motivation
 
 ## Security
 
-**Report security issues** to security@langchain.dev - do not open public issues.
+Report security issues to security@langchain.dev - do not open public issues.
 
-**Development security**:
-- Never commit API keys or secrets
-- Follow secure coding practices in tool implementations
-- Review security implications of agent capabilities
+Never commit API keys or secrets to the repository.
 
 ---
 
-For detailed setup instructions, see the [official development documentation](https://docs.langchain.com/labs/swe/setup/development).
+For detailed setup instructions, see the [development documentation](https://docs.langchain.com/labs/swe/setup/development).
