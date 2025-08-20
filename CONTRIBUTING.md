@@ -142,12 +142,10 @@ While working on Open SWE code, you can run `yarn dev`. It will automatically bu
 Run these commands to ensure your changes are ready:
 
 ```bash
-yarn lint          # Check linting (may show warnings)
+yarn lint          # Check linting
 yarn build         # Ensure TypeScript compilation
 yarn test          # Run tests
 ```
-
-> **Note:** `yarn format:check` may fail on generated files in `/dist` directories. This is expected and won't block PRs.
 
 All CI checks must pass before your PR can be merged.
 
