@@ -674,6 +674,7 @@ export async function quoteReplyToPullRequestComment({
   commentId,
   body,
   pullNumber,
+  originalCommentUserLogin,
   githubInstallationToken,
 }: {
   owner: string;
@@ -681,6 +682,7 @@ export async function quoteReplyToPullRequestComment({
   commentId: number;
   body: string;
   pullNumber: number;
+  originalCommentUserLogin: string;
   githubInstallationToken: string;
 }): Promise<GitHubIssueComment | null> {
   return withGitHubRetry(
@@ -697,7 +699,7 @@ export async function quoteReplyToPullRequestComment({
 
       const quoteReply = `${originalComment.data.body ? `> ${originalComment.data.body}` : ""}
       
-${body}`;
+@${originalCommentUserLogin} ${body}`;
 
       const { data: comment } = await octokit.issues.createComment({
         owner,

@@ -11,6 +11,7 @@ import {
 } from "../utils/github/api.js";
 import { getRecentUserRequest } from "../utils/user-request.js";
 import { RequestSource } from "../constants.js";
+import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
 
 export function shouldIncludeReviewCommentTool(
   state: GraphState,
@@ -67,10 +68,11 @@ export function createReplyToCommentTool(
   const replyToReviewCommentTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-      const { reviewPullNumber } = config.configurable ?? {};
+      const reviewPullNumber = config.configurable?.reviewPullNumber;
+      const userLogin = config.configurable?.[GITHUB_USER_LOGIN_HEADER];
 
-      if (!reviewPullNumber) {
-        throw new Error("No pull request number found");
+      if (!reviewPullNumber || !userLogin) {
+        throw new Error("No pull request number or user login found");
       }
 
       await quoteReplyToPullRequestComment({
@@ -79,6 +81,7 @@ export function createReplyToCommentTool(
         commentId: input.id,
         body: input.comment,
         pullNumber: reviewPullNumber,
+        originalCommentUserLogin: userLogin,
         githubInstallationToken,
       });
 
