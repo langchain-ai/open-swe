@@ -109,7 +109,7 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
             id: uuidv4(),
             content: prompt,
             additional_kwargs: {
-              requestSource: RequestSource.GITHUB_WEBHOOK,
+              requestSource: RequestSource.GITHUB_PULL_REQUEST_WEBHOOK,
             },
           }),
         ],
@@ -130,6 +130,7 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
         runInput,
         configurable: {
           shouldCreateIssue: false,
+          reviewPullNumber: payload.pull_request.number,
         },
       });
 

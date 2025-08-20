@@ -21,6 +21,7 @@ import { encryptSecret } from "@open-swe/shared/crypto";
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
 import { StreamMode } from "@langchain/langgraph-sdk";
+import { extractContentWithoutDetailsFromIssueBody } from "../../utils/github/issue-messages.js";
 
 export function createDevMetadataComment(runId: string, threadId: string) {
   return `<details>
@@ -150,7 +151,9 @@ export async function getPrContext(
       id: issue.id,
       number: issue.number,
       title: issue.title,
-      body: issue.body ?? undefined,
+      body: issue.body
+        ? extractContentWithoutDetailsFromIssueBody(issue.body)
+        : undefined,
       state: issue.state,
       author: issue.user?.login,
     })),

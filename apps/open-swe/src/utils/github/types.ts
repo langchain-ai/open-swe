@@ -20,3 +20,6 @@ export type GitHubBranch =
 
 export type GitHubPullRequestGet =
   RestEndpointMethodTypes["pulls"]["get"]["response"]["data"];
+
+export type GitHubReviewComment =
+  RestEndpointMethodTypes["pulls"]["createReviewComment"]["response"]["data"];

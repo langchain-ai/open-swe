@@ -193,7 +193,8 @@ export async function openPullRequest(
     | GitHubPullRequestUpdate
     | null = null;
 
-  const prBody = `${shouldCreateIssue(config) ? `Fixes #${state.githubIssueId}` : ""}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`;
+  const reviewPullNumber = config.configurable?.reviewPullNumber;
+  const prBody = `${shouldCreateIssue(config) ? `Fixes #${state.githubIssueId}` : ""}${reviewPullNumber ? `\n\nTriggered from pull request: #${reviewPullNumber}` : ""}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`;
 
   if (!prForTask) {
     // No PR created yet. Shouldn't be possible, but we have a condition here anyway

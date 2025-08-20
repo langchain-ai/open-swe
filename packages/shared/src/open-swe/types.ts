@@ -457,6 +457,11 @@ export const GraphConfigurationMetadata: {
         "Whether or not to create GitHub issues for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
     },
   },
+  reviewPullNumber: {
+    x_open_swe_ui_config: {
+      type: "hidden",
+    },
+  },
   apiKeys: {
     x_open_swe_ui_config: {
       type: "hidden",
@@ -628,6 +633,13 @@ export const GraphConfiguration = z.object({
    */
   shouldCreateIssue: withLangGraph(z.boolean().optional(), {
     metadata: GraphConfigurationMetadata.shouldCreateIssue,
+  }),
+  /**
+   * The pull request number that this run is associated with.
+   * @default undefined
+   */
+  reviewPullNumber: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.reviewPullNumber,
   }),
   /**
    * User defined API keys to use

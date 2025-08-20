@@ -89,7 +89,7 @@ export async function handleIssueLabeled(payload: any) {
           additional_kwargs: {
             isOriginalIssue: true,
             githubIssueId: issueData.issueNumber,
-            requestSource: RequestSource.GITHUB_WEBHOOK,
+            requestSource: RequestSource.GITHUB_ISSUE_WEBHOOK,
           },
         }),
       ],

@@ -342,12 +342,14 @@ export async function checkoutBranchAndCommit(
     logger.info("First commit detected, creating a draft pull request.");
     const hasIssue = shouldCreateIssue(config);
 
+    const reviewPullNumber = config.configurable?.reviewPullNumber;
+
     const pullRequest = await createPullRequest({
       owner: targetRepository.owner,
       repo: targetRepository.repo,
       headBranch: branchName,
       title: `[WIP]: ${activeTask?.title ?? "Open SWE task"}`,
-      body: `**WORK IN PROGRESS OPEN SWE PR**${hasIssue ? `\n\nFixes: #${options.githubIssueId}` : ""}`,
+      body: `**WORK IN PROGRESS OPEN SWE PR**${hasIssue ? `\n\nFixes: #${options.githubIssueId}` : ""}${reviewPullNumber ? `\n\nTriggered from pull request: #${reviewPullNumber}` : ""}`,
       githubInstallationToken: options.githubInstallationToken,
       draft: true,
       baseBranch: targetRepository.branch,

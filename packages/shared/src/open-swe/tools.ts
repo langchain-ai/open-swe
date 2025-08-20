@@ -662,3 +662,25 @@ export function createWriteDefaultTsConfigToolFields(
     schema: writeDefaultTsConfigToolSchema,
   };
 }
+
+export function createReplyToReviewCommentToolFields() {
+  const commentOnReviewCommentSchema = z.object({
+    id: z
+      .number()
+      .describe(
+        "The ID of the review comment to reply to. This must be a valid ID from a review comment.",
+      ),
+    comment: z
+      .string()
+      .describe(
+        "The reply to leave on the review comment. This should be a concise reply.",
+      ),
+  });
+
+  return {
+    name: "reply_to_review_comment",
+    description:
+      "Use this tool to reply to a review comment. You should call this tool to reply to user comments if they don't require modifying code but instead are requesting information. Additionally, this should be called to indicate to the user that a comment has been resolved, or if you're unable to resolve the comment call this tool to let the user know you're unable to resolve the comment.",
+    schema: commentOnReviewCommentSchema,
+  };
+}

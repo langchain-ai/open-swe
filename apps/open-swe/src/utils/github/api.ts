@@ -7,6 +7,7 @@ import {
   GitHubPullRequest,
   GitHubPullRequestList,
   GitHubPullRequestUpdate,
+  GitHubReviewComment,
 } from "./types.js";
 import { getOpenSWELabel } from "./label.js";
 import { getInstallationToken } from "@open-swe/shared/github/auth";
@@ -622,6 +623,46 @@ export async function getBranch({
     },
     githubInstallationToken,
     "Failed to get branch",
+    undefined,
+    1,
+  );
+}
+
+export async function replyToReviewComment({
+  owner,
+  repo,
+  commentId,
+  body,
+  pullNumber,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  commentId: number;
+  body: string;
+  pullNumber: number;
+  githubInstallationToken: string;
+}): Promise<GitHubReviewComment | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: comment } = await octokit.pulls.createReplyForReviewComment(
+        {
+          owner,
+          repo,
+          comment_id: commentId,
+          pull_number: pullNumber,
+          body,
+        },
+      );
+
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to reply to review comment",
     undefined,
     1,
   );

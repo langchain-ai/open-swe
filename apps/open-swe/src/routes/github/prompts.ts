@@ -1,3 +1,4 @@
+import { createReplyToReviewCommentToolFields } from "@open-swe/shared/open-swe/tools";
 import {
   PullRequestReviewTriggerData,
   SimpleIssue,
@@ -11,8 +12,9 @@ You're tasked with resolving all of the relevant comments/reviews which were lef
 
 For each comment, determine whether or not it needs a code change, and if so update the code to properly resolve the comment.
   IMPORTANT: Remember that some comments might already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the actual PR review which was left on the PR.
+After making a code change ensure you reply to the review comment which requested the change using the '${createReplyToReviewCommentToolFields().name}' tool. This message should be very short and to the point.
 
-For comments which do not require code changes, you may ignore them.
+For comments which do not require code changes, you should either reply to the comment using the '${createReplyToReviewCommentToolFields().name}' tool, or ignore the comment if it's a no-op.
 
 For comments which do require code changes, you should implement the changes in the simplest way possible.
 Ensure they're implemented to properly resolve the comment. Do not make any changes which are not directly related to resolving the comment.
@@ -54,6 +56,8 @@ If there are multiple, you should prioritize the reviews which are still "active
 
 Given all of this context, please resolve the PR review comments in the simplest ways possible. You are only to make the code changes as requested in the review. A pull request will be automatically created for you with these changes that points to the original branch the review was left on.
 You're already checked out on a new branch which is based on the original branch the review was left on. You should make all your changes on this branch.
+
+IMPORTANT: The comments in the reviews should take precedence over the comments on the linked issue(s), or the body of the pull request/issue. Your main goal is to resolve all of the relevant review comments not yet addressed, in the simplest and most direct way possible.
 `;
 
 function formatLinkedIssuesPrompt(issues: SimpleIssue[]): string {
