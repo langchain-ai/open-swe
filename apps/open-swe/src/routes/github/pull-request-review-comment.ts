@@ -6,6 +6,7 @@ import { constructLinkToPRReviewComment } from "./utils.js";
 import { PullRequestReviewTriggerData } from "./types.js";
 import { createPromptFromPRReviewCommentTrigger } from "./prompts.js";
 import { getRandomWebhookMessage } from "./webhook-messages.js";
+import { GITHUB_TRIGGER_USERNAME } from "./constants.js";
 
 class PRReviewCommentWebhookHandler extends PRWebhookHandlerBase {
   constructor() {
@@ -40,7 +41,7 @@ class PRReviewCommentWebhookHandler extends PRWebhookHandlerBase {
     }
 
     this.logger.info(
-      `@open-swe mentioned in PR #${payload.pull_request.number} review comment`,
+      `${GITHUB_TRIGGER_USERNAME} mentioned in PR #${payload.pull_request.number} review comment`,
       {
         commentId: payload.comment.id,
         author: payload.comment.user?.login,

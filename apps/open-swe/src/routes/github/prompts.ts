@@ -11,10 +11,11 @@ import {
   SimplePullRequestReview,
   SimpleTriggerComment,
 } from "./types.js";
+import { GITHUB_TRIGGER_USERNAME } from "./constants.js";
 
 // For PR review triggers
 const PR_REVIEW_TRIGGER_PROMPT = `<instructions>
-You're tasked with resolving all of the relevant comments/reviews which were left on this pull request.
+You're tasked with resolving all of the relevant comments/reviews which were left on this pull request. The user has tagged you (${GITHUB_TRIGGER_USERNAME}) in a review, meaning they want you to resolve the review and all of its comments for them.
 
 For each comment, determine whether or not it needs a code change, and if so update the code to properly resolve the comment.
   IMPORTANT: Remember that some comments might already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the actual PR review which was left on the PR.
@@ -87,7 +88,7 @@ IMPORTANT: The comments in the reviews should take precedence over the comments 
 
 // For PR review comment triggers
 const PR_REVIEW_COMMENT_TRIGGER_PROMPT = `<instructions>
-You're tasked with resolving the pull request review comment which was left on this PR, and you (open-swe) were tagged in.
+You're tasked with resolving the pull request review comment which was left on this PR, and you (${GITHUB_TRIGGER_USERNAME}) were tagged in.
 
 For the review comment, determine whether or not it needs a code change, and if so update the code to properly resolve the comment.
   IMPORTANT: Remember that some comments might already be resolved, so don't blindly make changes based on the comments alone. You mainly care about the actual PR review which was left on the PR.
@@ -159,7 +160,7 @@ IMPORTANT: The review comment should take precedence over the comments on the li
 
 // For PR comment triggers
 const PR_COMMENT_TRIGGER_PROMPT = `<instructions>
-The user has tagged you (open-swe) in a comment on this pull request. Your task is to resolve their comment in the simplest way possible.
+The user has tagged you (${GITHUB_TRIGGER_USERNAME}) in a comment on this pull request. Your task is to resolve their comment in the simplest way possible.
 
 Determine whether or not the comment requires a code change, and if so update the code to properly resolve the comment.
 After making a code change ensure you reply to the comment which requested the change using the '${createReplyToCommentToolFields().name}' tool. This message should be very short and to the point.
