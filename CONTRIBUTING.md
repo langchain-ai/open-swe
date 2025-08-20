@@ -29,18 +29,112 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
    cp apps/open-swe/.env.example apps/open-swe/.env
    ```
 
-4. **Configure required API keys** in your `.env` files:
-   - `ANTHROPIC_API_KEY` - LLM provider (required)
-   - `DAYTONA_API_KEY` - Cloud sandboxes (required)
-   - `SECRETS_ENCRYPTION_KEY` - Generate with `openssl rand -hex 32` (required)
-   - GitHub App credentials (required for GitHub integration)
+4. **Create GitHub App** (required):
+   
+   > **Note:** You need a **GitHub App** (not OAuth App). Consider separate apps for development and production.
+   
+   **Create the App:**
+   1. Go to [GitHub App creation page](https://github.com/settings/apps/new)
+   2. Fill in basic information:
+      - **GitHub App name:** Your preferred name (e.g., "open-swe-dev")
+      - **Description:** Development instance of Open SWE coding agent
+      - **Homepage URL:** Your repository URL
+      - **Callback URL:** `http://localhost:3000/api/auth/github/callback`
+   
+   **Configure OAuth Settings:**
+   - ✅ Request user authorization (OAuth) during installation
+   - ✅ Redirect on update
+   - ❌ Expire user authorization tokens
+   
+   **Set Up Webhook:**
+   - ✅ Enable webhook
+   - **Webhook URL:** Use ngrok to expose your local server:
+     ```bash
+     ngrok http 2024
+     ```
+     Use the ngrok URL + `/webhook/github` (e.g., `https://abc123.ngrok.io/webhook/github`)
+   - **Webhook secret:** Generate and save:
+     ```bash
+     openssl rand -hex 32
+     ```
+     Add this value to GITHUB_WEBHOOK_SECRET in apps/open-swe/.env 
 
-   > See the [development setup docs](https://docs.langchain.com/labs/swe/setup/development) for complete configuration details.
+   **Configure Permissions (Repository):**
+   - **Contents:** Read & Write
+   - **Issues:** Read & Write  
+   - **Pull requests:** Read & Write
+   - **Metadata:** Read only (auto-enabled)
+   
+   **Organization permissions**: None
+   **Account permissions**: None
+   
+   **Subscribe to Events:**
+   - ✅ Issues
+   - ✅ Pull request review
+   - ✅ Pull request review comment
+   - ✅ Issue comment
+   
+   **Installation Settings:**
+   - Choose "Any account" for broader testing or "Only on this account" to limit scope
+
+   **Complete App Creation**
+   - Click Create GitHub App to finish the setup
+   
+   **Collect Credentials:**
+   After creating the app, collect these values and add them to both environment files:
+   
+   - **`GITHUB_APP_NAME`** - The name you chose
+   - **`GITHUB_APP_ID`** - Found in the "About" section (e.g., `12345678`)
+   - **`NEXT_PUBLIC_GITHUB_APP_CLIENT_ID`** - Found in the "About" section
+   - **`GITHUB_APP_CLIENT_SECRET`**:
+     1. Scroll to "Client secrets" section
+     2. Click "Generate new client secret"
+     3. Copy the generated value
+   - **`GITHUB_APP_PRIVATE_KEY`**:
+     1. Scroll to "Private keys" section
+     2. Click "Generate a private key"
+     3. Download the `.pem` file and copy its contents
+     4. Format as a single line with `\\n` for line breaks, or use the multiline format shown in the example
+   - **`GITHUB_APP_REDIRECT_URI`** - Should be `http://localhost:3000/api/auth/github/callback` for local development, or `https://your-production-url.com/api/auth/github/callback` for production
+   - **`GITHUB_WEBHOOK_SECRET`** - Generate and save this value:
+     ```bash
+     openssl rand -hex 32
+     ```
+     Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/open-swe/.env` and `apps/web/.env`   
 
 5. **Start development servers**:
    ```bash
    yarn dev  # Starts both web app (port 3000) and agent (port 2024)
    ```
+
+## Development Cycle
+
+While working on Open SWE code, you can run `yarn dev`. It will automatically build your code, restart the backend services, and refresh the frontend (web UI) on every change you make.
+
+### Basic Development Workflow
+
+1. **Start development mode**:
+   ```bash
+   yarn dev
+   ```
+   This starts all services with hot reload enabled.
+
+2. **Make your changes** - Code gets automatically rebuilt and reloaded
+
+3. **Check if everything still works in production mode**:
+   ```bash
+   yarn build
+   yarn start  # Test production builds (individual apps only)
+   ```
+
+4. **Create tests** for new functionality
+
+5. **Run all tests**:
+   ```bash
+   yarn test
+   ```
+
+6. **Run quality checks** and **commit your changes**
 
 ## Before Submitting PRs
 
