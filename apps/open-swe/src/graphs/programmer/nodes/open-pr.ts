@@ -113,10 +113,27 @@ export async function openPullRequest(
     );
   }
 
+  const repoPath = getRepoAbsolutePath(state.targetRepository);
+
+  // First, verify that there are changed files
+  const gitDiffRes = await sandbox.process.executeCommand(
+    `git diff --name-only ${state.targetRepository.branch ?? ""}`,
+    repoPath,
+  );
+  if (gitDiffRes.exitCode !== 0 || gitDiffRes.result.trim().length === 0) {
+    // no changed files
+    const sandboxDeleted = await deleteSandbox(sandboxSessionId);
+    return {
+      ...(sandboxDeleted && {
+        sandboxSessionId: undefined,
+        dependenciesInstalled: false,
+      }),
+    };
+  }
+
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   if (changedFiles.length > 0) {
