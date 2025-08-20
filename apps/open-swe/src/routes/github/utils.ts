@@ -44,8 +44,7 @@ export function mentionsGitHubUserForTrigger(commentBody: string): boolean {
 export function extractLinkedIssues(prBody: string): number[] {
   // Look for common patterns like "fixes #123", "closes #456", "resolves #789"
   const patterns = [
-    /(?:fixes?|closes?|resolves?)\s+#(\d+)/gi,
-    /(?:fix|close|resolve)\s+#(\d+)/gi,
+    /\b(?:fixes?|closes?|resolves?|fix|close|resolve)(?:\s*:\s*|\s+)#(\d+)/gi,
   ];
 
   const issueNumbers: number[] = [];
