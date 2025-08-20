@@ -6,8 +6,9 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
 
 ### Requirements
 
-- **Node.js** 18.x or 20.x  
-- **Yarn** (managed via package.json)
+- **Node.js** (version 18 or higher)
+- **Yarn** (version 3.5.1 or higher)
+- **Git**
 
 ### Setup Steps
 
