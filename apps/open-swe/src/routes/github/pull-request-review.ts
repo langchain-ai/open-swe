@@ -8,6 +8,7 @@ import {
   convertPRPayloadToPullRequestObj,
   createRunFromWebhook,
   createDevMetadataComment,
+  constructLinkToPRReview,
 } from "./utils.js";
 import { PullRequestReviewTriggerData } from "./types.js";
 import { createPromptFromPRTrigger } from "./prompts.js";
@@ -140,6 +141,12 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
       });
 
       logger.info("Creating comment...");
+      const reviewCommentLink = constructLinkToPRReview({
+        owner: payload.repository.owner.login,
+        repo: payload.repository.name,
+        pullNumber: payload.pull_request.number,
+        reviewId: payload.review.id,
+      });
       const appUrl = getOpenSweAppUrl(threadId);
       const appUrlCommentText = appUrl
         ? `View run in Open SWE [here](${appUrl}) (this URL will only work for @${payload.sender.login})`
@@ -150,7 +157,7 @@ export async function handlePullRequestReview(payload: any): Promise<any> {
           owner: payload.repository.owner.login,
           repo: payload.repository.name,
           issue_number: payload.pull_request.number,
-          body: `🤖 Open SWE will process this PR review. Running...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(runId, threadId)}`,
+          body: `🤖 Open SWE will process [this PR review](${reviewCommentLink}). Running...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(runId, threadId)}`,
         },
       );
     } catch (error) {

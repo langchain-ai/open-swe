@@ -35,23 +35,31 @@ The context you're provided with to resolve the PR review is as follows:
 
 <pull-request-data>
 Here is the data on the pull request you're resolving the review for:
+
 {PR_DATA}
+
 </pull-request-data>
 
 <linked-issues>
 Here are the issues which will be closed when this pull request is merged. Ensure you read over the issue titles/descriptions so you have an idea as to the purpose of the PR.
+
 {LINKED_ISSUES}
+
 </linked-issues>
 
 <pull-request-comments>
 Here are all of the comments (if any) which were left on the pull request.
+
 {PR_COMMENTS}
+
 </pull-request-comments>
 
 <pull-request-reviews>
 Here are all of the reviews which were left on the pull request.
 If there are multiple, you should prioritize the reviews which are still "active" (e.g. changed requested, approved, or commented). However, still keep in mind the previous reviews for important context.
+
 {PR_REVIEWS}
+
 </pull-request-reviews>
 
 Given all of this context, please resolve the PR review comments in the simplest ways possible. You are only to make the code changes as requested in the review. A pull request will be automatically created for you with these changes that points to the original branch the review was left on.
@@ -68,10 +76,15 @@ function formatLinkedIssuesPrompt(issues: SimpleIssue[]): string {
   return issues
     .map(
       (issue) => `<issue number="${issue.number}">
-  <state>${issue.state}</state>
-  <title>${issue.title}</title>
-  <body>${issue.body ?? "No body"}</body>
-</issue>`,
+
+      <state>${issue.state}</state>
+
+      <title>${issue.title}</title>
+
+      <body>${issue.body ?? "No body"}</body>
+
+</issue>
+`,
     )
     .join("\n");
 }
@@ -84,9 +97,13 @@ function formatPRCommentsPrompt(comments: SimplePullRequestComment[]): string {
   return comments
     .map(
       (comment) => `<comment id="${comment.id}">
-  <author>${comment.author}</author>
-  <body>${comment.body}</body>
-</comment>`,
+
+      <author>${comment.author}</author>
+
+      <body>${comment.body}</body>
+
+</comment>
+`,
     )
     .join("\n");
 }
@@ -99,29 +116,44 @@ function formatPRReviewsPrompt(reviews: SimplePullRequestReview[]): string {
   return reviews
     .map(
       (review) => `<review id="${review.id}">
+
   <author>${review.author}</author>
+
   <body>${review.body ?? "No review body"}</body>
+
   <state>${review.state}</state>
+
     ${review.reviewComments.map(
       (comment) => `<review-comment id="${comment.id}">
+
       <body>${comment.body ?? "No review comment body"}</body>
+      
       <path>${comment.path}</path>
+      
       <line>${comment.line}</line>
+      
       <diff-hunk>
         ${comment.diff_hunk}
       </diff-hunk>
+      
     </review-comment>`,
     )}
-</review>`,
+
+</review>
+`,
     )
     .join("\n");
 }
 
 function formatPRDataPrompt(prData: SimplePullRequest): string {
-  return `<title>${prData.title}</title>
+  return `<title>\n${prData.title}</title>
+
 <body>${prData.body}</body>
+
 <author>${prData.author}</author>
+
 <state>${prData.state}</state>
+
 <head-ref>${prData.head.ref}</head-ref>`;
 }
 

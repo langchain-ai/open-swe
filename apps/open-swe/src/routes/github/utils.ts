@@ -227,3 +227,30 @@ export async function createRunFromWebhook(inputs: {
     threadId,
   };
 }
+
+export function constructLinkToPRComment(inputs: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  commentId: number;
+}) {
+  return `https://github.com/${inputs.owner}/${inputs.repo}/pull/${inputs.pullNumber}#issuecomment-${inputs.commentId}`;
+}
+
+export function constructLinkToPRReviewComment(inputs: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  commentId: number;
+}) {
+  return `https://github.com/${inputs.owner}/${inputs.repo}/pull/${inputs.pullNumber}#discussion_r${inputs.reviewId}`;
+}
+
+export function constructLinkToPRReview(inputs: {
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  reviewId: number;
+}) {
+  return `https://github.com/${inputs.owner}/${inputs.repo}/pull/${inputs.pullNumber}#pullrequestreview-${inputs.reviewId}`;
+}
