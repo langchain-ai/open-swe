@@ -7,7 +7,7 @@ import { getPrContext } from "./utils.js";
  * Requires process.env.GITHUB_PAT_PR_REVIEW_TESTING to be set to a GitHub Personal Access Token
  * with issue and PR read permissions for a repo.
  */
-describe("getPrContext integration - bracesproul/personal-site#36", () => {
+describe("getPrContext integration - langchain-ai/open-swe-dev#725", () => {
   it("separates PR comments and review comments; finds expected messages", async () => {
     const token = process.env.GITHUB_PAT_PR_REVIEW_TESTING;
     if (!token) {
@@ -16,9 +16,9 @@ describe("getPrContext integration - bracesproul/personal-site#36", () => {
 
     const octokit = new Octokit({ auth: token });
 
-    const owner = "bracesproul";
-    const repo = "personal-site";
-    const prNumber = 36;
+    const owner = "langchain-ai";
+    const repo = "open-swe-dev";
+    const prNumber = 725;
 
     const { prComments, reviews } = await getPrContext(octokit, {
       owner,

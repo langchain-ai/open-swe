@@ -2,7 +2,7 @@ import { Context } from "hono";
 import { BlankEnv, BlankInput } from "hono/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { Webhooks } from "@octokit/webhooks";
-import { handleIssueLabeled } from "./issue.js";
+import { handleIssueLabeled } from "./issue-labeled.js";
 import { handlePullRequestComment } from "./pull-request-comment.js";
 import { handlePullRequestReview } from "./pull-request-review.js";
 import { handlePullRequestReviewComment } from "./pull-request-review-comment.js";
