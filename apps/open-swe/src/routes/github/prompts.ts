@@ -1,6 +1,7 @@
 import {
   createReplyToCommentToolFields,
   createReplyToReviewCommentToolFields,
+  createReplyToReviewToolFields,
 } from "@open-swe/shared/open-swe/tools";
 import {
   PullRequestReviewTriggerData,
@@ -23,6 +24,10 @@ Do not leave comments in your code about the review, or changes you're making.
 After making a code change ensure you reply to the review comment which requested the change using the '${createReplyToReviewCommentToolFields().name}' tool. This message should be very short and to the point.
 
 For comments which do not require code changes, you should either reply to the comment using the '${createReplyToReviewCommentToolFields().name}' tool, or ignore the comment if it's a no-op.
+
+Finally, when you've finished resolving the entire review, you should reply to the original review using the '${createReplyToReviewToolFields().name}' tool.
+
+NOTE: This is different from replying to a normal comment, and different from replying to review comments. Ensure you use each tool appropriately.
 
 The changes you make will be put into a pull request which is set to be merged into the branch the review was left on. This will happen automatically for you.
 </instructions>

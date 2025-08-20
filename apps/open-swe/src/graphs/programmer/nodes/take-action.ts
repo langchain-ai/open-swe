@@ -44,6 +44,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   createReplyToCommentTool,
   createReplyToReviewCommentTool,
+  createReplyToReviewTool,
   shouldIncludeReviewCommentTool,
 } from "../../../tools/reply-to-review-comment.js";
 
@@ -92,6 +93,7 @@ export async function takeAction(
       ? [
           createReplyToReviewCommentTool(state, config),
           createReplyToCommentTool(state, config),
+          createReplyToReviewTool(state, config),
         ]
       : []),
     ...mcpTools,

@@ -1,178 +1,124 @@
-import { v4 as uuidv4 } from "uuid";
-import { createLogger, LogLevel } from "../../utils/logger.js";
-import { GitHubApp } from "../../utils/github-app.js";
 import {
-  constructLinkToPRComment,
-  convertPRPayloadToPullRequestObj,
-  createDevMetadataComment,
-  createRunFromWebhook,
-  extractLinkedIssues,
-  getPrContext,
-  mentionsOpenSWE,
-} from "./utils.js";
+  PRWebhookHandlerBase,
+  PRWebhookContext,
+} from "./pr-webhook-handler-base.js";
+import { constructLinkToPRComment } from "./utils.js";
 import { PullRequestReviewTriggerData } from "./types.js";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
-import { HumanMessage } from "@langchain/core/messages";
-import { RequestSource } from "../../constants.js";
 import { createPromptFromPRCommentTrigger } from "./prompts.js";
-import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
+import { getRandomWebhookMessage } from "./webhook-messages.js";
 
-const logger = createLogger(LogLevel.INFO, "GitHubPRCommentHandler");
-
-const githubApp = new GitHubApp();
-
-export async function handlePullRequestComment(payload: any): Promise<any> {
-  // Only process comments on pull requests
-  if (!payload.issue.pull_request) {
-    return;
+class PRCommentWebhookHandler extends PRWebhookHandlerBase {
+  constructor() {
+    super("GitHubPRCommentHandler");
   }
 
-  const commentBody = payload.comment.body;
-
-  if (!mentionsOpenSWE(commentBody)) {
-    logger.info("Comment does not mention @open-swe, skipping");
-    return;
+  protected createPrompt(prData: PullRequestReviewTriggerData): string {
+    return createPromptFromPRCommentTrigger(prData);
   }
 
-  logger.info(`@open-swe mentioned in PR #${payload.issue.number} comment`, {
-    commentId: payload.comment.id,
-    author: payload.comment.user?.login,
-  });
+  protected createCommentMessage(linkToTrigger: string): string {
+    return getRandomWebhookMessage("pr_comment", linkToTrigger);
+  }
 
-  try {
-    // Get installation ID from the webhook payload
-    const installationId = payload.installation?.id;
+  protected createTriggerLink(
+    context: PRWebhookContext,
+    triggerId: number | string,
+  ): string {
+    return constructLinkToPRComment({
+      owner: context.owner,
+      repo: context.repo,
+      pullNumber: context.prNumber,
+      commentId: triggerId as number,
+    });
+  }
 
-    if (!installationId) {
-      logger.error("No installation ID found in webhook payload");
+  async handlePullRequestComment(payload: any): Promise<void> {
+    // Only process comments on pull requests
+    if (!payload.issue.pull_request) {
       return;
     }
 
-    const octokit = await githubApp.getInstallationOctokit(installationId);
+    const commentBody = payload.comment.body;
 
-    const owner = payload.repository.owner.login;
-    const repo = payload.repository.name;
-    const prNumber = payload.issue.number;
+    if (!this.validateOpenSWEMention(commentBody, "Comment")) {
+      return;
+    }
 
-    // Get full PR details
-    const { data: pullRequest } = await octokit.request(
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+    this.logger.info(
+      `@open-swe mentioned in PR #${payload.issue.number} comment`,
       {
-        owner,
-        repo,
-        pull_number: prNumber,
+        commentId: payload.comment.id,
+        author: payload.comment.user?.login,
       },
     );
 
-    const { reviews, prComments, linkedIssues } = await getPrContext(octokit, {
-      owner,
-      repo,
-      prNumber,
-      linkedIssueNumbers: extractLinkedIssues(pullRequest.body || ""),
-    });
-
-    const prData: PullRequestReviewTriggerData = {
-      pullRequest: convertPRPayloadToPullRequestObj(pullRequest, prNumber),
-      triggerComment: {
-        id: payload.comment.id,
-        body: commentBody,
-        author: payload.comment.user?.login,
-      },
-      prComments,
-      reviews,
-      linkedIssues,
-      repository: {
-        owner,
-        name: repo,
-      },
-    };
-
-    const prompt = createPromptFromPRCommentTrigger(prData);
-
     try {
-      // Get installation ID from the webhook payload
-      const installationId = payload.installation?.id;
-
-      if (!installationId) {
-        logger.error("No installation ID found in webhook payload");
+      const context = await this.setupPRWebhookContext(payload);
+      if (!context) {
         return;
       }
 
-      const [octokit, { token }] = await Promise.all([
-        githubApp.getInstallationOctokit(installationId),
-        githubApp.getInstallationAccessToken(installationId),
-      ]);
-
-      if (!isAllowedUser(payload.sender.login)) {
-        logger.error("User is not a member of allowed orgs", {
-          username: payload.sender.login,
-        });
-        return;
-      }
-
-      const runInput: ManagerGraphUpdate = {
-        messages: [
-          new HumanMessage({
-            id: uuidv4(),
-            content: prompt,
-            additional_kwargs: {
-              requestSource: RequestSource.GITHUB_PULL_REQUEST_WEBHOOK,
-            },
-          }),
-        ],
-        targetRepository: {
-          owner: payload.repository.owner.login,
-          repo: payload.repository.name,
-          branch: pullRequest.head.ref,
-        },
-        autoAcceptPlan: true,
-      };
-
-      const { runId, threadId } = await createRunFromWebhook({
-        installationId,
-        installationToken: token,
-        userId: payload.sender.id,
-        userLogin: payload.sender.login,
-        installationName: payload.repository.owner.login,
-        runInput,
-        configurable: {
-          shouldCreateIssue: false,
-          reviewPullNumber: prNumber,
-        },
-      });
-
-      logger.info("Created new run from GitHub review.", {
-        threadId,
-        runId,
-      });
-
-      logger.info("Creating comment...");
-      const commentLink = constructLinkToPRComment({
-        owner: payload.repository.owner.login,
-        repo: payload.repository.name,
-        pullNumber: prNumber,
-        commentId: payload.comment.id,
-      });
-      const appUrl = getOpenSweAppUrl(threadId);
-      const appUrlCommentText = appUrl
-        ? `View run in Open SWE [here](${appUrl}) (this URL will only work for @${payload.sender.login})`
-        : "";
-      await octokit.request(
-        "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      // Get full PR details
+      const { data: pullRequest } = await context.octokit.request(
+        "GET /repos/{owner}/{repo}/pulls/{pull_number}",
         {
-          owner: payload.repository.owner.login,
-          repo: payload.repository.name,
-          issue_number: prNumber,
-          body: `🤖 Open SWE will process [this PR comment](${commentLink}). Running...\n\n${appUrlCommentText}\n\n${createDevMetadataComment(runId, threadId)}`,
+          owner: context.owner,
+          repo: context.repo,
+          pull_number: context.prNumber,
         },
       );
-    } catch (error) {
-      logger.error("Error starting run from PR comment webhook:", error);
-    }
 
-    return prData;
-  } catch (error) {
-    logger.error("Error processing PR comment webhook:", error);
+      const { reviews, prComments, linkedIssues } = await this.fetchPRContext(
+        context,
+        pullRequest.body || "",
+      );
+
+      const prData = this.createPRTriggerData(
+        pullRequest,
+        context.prNumber,
+        {
+          id: payload.comment.id,
+          body: commentBody,
+          author: payload.comment.user?.login,
+        },
+        prComments,
+        reviews,
+        linkedIssues,
+        {
+          owner: context.owner,
+          name: context.repo,
+        },
+      );
+
+      const prompt = this.createPrompt(prData);
+      const runInput = this.createPRRunInput(prompt, context, pullRequest);
+      const configurable = this.createPRRunConfiguration(context);
+
+      const { runId, threadId } = await this.createRun(context, {
+        runInput,
+        configurable,
+      });
+
+      const triggerLink = this.createTriggerLink(context, payload.comment.id);
+      const commentMessage = this.createCommentMessage(triggerLink);
+
+      await this.createComment(
+        context,
+        {
+          issueNumber: context.prNumber,
+          message: commentMessage,
+        },
+        runId,
+        threadId,
+      );
+    } catch (error) {
+      this.handleError(error, "PR comment webhook");
+    }
   }
+}
+
+const prCommentHandler = new PRCommentWebhookHandler();
+
+export async function handlePullRequestComment(payload: any): Promise<void> {
+  return prCommentHandler.handlePullRequestComment(payload);
 }

@@ -704,8 +704,31 @@ export function createReplyToCommentToolFields() {
   return {
     name: "reply_to_comment",
     description:
-      "Use this tool to reply to a comment. This tool should always be called if you have just resolve a comment (NOT A REVIEW COMMENT) the user tagged you in. Use this tool to concisely let the user know you've resolved their comment, or to answer their comment." +
+      "Use this tool to reply to a comment. This tool should always be called if you have just resolved a comment (NOT A REVIEW COMMENT) the user tagged you in. Use this tool to concisely let the user know you've resolved their comment, or to answer their comment." +
       "\nONLY USE THIS FOR NORMAL COMMENTS. FOR REVIEW COMMENTS USE THE 'reply_to_review_comment' TOOL.",
     schema: commentOnReviewCommentSchema,
+  };
+}
+
+export function createReplyToReviewToolFields() {
+  const commentOnReviewSchema = z.object({
+    id: z
+      .number()
+      .describe(
+        "The ID of the review to reply to. This must be a valid ID from a review. NOT A REVIEW COMMENT",
+      ),
+    comment: z
+      .string()
+      .describe(
+        "The reply to leave on the review. This should be a concise reply.",
+      ),
+  });
+
+  return {
+    name: "reply_to_review",
+    description:
+      "Use this tool to reply to a review. This tool should always be called if you have just resolved a review (NOT A REVIEW COMMENT) the user tagged you in. Use this tool to concisely let the user know you've resolved their review, or to answer their review." +
+      "\nONLY USE THIS FOR NORMAL REVIEWS. FOR REVIEW COMMENTS USE THE 'reply_to_review_comment' TOOL.",
+    schema: commentOnReviewSchema,
   };
 }

@@ -64,6 +64,7 @@ import {
   createReplyToReviewCommentTool,
   createReplyToCommentTool,
   shouldIncludeReviewCommentTool,
+  createReplyToReviewTool,
 } from "../../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
@@ -193,6 +194,7 @@ async function createToolsAndPrompt(
       ? [
           createReplyToReviewCommentTool(state, config),
           createReplyToCommentTool(state, config),
+          createReplyToReviewTool(state, config),
         ]
       : []),
     ...mcpTools,
