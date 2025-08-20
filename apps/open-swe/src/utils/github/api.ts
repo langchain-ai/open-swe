@@ -7,6 +7,7 @@ import {
   GitHubPullRequest,
   GitHubPullRequestList,
   GitHubPullRequestUpdate,
+  GitHubReviewComment,
 } from "./types.js";
 import { getOpenSWELabel } from "./label.js";
 import { getInstallationToken } from "@open-swe/shared/github/auth";
@@ -622,6 +623,145 @@ export async function getBranch({
     },
     githubInstallationToken,
     "Failed to get branch",
+    undefined,
+    1,
+  );
+}
+
+export async function replyToReviewComment({
+  owner,
+  repo,
+  commentId,
+  body,
+  pullNumber,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  commentId: number;
+  body: string;
+  pullNumber: number;
+  githubInstallationToken: string;
+}): Promise<GitHubReviewComment | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const { data: comment } = await octokit.pulls.createReplyForReviewComment(
+        {
+          owner,
+          repo,
+          comment_id: commentId,
+          pull_number: pullNumber,
+          body,
+        },
+      );
+
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to reply to review comment",
+    undefined,
+    1,
+  );
+}
+
+export async function quoteReplyToPullRequestComment({
+  owner,
+  repo,
+  commentId,
+  body,
+  pullNumber,
+  originalCommentUserLogin,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  commentId: number;
+  body: string;
+  pullNumber: number;
+  originalCommentUserLogin: string;
+  githubInstallationToken: string;
+}): Promise<GitHubIssueComment | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const originalComment = await octokit.issues.getComment({
+        owner,
+        repo,
+        comment_id: commentId,
+      });
+
+      const quoteReply = `${originalComment.data.body ? `> ${originalComment.data.body}` : ""}
+      
+@${originalCommentUserLogin} ${body}`;
+
+      const { data: comment } = await octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        body: quoteReply,
+      });
+
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to quote reply to pull request comment",
+    undefined,
+    1,
+  );
+}
+
+export async function quoteReplyToReview({
+  owner,
+  repo,
+  reviewCommentId,
+  body,
+  pullNumber,
+  originalCommentUserLogin,
+  githubInstallationToken,
+}: {
+  owner: string;
+  repo: string;
+  reviewCommentId: number;
+  body: string;
+  pullNumber: number;
+  originalCommentUserLogin: string;
+  githubInstallationToken: string;
+}): Promise<GitHubIssueComment | null> {
+  return withGitHubRetry(
+    async (token: string) => {
+      const octokit = new Octokit({
+        auth: token,
+      });
+
+      const originalComment = await octokit.pulls.getReview({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        review_id: reviewCommentId,
+      });
+
+      const quoteReply = `${originalComment.data.body ? `> ${originalComment.data.body}` : ""}
+      
+@${originalCommentUserLogin} ${body}`;
+
+      const { data: comment } = await octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: pullNumber,
+        body: quoteReply,
+      });
+
+      return comment;
+    },
+    githubInstallationToken,
+    "Failed to quote reply to pull request review",
     undefined,
     1,
   );

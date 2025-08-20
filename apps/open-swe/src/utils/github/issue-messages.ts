@@ -8,7 +8,7 @@ import { GitHubIssue, GitHubIssueComment } from "./types.js";
 import { getIssue, getIssueComments } from "./api.js";
 import { GraphConfig, TargetRepository } from "@open-swe/shared/open-swe/types";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
-import { DETAILS_OPEN_TAG } from "./issue-task.js";
+import { DETAILS_CLOSE_TAG, DETAILS_OPEN_TAG } from "./issue-task.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 export function getUntrackedComments(
@@ -161,7 +161,10 @@ export function extractContentWithoutDetailsFromIssueBody(
   }
 
   const bodyWithoutDetails = extractContentFromIssueBody(
-    body.split(DETAILS_OPEN_TAG)[0],
+    body.substring(
+      body.indexOf(DETAILS_OPEN_TAG) + DETAILS_OPEN_TAG.length,
+      body.indexOf(DETAILS_CLOSE_TAG),
+    ),
   );
   return bodyWithoutDetails;
 }
@@ -170,7 +173,10 @@ export function getMessageContentFromIssue(
   issue: GitHubIssue | GitHubIssueComment,
 ): string {
   if ("title" in issue) {
-    return `[original issue]\n**${issue.title}**\n${extractContentFromIssueBody(issue.body ?? "")}`;
+    const formattedBody = extractContentWithoutDetailsFromIssueBody(
+      issue.body ?? "",
+    );
+    return `[original issue]\n**${issue.title}**\n${formattedBody}`;
   }
   return `[issue comment]\n${issue.body}`;
 }

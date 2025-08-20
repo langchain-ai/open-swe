@@ -60,6 +60,12 @@ import {
 } from "@langchain/core/messages";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
+import {
+  createReplyToReviewCommentTool,
+  createReplyToCommentTool,
+  shouldIncludeReviewCommentTool,
+  createReplyToReviewTool,
+} from "../../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -184,6 +190,13 @@ async function createToolsAndPrompt(
     createMarkTaskCompletedToolFields(),
     createSearchDocumentForTool(state, config),
     createWriteDefaultTsConfigTool(state, config),
+    ...(shouldIncludeReviewCommentTool(state, config)
+      ? [
+          createReplyToReviewCommentTool(state, config),
+          createReplyToCommentTool(state, config),
+          createReplyToReviewTool(state, config),
+        ]
+      : []),
     ...mcpTools,
   ];
 
