@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/langchain-ai/open-swe/security/policy
+    about: Please report security vulnerabilities by following our SECURITY.md.
+  - name: Questions & Discussions
+    url: https://github.com/langchain-ai/open-swe/discussions
+    about: For usage questions and ideas, please start a discussion.
