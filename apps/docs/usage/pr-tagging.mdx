@@ -152,7 +152,7 @@ This should match the username from Step 1 (without the @ symbol).
 
 ### Step 4: Update Allowed Users
 
-Add the GitHub usernames who should be allowed to trigger runs to the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable in your agent's deployment environment.
+Add the GitHub usernames who should be allowed to trigger runs to the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable in your agent's deployment environment (include in the production deployments for both the web app and agent to take advantage of the allowed users functionality).
 
 ```bash
 NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
