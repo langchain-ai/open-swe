@@ -5,10 +5,12 @@ import jsonwebtoken from "jsonwebtoken";
  */
 export function generateJWT(appId: string, privateKey: string): string {
   const now = Math.floor(Date.now() / 1000);
+  const issuedAtTime = now - 60;
+  const expirationTime = issuedAtTime + 10 * 60;
 
   const payload = {
-    iat: now,
-    exp: now + 10 * 60,
+    iat: issuedAtTime,
+    exp: expirationTime,
     iss: appId,
   };
 
