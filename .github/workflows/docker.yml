@@ -211,18 +211,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Sync secrets to Secret Manager (agent)
-        run: |
-          upsert() { n="$1"; v="$2"; if [ -z "$v" ]; then echo "Skipping $n: empty value"; return; fi; if gcloud secrets describe "$n" >/dev/null 2>&1; then printf %s "$v" | gcloud secrets versions add "$n" --data-file=-; else printf %s "$v" | gcloud secrets create "$n" --data-file=-; fi }
-          upsert LANGCHAIN_API_KEY       "${{ secrets.LANGCHAIN_API_KEY }}"
-          upsert ANTHROPIC_API_KEY      "${{ secrets.ANTHROPIC_API_KEY }}"
-          upsert OPENAI_API_KEY         "${{ secrets.OPENAI_API_KEY }}"
-          upsert GOOGLE_API_KEY         "${{ secrets.GOOGLE_API_KEY }}"
-          upsert DAYTONA_API_KEY        "${{ secrets.DAYTONA_API_KEY }}"
-          upsert FIRECRAWL_API_KEY      "${{ secrets.FIRECRAWL_API_KEY }}"
-          upsert GITHUB_APP_PRIVATE_KEY "${{ secrets.GITHUB_APP_PRIVATE_KEY }}"
-          upsert GITHUB_WEBHOOK_SECRET  "${{ secrets.GITHUB_WEBHOOK_SECRET }}"
-          upsert SECRETS_ENCRYPTION_KEY "${{ secrets.SECRETS_ENCRYPTION_KEY }}"
       - name: Deploy to Cloud Run (agent)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
@@ -231,8 +219,7 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars PORT=2024,OPEN_SWE_APP_URL=${{ vars.OPEN_SWE_APP_URL }},LANGCHAIN_PROJECT=${{ vars.LANGCHAIN_PROJECT || 'default' }},LANGCHAIN_TRACING_V2=${{ vars.LANGCHAIN_TRACING_V2 || 'true' }},LANGCHAIN_TEST_TRACKING=${{ vars.LANGCHAIN_TEST_TRACKING || 'false' }},GITHUB_APP_ID=${{ vars.GITHUB_APP_ID }},GITHUB_APP_NAME=${{ vars.GITHUB_APP_NAME }} \
-            --set-secrets LANGCHAIN_API_KEY=LANGCHAIN_API_KEY:latest,ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,DAYTONA_API_KEY=DAYTONA_API_KEY:latest,FIRECRAWL_API_KEY=FIRECRAWL_API_KEY:latest,GITHUB_APP_PRIVATE_KEY=GITHUB_APP_PRIVATE_KEY:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest,SECRETS_ENCRYPTION_KEY=SECRETS_ENCRYPTION_KEY:latest
+            --set-env-vars PORT=2024,OPEN_SWE_APP_URL=${{ vars.OPEN_SWE_APP_URL }},LANGCHAIN_PROJECT=${{ vars.LANGCHAIN_PROJECT || 'default' }},LANGCHAIN_TRACING_V2=${{ vars.LANGCHAIN_TRACING_V2 || 'true' }},LANGCHAIN_TEST_TRACKING=${{ vars.LANGCHAIN_TEST_TRACKING || 'false' }},GITHUB_APP_ID=${{ vars.GITHUB_APP_ID }},GITHUB_APP_NAME=${{ vars.GITHUB_APP_NAME }},LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }},ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }},DAYTONA_API_KEY=${{ secrets.DAYTONA_API_KEY }},FIRECRAWL_API_KEY=${{ secrets.FIRECRAWL_API_KEY }},GITHUB_APP_PRIVATE_KEY=${{ secrets.GITHUB_APP_PRIVATE_KEY }},GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }}
 
   deploy-web:
     needs: [changes, build-web]
@@ -256,12 +243,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
-      - name: Sync secrets to Secret Manager (web)
-        run: |
-          upsert() { n="$1"; v="$2"; if [ -z "$v" ]; then echo "Skipping $n: empty value"; return; fi; if gcloud secrets describe "$n" >/dev/null 2>&1; then printf %s "$v" | gcloud secrets versions add "$n" --data-file=-; else printf %s "$v" | gcloud secrets create "$n" --data-file=-; fi }
-          upsert GITHUB_APP_CLIENT_SECRET "${{ secrets.GITHUB_APP_CLIENT_SECRET }}"
-          upsert GITHUB_APP_PRIVATE_KEY  "${{ secrets.GITHUB_APP_PRIVATE_KEY }}"
-          upsert SECRETS_ENCRYPTION_KEY  "${{ secrets.SECRETS_ENCRYPTION_KEY }}"
       - name: Deploy to Cloud Run (web)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
@@ -270,7 +251,6 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars PORT=3000,NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }},LANGGRAPH_API_URL=${{ vars.LANGGRAPH_API_URL }},NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }},GITHUB_APP_NAME=${{ vars.GITHUB_APP_NAME }},GITHUB_APP_ID=${{ vars.GITHUB_APP_ID }},GITHUB_APP_REDIRECT_URI=${{ vars.GITHUB_APP_REDIRECT_URI }} \
-            --set-secrets GITHUB_APP_CLIENT_SECRET=GITHUB_APP_CLIENT_SECRET:latest,GITHUB_APP_PRIVATE_KEY=GITHUB_APP_PRIVATE_KEY:latest,SECRETS_ENCRYPTION_KEY=SECRETS_ENCRYPTION_KEY:latest
+            --set-env-vars PORT=3000,NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }},LANGGRAPH_API_URL=${{ vars.LANGGRAPH_API_URL }},NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }},GITHUB_APP_NAME=${{ vars.GITHUB_APP_NAME }},GITHUB_APP_ID=${{ vars.GITHUB_APP_ID }},GITHUB_APP_REDIRECT_URI=${{ vars.GITHUB_APP_REDIRECT_URI }},GITHUB_APP_CLIENT_SECRET=${{ secrets.GITHUB_APP_CLIENT_SECRET }},GITHUB_APP_PRIVATE_KEY=${{ secrets.GITHUB_APP_PRIVATE_KEY }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }}
 
 
