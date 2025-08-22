@@ -51,8 +51,30 @@ jobs:
               - 'yarn.lock'
               - 'turbo.json'
 
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    concurrency:
+      group: tests-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+          cache: "yarn"
+      - name: Install dependencies
+        run: yarn install --immutable --mode=skip-build
+      - name: Build project
+        run: yarn build
+      - name: Run tests
+        run: yarn test
+
   build-agent:
-    needs: changes
+    needs: [changes, tests]
     if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
     concurrency:
@@ -107,7 +129,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-web:
-    needs: changes
+    needs: [changes, tests]
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
