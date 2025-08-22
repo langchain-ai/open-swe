@@ -225,6 +225,20 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Push GHCR image to Artifact Registry (agent)
+        run: |
+          set -euo pipefail
+          GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
+          AR_HOST="${GCP_REGION}-docker.pkg.dev"
+          AR_REPO_PATH="${AR_HOST}/${GCP_PROJECT_ID}/open-swe/open-swe-agent:sha-${GITHUB_SHA}"
+          echo "Pulling $GHCR_IMAGE"
+          docker pull "$GHCR_IMAGE"
+          echo "Configuring docker for $AR_HOST"
+          gcloud auth configure-docker "$AR_HOST" --quiet
+          echo "Tagging to $AR_REPO_PATH"
+          docker tag "$GHCR_IMAGE" "$AR_REPO_PATH"
+          echo "Pushing $AR_REPO_PATH"
+          docker push "$AR_REPO_PATH"
       - name: Delete existing service (agent) if requested
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.fresh == 'true'
         run: |
@@ -237,7 +251,7 @@ jobs:
             || true
       - name: Deploy to Cloud Run (agent)
         run: |
-          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
+          IMAGE_REF="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/open-swe/open-swe-agent:sha-${GITHUB_SHA}"
           PK_ESC=$(printf '%s' "${{ secrets.GH_APP_PRIVATE_KEY }}")
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --image "$IMAGE_REF" \
@@ -284,6 +298,20 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Push GHCR image to Artifact Registry (web)
+        run: |
+          set -euo pipefail
+          GHCR_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
+          AR_HOST="${GCP_REGION}-docker.pkg.dev"
+          AR_REPO_PATH="${AR_HOST}/${GCP_PROJECT_ID}/open-swe/open-swe-web:sha-${GITHUB_SHA}"
+          echo "Pulling $GHCR_IMAGE"
+          docker pull "$GHCR_IMAGE"
+          echo "Configuring docker for $AR_HOST"
+          gcloud auth configure-docker "$AR_HOST" --quiet
+          echo "Tagging to $AR_REPO_PATH"
+          docker tag "$GHCR_IMAGE" "$AR_REPO_PATH"
+          echo "Pushing $AR_REPO_PATH"
+          docker push "$AR_REPO_PATH"
       - name: Delete existing service (web) if requested
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.fresh == 'true'
         run: |
@@ -296,7 +324,7 @@ jobs:
             || true
       - name: Deploy to Cloud Run (web)
         run: |
-          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
+          IMAGE_REF="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/open-swe/open-swe-web:sha-${GITHUB_SHA}"
           PK_ESC=$(printf '%s' "${{ secrets.GH_APP_PRIVATE_KEY }}")
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --image "$IMAGE_REF" \
