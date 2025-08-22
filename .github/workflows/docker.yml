@@ -214,12 +214,14 @@ jobs:
       - name: Deploy to Cloud Run (agent)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
+          # Escape newlines in the PEM so it can be passed via --set-env-vars as a single shell arg
+          PK_ESC=$(printf '%s' "${{ secrets.GH_APP_PRIVATE_KEY }}" | awk '{printf "%s\\n",$0}' | sed 's/\\n$//')
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --image "$IMAGE_REF" \
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars OPEN_SWE_APP_URL=${{ vars.OPEN_SWE_APP_URL }},LANGCHAIN_PROJECT=${{ vars.LANGCHAIN_PROJECT || 'default' }},LANGCHAIN_TRACING_V2=${{ vars.LANGCHAIN_TRACING_V2 || 'true' }},LANGCHAIN_TEST_TRACKING=${{ vars.LANGCHAIN_TEST_TRACKING || 'false' }},GITHUB_APP_ID=${{ vars.GH_APP_ID }},GITHUB_APP_NAME=${{ vars.GH_APP_NAME }},GITHUB_TRIGGER_USERNAME=${{ github.actor }},SKIP_CI_UNTIL_LAST_COMMIT=${{ vars.SKIP_CI_UNTIL_LAST_COMMIT }},LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }},ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }},DAYTONA_API_KEY=${{ secrets.DAYTONA_API_KEY }},FIRECRAWL_API_KEY=${{ secrets.FIRECRAWL_API_KEY }},GITHUB_APP_PRIVATE_KEY=${{ secrets.GH_APP_PRIVATE_KEY }},GITHUB_WEBHOOK_SECRET=${{ secrets.GH_WEBHOOK_SECRET }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }}
+            --set-env-vars OPEN_SWE_APP_URL=${{ vars.OPEN_SWE_APP_URL }},LANGCHAIN_PROJECT=${{ vars.LANGCHAIN_PROJECT || 'default' }},LANGCHAIN_TRACING_V2=${{ vars.LANGCHAIN_TRACING_V2 || 'true' }},LANGCHAIN_TEST_TRACKING=${{ vars.LANGCHAIN_TEST_TRACKING || 'false' }},GITHUB_APP_ID=${{ vars.GH_APP_ID }},GITHUB_APP_NAME=${{ vars.GH_APP_NAME }},GITHUB_TRIGGER_USERNAME=${{ github.actor }},SKIP_CI_UNTIL_LAST_COMMIT=${{ vars.SKIP_CI_UNTIL_LAST_COMMIT }},LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }},ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }},DAYTONA_API_KEY=${{ secrets.DAYTONA_API_KEY }},FIRECRAWL_API_KEY=${{ secrets.FIRECRAWL_API_KEY }},GITHUB_APP_PRIVATE_KEY=$PK_ESC,GITHUB_WEBHOOK_SECRET=${{ secrets.GH_WEBHOOK_SECRET }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }}
 
   deploy-web:
     needs: [changes, build-web]
@@ -246,11 +248,13 @@ jobs:
       - name: Deploy to Cloud Run (web)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
+          # Escape newlines in the PEM so it can be passed via --set-env-vars as a single shell arg
+          PK_ESC=$(printf '%s' "${{ secrets.GH_APP_PRIVATE_KEY }}" | awk '{printf "%s\\n",$0}' | sed 's/\\n$//')
           gcloud run deploy "$CLOUD_RUN_SERVICE" \
             --image "$IMAGE_REF" \
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --set-env-vars NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }},LANGGRAPH_API_URL=${{ vars.LANGGRAPH_API_URL }},NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }},GITHUB_APP_NAME=${{ vars.GH_APP_NAME }},GITHUB_APP_ID=${{ vars.GH_APP_ID }},GITHUB_APP_REDIRECT_URI=${{ vars.GH_APP_REDIRECT_URI }},GITHUB_APP_CLIENT_SECRET=${{ secrets.GH_APP_CLIENT_SECRET }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }},GITHUB_APP_PRIVATE_KEY=${{ secrets.GH_APP_PRIVATE_KEY }}
+            --set-env-vars NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }},LANGGRAPH_API_URL=${{ vars.LANGGRAPH_API_URL }},NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }},GITHUB_APP_NAME=${{ vars.GH_APP_NAME }},GITHUB_APP_ID=${{ vars.GH_APP_ID }},GITHUB_APP_REDIRECT_URI=${{ vars.GH_APP_REDIRECT_URI }},GITHUB_APP_CLIENT_SECRET=${{ secrets.GH_APP_CLIENT_SECRET }},SECRETS_ENCRYPTION_KEY=${{ secrets.SECRETS_ENCRYPTION_KEY }},GITHUB_APP_PRIVATE_KEY=$PK_ESC
 
 
