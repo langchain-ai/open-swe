@@ -199,7 +199,7 @@ jobs:
     env:
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       GCP_REGION: ${{ secrets.GCP_REGION }}
-      CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE_AGENT }}
+      CLOUD_RUN_SERVICE: open-swe-agent
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -230,7 +230,7 @@ jobs:
     env:
       GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
       GCP_REGION: ${{ secrets.GCP_REGION }}
-      CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE_WEB }}
+      CLOUD_RUN_SERVICE: open-swe-web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
