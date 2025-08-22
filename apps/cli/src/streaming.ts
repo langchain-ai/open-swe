@@ -5,7 +5,6 @@ import { formatDisplayLog } from "./logger.js";
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 interface InterruptData {
-  question: string;
   command: string;
   args: Record<string, string | number | boolean>;
   id: string;
@@ -124,9 +123,8 @@ export class StreamingService {
           if (chunk.data && chunk.data.__interrupt__) {
             const chunkData = chunk.data as ChunkData;
             const interrupt = chunkData.__interrupt__?.[0]?.value;
-            if (interrupt?.question && interrupt?.command && interrupt?.args) {
+            if (interrupt?.command && interrupt?.args) {
               this.callbacks.setCurrentInterrupt({
-                question: interrupt.question,
                 command: interrupt.command,
                 args: interrupt.args,
                 id: chunkData.__interrupt__?.[0]?.id || "unknown",
@@ -177,9 +175,8 @@ export class StreamingService {
           if (chunk.data && chunk.data.__interrupt__) {
             const chunkData = chunk.data as ChunkData;
             const interrupt = chunkData.__interrupt__?.[0]?.value;
-            if (interrupt?.question && interrupt?.command && interrupt?.args) {
+            if (interrupt?.command && interrupt?.args) {
               this.callbacks.setCurrentInterrupt({
-                question: interrupt.question,
                 command: interrupt.command,
                 args: interrupt.args,
                 id: chunkData.__interrupt__?.[0]?.id || "unknown",
@@ -233,7 +230,6 @@ export class StreamingService {
             const interrupt = chunkData.__interrupt__?.[0]?.value;
             if (interrupt?.question && interrupt?.command && interrupt?.args) {
               this.callbacks.setCurrentInterrupt({
-                question: interrupt.question,
                 command: interrupt.command,
                 args: interrupt.args,
                 id: chunkData.__interrupt__?.[0]?.id || "unknown",

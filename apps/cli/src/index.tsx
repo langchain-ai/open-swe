@@ -82,7 +82,6 @@ const App: React.FC = () => {
   const [streamingService, setStreamingService] =
     useState<StreamingService | null>(null);
   const [currentInterrupt, setCurrentInterrupt] = useState<{
-    question: string;
     command: string;
     args: Record<string, any>;
     id: string;
