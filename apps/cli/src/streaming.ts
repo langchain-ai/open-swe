@@ -228,7 +228,7 @@ export class StreamingService {
           if (chunk.data && chunk.data.__interrupt__) {
             const chunkData = chunk.data as ChunkData;
             const interrupt = chunkData.__interrupt__?.[0]?.value;
-            if (interrupt?.question && interrupt?.command && interrupt?.args) {
+            if (interrupt?.command && interrupt?.args) {
               this.callbacks.setCurrentInterrupt({
                 command: interrupt.command,
                 args: interrupt.args,
