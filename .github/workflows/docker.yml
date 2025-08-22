@@ -230,6 +230,7 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
+            --remove-secrets LANGCHAIN_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY,GOOGLE_API_KEY,DAYTONA_API_KEY,FIRECRAWL_API_KEY,GITHUB_APP_PRIVATE_KEY,GITHUB_WEBHOOK_SECRET,SECRETS_ENCRYPTION_KEY \
             --set-env-vars OPEN_SWE_APP_URL="${{ vars.OPEN_SWE_APP_URL }}" \
             --set-env-vars LANGCHAIN_PROJECT="${{ vars.LANGCHAIN_PROJECT }}" \
             --set-env-vars LANGCHAIN_TRACING_V2="${{ vars.LANGCHAIN_TRACING_V2 || 'true' }}" \
@@ -279,6 +280,7 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
+            --remove-secrets GITHUB_APP_CLIENT_SECRET,GITHUB_APP_PRIVATE_KEY,SECRETS_ENCRYPTION_KEY \
             --set-env-vars NEXT_PUBLIC_API_URL="${{ vars.NEXT_PUBLIC_API_URL }}" \
             --set-env-vars LANGGRAPH_API_URL="${{ vars.LANGGRAPH_API_URL }}" \
             --set-env-vars NEXT_PUBLIC_GITHUB_APP_CLIENT_ID="${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }}" \
