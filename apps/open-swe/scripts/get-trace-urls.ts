@@ -3,7 +3,7 @@ import "dotenv/config";
 import { Client } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-
+/* eslint-disable no-console */
 interface TraceUrls {
   managerTraceUrl: string;
   plannerTraceUrl: string;
