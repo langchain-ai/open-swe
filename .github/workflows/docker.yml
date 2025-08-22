@@ -80,6 +80,8 @@ jobs:
     concurrency:
       group: docker-agent-${{ github.ref }}
       cancel-in-progress: true
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,6 +120,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -135,6 +138,8 @@ jobs:
     concurrency:
       group: docker-web-${{ github.ref }}
       cancel-in-progress: true
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -173,6 +178,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -182,5 +188,67 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-agent:
+    needs: [changes, build-agent]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-agent-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE_AGENT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Deploy to Cloud Run (agent)
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --image "$IMAGE_REF" \
+            --region "$GCP_REGION" \
+            --platform managed \
+            --allow-unauthenticated
+
+  deploy-web:
+    needs: [changes, build-web]
+    if: github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-web-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ secrets.GCP_REGION }}
+      CLOUD_RUN_SERVICE: ${{ secrets.CLOUD_RUN_SERVICE_WEB }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Deploy to Cloud Run (web)
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
+          gcloud run deploy "$CLOUD_RUN_SERVICE" \
+            --image "$IMAGE_REF" \
+            --region "$GCP_REGION" \
+            --platform managed \
+            --allow-unauthenticated
 
 
