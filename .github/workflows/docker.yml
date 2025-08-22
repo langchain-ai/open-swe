@@ -16,20 +16,38 @@ env:
   IMAGE_NAMESPACE: ${{ github.repository_owner }}
 
 jobs:
-  build-and-push:
+  changes:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: agent
-            dockerfile: apps/open-swe/Dockerfile
-            image_name: open-swe-agent
-            context: .
-          - name: web
-            dockerfile: apps/web/Dockerfile
-            image_name: open-swe-web
-            context: .
+    outputs:
+      agent: ${{ steps.filter.outputs.agent }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Detect changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            agent:
+              - 'apps/open-swe/**'
+              - 'packages/shared/**'
+              - 'apps/open-swe/Dockerfile'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'turbo.json'
+            web:
+              - 'apps/web/**'
+              - 'packages/shared/**'
+              - 'apps/web/Dockerfile'
+              - 'package.json'
+              - 'yarn.lock'
+              - 'turbo.json'
+
+  build-agent:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,8 +70,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ matrix.image_name }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent
           tags: |
             type=raw,value=${{ github.ref_name }}
             type=sha
@@ -63,16 +80,68 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
           labels: |
-            org.opencontainers.image.title=${{ matrix.image_name }}
-            org.opencontainers.image.description=Open SWE ${{ matrix.name }} image
+            org.opencontainers.image.title=open-swe-agent
+            org.opencontainers.image.description=Open SWE agent image
             org.opencontainers.image.vendor=LangChain Labs
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: apps/open-swe/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  build-web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web
+          tags: |
+            type=raw,value=${{ github.ref_name }}
+            type=sha
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+          labels: |
+            org.opencontainers.image.title=open-swe-web
+            org.opencontainers.image.description=Open SWE web image
+            org.opencontainers.image.vendor=LangChain Labs
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
