@@ -6,6 +6,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    paths-ignore:
+      - 'apps/docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
   workflow_dispatch: # Allows triggering the workflow manually in GitHub UI
 
 # If another push to the same PR or branch happens while this workflow is still running,
@@ -93,6 +97,7 @@ jobs:
   dev-server-check:
     name: Check dev server startup
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
     defaults:
       run:
         working-directory: apps/open-swe

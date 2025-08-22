@@ -6,6 +6,10 @@ on:
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
+    paths-ignore:
+      - 'apps/docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
 
 permissions:
   contents: read
@@ -18,6 +22,9 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    concurrency:
+      group: docker-${{ github.ref }}
+      cancel-in-progress: true
     outputs:
       agent: ${{ steps.filter.outputs.agent }}
       web: ${{ steps.filter.outputs.web }}
@@ -48,6 +55,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: docker-agent-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,6 +110,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    concurrency:
+      group: docker-web-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

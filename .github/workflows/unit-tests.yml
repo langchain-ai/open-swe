@@ -7,6 +7,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    paths-ignore:
+      - 'apps/docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
   workflow_dispatch: # Allows triggering the workflow manually in GitHub UI
 
 # If another push to the same PR or branch happens while this workflow is still running,
@@ -21,8 +25,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        node-version: [18.x, 20.x]
+        node-version: [18.x]
     runs-on: ${{ matrix.os }}
+    # On main, also run on Node 20 in a follow-up job
     steps:
       - uses: actions/checkout@v4
       - name: Enable Corepack
@@ -31,6 +36,26 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: ${{ matrix.node-version }}
+          cache: "yarn"
+      - name: Install dependencies
+        run: yarn install --immutable --mode=skip-build
+      - name: Build project
+        run: yarn build
+      - name: Run tests
+        run: yarn test
+
+  unit-tests-node20-main:
+    if: github.ref == 'refs/heads/main'
+    name: Unit Tests (Node 20 on main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Use Node.js 20.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
