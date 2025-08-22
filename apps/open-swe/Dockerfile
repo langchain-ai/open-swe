@@ -16,6 +16,9 @@ COPY packages/shared/package.json packages/shared/package.json
 # Now copy the rest of the repository
 COPY . .
 
+# Ensure an env file exists for langgraph config even in CI builds
+RUN test -f apps/open-swe/.env || touch apps/open-swe/.env
+
 # Install dependencies for all workspaces with the repo-pinned Yarn version
 RUN yarn install --immutable
 

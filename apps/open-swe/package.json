@@ -10,6 +10,7 @@
   "type": "module",
   "scripts": {
     "dev": "langgraphjs dev --no-browser --config ../../langgraph.json",
+    "start": "node -e \"process.env.PORT=process.env.PORT||8080; require('child_process').execSync('yarn dev',{stdio:'inherit'})\"",
     "clean": "rm -rf .turbo ../../.langgraph_api ./dist || true",
     "build": "tsc",
     "lint": "eslint .",
