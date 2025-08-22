@@ -75,7 +75,7 @@ jobs:
 
   build-agent:
     needs: [changes, tests]
-    if: needs.changes.outputs.agent == 'true'
+    if: github.ref == 'refs/heads/main' || needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: docker-agent-${{ github.ref }}
@@ -133,7 +133,7 @@ jobs:
 
   build-web:
     needs: [changes, tests]
-    if: needs.changes.outputs.web == 'true'
+    if: github.ref == 'refs/heads/main' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: docker-web-${{ github.ref }}
@@ -191,7 +191,7 @@ jobs:
 
   deploy-agent:
     needs: [changes, build-agent]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.agent == 'true'
+    if: github.ref == 'refs/heads/main' && needs.build-agent.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-agent-${{ github.ref }}
@@ -223,7 +223,7 @@ jobs:
 
   deploy-web:
     needs: [changes, build-web]
-    if: github.ref == 'refs/heads/main' && needs.changes.outputs.web == 'true'
+    if: github.ref == 'refs/heads/main' && needs.build-web.result == 'success'
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-web-${{ github.ref }}
