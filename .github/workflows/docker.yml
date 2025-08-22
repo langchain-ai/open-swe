@@ -20,6 +20,10 @@ on:
         description: 'Also push and deploy to Cloud Run (true|false)'
         required: true
         default: 'false'
+      fresh:
+        description: 'Delete existing Cloud Run service before deploy (true|false)'
+        required: true
+        default: 'false'
 
 permissions:
   contents: read
@@ -221,6 +225,16 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Delete existing service (agent) if requested
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.fresh == 'true'
+        run: |
+          gcloud run services delete "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --quiet || true
+      - name: Remove secret-typed envs (agent)
+        run: |
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --region "$GCP_REGION" \
+            --remove-secrets LANGCHAIN_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY,GOOGLE_API_KEY,DAYTONA_API_KEY,FIRECRAWL_API_KEY,GITHUB_APP_PRIVATE_KEY,GITHUB_WEBHOOK_SECRET,SECRETS_ENCRYPTION_KEY \
+            || true
       - name: Deploy to Cloud Run (agent)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-agent@${{ needs.build-agent.outputs.digest }}"
@@ -230,7 +244,6 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --remove-secrets LANGCHAIN_API_KEY,ANTHROPIC_API_KEY,OPENAI_API_KEY,GOOGLE_API_KEY,DAYTONA_API_KEY,FIRECRAWL_API_KEY,GITHUB_APP_PRIVATE_KEY,GITHUB_WEBHOOK_SECRET,SECRETS_ENCRYPTION_KEY \
             --set-env-vars OPEN_SWE_APP_URL="${{ vars.OPEN_SWE_APP_URL }}" \
             --set-env-vars LANGCHAIN_PROJECT="${{ vars.LANGCHAIN_PROJECT }}" \
             --set-env-vars LANGCHAIN_TRACING_V2="${{ vars.LANGCHAIN_TRACING_V2 || 'true' }}" \
@@ -271,6 +284,16 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Delete existing service (web) if requested
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.fresh == 'true'
+        run: |
+          gcloud run services delete "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --quiet || true
+      - name: Remove secret-typed envs (web)
+        run: |
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --region "$GCP_REGION" \
+            --remove-secrets GITHUB_APP_CLIENT_SECRET,GITHUB_APP_PRIVATE_KEY,SECRETS_ENCRYPTION_KEY \
+            || true
       - name: Deploy to Cloud Run (web)
         run: |
           IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/open-swe-web@${{ needs.build-web.outputs.digest }}"
@@ -280,7 +303,6 @@ jobs:
             --region "$GCP_REGION" \
             --platform managed \
             --allow-unauthenticated \
-            --remove-secrets GITHUB_APP_CLIENT_SECRET,GITHUB_APP_PRIVATE_KEY,SECRETS_ENCRYPTION_KEY \
             --set-env-vars NEXT_PUBLIC_API_URL="${{ vars.NEXT_PUBLIC_API_URL }}" \
             --set-env-vars LANGGRAPH_API_URL="${{ vars.LANGGRAPH_API_URL }}" \
             --set-env-vars NEXT_PUBLIC_GITHUB_APP_CLIENT_ID="${{ vars.NEXT_PUBLIC_GITHUB_APP_CLIENT_ID }}" \
