@@ -51,7 +51,7 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
    - ✅ Enable webhook
    - **Webhook URL:** Use ngrok to expose your local server:
      ```bash
-     ngrok http 2024
+     ngrok http 2024  # Port 2024 is where the agent runs
      ```
      Use the ngrok URL + `/webhook/github` (e.g., `https://abc123.ngrok.io/webhook/github`)
    - **Webhook secret:** Generate and save:
@@ -107,6 +107,14 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
    ```bash
    yarn dev  # Starts both web app (port 3000) and agent (port 2024)
    ```
+   
+   > **Note:** You don't need `yarn build` for development. The `yarn dev` command uses hot reload and compiles TypeScript in real-time.
+
+## Verify Setup
+
+Once setup is complete, verify everything is working:
+- **Web UI:** http://localhost:3000
+- **Agent API:** http://localhost:2024
 
 ## Development Cycle
 
@@ -124,7 +132,7 @@ While working on Open SWE code, you can run `yarn dev`. It will automatically bu
 
 3. **Check if everything still works in production mode**:
    ```bash
-   yarn build
+   yarn build  # Only required for production testing, not for development
    yarn start  # Test production builds (individual apps only)
    ```
 
