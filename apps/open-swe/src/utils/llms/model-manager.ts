@@ -11,7 +11,6 @@ import {
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { decryptSecret } from "@open-swe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
-import { OllamaChatWrapper } from "./ollama-chat-wrapper.js";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -206,18 +205,6 @@ export class ModelManager {
       provider,
       modelName,
     });
-
-    // Use our custom wrapper for Ollama models to handle tool calling
-    if (provider === "ollama") {
-      const ollamaModel = new OllamaChatWrapper({
-        model: modelName.replace("ollama:", ""),
-        baseUrl: config.configurable?.apiKeys?.ollamaBaseUrl || "http://localhost:11434",
-        ...modelOptions,
-      });
-      
-      logger.info("Created Ollama model with tool support wrapper", { modelName });
-      return ollamaModel;
-    }
 
     return await initChatModel(modelName, modelOptions);
   }
@@ -416,11 +403,11 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
       },
       ollama: {
-        [LLMTask.PLANNER]: this.getSelectedOllamaModel(config, "large"), // Use with tool wrapper
-        [LLMTask.PROGRAMMER]: this.getSelectedOllamaModel(config, "large"), // Use with tool wrapper
-        [LLMTask.REVIEWER]: this.getSelectedOllamaModel(config, "medium"), // Use with tool wrapper
-        [LLMTask.ROUTER]: this.getSelectedOllamaModel(config, "small"), // Use with tool wrapper
-        [LLMTask.SUMMARIZER]: this.getSelectedOllamaModel(config, "medium"), // Text generation
+        [LLMTask.PLANNER]: "qwen2.5-coder:32b",
+        [LLMTask.PROGRAMMER]: "qwen2.5-coder:32b",
+        [LLMTask.REVIEWER]: "qwen2.5-coder:14b",
+        [LLMTask.ROUTER]: "qwen2.5-coder:7b",
+        [LLMTask.SUMMARIZER]: "qwen2.5-coder:14b",
       },
     };
 
@@ -429,46 +416,6 @@ export class ModelManager {
       return null;
     }
     return { provider, modelName };
-  }
-
-  /**
-   * Get selected Ollama model based on task requirements
-   */
-  private getSelectedOllamaModel(config: GraphConfig, size: "small" | "medium" | "large"): string | null {
-    const selectedModels = (config.configurable as any)?.selectedOllamaModels || [];
-    
-    if (!Array.isArray(selectedModels) || selectedModels.length === 0) {
-      // Fallback to default models if none selected
-      const fallbacks = {
-        small: "qwen2.5-coder:7b",
-        medium: "qwen2.5-coder:14b", 
-        large: "qwen2.5-coder:32b"
-      };
-      return fallbacks[size];
-    }
-    
-    // Sort models by likely size (heuristic based on name)
-    const sortedModels = [...selectedModels].sort((a, b) => {
-      const getSize = (name: string) => {
-        if (name.includes('70b') || name.includes('32b')) return 3;
-        if (name.includes('20b') || name.includes('14b')) return 2;
-        if (name.includes('7b') || name.includes('3b') || name.includes('1b')) return 1;
-        return 2; // default to medium
-      };
-      return getSize(a) - getSize(b);
-    });
-    
-    // Select model based on size requirement
-    switch (size) {
-      case "small":
-        return sortedModels[0]; // Smallest model
-      case "medium":
-        return sortedModels[Math.floor(sortedModels.length / 2)]; // Middle model
-      case "large":
-        return sortedModels[sortedModels.length - 1]; // Largest model
-      default:
-        return sortedModels[0];
-    }
   }
 
   /**
