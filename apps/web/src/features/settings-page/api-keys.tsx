@@ -235,7 +235,7 @@ export function APIKeysTab() {
               {section.title}
             </CardTitle>
             <CardDescription>
-              Manage API keys for {section.title.toLowerCase()} services
+              Configure {section.title.toLowerCase()} providers
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -276,7 +276,7 @@ export function APIKeysTab() {
                         htmlFor={`${apiKey.id}-key`}
                         className="text-sm font-medium"
                       >
-                        API Key
+                        {apiKey.id === "ollamaBaseUrl" ? "Server URL" : "API Key"}
                       </Label>
                       {apiKey.description && (
                         <p className="text-muted-foreground text-xs">
