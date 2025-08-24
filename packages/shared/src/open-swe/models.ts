@@ -135,13 +135,27 @@ export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
 
 /**
  * Get available models based on configuration
- * Returns MODEL_OPTIONS plus OLLAMA_MODELS when in local mode, otherwise just MODEL_OPTIONS
+ * Returns MODEL_OPTIONS plus selected OLLAMA_MODELS when in local mode, otherwise just MODEL_OPTIONS
  */
 export function getAvailableModels(config?: GraphConfig) {
   const baseModels = MODEL_OPTIONS;
 
   if (isLocalMode(config)) {
-    return [...baseModels, ...OLLAMA_MODELS];
+    // Get selected Ollama models from config
+    const selectedOllamaModels = (config?.configurable as any)?.selectedOllamaModels || [];
+    
+    if (Array.isArray(selectedOllamaModels) && selectedOllamaModels.length > 0) {
+      // Create model options from selected models
+      const dynamicOllamaModels = selectedOllamaModels.map((modelName: string) => ({
+        label: modelName,
+        value: `ollama:${modelName}`,
+      }));
+      
+      return [...baseModels, ...dynamicOllamaModels];
+    } else {
+      // Fallback to default Ollama models if none selected
+      return [...baseModels, ...OLLAMA_MODELS];
+    }
   }
 
   return baseModels;
@@ -149,18 +163,44 @@ export function getAvailableModels(config?: GraphConfig) {
 
 /**
  * Get available models (no thinking) based on configuration
- * Returns filtered models plus OLLAMA_MODELS when in local mode, otherwise just filtered models
+ * Returns filtered models plus selected OLLAMA_MODELS when in local mode, otherwise just filtered models
+ * Note: Ollama models are excluded from tool-calling tasks due to lack of function calling support
  */
-export function getAvailableModelsNoThinking(config?: GraphConfig) {
+export function getAvailableModelsNoThinking(config?: GraphConfig, taskContext?: string) {
   const baseModels = MODEL_OPTIONS_NO_THINKING;
 
   if (isLocalMode(config)) {
-    // Filter out thinking models from Ollama models as well
-    const ollamaModelsNoThinking = OLLAMA_MODELS.filter(
-      ({ value }) =>
-        !value.includes("extended-thinking") && !value.startsWith("ollama:o"),
-    );
-    return [...baseModels, ...ollamaModelsNoThinking];
+    // Don't include Ollama models for tool-calling tasks
+    const toolCallingTasks = ['planner', 'programmer', 'reviewer', 'router'];
+    const isToolCallingTask = taskContext && toolCallingTasks.includes(taskContext.toLowerCase());
+    
+    if (isToolCallingTask) {
+      return baseModels; // Only return cloud models for tool-calling tasks
+    }
+
+    // Get selected Ollama models from config for non-tool-calling tasks
+    const selectedOllamaModels = (config?.configurable as any)?.selectedOllamaModels || [];
+    
+    if (Array.isArray(selectedOllamaModels) && selectedOllamaModels.length > 0) {
+      // Create model options from selected models (filter out thinking models)
+      const dynamicOllamaModels = selectedOllamaModels
+        .filter((modelName: string) => 
+          !modelName.includes("extended-thinking") && !modelName.startsWith("o")
+        )
+        .map((modelName: string) => ({
+          label: `${modelName} (Local)`,
+          value: `ollama:${modelName}`,
+        }));
+      
+      return [...baseModels, ...dynamicOllamaModels];
+    } else {
+      // Fallback to default Ollama models if none selected
+      const ollamaModelsNoThinking = OLLAMA_MODELS.filter(
+        ({ value }) =>
+          !value.includes("extended-thinking") && !value.startsWith("ollama:o"),
+      );
+      return [...baseModels, ...ollamaModelsNoThinking];
+    }
   }
 
   return baseModels;
