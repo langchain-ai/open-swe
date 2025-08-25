@@ -88,23 +88,12 @@ export async function getMcpTools(
 ): Promise<StructuredToolInterface[]> {
   try {
     const mergedServers: McpServers = {};
-    const shouldUseLangEngResult = shouldUseLangEng(config);
-    console.log("Debug MCP:", {
-      shouldUseLangEng: shouldUseLangEngResult,
-      langEng: config?.configurable?.langEng,
-      configurable: config?.configurable,
-    });
-
-    if (shouldUseLangEngResult) {
-      console.log("Adding default server because langEng is enabled");
+    if (shouldUseLangEng(config)) {
       mergedServers["langgraph-docs-mcp"] =
         DEFAULT_MCP_SERVERS["langgraph-docs-mcp"];
-    } else {
-      console.log("NOT adding default server because langEng is disabled");
     }
 
     const mcpServersConfig = config?.configurable?.["mcpServers"];
-    console.log("mcpServersConfig", mcpServersConfig);
     if (mcpServersConfig) {
       try {
         const userServers: McpServers = JSON.parse(mcpServersConfig);
