@@ -15,7 +15,6 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   GITHUB_PAT,
-  DEFAULT_MCP_SERVERS,
   GITHUB_INSTALLATION_ID,
 } from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
@@ -429,9 +428,9 @@ export const GraphConfigurationMetadata: {
   mcpServers: {
     x_open_swe_ui_config: {
       type: "json",
-      default: JSON.stringify(DEFAULT_MCP_SERVERS, null, 2),
+      default: "{}",
       description:
-        "JSON configuration for custom MCP servers. LangGraph docs server is set by default. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+        "JSON configuration for custom MCP servers. LangGraph docs server is automatically added when LangEng is enabled. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
     },
   },
   shouldCreateIssue: {
