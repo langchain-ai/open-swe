@@ -20,14 +20,15 @@ import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
-import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
+import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT, LANGENG_PROMPT } from "./prompt.js";
+import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
-function formatSystemPrompt(state: PlannerGraphState): string {
+function formatSystemPrompt(state: PlannerGraphState, config: GraphConfig): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const scratchpad = getScratchpad(state.messages)
@@ -48,7 +49,8 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       scratchpad.length
         ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
-    );
+    )
+    .replace("{ADDITIONAL_INSTRUCTIONS}", shouldUseLangEng(config) ? LANGENG_PROMPT : "");
 }
 
 export async function generatePlan(
@@ -97,7 +99,7 @@ export async function generatePlan(
     .invoke([
       {
         role: "system",
-        content: formatSystemPrompt(state),
+        content: formatSystemPrompt(state, config),
       },
       ...inputMessages,
     ]);
