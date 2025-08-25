@@ -34,7 +34,9 @@ Your sole objective in this phase is to gather comprehensive context about the c
         - You will always be able to gather more context after the planning phase, so ensure that the actions you perform in this planning phase are only the most necessary and targeted actions to gather context.
         - Avoid rabbit holes for gathering context. You should always first consider whether or not the action you're about to take is necessary to generate a plan for the user's request. If it is not, do not take it.
     9. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd. You may use cd if the User explicitly requests it.
+    {LANGGRAPH_DOCUMENTATION_PROMPT}
 </context_gathering_guidelines>
+{EXTERNAL_LIBRARIES_PLAN_PROMPT}
 
 <tool_usage>
     ### Grep search tool
@@ -74,6 +76,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
         Parameters:
             - \`url\`: The URL to fetch the contents of
             - \`query\`: The query to search for within the document. This should be a natural language query. The query will be passed to a separate LLM and prompted to extract context from the document which answers this query.
+    {DEV_SERVER_PROMPT}
 </tool_usage>
 
 <workspace_information>
@@ -96,3 +99,116 @@ Your sole objective in this phase is to gather comprehensive context about the c
     {USER_REQUEST_PROMPT}
     </user_request>
 </task_context>`;
+
+
+export const LANGGRAPH_DOCUMENTATION_PROMPT = `
+10. LangGraph Documentation Access:
+  - You have access to the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools. Use them when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
+  - In the case of generating a plan, mention in the plan to use the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools to get up to date information on the LangGraph API while coding.
+  - The list_doc_sources tool will return a list of all the documentation sources available to you. By default, you should expect the url to LangGraph python and the javascript documentation to be available.
+  - The fetch_docs tool will fetch the documentation for the given source. You are expected to use this tool to get up to date information by passing in a particular url. It returns the documentation as a markdown string.
+  - [Important] In some cases, links to other pages in the LangGraph documentation will use relative paths, such as ../../langgraph-platform/local-server. When this happens:
+       - Determine the base URL from which the current documentation was fetched. It should be the url of the page you you read the relative path from.
+       - For ../, go one level up in the URL hierarchy.
+       - For ../../, go two levels up, then append the relative path.
+       - If the current page is: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
+           - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
+           - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
+       - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
+`
+
+export const EXTERNAL_LIBRARIES_PLAN_PROMPT = `
+<external_libraries_and_frameworks_planning>
+   <langgraph_planning_requirements>
+       When planning LangGraph agents, ensure tasks include:
+      
+       **Structure Requirements:**
+       - If any LangGraph-related files exist in the codebase (graph.py, main.py, app.py, or any files with graph imports/exports), do not create a newagent.py. Always work with existing files and follow the established patterns.
+       - Create agent.py when building a new LangGraph project from an empty directory with zero existing graph-related files.
+       - For existing projects, always follow the existing structure and never impose new patterns.
+       - Proper state management with TypedDict or Pydantic BaseModel
+       - Never add a checkpointer unless explicitly requested by user
+      
+       **Deployment-First Planning:**
+       - Plan to use prebuilt components: create_react_agent, supervisor patterns, swarm patterns
+       - Only plan to use custom StateGraph when prebuilt components don't fit the use case
+       - Always include tasks for runtime testing with dev_server
+       - Plan for \`langgraph dev\` testing after implementation
+      
+       **Critical Error Prevention in Plans:**
+       - State updates must return dictionaries, not full state objects
+       - Message objects are not strings - plan for .content property extraction
+       - Always plan for exporting compiled graph as 'app' variable
+       - Plan for type safety verification before chaining operations
+      
+       **Required Testing Tasks:**
+       - Include dev_server task after any LangGraph implementation
+       - Plan for \`langgraph dev\` command testing
+       - Plan for sending test requests to verify agent responses
+       - Plan for reviewing server logs for initialization issues
+   </langgraph_planning_requirements>
+  
+   <framework_integration_planning>
+       **Streamlit + LangGraph Integration:**
+       - Plan for nest_asyncio setup tasks
+       - Plan for session state management tasks
+       - Plan for form widget constraints handling
+      
+       **FastAPI + LangGraph Integration:**
+       - Plan for async endpoint patterns
+       - Plan for proper event loop management
+      
+       **Multi-Framework Integration:**
+       - Plan debugging verification tasks with test markers
+       - Plan for config propagation verification
+       - Plan for integration point testing
+   </framework_integration_planning>
+   <important_documentation>
+       **LangGraph Core Concepts:**
+       - https://langchain-ai.github.io/langgraph/concepts/agentic_concepts/
+       - https://langchain-ai.github.io/langgraph/how-tos/pass-config-to-tools/
+      
+       **LangGraph Patterns:**
+       - https://langchain-ai.github.io/langgraph/reference/supervisor/
+       - https://langchain-ai.github.io/langgraph/reference/swarm/
+      
+       **LangGraph Streaming & Interrupts (needed when user input required):**
+        - https://langchain-ai.github.io/langgraph/how-tos/stream-updates/
+        - https://langchain-ai.github.io/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
+        - https://langchain-ai.github.io/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming
+        - https://docs.langchain.com/langgraph-platform/interrupt-concurrent
+      
+       **Framework Integration:**
+       - https://docs.streamlit.io/library/api-reference/session-state
+       - https://docs.streamlit.io/knowledge-base/using-streamlit/how-to-use-async-await
+       - https://docs.python.org/3/library/asyncio-dev.html#common-mistakes
+       - https://github.com/erdewit/nest_asyncio
+   </important_documentation>
+</external_libraries_and_frameworks_planning>`;
+
+export const DEV_SERVER_PROMPT = `
+### Dev server tool
+       The \`dev_server\` tool allows you to start development servers and monitor their behavior for debugging purposes.
+       You SHOULD use this tool when reviewing any changes to web applications, APIs, or services.
+       Static code review is insufficient - you must verify runtime behavior when creating langgraph agents.
+      
+       **You should always use this tool when:**
+       - Reviewing API modifications (verify endpoints respond properly)
+       - Investigating server startup issues or runtime errors
+      
+       Common development server commands by technology:
+       - **Python/LangGraph**: \`langgraph dev\` (for LangGraph applications)
+       - **Node.js/React**: \`npm start\`, \`npm run dev\`, \`yarn start\`, \`yarn dev\`
+       - **Python/Django**: \`python manage.py runserver\`
+       - **Python/Flask**: \`python app.py\`, \`flask run\`
+       - **Python/FastAPI**: \`uvicorn main:app --reload\`
+       - **Go**: \`go run .\`, \`go run main.go\`
+       - **Ruby/Rails**: \`rails server\`, \`bundle exec rails server\`
+      
+       Parameters:
+           - \`command\`: The development server command to execute (e.g., ["langgraph", "dev"] or ["npm", "start"])
+           - \`request\`: HTTP request to send to the server for testing (JSON format with url, method, headers, body)
+           - \`workdir\`: Working directory for the command
+           - \`wait_time\`: Time to wait in seconds before sending request (default: 10)
+      
+       The tool will start the server, send a test request, capture logs, and return the results for your review.`;
