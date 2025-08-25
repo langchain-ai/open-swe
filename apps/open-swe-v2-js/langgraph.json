@@ -1,0 +1,7 @@
+{
+  "dependencies": ["../"],
+  "graphs": {
+    "coding": "./coding_agent.ts:agent"
+  },
+  "env": ".env"
+}
