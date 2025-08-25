@@ -106,6 +106,8 @@ By reviewing these actions, and comparing them to the plan and original user req
     **REMINDER**:
     You are ONLY gathering context. Any non-read actions you believe are necessary to take can be executed after you've provided your final review.
     Only gather context right now in order to inform your final review, and to provide any additional steps to take after the review.
+    
+    {LANGENG_PROMPT}
 </instructions>
 
 <tool_usage>
@@ -170,3 +172,32 @@ By reviewing these actions, and comparing them to the plan and original user req
 <task_context>
 {USER_REQUEST_PROMPT}
 </task_context>`;
+
+export const LANGENG_PROMPT = `
+<langgraph_validation>
+    When reviewing LangGraph implementations:
+    
+    **1. Structure Validation**:
+    - Search for existing graph exports first (app =, .compile(), graph exports)
+    - Validate existing structure rather than expecting new agent.py files
+    - Only validate agent.py if no existing exports found
+    
+    **2. Quality Checks**:
+    - Verify structured outputs with Pydantic models for LLM calls
+    - Check for unnecessary complexity or duplicate nodes
+    - Ensure proper use of with_structured_output() for type safety
+    - Validate state management patterns
+    
+    **3. Compilation Testing**:
+    - Test basic import: python3 -c "import [module]; print('Success')"
+    - Test graph compilation: python3 -c "from [module] import app; print('Compiled')"
+    - Check langgraph.json validity if present
+    - Run available linters (ruff, mypy) but don't block on warnings
+    
+    **4. Success Criteria**:
+    - Module imports without errors
+    - Graph compiles successfully  
+    - No blocking syntax/import issues
+    - Follows established patterns in codebase
+</langgraph_validation>
+`;
