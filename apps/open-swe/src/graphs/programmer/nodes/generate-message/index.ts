@@ -34,6 +34,7 @@ import {
   DYNAMIC_SYSTEM_PROMPT,
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
+  LANGENG_PROMPT
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -66,6 +67,7 @@ import {
   shouldIncludeReviewCommentTool,
   createReplyToReviewTool,
 } from "../../../../tools/reply-to-review-comment.js";
+import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -94,6 +96,7 @@ const formatDynamicContextPrompt = (state: GraphState) => {
 const formatStaticInstructionsPrompt = (
   state: GraphState,
   isAnthropicModel: boolean,
+  config: GraphConfig,
 ) => {
   return (
     isAnthropicModel
@@ -101,11 +104,14 @@ const formatStaticInstructionsPrompt = (
       : STATIC_SYSTEM_INSTRUCTIONS
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replace("{LANGENG_PROMPT}", shouldUseLangEng(config) ? LANGENG_PROMPT : "")
+    .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 };
 
 const formatCacheablePrompt = (
   state: GraphState,
+  config: GraphConfig,
   args?: {
     isAnthropicModel?: boolean;
     excludeCacheControl?: boolean;
@@ -117,7 +123,7 @@ const formatCacheablePrompt = (
     // Cache Breakpoint 2: Static Instructions
     {
       type: "text",
-      text: formatStaticInstructionsPrompt(state, !!args?.isAnthropicModel),
+      text: formatStaticInstructionsPrompt(state, !!args?.isAnthropicModel, config),
       ...(!args?.excludeCacheControl
         ? { cache_control: { type: "ephemeral" } }
         : {}),
@@ -236,6 +242,7 @@ async function createToolsAndPrompt(
           ...state,
           taskPlan: options.latestTaskPlan ?? state.taskPlan,
         },
+        config,
         {
           isAnthropicModel: true,
           excludeCacheControl: false,
@@ -254,6 +261,7 @@ async function createToolsAndPrompt(
           ...state,
           taskPlan: options.latestTaskPlan ?? state.taskPlan,
         },
+        config,
         {
           isAnthropicModel: false,
           excludeCacheControl: true,
