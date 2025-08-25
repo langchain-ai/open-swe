@@ -41,6 +41,8 @@ interface TerminalInputProps {
   shouldCreateIssue: boolean;
   setShouldCreateIssue: Dispatch<SetStateAction<boolean>>;
   draftToLoad?: string;
+  langEng: boolean;
+  setLangEng: Dispatch<SetStateAction<boolean>>;
 }
 
 const MISSING_API_KEYS_TOAST_CONTENT = (
@@ -76,6 +78,8 @@ export function TerminalInput({
   shouldCreateIssue,
   setShouldCreateIssue,
   draftToLoad,
+  langEng,
+  setLangEng,
 }: TerminalInputProps) {
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
@@ -169,6 +173,7 @@ export function TerminalInput({
               configurable: {
                 ...defaultConfig,
                 shouldCreateIssue,
+                langEng,
                 [GITHUB_USER_LOGIN_HEADER]: user.login,
               },
             },
@@ -208,6 +213,11 @@ export function TerminalInput({
           defaultConfig?.shouldCreateIssue != null
             ? !!defaultConfig.shouldCreateIssue
             : true,
+        );
+        setLangEng(
+          defaultConfig?.langEng != null
+            ? !!defaultConfig.langEng
+            : false,
         );
       } catch (e) {
         if (

@@ -8,6 +8,7 @@ import {
 } from "@open-swe/shared/open-swe/mcp";
 import { createLogger, LogLevel } from "./logger.js";
 import { DEFAULT_MCP_SERVERS } from "@open-swe/shared/constants";
+import { shouldUseLangEng } from "./should-use-langEng.js";
 
 const logger = createLogger(LogLevel.INFO, "MCP Client");
 
@@ -86,10 +87,23 @@ export async function getMcpTools(
   config: GraphConfig,
 ): Promise<StructuredToolInterface[]> {
   try {
-    // TODO: Remove default MCP servers obj once UI is implemented
-    const mergedServers: McpServers = { ...DEFAULT_MCP_SERVERS };
+    const mergedServers: McpServers = {};
+    const shouldUseLangEngResult = shouldUseLangEng(config);
+    console.log("Debug MCP:", {
+      shouldUseLangEng: shouldUseLangEngResult,
+      langEng: config?.configurable?.langEng,
+      configurable: config?.configurable
+    });
+
+    if (shouldUseLangEngResult) {
+      console.log("Adding default server because langEng is enabled");
+      mergedServers["langgraph-docs-mcp"] = DEFAULT_MCP_SERVERS["langgraph-docs-mcp"];
+    } else {
+      console.log("NOT adding default server because langEng is disabled");
+    }
 
     const mcpServersConfig = config?.configurable?.["mcpServers"];
+    console.log("mcpServersConfig", mcpServersConfig);
     if (mcpServersConfig) {
       try {
         const userServers: McpServers = JSON.parse(mcpServersConfig);
