@@ -307,7 +307,6 @@ export const DEV_SERVER_PROMPT = `
       
        The tool will start the server, send a test request, capture logs, and return the results for your review.`;
 
-
 export const LANGENG_PROMPT = `
 <langgraph_specific_patterns>
        <critical_structure>

@@ -34,7 +34,7 @@ import {
   DYNAMIC_SYSTEM_PROMPT,
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
-  LANGENG_PROMPT
+  LANGENG_PROMPT,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -123,7 +123,11 @@ const formatCacheablePrompt = (
     // Cache Breakpoint 2: Static Instructions
     {
       type: "text",
-      text: formatStaticInstructionsPrompt(state, !!args?.isAnthropicModel, config),
+      text: formatStaticInstructionsPrompt(
+        state,
+        !!args?.isAnthropicModel,
+        config,
+      ),
       ...(!args?.excludeCacheControl
         ? { cache_control: { type: "ephemeral" } }
         : {}),

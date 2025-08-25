@@ -12,7 +12,11 @@ import {
 import { GraphConfig } from "@open-swe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { PREVIOUS_REVIEW_PROMPT, SYSTEM_PROMPT, LANGENG_PROMPT } from "./prompt.js";
+import {
+  PREVIOUS_REVIEW_PROMPT,
+  SYSTEM_PROMPT,
+  LANGENG_PROMPT,
+} from "./prompt.js";
 import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
@@ -41,7 +45,10 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
-function formatSystemPrompt(state: ReviewerGraphState, config: GraphConfig): string {
+function formatSystemPrompt(
+  state: ReviewerGraphState,
+  config: GraphConfig,
+): string {
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
 
@@ -149,7 +156,9 @@ function createToolsAndPrompt(
   const anthropicMessages = [
     {
       role: "system",
-      content: formatCacheablePrompt(state, config, { excludeCacheControl: false }),
+      content: formatCacheablePrompt(state, config, {
+        excludeCacheControl: false,
+      }),
     },
     {
       role: "user",
@@ -162,7 +171,9 @@ function createToolsAndPrompt(
   const nonAnthropicMessages = [
     {
       role: "system",
-      content: formatCacheablePrompt(state, config, { excludeCacheControl: true }),
+      content: formatCacheablePrompt(state, config, {
+        excludeCacheControl: true,
+      }),
     },
     {
       role: "user",

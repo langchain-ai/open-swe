@@ -20,7 +20,11 @@ import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
 } from "../../utils/followup.js";
-import { SYSTEM_PROMPT, LANGGRAPH_DOCUMENTATION_PROMPT, EXTERNAL_LIBRARIES_PLAN_PROMPT } from "./prompt.js";
+import {
+  SYSTEM_PROMPT,
+  LANGGRAPH_DOCUMENTATION_PROMPT,
+  EXTERNAL_LIBRARIES_PLAN_PROMPT,
+} from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   isLocalMode,
@@ -82,8 +86,14 @@ function formatSystemPrompt(
     )
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
-    .replace("{LANGGRAPH_DOCUMENTATION_PROMPT}", shouldUseLangEng(config) ? LANGGRAPH_DOCUMENTATION_PROMPT : "")
-    .replace("{EXTERNAL_LIBRARIES_PLAN_PROMPT}", shouldUseLangEng(config) ? EXTERNAL_LIBRARIES_PLAN_PROMPT : "")
+    .replace(
+      "{LANGGRAPH_DOCUMENTATION_PROMPT}",
+      shouldUseLangEng(config) ? LANGGRAPH_DOCUMENTATION_PROMPT : "",
+    )
+    .replace(
+      "{EXTERNAL_LIBRARIES_PLAN_PROMPT}",
+      shouldUseLangEng(config) ? EXTERNAL_LIBRARIES_PLAN_PROMPT : "",
+    )
     .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 }
 

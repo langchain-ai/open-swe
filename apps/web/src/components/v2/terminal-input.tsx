@@ -215,9 +215,7 @@ export function TerminalInput({
             : true,
         );
         setLangEng(
-          defaultConfig?.langEng != null
-            ? !!defaultConfig.langEng
-            : false,
+          defaultConfig?.langEng != null ? !!defaultConfig.langEng : false,
         );
       } catch (e) {
         if (

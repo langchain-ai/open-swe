@@ -92,12 +92,13 @@ export async function getMcpTools(
     console.log("Debug MCP:", {
       shouldUseLangEng: shouldUseLangEngResult,
       langEng: config?.configurable?.langEng,
-      configurable: config?.configurable
+      configurable: config?.configurable,
     });
 
     if (shouldUseLangEngResult) {
       console.log("Adding default server because langEng is enabled");
-      mergedServers["langgraph-docs-mcp"] = DEFAULT_MCP_SERVERS["langgraph-docs-mcp"];
+      mergedServers["langgraph-docs-mcp"] =
+        DEFAULT_MCP_SERVERS["langgraph-docs-mcp"];
     } else {
       console.log("NOT adding default server because langEng is disabled");
     }

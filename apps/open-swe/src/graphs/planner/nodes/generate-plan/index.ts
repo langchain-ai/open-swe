@@ -28,7 +28,10 @@ import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
-function formatSystemPrompt(state: PlannerGraphState, config: GraphConfig): string {
+function formatSystemPrompt(
+  state: PlannerGraphState,
+  config: GraphConfig,
+): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const scratchpad = getScratchpad(state.messages)
@@ -50,7 +53,10 @@ function formatSystemPrompt(state: PlannerGraphState, config: GraphConfig): stri
         ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
     )
-    .replace("{ADDITIONAL_INSTRUCTIONS}", shouldUseLangEng(config) ? LANGENG_PROMPT : "");
+    .replace(
+      "{ADDITIONAL_INSTRUCTIONS}",
+      shouldUseLangEng(config) ? LANGENG_PROMPT : "",
+    );
 }
 
 export async function generatePlan(

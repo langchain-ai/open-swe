@@ -74,7 +74,6 @@ Always format your plan items with proper markdown. Avoid large headers, but you
 
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
 
-
 export const LANGENG_PROMPT = `
 7. **LangGraph-specific planning:**
   - When the user's request involves LangGraph code generation, editing, or bug fixing, ensure the execution agent will have access to up-to-date LangGraph documentation
@@ -95,4 +94,4 @@ export const LANGENG_PROMPT = `
            - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
            - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
        - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
-`
+`;

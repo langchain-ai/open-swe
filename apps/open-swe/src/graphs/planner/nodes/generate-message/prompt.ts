@@ -100,7 +100,6 @@ Your sole objective in this phase is to gather comprehensive context about the c
     </user_request>
 </task_context>`;
 
-
 export const LANGGRAPH_DOCUMENTATION_PROMPT = `
 10. LangGraph Documentation Access:
   - You have access to the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools. Use them when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
@@ -115,7 +114,7 @@ export const LANGGRAPH_DOCUMENTATION_PROMPT = `
            - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
            - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
        - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
-`
+`;
 
 export const EXTERNAL_LIBRARIES_PLAN_PROMPT = `
 <external_libraries_and_frameworks_planning>

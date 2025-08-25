@@ -443,8 +443,8 @@ export const GraphConfigurationMetadata: {
   },
   langEng: {
     x_open_swe_ui_config: {
-      type: "hidden"
-    }
+      type: "hidden",
+    },
   },
   reviewPullNumber: {
     x_open_swe_ui_config: {
