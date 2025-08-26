@@ -4140,6 +4140,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
+    "@langchain/core": ^0.3.65
     "@langchain/langgraph-cli": ^0.0.47
     "@open-swe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
@@ -9635,7 +9636,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"deepagents@npm:0.0.0-rc.2, deepagents@npm:rc":
+"deepagents@npm:0.0.0-rc.2":
   version: 0.0.0-rc.2
   resolution: "deepagents@npm:0.0.0-rc.2"
   dependencies:
@@ -16296,7 +16297,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "open-swe@workspace:."
   dependencies:
-    deepagents: rc
+    "@langchain/core": ^0.3.72
     turbo: ^2.5.0
     typescript: ^5
   languageName: unknown

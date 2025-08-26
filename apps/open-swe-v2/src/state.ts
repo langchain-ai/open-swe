@@ -4,16 +4,30 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import * as path from "path";
 import { DeepAgentState } from "deepagents";
 import { FILE_EDIT_COMMANDS } from "./constants.js";
-import { Command, CommandArgs, ApprovalKey, FileEditCommandArgs, ExecuteBashCommandArgs, FileSystemCommandArgs, ApprovedOperations } from "./types.js";
+import {
+  Command,
+  CommandArgs,
+  ApprovalKey,
+  FileEditCommandArgs,
+  ExecuteBashCommandArgs,
+  FileSystemCommandArgs,
+  ApprovedOperations,
+} from "./types.js";
 
 export const CodingAgentState: any = DeepAgentState.extend({
-  approved_operations: withLangGraph(z.custom<ApprovedOperations>().optional(), {
-    reducer: {
-      schema: z.custom<ApprovedOperations>().optional(),
-      fn: (_state: ApprovedOperations | undefined, update: ApprovedOperations | undefined) => update,
+  approved_operations: withLangGraph(
+    z.custom<ApprovedOperations>().optional(),
+    {
+      reducer: {
+        schema: z.custom<ApprovedOperations>().optional(),
+        fn: (
+          _state: ApprovedOperations | undefined,
+          update: ApprovedOperations | undefined,
+        ) => update,
+      },
+      default: () => ({ cached_approvals: new Set<string>() }),
     },
-    default: () => ({ cached_approvals: new Set<string>() }),
-  }),
+  ),
 });
 
 export type CodingAgentStateType = z.infer<typeof CodingAgentState>;

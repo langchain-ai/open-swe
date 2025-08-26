@@ -7,7 +7,6 @@ import { ApprovedOperations } from "./types.js";
 
 type StateType = CodingAgentStateType;
 
-
 export function createAgentPostModelHook() {
   /**
    * Post model hook that checks for write tool calls and uses caching to avoid
