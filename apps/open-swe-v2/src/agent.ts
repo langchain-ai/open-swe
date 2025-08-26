@@ -1,10 +1,9 @@
-/* eslint-disable no-console */
 import { createDeepAgent } from "deepagents";
 import "dotenv/config";
 import { code_reviewer_agent, test_generator_agent } from "./subagents.js";
-import { get_coding_instructions } from "./coding_instructions.js";
-import { createCodingAgentPostModelHook } from "./coding_post_model_hook.js";
-import { CodingAgentState } from "./coding_agent_state.js";
+import { get_coding_instructions } from "./prompts.js";
+import { createCodingAgentPostModelHook } from "./post-model-hook.js";
+import { CodingAgentState } from "./state.js";
 import { executeBash, httpRequest, webSearch } from "./tools.js";
 
 // LangSmith tracing setup

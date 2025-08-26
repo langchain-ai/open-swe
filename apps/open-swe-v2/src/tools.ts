@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { spawn } from "child_process";
-import { validateCommandSafety } from "./command_safety.js";
+import { validateCommandSafety } from "./command-safety.js";
 
 // Execute bash command tool
 export const executeBash = tool(

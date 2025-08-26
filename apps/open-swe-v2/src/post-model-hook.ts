@@ -1,10 +1,7 @@
 import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { interrupt } from "@langchain/langgraph";
 import { WRITE_COMMANDS } from "./constants.js";
-import {
-  CodingAgentStateHelpers,
-  type CodingAgentStateType,
-} from "./coding_agent_state.js";
+import { CodingAgentStateHelpers, type CodingAgentStateType } from "./state.js";
 
 interface StateType extends CodingAgentStateType {
   todos: any[];
