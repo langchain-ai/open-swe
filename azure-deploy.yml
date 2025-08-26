@@ -1,0 +1,185 @@
+# Azure App Service Deployment Configuration
+# This file can be used with Azure DevOps Pipelines or GitHub Actions
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - staging
+
+variables:
+  # Node.js version
+  nodeVersion: '18.x'
+  # Build configuration
+  buildConfiguration: 'Release'
+
+stages:
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+      - job: Build
+        displayName: 'Build Job'
+        pool:
+          vmImage: 'ubuntu-latest'
+        
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: $(nodeVersion)
+            displayName: 'Install Node.js'
+          
+          - script: |
+              npm install -g yarn@3.5.1
+            displayName: 'Install Yarn'
+          
+          - script: |
+              yarn install --frozen-lockfile
+            displayName: 'Install Dependencies'
+          
+          - script: |
+              yarn build
+            displayName: 'Build Applications'
+          
+          - script: |
+              yarn test
+            displayName: 'Run Tests'
+          
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: '$(System.DefaultWorkingDirectory)'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+              replaceExistingArchive: true
+            displayName: 'Archive Files'
+          
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'drop'
+              publishLocation: 'Container'
+            displayName: 'Publish Artifacts'
+
+  - stage: DeployDev
+    displayName: 'Deploy to Development'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployWeb
+        displayName: 'Deploy Web App'
+        environment: 'development'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(webAppName-dev)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/web && npm start'
+      
+      - deployment: DeployAgent
+        displayName: 'Deploy Agent'
+        environment: 'development'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(agentAppName-dev)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/agent-mojo && yarn dev'
+
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/staging'))
+    jobs:
+      - deployment: DeployWeb
+        displayName: 'Deploy Web App'
+        environment: 'staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(webAppName-staging)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/web && npm start'
+      
+      - deployment: DeployAgent
+        displayName: 'Deploy Agent'
+        environment: 'staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(agentAppName-staging)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/agent-mojo && yarn dev'
+
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployWeb
+        displayName: 'Deploy Web App'
+        environment: 'production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(webAppName-prod)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/web && npm start'
+      
+      - deployment: DeployAgent
+        displayName: 'Deploy Agent'
+        environment: 'production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webAppLinux'
+                    appName: '$(agentAppName-prod)'
+                    package: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+                    runtimeStack: 'NODE|18-lts'
+                    startUpCommand: 'cd apps/agent-mojo && yarn start'

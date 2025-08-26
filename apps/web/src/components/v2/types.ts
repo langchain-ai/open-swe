@@ -1,5 +1,5 @@
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@open-swe/shared/agent-mojo/types";
 
 export interface ErrorState {
   message: string;

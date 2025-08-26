@@ -14,7 +14,6 @@ import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
 import { parsePartialJson } from "@langchain/core/output_parsers";
-import { RestartRun } from "./restart-run";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -28,7 +27,7 @@ function MessageCopyButton({ content }: { content: string }) {
 
   return (
     <TooltipIconButton
-      onClick={(e) => handleCopy(e)}
+      onClick={(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => handleCopy(e)}
       variant="ghost"
       tooltip="Copy content"
       className="size-6 p-1"
@@ -71,11 +70,6 @@ interface ManagerChatProps {
   isLoading: boolean;
   cancelRun: () => void;
   errorState?: ErrorState | null;
-  // Restart-run controls
-  canRestartRun?: boolean;
-  managerThreadId?: string;
-  plannerThreadId?: string;
-  programmerThreadId?: string;
   githubUser?: {
     login: string;
     avatar_url: string;
@@ -83,7 +77,6 @@ interface ManagerChatProps {
     name: string | null;
     email: string | null;
   };
-  disableSubmit?: boolean;
 }
 
 function extractResponseFromMessage(message: Message): string {
@@ -168,12 +161,7 @@ export function ManagerChat({
   isLoading,
   cancelRun,
   errorState,
-  canRestartRun,
-  managerThreadId,
-  plannerThreadId,
-  programmerThreadId,
   githubUser,
-  disableSubmit,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
@@ -193,7 +181,7 @@ export function ManagerChat({
                   return (
                     <div
                       key={message.id}
-                      className="group bg-muted flex items-start gap-3 rounded-lg p-3"
+                      className="group bg-muted flex items-start gap-3 rounded-lg p-3 premium-hover glass-effect"
                     >
                       <div className="mt-0.5 flex-shrink-0">
                         {message.type === "human" ? (
@@ -221,7 +209,7 @@ export function ManagerChat({
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human"
                               ? githubUser?.login || "You"
-                              : "Open SWE"}
+                              : "Agent Mojo"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
                             <MessageCopyButton content={messageContentString} />
@@ -245,13 +233,6 @@ export function ManagerChat({
                     icon={<AlertCircle className="size-4" />}
                   />
                 ) : null}
-                {canRestartRun && managerThreadId && plannerThreadId ? (
-                  <RestartRun
-                    managerThreadId={managerThreadId}
-                    plannerThreadId={plannerThreadId}
-                    programmerThreadId={programmerThreadId}
-                  />
-                ) : null}
               </>
             }
             footer={
@@ -269,15 +250,9 @@ export function ManagerChat({
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
             placeholder="Type your message..."
-            className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm"
+            className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm glass-effect"
             onKeyDown={(e) => {
-              if (
-                e.key === "Enter" &&
-                (e.metaKey || e.ctrlKey) &&
-                !isLoading &&
-                !disableSubmit &&
-                !!chatInput.trim()
-              ) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
                 e.preventDefault();
                 handleSendMessage();
               }
@@ -295,7 +270,7 @@ export function ManagerChat({
           ) : (
             <Button
               onClick={handleSendMessage}
-              disabled={!chatInput.trim() || disableSubmit}
+              disabled={!chatInput.trim()}
               size="icon"
               variant="brand"
               className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"

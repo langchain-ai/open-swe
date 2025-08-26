@@ -29,7 +29,7 @@ The file should not contain any other content besides those tags, and the rules/
 With all of this in mind, please explore the repository and write this single \`AGENTS.md\` file with the rules/context/instructions gathered!`;
 
 const DEV_README_PROMPT = `Please add a new callout to the root readme in the repository:
-"Welcome to Open SWE!"
+"Welcome to Agent Mojo!"
 Make it a 'tip' callout`;
 
 function DevReadmePromptQuickAction({
@@ -42,7 +42,7 @@ function DevReadmePromptQuickAction({
   return (
     <Card
       onClick={() => setQuickActionPrompt(DEV_README_PROMPT)}
-      className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm"
+      className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm premium-hover premium-glow"
     >
       <CardHeader className="px-3">
         <CardTitle className="text-foreground text-sm">
@@ -89,7 +89,7 @@ function RepositoryTemplateQuickAction(props: {
       target="_blank"
       rel="noopener noreferrer"
     >
-      <Card className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm">
+      <Card className="border-border bg-card hover:bg-muted/30 dark:hover:bg-muted/20 hover:shadow-primary/2 cursor-pointer py-3 transition-all duration-200 hover:shadow-sm premium-hover premium-glow">
         <CardHeader className="px-3">
           <CardTitle className="text-foreground text-sm">
             {props.title}

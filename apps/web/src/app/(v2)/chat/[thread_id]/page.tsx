@@ -7,7 +7,7 @@ import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@open-swe/shared/agent-mojo/manager/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { use, useEffect, useRef, useState } from "react";

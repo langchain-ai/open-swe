@@ -17,10 +17,10 @@ const TerminalInterface: React.FC<TerminalInterfaceProps> = ({
   return (
     <Box flexDirection="column" padding={1}>
       <Box justifyContent="center" marginBottom={0}>
-        <Text bold>LangChain AgentMojo CLI</Text>
+        <Text bold>Agent Mojo</Text>
       </Box>
       <Box flexDirection="column">
-        <Text>Describe your coding task in as much detail as possible...</Text>
+        <Text>Describe your coding task in as much detail as possible... Remmber this, good instructions give good results.</Text>
       </Box>
       <Box
         borderStyle="round"

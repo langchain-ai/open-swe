@@ -1,7 +1,7 @@
 import { Thread } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { GraphState, TaskPlan } from "@open-swe/shared/agent-mojo/types";
+import { getActivePlanItems } from "@open-swe/shared/agent-mojo/tasks";
 
 export function computeThreadTitle(
   taskPlan: TaskPlan | undefined,
@@ -19,6 +19,12 @@ export function computeThreadTitle(
 export function getThreadTitle<State extends Record<string, any> = GraphState>(
   thread: Thread<State>,
 ): string {
+  // Prefer an explicit title if one was set in the thread state
+  const explicitTitle = (thread as any)?.values?.title as string | undefined;
+  if (explicitTitle && explicitTitle.trim()) {
+    return explicitTitle.trim();
+  }
+
   const messages = thread?.values?.messages;
   if (!messages?.length || !messages[0]?.content) {
     return `Thread ${thread.thread_id.substring(0, 8)}`;

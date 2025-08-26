@@ -1,13 +1,13 @@
 ---
 title: "Authentication"
-description: "How authentication works in Open SWE"
+description: "How authentication works in Agent Mojo"
 ---
 
-Open SWE implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow involves GitHub OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
+Agent Mojo implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow involves GitHub OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
 
 ## GitHub OAuth Authentication
 
-Open SWE uses GitHub OAuth for client-side authentication, providing secure access to user accounts and repository permissions.
+Agent Mojo uses GitHub OAuth for client-side authentication, providing secure access to user accounts and repository permissions.
 
 ### Authentication Flow
 
@@ -94,7 +94,7 @@ The proxy route automatically injects the following encrypted headers into each 
 
 ### Token Encryption
 
-Open SWE implements AES-256-GCM encryption for all secrets passed to the LangGraph server to prevent exposure in:
+Agent Mojo implements AES-256-GCM encryption for all secrets passed to the LangGraph server to prevent exposure in:
 
 - LangSmith trace metadata
 - Run configurations
@@ -113,7 +113,7 @@ The encryption process uses the `SECRETS_ENCRYPTION_KEY` environment variable an
 
 ## Authentication Middleware
 
-The LangGraph server implements comprehensive authentication middleware (`apps/open-swe/src/security/auth.ts`) that validates all incoming requests.
+The LangGraph server implements comprehensive authentication middleware (`apps/Agent Mojo/src/security/auth.ts`) that validates all incoming requests.
 
 ### Webhook Authentication
 
@@ -171,7 +171,7 @@ Upon successful authentication, the middleware returns an identity object contai
 
 ## Resource Access Control
 
-Open SWE implements fine-grained access control for all LangGraph resources:
+Agent Mojo implements fine-grained access control for all LangGraph resources:
 
 ### Metadata-Based Ownership
 

@@ -1,16 +1,16 @@
 {
   "name": "@open-swe/shared",
-  "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
+  "homepage": "https://github.com/langchain-ai/agent-mojo/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langchain-ai/open-swe.git"
+    "url": "https://github.com/langchain-ai/agent-mojo.git"
   },
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "clean": "rm -rf ./dist .turbo || true",
-    "build": "yarn clean && tsc",
+    "clean": "rm -rf ./dist .turbo tsconfig.tsbuildinfo || true",
+    "build": "yarn clean && tsc --build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -58,12 +58,100 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js"
     },
+    "./package.json": "./package.json",
+    "./constants": {
+      "import": "./dist/constants.js",
+      "types": "./dist/constants.d.ts"
+    },
+    "./messages": {
+      "import": "./dist/messages.js",
+      "types": "./dist/messages.d.ts"
+    },
+    "./agent-inbox-interrupt": {
+      "import": "./dist/agent-inbox-interrupt.js",
+      "types": "./dist/agent-inbox-interrupt.d.ts"
+    },
+    "./caching": {
+      "import": "./dist/caching.js",
+      "types": "./dist/caching.d.ts"
+    },
+    "./configurable-metadata": {
+      "import": "./dist/configurable-metadata.js",
+      "types": "./dist/configurable-metadata.d.ts"
+    },
+    "./crypto": {
+      "import": "./dist/crypto.js",
+      "types": "./dist/crypto.d.ts"
+    },
+    "./git": {
+      "import": "./dist/git.js",
+      "types": "./dist/git.d.ts"
+    },
+    "./jwt": {
+      "import": "./dist/jwt.js",
+      "types": "./dist/jwt.d.ts"
+    },
+    "./github/auth": {
+      "import": "./dist/github/auth.js",
+      "types": "./dist/github/auth.d.ts"
+    },
+    "./github/allowed-users": {
+      "import": "./dist/github/allowed-users.js",
+      "types": "./dist/github/allowed-users.d.ts"
+    },
+    "./github/verify-user": {
+      "import": "./dist/github/verify-user.js",
+      "types": "./dist/github/verify-user.d.ts"
+    },
+    "./agent-mojo/types": {
+      "import": "./dist/agent-mojo/types.js",
+      "types": "./dist/agent-mojo/types.d.ts"
+    },
+    "./agent-mojo/local-mode": {
+      "import": "./dist/agent-mojo/local-mode.js",
+      "types": "./dist/agent-mojo/local-mode.d.ts"
+    },
+    "./agent-mojo/tasks": {
+      "import": "./dist/agent-mojo/tasks.js",
+      "types": "./dist/agent-mojo/tasks.d.ts"
+    },
+    "./agent-mojo/tools": {
+      "import": "./dist/agent-mojo/tools.js",
+      "types": "./dist/agent-mojo/tools.d.ts"
+    },
+    "./agent-mojo/models": {
+      "import": "./dist/agent-mojo/models.js",
+      "types": "./dist/agent-mojo/models.d.ts"
+    },
+    "./agent-mojo/mcp": {
+      "import": "./dist/agent-mojo/mcp.js",
+      "types": "./dist/agent-mojo/mcp.d.ts"
+    },
+    "./agent-mojo/llm-task": {
+      "import": "./dist/agent-mojo/llm-task.js",
+      "types": "./dist/agent-mojo/llm-task.d.ts"
+    },
+    "./agent-mojo/custom-node-events": {
+      "import": "./dist/agent-mojo/custom-node-events.js",
+      "types": "./dist/agent-mojo/custom-node-events.d.ts"
+    },
+    "./agent-mojo/manager/types": {
+      "import": "./dist/agent-mojo/manager/types.js",
+      "types": "./dist/agent-mojo/manager/types.d.ts"
+    },
+    "./agent-mojo/planner/types": {
+      "import": "./dist/agent-mojo/planner/types.js",
+      "types": "./dist/agent-mojo/planner/types.d.ts"
+    },
+    "./agent-mojo/reviewer/types": {
+      "import": "./dist/agent-mojo/reviewer/types.js",
+      "types": "./dist/agent-mojo/reviewer/types.d.ts"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js",
       "require": "./dist/*.js"
-    },
-    "./package.json": "./package.json"
+    }
   },
   "files": [
     "dist/**/*"

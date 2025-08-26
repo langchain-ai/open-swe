@@ -27,7 +27,7 @@ import {
   createGrepToolFields,
   createSearchDocumentForToolFields,
   createTextEditorToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@open-swe/shared/agent-mojo/tools";
 import { z } from "zod";
 import {
   Tooltip,

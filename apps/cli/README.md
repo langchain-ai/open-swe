@@ -1,9 +1,9 @@
-# Open SWE CLI
+# Agent Mojo
 
 > **⚠️ Under Development**  
 > This CLI is currently under active development and may contain bugs or incomplete features.
 
-A command-line interface for Open SWE that provides a terminal-based chat experience to interact with the autonomous coding agent. Built with React and Ink, it offers real-time streaming of agent logs and works directly on your local codebase without requiring GitHub authentication.
+A command-line interface for Agent Mojo that provides a terminal-based chat experience to interact with the autonomous coding agent. Built with React and Ink, it offers real-time streaming of agent logs and works directly on your local codebase without requiring GitHub authentication.
 
 ## Documentation
 
@@ -29,7 +29,7 @@ The CLI will:
 
 1. Start in local mode (no authentication required)
 2. Work directly on files in your current directory
-3. Provide interactive chat with the Open SWE agent
+3. Provide interactive chat with the Agent Mojo agent
 4. Stream real-time logs and responses
 
 ## Prerequisites

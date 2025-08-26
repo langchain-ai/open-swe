@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import type { TargetRepository } from "@open-swe/shared/open-swe/types";
+import type { TargetRepository } from "@open-swe/shared/agent-mojo/types";
 import { GitHubSVG } from "@/components/icons/github";
 import { Repository } from "@/utils/github";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
@@ -27,7 +27,7 @@ interface RepositorySelectorProps {
   chatStarted?: boolean;
   streamTargetRepository?: TargetRepository;
 }
-// TODO: remove this, we should use the TargetRepository type from the open-swe package
+// TODO: remove this, we should use the TargetRepository type from the agent-mojo package
 // Convert GitHub Repository to TargetRepository format
 const repositoryToTarget = (repo: Repository): TargetRepository => {
   const [owner, repoName] = repo.full_name.split("/");

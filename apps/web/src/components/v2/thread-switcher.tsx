@@ -44,7 +44,7 @@ export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
         <Button
           variant="outline"
           size="sm"
-          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground h-7 gap-1 text-xs"
+          className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground h-7 gap-1 text-xs premium-hover"
         >
           <Layers3 className="h-3 w-3" />
           <span className="hidden sm:inline">Switch Thread</span>
@@ -67,7 +67,7 @@ export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
               router.push("/chat");
               setOpen(false);
             }}
-            className="border-border bg-card text-foreground hover:bg-muted h-8 w-full justify-start gap-2 text-xs"
+            className="border-border bg-card text-foreground hover:bg-muted h-8 w-full justify-start gap-2 text-xs premium-hover"
             variant="outline"
           >
             <Plus className="h-3 w-3" />

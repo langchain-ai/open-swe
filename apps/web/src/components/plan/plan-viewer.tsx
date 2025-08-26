@@ -1,6 +1,6 @@
 import { Check, Clock, Pencil, Play, Trash } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@open-swe/shared/agent-mojo/types";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { Dispatch, SetStateAction, useState } from "react";
 import { Textarea } from "../ui/textarea";

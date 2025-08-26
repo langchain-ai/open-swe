@@ -13,20 +13,34 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { useRouter } from "next/navigation";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../ui/alert-dialog";
 import { Skeleton } from "../ui/skeleton";
 import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { TaskPlan } from "@open-swe/shared/agent-mojo/types";
+import { getActivePlanItems } from "@open-swe/shared/agent-mojo/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 import { computeThreadTitle } from "@/lib/thread";
+import { createClient } from "@/providers/client";
+import { Trash2 } from "lucide-react";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
   status?: ThreadUIStatus;
   statusLoading?: boolean;
   taskPlan?: TaskPlan;
+  onDeleted?: (threadId: string) => void;
 }
 
 export function ThreadCard({
@@ -34,8 +48,22 @@ export function ThreadCard({
   status,
   statusLoading,
   taskPlan,
+  onDeleted,
 }: ThreadCardProps) {
   const router = useRouter();
+  const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!apiUrl) return;
+    try {
+      const client = createClient(apiUrl);
+      await client.threads.delete(thread.id);
+      onDeleted?.(thread.id);
+    } catch (err) {
+      // no-op; optionally toast in future
+      console.error("Failed to delete thread", err);
+    }
+  };
 
   const threadTitle = computeThreadTitle(taskPlan, thread.title);
   const isStatusLoading = statusLoading && !status;
@@ -66,7 +94,7 @@ export function ThreadCard({
         currentTaskIndex: displayCurrentIndex,
         totalTasks: sortedPlanItems.length,
       };
-    } catch (error) {
+    } catch {
       return { currentTaskIndex: 0, totalTasks: 0 };
     }
   };
@@ -129,7 +157,7 @@ export function ThreadCard({
   return (
     <Card
       key={thread.id}
-      className="border-border bg-card hover:bg-muted/50 hover:shadow-primary/3 hover:border-primary/10 group cursor-pointer px-0 py-3 transition-all duration-200 hover:shadow-md"
+      className="border-border bg-card hover:bg-muted/50 hover:shadow-primary/3 hover:border-primary/10 group cursor-pointer px-0 py-3 transition-all duration-200 hover:shadow-md premium-hover premium-glow"
       onClick={() => {
         router.push(`/chat/${thread.id}`);
       }}
@@ -220,6 +248,33 @@ export function ThreadCard({
                 <GitPullRequest className="h-3 w-3 transition-colors duration-200" />
               </Button>
             )}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:bg-red-100 dark:hover:bg-red-950"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete thread?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This action cannot be undone. This will permanently delete
+                    the thread and its history.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleDelete}>
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </CardContent>

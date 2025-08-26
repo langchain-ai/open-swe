@@ -11,7 +11,7 @@ import { useQueryState, parseAsString } from "nuqs";
 import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";
 import { Thread } from "@langchain/langgraph-sdk";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@open-swe/shared/agent-mojo/types";
 
 const THREADS_PER_PAGE = 10;
 

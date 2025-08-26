@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Open SWE",
+  "name": "Agent Mojo",
   "colors": {
     "primary": "#0ea5e9",
     "light": "#38bdf8",
@@ -23,7 +23,6 @@
               "usage/intro",
               "usage/ui",
               "usage/github",
-              "usage/pr-tagging",
               "usage/examples",
               "usage/best-practices",
               "usage/custom-rules"
@@ -59,7 +58,7 @@
         },
         {
           "anchor": "GitHub",
-          "href": "https://github.com/langchain-ai/open-swe",
+          "href": "https://github.com/langchain-ai/agent-mojo",
           "icon": "github"
         }
       ]
@@ -73,15 +72,14 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/langchain-ai/open-swe"
+        "href": "https://github.com/langchain-ai/agent-mojo"
       }
     ]
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/langchain-ai/open-swe",
+      "github": "https://github.com/langchain-ai/agent-mojo",
       "twitter": "https://twitter.com/langchainai"
     }
   }
 }
-

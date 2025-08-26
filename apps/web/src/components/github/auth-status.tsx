@@ -48,7 +48,7 @@ function AuthStatusContent() {
       console.log("redirecting to chat");
       router.push("/chat");
     }
-  }, [githubToken]);
+  }, [githubToken, router]);
 
   const checkAuthStatus = async () => {
     try {
@@ -90,13 +90,14 @@ function AuthStatusContent() {
             <div className="flex flex-col items-start gap-2">
               <LangGraphLogoSVG className="h-7" />
               <h1 className="text-xl font-semibold tracking-tight">
-                Get started
+                Welcome to Agent Mojo.
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Connect your GitHub account to get started with Open SWE.
+              Connect your GitHub account to get started.
             </p>
             <Button
+              variant="brand"
               onClick={handleLogin}
               disabled={isLoading}
             >
@@ -143,9 +144,9 @@ function AuthStatusContent() {
               </p>
             </div>
             <Button
+              variant="brand"
               onClick={handleInstallGitHubApp}
               disabled={isLoading || isCheckingAppInstallation}
-              className="bg-black hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200"
             >
               <GitHubSVG
                 width="16"

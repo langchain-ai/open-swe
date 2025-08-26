@@ -31,11 +31,11 @@ export function GitHubManager() {
     isInstalled,
     isLoading,
     error,
-    installations,
+    installations: _installations,
     currentInstallation,
     installationsLoading,
     installationsError,
-    switchInstallation,
+    switchInstallation: _switchInstallation,
     refreshInstallations,
     repositories,
     repositoriesLoadingMore,
@@ -212,6 +212,7 @@ export function GitHubManager() {
                 </p>
               </div>
               <Button
+                variant="brand"
                 onClick={handleInstallApp}
                 className="w-full"
               >

@@ -54,7 +54,7 @@ export function ThreadErrorCard({ error, onGoBack }: ThreadErrorCardProps) {
 
   return (
     <div className="bg-background fixed inset-0 flex items-center justify-center p-4">
-      <div className="bg-card w-full max-w-md rounded-lg border p-6 shadow-lg">
+      <div className="bg-card w-full max-w-md rounded-lg border p-6 shadow-lg glass-effect premium-glow">
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             {getErrorIcon()}

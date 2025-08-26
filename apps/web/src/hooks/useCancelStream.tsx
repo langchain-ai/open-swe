@@ -1,6 +1,6 @@
 import { UseStream } from "@langchain/langgraph-sdk/react";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { PlannerGraphState } from "@open-swe/shared/agent-mojo/planner/types";
+import { GraphState } from "@open-swe/shared/agent-mojo/types";
 import { useState } from "react";
 import { toast } from "sonner";
 

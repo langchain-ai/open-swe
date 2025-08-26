@@ -1,25 +1,10 @@
 {
-  "extends": "@tsconfig/recommended",
-  "compilerOptions": {
-    "target": "ES2021",
-    "lib": ["ES2023"],
-    "module": "NodeNext",
-    "moduleResolution": "nodenext",
-    "esModuleInterop": true,
-    "noImplicitReturns": true,
-    "declaration": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "useDefineForClassFields": true,
-    "strictPropertyInitialization": false,
-    "allowJs": true,
-    "strict": true,
-    "strictFunctionTypes": false,
-    "outDir": "dist",
-    "types": ["jest", "node"],
-    "resolveJsonModule": true
-  },
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  // Solution-style tsconfig to coordinate subprojects in the monorepo.
+  // This prevents the root from type-checking all files with conflicting settings.
+  "files": [],
+  "references": [
+    { "path": "apps/cli" },
+    { "path": "apps/agent-mojo" },
+    { "path": "packages/shared" }
+  ]
 }

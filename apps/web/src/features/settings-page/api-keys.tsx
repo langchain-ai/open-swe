@@ -42,7 +42,7 @@ const API_KEY_DEFINITIONS = {
   llms: [
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
-    { id: "googleApiKey", name: "Google Gen AI" },
+    { id: "googleApiKey", name: "Google" },
   ],
   // infrastructure: [
   //   {
@@ -119,10 +119,9 @@ export function APIKeysTab() {
         <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
         <AlertDescription className="text-blue-800 dark:text-blue-300">
           <p>
-            Open SWE uses Anthropic models by default. Configure your Anthropic
-            API key below to get started.
+            Agent Mojo uses OPENAI and GOOGLE models by default. 
           </p>
-          <p>Only an Anthropic API key is required to get started.</p>
+          <p>For Claude: Enter your Anthropic API key below.</p>
         </AlertDescription>
       </Alert>
       {Object.entries(apiKeySections).map(([sectionKey, section]) => (

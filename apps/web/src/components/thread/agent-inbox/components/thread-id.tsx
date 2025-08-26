@@ -47,7 +47,7 @@ export function ThreadIdCopyable({
 
   return (
     <TooltipIconButton
-      onClick={(e) => handleCopy(e)}
+      onClick={handleCopy}
       variant="ghost"
       tooltip="Copy thread ID"
       className="flex w-fit flex-grow-0 cursor-pointer items-center gap-1 rounded-md border-[1px] border-gray-200 p-1 hover:bg-gray-50/90"

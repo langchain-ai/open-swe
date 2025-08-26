@@ -2,17 +2,17 @@ import useSWR from "swr";
 import { Thread } from "@langchain/langgraph-sdk";
 import { createClient } from "@/providers/client";
 import { THREAD_SWR_CONFIG } from "@/lib/swr-config";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { ReviewerGraphState } from "@open-swe/shared/open-swe/reviewer/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ManagerGraphState } from "@open-swe/shared/agent-mojo/manager/types";
+import { PlannerGraphState } from "@open-swe/shared/agent-mojo/planner/types";
+import { ReviewerGraphState } from "@open-swe/shared/agent-mojo/reviewer/types";
+import { GraphState } from "@open-swe/shared/agent-mojo/types";
 import { useMemo, useState } from "react";
 import type { Installation } from "./useGitHubInstallations";
 
 type ThreadSortBy = "thread_id" | "status" | "created_at" | "updated_at";
 type SortOrder = "asc" | "desc";
 /**
- * Union type representing all possible graph states in the Open SWE system
+ * Union type representing all possible graph states in the Agent Mojo system
  */
 export type AnyGraphState =
   | ManagerGraphState

@@ -15,7 +15,7 @@ import { ConfigField } from "@/components/configuration/config-field";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-metadata";
-import { GraphConfigurationMetadata } from "@open-swe/shared/open-swe/types";
+import { GraphConfigurationMetadata } from "@open-swe/shared/agent-mojo/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -187,7 +187,7 @@ export function ConfigManager() {
                         <CircleAlert className="h-4 w-4" />
                         <AlertDescription>
                           <p>
-                            <strong>Notice:</strong> Open SWE{" "}
+                            <strong>Notice:</strong> Agent Mojo{" "}
                             <i className="underline underline-offset-2">only</i>{" "}
                             supports MCP servers with <strong>HTTP</strong> or{" "}
                             <strong>SSE</strong> transports (with the exception

@@ -5,10 +5,10 @@ import {
   ThreadStatusData,
   mapLangGraphToUIStatus,
 } from "@/lib/schemas/thread-status";
-import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { GraphState, TaskPlan } from "@open-swe/shared/agent-mojo/types";
+import { ManagerGraphState } from "@open-swe/shared/agent-mojo/manager/types";
+import { PlannerGraphState } from "@open-swe/shared/agent-mojo/planner/types";
+import { getActivePlanItems } from "@open-swe/shared/agent-mojo/tasks";
 import { SessionCache, SessionCacheData } from "@/hooks/useThreadsStatus";
 
 function getErrorFields(error: unknown): {

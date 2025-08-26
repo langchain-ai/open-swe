@@ -4,7 +4,7 @@ import {
   PROGRAMMER_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@open-swe/shared/agent-mojo/types";
 
 /**
  * UI-specific thread status that extends LangGraph's states

@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Archive, Eye, EyeOff, List, ListChecks } from "lucide-react";
+import { Archive, ListChecks } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -26,13 +26,12 @@ import { UserPopover } from "../user-popover";
 
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@open-swe/shared/agent-mojo/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
-import { Settings, BookOpen } from "lucide-react";
+import { Settings } from "lucide-react";
 import NextLink from "next/link";
 import { OpenSWELogoSVG } from "../icons/openswe";
-import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
 function OpenSettingsButton() {
   return (
@@ -52,29 +51,7 @@ function OpenSettingsButton() {
   );
 }
 
-const DOCUMENTATION_URL = "https://docs.langchain.com/labs/swe";
 
-function OpenDocumentationButton() {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger
-          asChild
-          className="hover:bg-accent hover:text-accent-foreground size-6 rounded-md p-1 hover:cursor-pointer"
-        >
-          <a
-            href={DOCUMENTATION_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <BookOpen className="size-4" />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Open Documentation</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
 
 interface DefaultViewProps {
   threads: Thread<ManagerGraphState>[];
@@ -87,8 +64,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
   const [draftToLoad, setDraftToLoad] = useState("");
   const assistantId: string | undefined = MANAGER_GRAPH_ID;
-  const { getConfig } = useConfigStore();
-  const config = getConfig(DEFAULT_CONFIG_KEY);
   const {
     contentBlocks,
     setContentBlocks,
@@ -98,9 +73,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
-  const [shouldCreateIssue, setShouldCreateIssue] = useState(
-    config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
-  );
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const displayThreads = threadsMetadata.slice(0, 4);
@@ -136,7 +108,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
               <span className="text-muted-foreground text-xs">ready</span>
               <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
             </div>
-            <OpenDocumentationButton />
+
             <OpenSettingsButton />
             <ThemeToggle />
             <UserPopover />
@@ -178,13 +150,11 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   draftToLoad={draftToLoad}
                   autoAcceptPlan={autoAccept}
                   setAutoAcceptPlan={setAutoAccept}
-                  shouldCreateIssue={shouldCreateIssue}
-                  setShouldCreateIssue={setShouldCreateIssue}
                 />
                 <div className="flex items-center gap-2">
                   <TooltipIconButton
                     variant={autoAccept ? "default" : "ghost"}
-                    tooltip="Whether or not to automatically accept the plan"
+                    tooltip="Automatically accept the plan"
                     className={cn(
                       "transition-colors duration-200",
                       autoAccept
@@ -194,29 +164,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     onClick={() => setAutoAccept((prev) => !prev)}
                     side="bottom"
                   >
-                    {autoAccept ? (
-                      <ListChecks className="size-4" />
-                    ) : (
-                      <List className="size-4" />
-                    )}
-                  </TooltipIconButton>
-                  <TooltipIconButton
-                    variant={shouldCreateIssue ? "ghost" : "default"}
-                    tooltip="Whether or not to create a GitHub issue for the request"
-                    className={cn(
-                      "transition-colors duration-200",
-                      shouldCreateIssue
-                        ? "text-muted-foreground hover:text-foreground"
-                        : "bg-primary hover:bg-primary/90",
-                    )}
-                    onClick={() => setShouldCreateIssue((prev) => !prev)}
-                    side="bottom"
-                  >
-                    {shouldCreateIssue ? (
-                      <Eye className="size-4" />
-                    ) : (
-                      <EyeOff className="size-4" />
-                    )}
+                    <ListChecks className="size-4" />
                   </TooltipIconButton>
                 </div>
               </div>

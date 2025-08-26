@@ -11,7 +11,7 @@ import {
   useEffect,
 } from "react";
 import { createClient } from "./client";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@open-swe/shared/agent-mojo/types";
 
 interface ThreadContextType {
   threads: Thread<GraphState>[];
@@ -20,6 +20,7 @@ interface ThreadContextType {
   setThreadsLoading: Dispatch<SetStateAction<boolean>>;
   refreshThreads: () => Promise<void>;
   getThread: (threadId: string) => Promise<Thread<GraphState> | null>;
+  deleteThread: (threadId: string) => Promise<boolean>;
   recentlyUpdatedThreads: Set<string>;
   handleThreadClick: (
     thread: Thread<GraphState>,
@@ -47,7 +48,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<Thread<GraphState>[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
-  const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
+  const [recentlyUpdatedThreads, _setRecentlyUpdatedThreads] = useState<
     Set<string>
   >(new Set());
 
@@ -105,6 +106,25 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
   }, [apiUrl, assistantId]);
 
+  const deleteThread = useCallback(
+    async (threadId: string): Promise<boolean> => {
+      if (!apiUrl) return false;
+      try {
+        const client = createClient(apiUrl);
+        await client.threads.delete(threadId);
+        // Optimistically update local state
+        setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+        return true;
+      } catch (error) {
+        console.error("Failed to delete thread:", threadId, error);
+        // Ensure we refetch in case local state is stale
+        refreshThreads();
+        return false;
+      }
+    },
+    [apiUrl, refreshThreads],
+  );
+
   useEffect(() => {
     refreshThreads();
   }, [refreshThreads]);
@@ -129,6 +149,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     setThreadsLoading,
     refreshThreads,
     getThread,
+  deleteThread,
     recentlyUpdatedThreads,
     handleThreadClick,
   };
@@ -138,6 +159,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useThreadsContext() {
   const context = useContext(ThreadContext);
   if (context === undefined) {

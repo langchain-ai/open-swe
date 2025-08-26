@@ -1,4 +1,4 @@
-import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, ModelTokenData } from "@open-swe/shared/agent-mojo/types";
 import {
   calculateCostSavings,
   tokenDataReducer,
@@ -207,7 +207,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
   return (
     <HoverCard>
       <HoverCardTrigger asChild>
-        <button className="hover:bg-muted/50 ml-auto flex items-center gap-2 rounded-md p-2 transition-colors">
+        <button className="hover:bg-muted/50 ml-auto flex items-center gap-2 rounded-md p-2 transition-colors premium-hover">
           <ChartNoAxesColumnIncreasing className="h-4 w-4" />
           <Badge
             variant="secondary"

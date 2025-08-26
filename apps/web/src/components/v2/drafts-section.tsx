@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Trash2, FileText, Archive } from "lucide-react";
+import { Trash2, FileText } from "lucide-react";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 
 interface Draft {
@@ -91,7 +91,7 @@ export function DraftsSection({ onLoadDraft }: DraftsSectionProps) {
         {drafts.map((draft) => (
           <Card
             key={draft.id}
-            className="border-border bg-card hover:bg-muted cursor-pointer px-0 py-3 transition-shadow hover:shadow-lg dark:bg-gray-950"
+            className="border-border bg-card hover:bg-muted cursor-pointer px-0 py-3 transition-shadow hover:shadow-lg dark:bg-gray-950 premium-hover premium-glow"
             onClick={() => handleLoadDraft(draft)}
           >
             <CardHeader>

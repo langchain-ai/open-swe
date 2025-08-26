@@ -10,11 +10,11 @@ import {
 import { List, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { PlanItem, Task, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { PlanItem, Task, TaskPlan } from "@open-swe/shared/agent-mojo/types";
 import {
   getActivePlanItems,
   getActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@open-swe/shared/agent-mojo/tasks";
 import {
   HoverCard,
   HoverCardContent,

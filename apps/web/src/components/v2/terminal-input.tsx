@@ -10,7 +10,7 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@open-swe/shared/agent-mojo/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
@@ -19,12 +19,13 @@ import {
   GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
 } from "@open-swe/shared/constants";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphUpdate } from "@open-swe/shared/agent-mojo/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
 import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
 import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
+import { generateThreadTitleFromText } from "@/lib/generate-thread-title";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -38,8 +39,6 @@ interface TerminalInputProps {
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
   autoAcceptPlan: boolean;
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
-  shouldCreateIssue: boolean;
-  setShouldCreateIssue: Dispatch<SetStateAction<boolean>>;
   draftToLoad?: string;
 }
 
@@ -73,8 +72,6 @@ export function TerminalInput({
   setQuickActionPrompt,
   autoAcceptPlan,
   setAutoAcceptPlan,
-  shouldCreateIssue,
-  setShouldCreateIssue,
   draftToLoad,
 }: TerminalInputProps) {
   const { push } = useRouter();
@@ -126,7 +123,7 @@ export function TerminalInput({
     const issuesDisabled = selectedRepo && !repoHasIssuesEnabled(selectedRepo);
     if (issuesDisabled) {
       toast.error(
-        "Open SWE requires issues to be enabled on the repository. Please enable issues on the repository to use Open SWE.",
+        "Agent Mojo requires issues to be enabled on the repository. Please enable issues on the repository to use Agent Mojo.",
         {
           richColors: true,
           closeButton: true,
@@ -159,7 +156,7 @@ export function TerminalInput({
           autoAcceptPlan,
         };
 
-        const run = await stream.client.runs.create(
+  const run = await stream.client.runs.create(
           newThreadId,
           MANAGER_GRAPH_ID,
           {
@@ -168,7 +165,6 @@ export function TerminalInput({
               recursion_limit: 400,
               configurable: {
                 ...defaultConfig,
-                shouldCreateIssue,
                 [GITHUB_USER_LOGIN_HEADER]: user.login,
               },
             },
@@ -199,16 +195,36 @@ export function TerminalInput({
           );
         }
 
+        // Try to generate a concise title using gpt-4.1-mini; then persist on the thread
+        try {
+          const firstText = trimmedMessage;
+          const configApiKeys = (defaultConfig?.apiKeys || {}) as Record<
+            string,
+            string
+          >;
+          const maybeTitle = await generateThreadTitleFromText(
+            firstText,
+            configApiKeys.openaiApiKey,
+          );
+          if (maybeTitle) {
+            try {
+              await stream.client.threads.updateState(newThreadId, {
+                values: { title: maybeTitle },
+              });
+            } catch (e) {
+              // no-op if update fails
+              console.error("Failed to persist thread title:", e);
+            }
+          }
+  } catch {
+          // ignore
+        }
+
         push(`/chat/${newThreadId}`);
         clearCurrentDraft();
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
-        setShouldCreateIssue(
-          defaultConfig?.shouldCreateIssue != null
-            ? !!defaultConfig.shouldCreateIssue
-            : true,
-        );
       } catch (e) {
         if (
           typeof e === "object" &&
@@ -242,7 +258,7 @@ export function TerminalInput({
       // Clear quick action prompt
       setQuickActionPrompt?.("");
     }
-  }, [quickActionPrompt]);
+  }, [quickActionPrompt, message, setMessage, setQuickActionPrompt]);
 
   // Handle draft loading from external components
   useEffect(() => {
@@ -254,8 +270,8 @@ export function TerminalInput({
   return (
     <div className="border-border bg-muted hover:border-muted-foreground/50 hover:bg-muted/80 focus-within:border-muted-foreground/70 focus-within:bg-muted/80 focus-within:shadow-muted-foreground/20 rounded-md border p-2 font-mono text-xs transition-all duration-200 focus-within:shadow-md">
       <div className="text-foreground flex items-center gap-1">
-        <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200">
-          <span className="text-muted-foreground">agentmojo</span>
+        <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200 premium-hover glass-effect">
+          <span className="text-muted-foreground">Agent Mojo</span>
           <span className="text-muted-foreground/70">@</span>
           <span className="text-muted-foreground">github</span>
         </div>

@@ -1,9 +1,9 @@
 ---
 title: "Monorepo"
-description: "How the Open SWE monorepo is configured"
+description: "How the Agent Mojo monorepo is configured"
 ---
 
-Open SWE is organized as a Yarn workspace monorepo with Turbo build orchestration, designed to efficiently manage multiple applications and shared code. This structure enables code reuse, consistent tooling, and streamlined development workflows.
+Agent Mojo is organized as a Yarn workspace monorepo with Turbo build orchestration, designed to efficiently manage multiple applications and shared code. This structure enables code reuse, consistent tooling, and streamlined development workflows.
 
 ## Repository Structure
 
@@ -11,7 +11,7 @@ The monorepo is organized into two main directories:
 
 ### Applications (`apps/`)
 
-**`apps/open-swe`** - LangGraph Agent Application
+**`apps/Agent Mojo`** - LangGraph Agent Application
 
 - Contains the core LangGraph agent implementation with TypeScript
 - Includes three specialized graphs: manager, planner, and programmer
@@ -37,7 +37,7 @@ The monorepo is organized into two main directories:
 - Centralized location for shared types, constants, and utilities
 - Used by both the agent and web applications
 - Exports modules via `@open-swe/shared` namespace
-- Contains crypto utilities, GraphState types, and Open SWE specific modules
+- Contains crypto utilities, GraphState types, and Agent Mojo specific modules
 
 <Note>
   The shared package must be built before other packages can import from it. Any
@@ -114,7 +114,7 @@ Run these commands from the repository root:
 
 ## Postinstall Hook Requirements
 
-The `apps/open-swe` package includes a critical `postinstall` hook:
+The `apps/Agent Mojo` package includes a critical `postinstall` hook:
 
 ```json
 {
@@ -126,7 +126,7 @@ The `apps/open-swe` package includes a critical `postinstall` hook:
 
 <Note>
   This postinstall hook is **required** for LangGraph Platform deployment. Since
-  Open SWE is a monorepo and the agent requires access to built files from the
+  Agent Mojo is a monorepo and the agent requires access to built files from the
   shared package, we must run the build process before starting the LangGraph
   server.
 </Note>

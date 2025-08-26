@@ -1,7 +1,7 @@
 export const TIMEOUT_SEC = 60; // 1 minute
 export const SANDBOX_ROOT_DIR = "/home/daytona";
-export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-open-swe:0.1.0";
-export const DAYTONA_SNAPSHOT_NAME = "open-swe-vcpu2-mem4-disk5";
+export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-agent-mojo:0.1.0";
+export const DAYTONA_SNAPSHOT_NAME = "agent-mojo-vcpu2-mem4-disk5";
 export const PLAN_INTERRUPT_DELIMITER = ":::";
 export const PLAN_INTERRUPT_ACTION_TITLE = "Approve/Edit Plan";
 
@@ -17,7 +17,6 @@ export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
 export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
 
-export const OPEN_SWE_V2_GRAPH_ID = "open-swe-v2";
 export const MANAGER_GRAPH_ID = "manager";
 export const PLANNER_GRAPH_ID = "planner";
 export const PROGRAMMER_GRAPH_ID = "programmer";
@@ -42,7 +41,7 @@ export const DEFAULT_MCP_SERVERS = {
 };
 
 export const API_KEY_REQUIRED_MESSAGE =
-  "Unknown users must provide API keys to use the Open SWE demo application";
+  "Unknown users must provide API keys to use the Agent Mojo demo application";
 
 export const OPEN_SWE_STREAM_MODE = [
   "values",

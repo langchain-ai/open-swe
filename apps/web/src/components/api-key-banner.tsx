@@ -63,7 +63,7 @@ export function ApiKeyBanner() {
             API Key Required
           </h3>
           <p className="text-sm text-blue-700 dark:text-blue-300">
-            You need to add an API key to use AgentMojo. Add your Anthropic,
+            You need to add an API key to use Agent Mojo. Add your Anthropic,
             OpenAI, or Google API key to get started.
           </p>
         </div>

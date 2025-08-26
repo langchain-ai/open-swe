@@ -1,21 +1,21 @@
 ---
 title: Custom Rules
-description: Configure Open SWE with project-specific rules using `AGENTS.md`
+description: Configure Agent Mojo with project-specific rules using `AGENTS.md`
 ---
 
 # Custom Rules
 
-Custom rules allow you to provide project-specific context and guidelines to Open SWE through a markdown file in your repository root.
+Custom rules allow you to provide project-specific context and guidelines to Agent Mojo through a markdown file in your repository root.
 
 ## Getting Started
 
-The easiest way to get started is to have Open SWE itself write this file for you! The Open SWE UI provides a "Generate `AGENTS.md`" quick action which will insert a predefined prompt into the input. This prompt has been designed to generate a well-formatted `AGENTS.md` file from the agent.
+The easiest way to get started is to have Agent Mojo itself write this file for you! The Agent Mojo UI provides a "Generate `AGENTS.md`" quick action which will insert a predefined prompt into the input. This prompt has been designed to generate a well-formatted `AGENTS.md` file from the agent.
 
 ![Quick Action Generate AGENTS.md](/images/quick_action_generate_agents_md.png)
 
 ## What is `AGENTS.md`?
 
-`AGENTS.md` is a markdown file that tells Open SWE about your project's:
+`AGENTS.md` is a markdown file that tells Agent Mojo about your project's:
 
 - Coding standards and conventions
 - Repository structure and architecture
@@ -25,7 +25,7 @@ The easiest way to get started is to have Open SWE itself write this file for yo
 
 ## Why Use Custom Rules?
 
-Custom rules help Open SWE:
+Custom rules help Agent Mojo:
 
 - Follow your project's specific conventions
 - Understand your codebase architecture
@@ -33,7 +33,7 @@ Custom rules help Open SWE:
 - Write tests that match your testing patterns
 - Generate properly formatted pull requests
 
-Without custom rules, Open SWE uses generic best practices that may not align with your project.
+Without custom rules, Agent Mojo uses generic best practices that may not align with your project.
 
 ## Supported Sections
 
@@ -99,7 +99,7 @@ Example: "The pull request body should include a `Testing Steps` section which i
 
 ## File Names
 
-Open SWE reads custom rules from these files (in order of precedence):
+Agent Mojo reads custom rules from these files (in order of precedence):
 
 1. `AGENTS.md` (recommended)
 2. `AGENT.md`

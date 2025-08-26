@@ -7,10 +7,14 @@
     "outDir": "dist",
     "jsx": "react-jsx",
     "strict": true,
-    "types": ["node"],
+    "types": ["node", "react"],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "composite": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/shared" }
+  ]
 }

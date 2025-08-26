@@ -11,7 +11,8 @@ interface InstallAppButtonProps {
     | "secondary"
     | "ghost"
     | "link"
-    | "destructive";
+    | "destructive"
+    | "brand";
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
   children?: React.ReactNode;

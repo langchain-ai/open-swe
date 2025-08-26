@@ -1,6 +1,6 @@
-# Open SWE Documentation
+# Agent Mojo Documentation
 
-The documentation site for Open SWE, built with Mintlify to provide comprehensive guides and API references.
+The documentation site for Agent Mojo, built with Mintlify to provide comprehensive guides and API references.
 
 ## Documentation
 

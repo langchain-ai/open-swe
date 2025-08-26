@@ -1,9 +1,9 @@
 ---
 title: "Development Setup"
-description: "How to set up Open SWE for development"
+description: "How to set up Agent Mojo for development"
 ---
 
-This guide will walk you through setting up Open SWE for local development. You'll need to clone the repository, install dependencies, configure environment variables, create a GitHub App, and start the development servers.
+This guide will walk you through setting up Agent Mojo for local development. You'll need to clone the repository, install dependencies, configure environment variables, create a GitHub App, and start the development servers.
 
 <Note>
   This setup is for development purposes. For production deployment, you'll need
@@ -22,13 +22,13 @@ Before starting, ensure you have the following installed:
 
 <Steps>
   <Step title="Clone the Repository">
-    Clone the Open SWE repository to your local machine:
+    Clone the Agent Mojo repository to your local machine:
 
     ```bash
-    git clone https://github.com/langchain-ai/open-swe.git
+    git clone https://github.com/langchain-ai/Agent Mojo.git
     ```
     ```bash
-    cd open-swe
+    cd Agent Mojo
     ```
 
   </Step>
@@ -53,7 +53,7 @@ Before starting, ensure you have the following installed:
     ```
     ```bash
     # Copy agent environment file
-    cp apps/open-swe/.env.example apps/open-swe/.env
+    cp apps/Agent Mojo/.env.example apps/Agent Mojo/.env
     ```
 
     ### Web App Environment Variables (`apps/web/.env`)
@@ -74,20 +74,15 @@ Before starting, ensure you have the following installed:
     GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
 
     # GitHub App details (will be filled after creating GitHub App)
-    GITHUB_APP_NAME="open-swe-dev" # this must match the name of your GitHub app, excluding spaces
+    GITHUB_APP_NAME="Agent Mojo-dev" # this must match the name of your GitHub app, excluding spaces
     GITHUB_APP_ID=""
     GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
-
-    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
-    # This is only used in production. In development every user is an "allowed user".
-    # Must be a valid JSON array of strings.
-    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
 
-    ### Agent Environment Variables (`apps/open-swe/.env`)
+    ### Agent Environment Variables (`apps/Agent Mojo/.env`)
 
     Configure the agent environment variables:
 
@@ -110,7 +105,7 @@ Before starting, ensure you have the following installed:
     FIRECRAWL_API_KEY=""  # For URL content extraction
 
     # GitHub App settings (same as web app)
-    GITHUB_APP_NAME="open-swe-dev" # this must match the name of your GitHub app, excluding spaces
+    GITHUB_APP_NAME="Agent Mojo-dev" # this must match the name of your GitHub app, excluding spaces
     GITHUB_APP_ID=""
     GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
     ...add your private key here...
@@ -125,14 +120,7 @@ Before starting, ensure you have the following installed:
 
     # CI/CD. See the /labs/swe/setup/ci for more information
     SKIP_CI_UNTIL_LAST_COMMIT="true"
-
-    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
-    # This is only used in production. In development every user is an "allowed user".
-    # Must be a valid JSON array of strings.
-    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
-
-    If you don't set the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable, every user will be required to set their own LLM API keys to use the agent. Additionally, none of the webhook features (triggering new runs by adding labels to GitHub issues, tagging the agent in PR reviews, etc.) will work unless you include the username's of the GitHub users you want to allow access to in the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable (in both web and agent deployments).
 
     <Tip>
     Generate the `SECRETS_ENCRYPTION_KEY` using: `openssl rand -hex 32`. This key must be identical in both environment files.
@@ -150,7 +138,7 @@ Before starting, ensure you have the following installed:
     1. Go to [GitHub App creation page](https://github.com/settings/apps/new)
     2. Fill in the basic information:
        - **GitHub App name**: Your preferred name
-       - **Description**: Development instance of Open SWE coding agent
+       - **Description**: Development instance of Agent Mojo coding agent
        - **Homepage URL**: Your repository URL
        - **Callback URL**: `http://localhost:3000/api/auth/github/callback`
 
@@ -175,7 +163,7 @@ Before starting, ensure you have the following installed:
        ```bash
        openssl rand -hex 32
        ```
-       Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/open-swe/.env`
+       Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/Agent Mojo/.env`
 
     ### Configure Permissions
 
@@ -192,7 +180,7 @@ Before starting, ensure you have the following installed:
     This gif shows how/where to enable the permissions on the GitHub App:
     <iframe
       className="w-full aspect-video rounded-xl"
-      src="https://www.youtube.com/embed/rw6ddYmiTMo"
+      src="https://www.youtube.com/embed/FP02bprNtrA"
       title="Permissions Walkthrough"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
       allowFullScreen
@@ -201,9 +189,6 @@ Before starting, ensure you have the following installed:
     ### Subscribe to Events
 
     - ✅ **Issues** - Required for webhook functionality
-    - ✅ **Pull request review** - Required for PR tagging functionality
-    - ✅ **Pull request review comment** - Required for PR tagging functionality
-    - ✅ **Issue comment** - Required for PR tagging functionality
 
     ### Installation Settings
 
@@ -236,7 +221,7 @@ Before starting, ensure you have the following installed:
       ```bash
       openssl rand -hex 32
       ```
-      Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/open-swe/.env` and `apps/web/.env`.
+      Add this value to `GITHUB_WEBHOOK_SECRET` in `apps/Agent Mojo/.env` and `apps/web/.env`.
 
     Below are screenshots showing where in the GitHub App settings you can find the values for the environment variables.
 
@@ -265,7 +250,7 @@ Before starting, ensure you have the following installed:
 
     **Terminal 1 - Start the LangGraph Agent:**
     ```bash
-    # apps/open-swe
+    # apps/Agent Mojo
     yarn dev
     ```
     This starts the LangGraph server at `http://localhost:2024`
@@ -300,6 +285,5 @@ Once both servers are running:
 ## Next Steps
 
 - Learn about [Authentication](/labs/swe/setup/authentication) to understand how the GitHub App integration works
-- Explore [Usage](/labs/swe/usage/intro) to start using Open SWE for code changes
+- Explore [Usage](/labs/swe/usage/intro) to start using Agent Mojo for code changes
 - Review the [Monorepo Structure](/labs/swe/setup/monorepo) for development best practices
-

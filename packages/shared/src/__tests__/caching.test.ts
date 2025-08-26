@@ -1,5 +1,5 @@
 import { tokenDataReducer } from "../caching.js";
-import { ModelTokenData } from "../open-swe/types.js";
+import { ModelTokenData } from "../agent-mojo/types.js";
 
 describe("tokenDataReducer", () => {
   it("should merge objects with the same model string", () => {

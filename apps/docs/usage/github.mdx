@@ -1,54 +1,54 @@
 ---
 title: "From Github"
-description: "How to use Open SWE from Github"
+description: "How to use Agent Mojo from Github"
 ---
 
 <Warning>
-  GitHub webhooks are _not_ available via the demo application. To use GitHub webhooks, you must set up your own instance of Open SWE following the [development setup guide](/labs/swe/setup/development).
+  GitHub webhooks are _not_ available via the demo application. To use GitHub webhooks, you must set up your own instance of Agent Mojo following the [development setup guide](/labs/swe/setup/development).
 </Warning>
 
 # GitHub Webhook Integration
 
-Open SWE integrates seamlessly with GitHub through webhooks, allowing you to trigger automated code changes directly from GitHub issues. This provides a streamlined workflow where you can request code changes by simply adding labels to issues in repositories where Open SWE is installed.
+Agent Mojo integrates seamlessly with GitHub through webhooks, allowing you to trigger automated code changes directly from GitHub issues. This provides a streamlined workflow where you can request code changes by simply adding labels to issues in repositories where Agent Mojo is installed.
 
 ## Triggering Runs with Labels
 
-Open SWE monitors GitHub issues for specific labels that trigger automated runs. When you add one of these labels to an issue, Open SWE will automatically create a new run to process your request.
+Agent Mojo monitors GitHub issues for specific labels that trigger automated runs. When you add one of these labels to an issue, Agent Mojo will automatically create a new run to process your request.
 
 ### Label Types
 
-Open SWE supports three types of labels that control how the agent operates:
+Agent Mojo supports three types of labels that control how the agent operates:
 
-**Manual Mode (`open-swe`)**
+**Manual Mode (`Agent Mojo`)**
 
 - Requires manual approval of the generated plan before code execution
 - Gives you full control over what changes will be made
 - Ideal for complex or sensitive changes where you want to review the approach first
 
-**Auto Mode (`open-swe-auto`)**
+**Auto Mode (`Agent Mojo-auto`)**
 
 - Automatically approves and executes the generated plan
 - Provides faster turnaround for straightforward requests
 - Best for simple changes or when you trust the agent to proceed autonomously
 
-**Max Mode (`open-swe-max` and `open-swe-max-auto`)**
+**Max Mode (`Agent Mojo-max` and `Agent Mojo-max-auto`)**
 
 - Uses Claude Opus 4.1 for both planning and programming tasks
 - Provides enhanced performance and reasoning capabilities for complex problems
-- `open-swe-max`: Requires manual plan approval with premium model performance
-- `open-swe-max-auto`: Combines automatic execution with premium model capabilities
+- `Agent Mojo-max`: Requires manual plan approval with premium model performance
+- `Agent Mojo-max-auto`: Combines automatic execution with premium model capabilities
 - Ideal for challenging tasks that benefit from the most advanced AI reasoning
 
 <Note>
-  In development environments, the labels are `open-swe-dev`,
-  `open-swe-auto-dev`, `open-swe-max-dev`, and `open-swe-max-auto-dev`
+  In development environments, the labels are `Agent Mojo-dev`,
+  `Agent Mojo-auto-dev`, `Agent Mojo-max-dev`, and `Agent Mojo-max-auto-dev`
   respectively. The system automatically uses the appropriate labels based on
   the `NODE_ENV` environment variable.
 </Note>
 
 ## Automatic Run Creation
 
-When you add a supported label to a GitHub issue, Open SWE's webhook handler automatically:
+When you add a supported label to a GitHub issue, Agent Mojo's webhook handler automatically:
 
 1. **Validates the request** - Verifies webhook signatures and authentication
 2. **Extracts issue context** - Captures the issue title, description, and metadata
@@ -60,10 +60,10 @@ The entire process happens within seconds of adding the label, providing immedia
 
 ## Issue Comments and Run Links
 
-Once a run is created, Open SWE automatically posts a comment on the triggering issue to confirm processing has started. This comment includes:
+Once a run is created, Agent Mojo automatically posts a comment on the triggering issue to confirm processing has started. This comment includes:
 
-- **Status confirmation** - "🤖 Open SWE has been triggered for this issue. Processing..."
-- **Run link** - Direct URL to view the run in the Open SWE web interface
+- **Status confirmation** - "🤖 Agent Mojo has been triggered for this issue. Processing..."
+- **Run link** - Direct URL to view the run in the Agent Mojo web interface
 - **Access restriction notice** - Clarifies that only the issue creator can access the run
 - **Development metadata** - Run ID and thread ID for debugging (in a collapsible section)
 
@@ -75,7 +75,7 @@ Once a run is created, Open SWE automatically posts a comment on the triggering 
 
 ## User Access Restrictions
 
-Open SWE implements strict access controls to ensure security and privacy:
+Agent Mojo implements strict access controls to ensure security and privacy:
 
 ### Issue Creator Access
 
@@ -85,19 +85,19 @@ Open SWE implements strict access controls to ensure security and privacy:
 
 ### Repository Permissions
 
-- Open SWE respects GitHub's repository permissions
+- Agent Mojo respects GitHub's repository permissions
 - Users must have appropriate access to the repository to trigger runs
-- The GitHub App installation determines which repositories can use Open SWE
+- The GitHub App installation determines which repositories can use Agent Mojo
 
 <Note>
   If you need to share access to a run with team members, you can do so through
-  the Open SWE web interface after the run is created, or by having team members
+  the Agent Mojo web interface after the run is created, or by having team members
   with repository access create their own issues.
 </Note>
 
 ## Pull Request Integration
 
-When Open SWE successfully completes code changes, it automatically creates pull requests that are linked back to the original issue:
+When Agent Mojo successfully completes code changes, it automatically creates pull requests that are linked back to the original issue:
 
 ### Automatic PR Creation
 
@@ -119,12 +119,12 @@ When Open SWE successfully completes code changes, it automatically creates pull
 
 ## Getting Started
 
-To start using Open SWE with webhooks:
+To start using Agent Mojo with webhooks:
 
-1. **Ensure Open SWE is installed** on your repository as a GitHub App
+1. **Ensure Agent Mojo is installed** on your repository as a GitHub App
 2. **Create a detailed issue** describing the changes you want
-3. **Add the appropriate label** (`open-swe` for manual mode or `open-swe-auto` for automatic mode)
+3. **Add the appropriate label** (`Agent Mojo` for manual mode or `Agent Mojo-auto` for automatic mode)
 4. **Monitor the issue comments** for the run link and status updates
-5. **Review and merge the PR** when Open SWE completes the changes
+5. **Review and merge the PR** when Agent Mojo completes the changes
 
 For setup instructions, see the [Development Setup](/labs/swe/setup/development) guide.

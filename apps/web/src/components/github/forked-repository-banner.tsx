@@ -36,8 +36,8 @@ export function IssuesRequiredBanner() {
       <AlertTitle>Issues Must Be Enabled</AlertTitle>
       <AlertDescription>
         <p>
-          Open SWE requires issues to be enabled on the repository. Please
-          enable issues on the repository to use Open SWE.
+          Agent Mojo requires issues to be enabled on the repository. Please
+          enable issues on the repository to use Agent Mojo.
         </p>
         <p>
           See{" "}

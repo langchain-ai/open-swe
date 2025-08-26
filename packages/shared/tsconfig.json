@@ -13,13 +13,15 @@
     "noUnusedParameters": true,
     "useDefineForClassFields": true,
     "strictPropertyInitialization": false,
-    "allowJs": true,
     "strict": true,
     "strictFunctionTypes": false,
     "outDir": "dist",
     "rootDir": "src",
     "types": ["jest", "node"],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "composite": true,
+    "noEmit": false
   },
   "include": ["src/**/*.ts", "src/*.ts"],
   "exclude": ["node_modules", "dist"]

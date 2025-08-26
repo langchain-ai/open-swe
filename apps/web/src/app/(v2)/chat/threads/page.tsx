@@ -10,7 +10,6 @@ import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { InstallationSelector } from "@/components/github/installation-selector";
 import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
@@ -38,6 +37,7 @@ function AllThreadsPageContent() {
     threads,
     isLoading: threadsLoading,
     hasMore,
+  mutate,
   } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
     currentInstallation,
@@ -229,6 +229,12 @@ function AllThreadsPageContent() {
                           status={statusMap[thread.id]}
                           statusLoading={statusLoading}
                           taskPlan={taskPlanMap[thread.id]}
+                          onDeleted={(id) => {
+                            mutate(
+                              (curr) => (curr ?? []).filter((t) => t.thread_id !== id),
+                              { revalidate: false },
+                            );
+                          }}
                         />
                       ))}
                     </div>
@@ -245,6 +251,12 @@ function AllThreadsPageContent() {
                   status={statusMap[thread.id]}
                   statusLoading={statusLoading}
                   taskPlan={taskPlanMap[thread.id]}
+                  onDeleted={(id) => {
+                    mutate(
+                      (curr) => (curr ?? []).filter((t) => t.thread_id !== id),
+                      { revalidate: false },
+                    );
+                  }}
                 />
               ))}
             </div>

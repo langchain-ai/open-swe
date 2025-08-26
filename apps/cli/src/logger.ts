@@ -7,7 +7,7 @@ import {
 } from "@langchain/core/messages";
 
 import { getMessageContentString } from "@open-swe/shared/messages";
-import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/agent-mojo/tools";
 
 export type ToolCall = {
   name: string;
@@ -23,43 +23,6 @@ interface LogChunk {
 }
 
 /**
- * Create a simple diff between old and new strings
- */
-function createSimpleDiff(oldString: string, newString: string): string[] {
-  const logs: string[] = [];
-
-  if (!oldString && newString) {
-    const lines = newString.split("\n").slice(0, 10);
-    lines.forEach((line) => logs.push(`+ ${line}`));
-    if (newString.split("\n").length > 10) {
-      logs.push(`+ ... (${newString.split("\n").length - 10} more lines)`);
-    }
-    return logs;
-  }
-
-  if (!newString) {
-    oldString.split("\n").forEach((line) => logs.push(`- ${line}`));
-    return logs;
-  }
-
-  const oldLines = oldString.split("\n");
-  const newLines = newString.split("\n");
-
-  const removedLines = oldLines.filter(
-    (oldLine) => !newLines.some((newLine) => newLine === oldLine),
-  );
-
-  const addedLines = newLines.filter(
-    (newLine) => !oldLines.some((oldLine) => oldLine === newLine),
-  );
-
-  removedLines.forEach((line) => logs.push(`- ${line}`));
-  addedLines.forEach((line) => logs.push(`+ ${line}`));
-
-  return logs;
-}
-
-/**
  * Format a tool call arguments into a clean, readable string
  */
 function formatToolCallArgs(tool: ToolCall): string {
@@ -68,69 +31,20 @@ function formatToolCallArgs(tool: ToolCall): string {
   if (!tool.args) return toolName;
 
   switch (toolName.toLowerCase()) {
-    case "shell":
-    case "execute_bash": {
-      let command = "";
+    case "shell": {
       if (Array.isArray(tool.args.command)) {
-        command = tool.args.command.join(" ");
-      } else {
-        command = tool.args.command || "";
+        return `${toolName}: ${tool.args.command.join(" ")}`;
       }
-
-      // Truncate long commands (more than 160 characters)
-      if (command.length > 160) {
-        return `${toolName}: ${command.substring(0, 160)}...`;
-      }
-      return `${toolName}: ${command}`;
+      return `${toolName}: ${tool.args.command || ""}`;
     }
 
-    case "write_file": {
-      const filePath = tool.args.file_path || "";
-      const content = tool.args.content || "";
-      const lineCount = content.split("\n").length;
-      return `${toolName}: ${filePath} (${lineCount} lines)`;
-    }
-
-    case "read_file": {
-      const filePath = tool.args.file_path || "";
-      return `${toolName}: ${filePath}`;
-    }
-
-    case "edit_file": {
-      const filePath = tool.args.file_path || "";
-      return `${toolName}: ${filePath}`;
-    }
-
-    case "http_request": {
-      const method = tool.args.method || "GET";
-      const url = tool.args.url || "";
-      return `${toolName}: ${method} ${url}`;
-    }
-
-    case "web_search": {
+    case "grep": {
       const query = tool.args.query || "";
       return `${toolName}: "${query}"`;
     }
 
-    case "grep": {
-      const pattern = tool.args.pattern || "";
-      const path = tool.args.path || "";
-      return `${toolName}: "${pattern}"${path ? ` in ${path}` : ""}`;
-    }
-
-    case "glob": {
-      const pattern = tool.args.pattern || "";
-      const path = tool.args.path || "";
-      return `${toolName}: ${pattern}${path ? ` in ${path}` : ""}`;
-    }
-
     case "view": {
       return `${toolName}: ${tool.args.path || ""}`;
-    }
-
-    case "ls": {
-      const path = tool.args.path || "";
-      return `${toolName}: ${path}`;
     }
 
     case "str_replace_based_edit_tool": {
@@ -143,7 +57,9 @@ function formatToolCallArgs(tool: ToolCall): string {
           return `${toolName}: insert_line=${insertLine}, new_str="${newStr}"`;
         }
         case "str_replace": {
-          return `${toolName}: string replacement`;
+          const oldStr = tool.args.old_str || "";
+          const newStr = tool.args.new_str || "";
+          return `${toolName}: old_str="${oldStr}", new_str="${newStr}"`;
         }
         case "create": {
           const fileText = tool.args.file_text || "";
@@ -161,24 +77,118 @@ function formatToolCallArgs(tool: ToolCall): string {
       }
     }
 
-    case "write_todos": {
-      const todos = tool.args.todos || [];
-      if (Array.isArray(todos)) {
-        const todoCount = todos.length;
-        const statusCounts = todos.reduce((acc: any, todo: any) => {
-          acc[todo.status] = (acc[todo.status] || 0) + 1;
-          return acc;
-        }, {});
-        const statusSummary = Object.entries(statusCounts)
-          .map(([status, count]) => `${count} ${status}`)
-          .join(", ");
-        return `${toolName}: Updated ${todoCount} todos (${statusSummary})`;
+    case "search_documents_for": {
+      const query = tool.args.query || "";
+      const url = tool.args.url || "";
+      return `${toolName}: "${query}" in ${url}`;
+    }
+
+    case "get_url_content": {
+      return `${toolName}: ${tool.args.url || ""}`;
+    }
+
+    case "session_plan": {
+      const title = tool.args.title || "";
+      const planSteps = tool.args.plan || [];
+      if (title) {
+        return `${toolName}: "${title}" (${planSteps.length} steps)`;
       }
-      return `${toolName}: Updated todos`;
+      return `${toolName}: ${planSteps.length} plan steps`;
+    }
+
+    case "apply_patch": {
+      const filePath = tool.args.file_path || "";
+      const diff = tool.args.diff || "";
+      const diffLines = diff.split("\n").length;
+      return `${toolName}: applied ${diffLines} line diff to ${filePath}`;
+    }
+
+    case "install_dependencies": {
+      const command = tool.args.command || [];
+      if (Array.isArray(command)) {
+        return `${toolName}: ${command.join(" ")}`;
+      }
+      return `${toolName}: ${command}`;
+    }
+
+    case "scratchpad": {
+      const scratchpad = tool.args.scratchpad || [];
+      if (Array.isArray(scratchpad)) {
+        return `${toolName}: ${scratchpad.length} notes`;
+      }
+      return `${toolName}: ${scratchpad}`;
+    }
+
+    case "command_safety_evaluator": {
+      const command = tool.args.command || "";
+      return `${toolName}: evaluating "${command}"`;
+    }
+
+    case "respond_and_route": {
+      const response = tool.args.response || "";
+      const route = tool.args.route || "";
+      if (response && route) {
+        return `${toolName}: "${response}" → ${route}`;
+      } else if (response) {
+        return `${toolName}: "${response}"`;
+      } else if (route) {
+        return `${toolName}: → ${route}`;
+      }
+      return `${toolName}: routing decision`;
+    }
+
+    case "request_human_help": {
+      const helpRequest = tool.args.help_request || "";
+      return `${toolName}: "${helpRequest}"`;
+    }
+
+    case "update_plan": {
+      const reasoning = tool.args.update_plan_reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "mark_task_completed": {
+      const summary = tool.args.completed_task_summary || "";
+      return `${toolName}: ${summary.slice(0, 50)}...`;
+    }
+
+    case "mark_task_not_completed": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "diagnose_error": {
+      const diagnosis = tool.args.diagnosis || "";
+      return `${toolName}: ${diagnosis.slice(0, 50)}...`;
+    }
+
+    case "write_technical_notes": {
+      const notes = tool.args.notes || "";
+      return `${toolName}: ${notes.slice(0, 50)}...`;
+    }
+
+    case "summarize_conversation_history": {
+      const reasoning = tool.args.reasoning || "";
+      return `${toolName}: ${reasoning.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_completed": {
+      const review = tool.args.review || "";
+      return `${toolName}: ${review.slice(0, 50)}...`;
+    }
+
+    case "code_review_mark_task_not_complete": {
+      const review = tool.args.review || "";
+      const actions = tool.args.additional_actions || [];
+      return `${toolName}: ${review.slice(0, 30)}... (${actions.length} actions)`;
+    }
+
+    case "review_started": {
+      const started = tool.args.review_started || false;
+      return `${toolName}: ${started ? "started" : "not started"}`;
     }
   }
-
-  return toolName;
+  return "";
 }
 
 /**
@@ -197,55 +207,7 @@ function formatToolResult(message: ToolMessage): string {
 
   switch (toolName.toLowerCase()) {
     case "shell":
-    case "execute_bash": {
-      try {
-        const result = JSON.parse(content);
-        if (!result.success && result.stderr) {
-          return result.stderr;
-        }
-        if (result.success && result.stdout) {
-          return result.stdout;
-        }
-        return content;
-      } catch {
-        return content;
-      }
-    }
-
-    case "write_file":
-      if (isError) return content;
-
-      return "File written successfully";
-
-    case "read_file": {
-      const contentLength = content.length;
-      return `${contentLength} characters`;
-    }
-
-    case "edit_file":
-      return isError ? content : "File edited successfully";
-
-    case "http_request": {
-      try {
-        const result = JSON.parse(content);
-        return `HTTP ${result.status_code || "unknown"}: ${result.success ? "Success" : "Failed"}`;
-      } catch {
-        return content.length > 100 ? content.slice(0, 100) + "..." : content;
-      }
-    }
-
-    case "web_search": {
-      try {
-        const result = JSON.parse(content);
-        if (result.error) {
-          return `Search error: ${result.error}`;
-        }
-        const results = result.results || [];
-        return `${results.length} search results found`;
-      } catch {
-        return content.length > 100 ? content.slice(0, 100) + "..." : content;
-      }
-    }
+      return content;
 
     case "grep": {
       if (content.includes("Exit code 1. No results found.")) {
@@ -257,7 +219,9 @@ function formatToolResult(message: ToolMessage): string {
 
     case "view": {
       const contentLength = content.length;
-      return `${contentLength} characters`;
+      return contentLength > 1000
+        ? `${contentLength} characters (truncated)`
+        : `${contentLength} characters`;
     }
 
     case "str_replace_based_edit_tool":
@@ -266,22 +230,19 @@ function formatToolResult(message: ToolMessage): string {
     case "get_url_content":
       return `${content.length} characters of content`;
 
-    case "write_todos":
-      if (content.includes("Updated todo list")) {
-        return "Todo list updated successfully";
-      }
-      return content.length > 100 ? content.slice(0, 100) + "..." : content;
+    case "apply_patch":
+      return "Patch applied successfully";
 
-    case "ls":
+    case "install_dependencies":
+      return "Dependencies installed successfully";
+
+    case "command_safety_evaluator":
       try {
-        const items = JSON.parse(content);
-        if (Array.isArray(items)) {
-          return `${items.length} items: ${items.slice(0, 8).join(", ")}${items.length > 8 ? "..." : ""}`;
-        }
+        const evaluation = JSON.parse(content);
+        return `Safety: ${evaluation.is_safe ? "SAFE" : "UNSAFE"} (${evaluation.risk_level} risk)`;
       } catch {
-        // fallthrough to default
+        return content;
       }
-      return content.length > 100 ? content.slice(0, 100) + "..." : content;
 
     default:
       return content.length > 200 ? content.slice(0, 200) + "..." : content;
@@ -290,11 +251,51 @@ function formatToolResult(message: ToolMessage): string {
 
 export function formatDisplayLog(chunk: LogChunk | string): string[] {
   if (typeof chunk === "string") {
-    return [chunk];
+    if (chunk.startsWith("Human feedback:")) {
+      return [
+        `[HUMAN FEEDBACK RECEIVED] ${chunk.replace("Human feedback:", "").trim()}`,
+      ];
+    }
+    if (chunk.startsWith("Interrupt:")) {
+      const message = chunk.replace("Interrupt:", "").trim();
+      return [
+        "═══════════════════════════════════════",
+        `📤 INTERRUPT: "${message}"`,
+        "═══════════════════════════════════════",
+      ];
+    }
+    // Filter out raw file content and object references
+    if (
+      chunk === "[object Object]" ||
+      chunk.includes("total 4") ||
+      chunk.includes("drwxr-xr-x") ||
+      chunk.includes("Exit code 1") ||
+      chunk.startsWith("#") ||
+      chunk.startsWith("-") ||
+      chunk.startsWith("./")
+    ) {
+      return [];
+    }
+    // Single line system messages
+    const cleanChunk = chunk.replace(/\s+/g, " ").trim();
+    const maxLength = 150;
+    const truncated =
+      cleanChunk.length > maxLength
+        ? cleanChunk.slice(0, maxLength) + "... [trunc]"
+        : cleanChunk;
+    return [`[SYSTEM] ${truncated}`];
   }
 
   const data = chunk.data;
   const logs: string[] = [];
+
+  // Handle session events
+  if (data.plannerSession) {
+    logs.push("[PLANNER SESSION STARTED]");
+  }
+  if (data.programmerSession) {
+    logs.push("[PROGRAMMER SESSION STARTED]");
+  }
 
   // Handle messages
   const nestedDataObj = Object.values(data)[0] as unknown as Record<
@@ -316,17 +317,16 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
         // Handle tool messages
         if (isToolMessage(message)) {
           const toolName = message.name || "tool";
-
-          // Skip displaying results for todo list tool calls
-          if (toolName === "write_todos") {
-            continue;
-          }
-
           const result = formatToolResult(message);
           if (result) {
-            // Display tool results as indented subsections
+            // Concatenate long tool results to a single line (truncate if too long)
+            const maxLength = 500;
             let formattedResult = result.replace(/\s+/g, " ");
-            logs.push(`  ↳ ${formattedResult}`);
+            if (formattedResult.length > maxLength) {
+              formattedResult =
+                formattedResult.slice(0, maxLength) + "... [trunc]";
+            }
+            logs.push(`[TOOL RESULT] ${toolName}: ${formattedResult}`);
           }
           continue;
         }
@@ -338,7 +338,12 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
             const reasoning = String(message.additional_kwargs.reasoning)
               .replace(/\s+/g, " ")
               .trim();
-            logs.push(`[REASONING] ${reasoning}`);
+            const maxLength = 150;
+            const truncated =
+              reasoning.length > maxLength
+                ? reasoning.slice(0, maxLength) + "... [trunc]"
+                : reasoning;
+            logs.push(`[REASONING] ${truncated}`);
           }
 
           // Handle tool calls
@@ -348,50 +353,7 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
 
             message.tool_calls.forEach((tool) => {
               const formattedArgs = formatToolCallArgs(tool);
-              logs.push(`▸ ${formattedArgs}`);
-
-              // Special handling for write_todos to display the actual todos nicely
-              if (
-                tool.name === "write_todos" &&
-                tool.args &&
-                tool.args.todos &&
-                Array.isArray(tool.args.todos)
-              ) {
-                const todos = tool.args.todos;
-                logs.push(""); // blank line before todos
-                todos.forEach((todo: any) => {
-                  const statusIcon =
-                    todo.status === "completed"
-                      ? "✓"
-                      : todo.status === "in_progress"
-                        ? "→"
-                        : "○";
-                  logs.push(`  ${statusIcon} ${todo.content}`);
-                });
-              }
-
-              // Special handling for edit_file to display the diff
-              if (tool.name === "edit_file" && tool.args) {
-                const oldString = tool.args.old_string || "";
-                const newString = tool.args.new_string || "";
-                const diffLines = createSimpleDiff(oldString, newString);
-                logs.push(...diffLines);
-              }
-
-              // Special handling for write_file to display the new content
-              if (tool.name === "write_file" && tool.args) {
-                const content = tool.args.content || "";
-                const diffLines = createSimpleDiff("", content);
-                logs.push(...diffLines);
-              }
-
-              // Special handling for str_replace_based_edit_tool to display the diff
-              if (tool.name === "str_replace_based_edit_tool" && tool.args) {
-                const oldStr = tool.args.old_str || "";
-                const newStr = tool.args.new_str || "";
-                const diffLines = createSimpleDiff(oldStr, newStr);
-                logs.push(...diffLines);
-              }
+              logs.push(`[TOOL CALL] ${formattedArgs}`);
 
               // Handle technical notes from tool call
               if (
@@ -414,9 +376,14 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
           // Handle regular AI messages
           const text = getMessageContentString(message.content);
           if (text) {
-            // Always single line, remove newlines
+            // Always single line, remove newlines and truncate
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◆ ${cleanText}`);
+            const maxLength = 200;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[AI] ${truncated}`);
           }
         }
 
@@ -426,7 +393,12 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
           if (text) {
             // Single line human messages
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◉ ${cleanText}`);
+            const maxLength = 150;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[HUMAN] ${truncated}`);
           }
         }
       } catch (error: any) {
@@ -434,27 +406,31 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
         // Fallback to original message if conversion fails
         if (msg.type === "tool") {
           const toolName = msg.name || "tool";
-
-          // Skip displaying results for todo list tool calls
-          if (toolName === "write_todos") {
-            // Skip this tool result
-          } else {
-            const content = getMessageContentString(msg.content);
-            if (content) {
-              logs.push(`  ↳ ${content}`);
-            }
+          const content = getMessageContentString(msg.content);
+          if (content) {
+            logs.push(`[TOOL RESULT] ${toolName}: ${content}`);
           }
         } else if (msg.type === "ai") {
           const text = getMessageContentString(msg.content);
           if (text) {
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◆ ${cleanText}`);
+            const maxLength = 200;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[AI] ${truncated}`);
           }
         } else if (msg.type === "human") {
           const text = getMessageContentString(msg.content);
           if (text) {
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◉ ${cleanText}`);
+            const maxLength = 150;
+            const truncated =
+              cleanText.length > maxLength
+                ? cleanText.slice(0, maxLength) + "... [trunc]"
+                : cleanText;
+            logs.push(`[HUMAN] ${truncated}`);
           }
         }
       }
@@ -485,9 +461,14 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
 
         " ", // Blank line after
       );
+    } else {
+      logs.push(
+        " ", // Blank line for separation
+        "⏳ INTERRUPT: Waiting for feedback...",
+        " ", // Blank line after
+      );
     }
   }
-
   return logs;
 }
 

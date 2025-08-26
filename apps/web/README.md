@@ -1,6 +1,6 @@
-# Open SWE Web
+# Agent Mojo Web
 
-The Next.js web interface for Open SWE, providing a user-friendly chat interface to interact with the LangGraph agent.
+The Next.js web interface for Agent Mojo, providing a user-friendly chat interface to interact with the LangGraph agent.
 
 ## Documentation
 

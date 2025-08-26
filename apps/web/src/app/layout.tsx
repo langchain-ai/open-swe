@@ -12,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Open SWE",
-  description: "Open SWE UX by LangChain",
+  title: "Agent Mojo",
+  description: "Agent Mojo UX by LangChain",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

@@ -1,6 +1,6 @@
 import { PlanViewer } from "./plan-viewer";
 import { useProposedPlan } from "../thread/agent-inbox/hooks/useProposedPlan";
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@open-swe/shared/agent-mojo/types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { X, ArrowRight } from "lucide-react";
 

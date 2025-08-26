@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitBranch, Shield } from "lucide-react";
-import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@open-swe/shared/agent-mojo/types";
 import { Branch } from "@/utils/github";
 import { toast } from "sonner";
 import { defaultFilter } from "cmdk";

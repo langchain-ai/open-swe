@@ -5,7 +5,7 @@
 - When importing from the shared package, use the @open-swe/shared namespace with specific module paths
 - Follow strict TypeScript practices - the codebase uses strict mode across all packages
 - Use ESLint and Prettier for code quality - run yarn lint:fix and yarn format before committing
-- Console logging is prohibited in the open-swe app (ESLint error) - use the `createLogger` function to create a new logger instance instead
+- Console logging is prohibited in the Agent Mojo app (ESLint error) - use the `createLogger` function to create a new logger instance instead
 - Build the shared package first before other packages can consume it (yarn build from the root handles this automatically via turbo repo)
 - Follow existing code patterns and maintain consistency with the established architecture
 - Include as few inline comments as possible
@@ -14,7 +14,7 @@
 <repository_structure>
 This is a Yarn workspace monorepo with Turbo build orchestration containing three main packages:
 
-**apps/open-swe**: LangGraph agent application
+**apps/Agent Mojo**: LangGraph agent application
 - Core LangChain/LangGraph agent implementation with TypeScript
 - Contains three graphs: programmer, planner, and manager (configured in langgraph.json)
 - Uses strict ESLint rules including no-console errors
@@ -26,9 +26,9 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 
 **packages/shared**: Common utilities package
 - Central workspace dependency providing shared types, constants, and utilities
-- Exports modules via @open-swe/shared namespace (e.g., @open-swe/shared/open-swe/types)
+- Exports modules via @open-swe/shared namespace (e.g., @open-swe/shared/Agent Mojo/types)
 - Must be built before other packages can import from it
-- Contains crypto utilities, GraphState types, and open-swe specific modules
+- Contains crypto utilities, GraphState types, and Agent Mojo specific modules
 
 **Root Configuration**:
 - turbo.json: Build orchestration with task dependencies and parallel execution
@@ -61,7 +61,7 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 
 **Running Tests**:
 - `yarn test` - Run unit tests across all packages
-- `yarn test:int` - Run integration tests (apps/open-swe only)
+- `yarn test:int` - Run integration tests (apps/Agent Mojo only)
 - `yarn test:single <file>` - Run a specific test file
 
 **Test Configuration**:

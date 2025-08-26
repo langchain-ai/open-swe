@@ -64,7 +64,7 @@ export const useConfigStore = create<ConfigState>()(
       resetStore: () => set({ configs: {} }),
     }),
     {
-      name: "open-swe-config-storage",
+      name: "agent-mojo-config-storage",
     },
   ),
 );

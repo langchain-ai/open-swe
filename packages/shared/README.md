@@ -1,6 +1,6 @@
-# Open SWE Shared
+# Agent Mojo Shared
 
-Shared utilities and types package for Open SWE, providing common functionality used across the monorepo applications.
+Shared utilities and types package for Agent Mojo, providing common functionality used across the monorepo applications.
 
 ## Documentation
 

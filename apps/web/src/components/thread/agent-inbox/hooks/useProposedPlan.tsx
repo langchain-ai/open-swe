@@ -1,6 +1,6 @@
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { useEffect, useState } from "react";
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@open-swe/shared/agent-mojo/types";
 import { convertPlanItemsToInterruptString } from "@/lib/plan-utils";
 import { PLAN_INTERRUPT_ACTION_TITLE } from "@open-swe/shared/constants";
 import { useStream } from "@langchain/langgraph-sdk/react";

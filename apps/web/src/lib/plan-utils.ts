@@ -1,4 +1,4 @@
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@open-swe/shared/agent-mojo/types";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,

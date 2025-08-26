@@ -1,22 +1,22 @@
 ---
 title: Best Practices
-description: Guidelines for effective use of Open SWE
+description: Guidelines for effective use of Agent Mojo
 ---
 
 # Best Practices
 
-Follow these guidelines to get the best results from Open SWE.
+Follow these guidelines to get the best results from Agent Mojo.
 
 ## Prompting Tips
 
 ### Be Clear and Direct
 
-- Include specific file paths and function names in your requests. Open SWE preforms best when its given a clear starting point.
-- Provide concrete examples of what you want to achieve. Describe the end state you want to reach so Open SWE knows what it's working towards.
+- Include specific file paths and function names in your requests. Agent Mojo preforms best when its given a clear starting point.
+- Provide concrete examples of what you want to achieve. Describe the end state you want to reach so Agent Mojo knows what it's working towards.
 
 ### Create Custom Rules
 
-Create an `AGENTS.md` file in your repository root to provide project-specific context. This helps Open SWE understand your codebase conventions and requirements.
+Create an `AGENTS.md` file in your repository root to provide project-specific context. This helps Agent Mojo understand your codebase conventions and requirements.
 
 <Tip>
   See the [Custom Rules](/labs/swe/usage/custom-rules) page for detailed guidance on
@@ -31,7 +31,7 @@ Create an `AGENTS.md` file in your repository root to provide project-specific c
 
 ### Avoid Multiple Tasks
 
-Submit separate requests for different features or fixes. This allows Open SWE to:
+Submit separate requests for different features or fixes. This allows Agent Mojo to:
 
 - Generate more focused plans
 - Provide better error handling
@@ -44,19 +44,19 @@ Submit separate requests for different features or fixes. This allows Open SWE t
 
 ### Avoid Other Models
 
-Although Open SWE allows you to select any model from Anthropic, OpenAI and Google, its prompts are tuned specifically for Anthropic models, and other providers will not preform as well.
+Although Agent Mojo allows you to select any model from Anthropic, OpenAI and Google, its prompts are tuned specifically for Anthropic models, and other providers will not preform as well.
 
 ## Mode Selection
 
-### `open-swe` vs `open-swe-max`
+### `Agent Mojo` vs `Agent Mojo-max`
 
-**`open-swe`**: Uses Claude Sonnet 4
+**`Agent Mojo`**: Uses Claude Sonnet 4
 
 - Suitable for most development tasks
 - Faster execution
 - Cost-effective
 
-**`open-swe-max`**: Uses Claude Opus 4 (only for the planning and code writing agents)
+**`Agent Mojo-max`**: Uses Claude Opus 4 (only for the planning and code writing agents)
 
 - For complex tasks requiring advanced reasoning
 - Higher quality output for challenging problems
@@ -66,18 +66,18 @@ Although Open SWE allows you to select any model from Anthropic, OpenAI and Goog
 
 **Auto Mode (`-auto` labels)**
 
-It's recommended to use the auto mode for most tasks. Open SWE is very good at planning, and in most cases it does not need a manual review before execution.
+It's recommended to use the auto mode for most tasks. Agent Mojo is very good at planning, and in most cases it does not need a manual review before execution.
 
-If you're running Open SWE against an open-ended or very complex task, you may want to use manual mode to review the plan before execution.
+If you're running Agent Mojo against an open-ended or very complex task, you may want to use manual mode to review the plan before execution.
 
 ## Label Reference
 
-- `open-swe`: Manual mode with Sonnet 4
-- `open-swe-auto`: Auto mode with Sonnet 4
-- `open-swe-max`: Manual mode with Opus 4.1
-- `open-swe-max-auto`: Auto mode with Opus 4.1
+- `Agent Mojo`: Manual mode with Sonnet 4
+- `Agent Mojo-auto`: Auto mode with Sonnet 4
+- `Agent Mojo-max`: Manual mode with Opus 4.1
+- `Agent Mojo-max-auto`: Auto mode with Opus 4.1
 
 <Note>
   In development environments, append `-dev` to all labels (e.g.,
-  `open-swe-dev`, `open-swe-auto-dev`).
+  `Agent Mojo-dev`, `Agent Mojo-auto-dev`).
 </Note>

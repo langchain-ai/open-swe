@@ -1,7 +1,7 @@
 {
   "name": "@open-swe/docs",
   "author": "LangChain",
-  "repository": "https://github.com/langchain-ai/open-swe",
+  "repository": "https://github.com/langchain-ai/agent-mojo",
   "private": true,
   "scripts": {
     "dev": "mint dev",

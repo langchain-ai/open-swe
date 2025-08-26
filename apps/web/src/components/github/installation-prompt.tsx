@@ -42,9 +42,8 @@ export function InstallationPrompt({
           </div>
           <div className="flex items-center gap-2">
             <InstallAppButton
-              variant="default"
+              variant="brand"
               size="sm"
-              className="border-amber-600 bg-amber-600 text-white hover:bg-amber-700"
             >
               Install GitHub App
             </InstallAppButton>
@@ -68,7 +67,7 @@ export function InstallationPrompt({
           <p className="mb-4 text-sm text-amber-700 dark:text-amber-300">
             {description}
           </p>
-          <InstallAppButton>Install GitHub App</InstallAppButton>
+          <InstallAppButton variant="brand">Install GitHub App</InstallAppButton>
         </>
       )}
     </div>
