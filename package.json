@@ -27,8 +27,5 @@
     "langsmith": "^0.3.48",
     "jsonwebtoken": "^9.0.2"
   },
-  "packageManager": "yarn@3.5.1",
-  "dependencies": {
-    "deepagents": "rc"
-  }
+  "packageManager": "yarn@3.5.1"
 }
