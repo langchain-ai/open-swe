@@ -7,13 +7,6 @@ import { createAgentPostModelHook } from "./post-model-hook.js";
 import { CodingAgentState } from "./state.js";
 import { executeBash, httpRequest, webSearch } from "./tools.js";
 
-if (process.env.LANGCHAIN_TRACING_V2 !== "false") {
-  process.env.LANGCHAIN_TRACING_V2 = "true";
-  if (!process.env.LANGCHAIN_PROJECT) {
-    process.env.LANGCHAIN_PROJECT = "coding_agent";
-  }
-}
-
 const codingInstructions = getCodingInstructions();
 const postModelHook = createAgentPostModelHook();
 

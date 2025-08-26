@@ -2,18 +2,11 @@ import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { interrupt } from "@langchain/langgraph";
 import { WRITE_COMMANDS } from "./constants.js";
 import { AgentStateHelpers, type CodingAgentStateType } from "./state.js";
+import { ToolCall } from "@langchain/core/messages/tool";
+import { ApprovedOperations } from "./types.js";
 
-interface StateType extends CodingAgentStateType {
-  todos: any[];
-  files: Record<string, string>;
-  messages: any[];
-}
+type StateType = CodingAgentStateType;
 
-interface ToolCall {
-  name?: string;
-  args?: Record<string, any>;
-  [key: string]: any;
-}
 
 export function createAgentPostModelHook() {
   /**
@@ -40,7 +33,10 @@ export function createAgentPostModelHook() {
     }
 
     if (!state.approved_operations) {
-      state.approved_operations = { cached_approvals: new Set<string>() };
+      const approved_operations: ApprovedOperations = {
+        cached_approvals: new Set<string>(),
+      };
+      state.approved_operations = approved_operations;
     }
 
     const approvedToolCalls: ToolCall[] = [];
@@ -82,20 +78,18 @@ export function createAgentPostModelHook() {
       }
     }
 
-    // Update the message if any tool calls were filtered out
+    // Return the updated message if any tool calls were filtered out
     if (approvedToolCalls.length !== lastMessage.tool_calls.length) {
       const originalToolCalls = lastMessage.tool_calls.filter((toolCall) =>
         approvedToolCalls.some((approved) => approved.name === toolCall.name),
       );
 
-      const MessageClass =
-        lastMessage instanceof AIMessageChunk ? AIMessageChunk : AIMessage;
-      const newMessage = new MessageClass({
-        content: lastMessage.content,
+      const newMessage = new AIMessage({
+        ...lastMessage,
         tool_calls: originalToolCalls,
-        additional_kwargs: lastMessage.additional_kwargs,
       });
 
+      // Update the messages in the state
       const newMessages = [...messages.slice(0, -1), newMessage];
       state.messages = newMessages;
     }

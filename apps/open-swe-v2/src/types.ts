@@ -8,18 +8,15 @@ import { z } from "zod";
 export interface FileEditCommandArgs {
   file_path?: string;
   path?: string;
-  [key: string]: any;
 }
 
 export interface ExecuteBashCommandArgs {
   cwd?: string;
-  [key: string]: any;
 }
 
 export interface FileSystemCommandArgs {
   path?: string;
   directory?: string;
-  [key: string]: any;
 }
 
 export interface GenericCommandArgs {

@@ -1,5 +1,5 @@
 /**
- * Constants for Open SWE V2 coding agent.
+ * Both of these constants are used in the approval system in the post model hook.
  */
 
 /**

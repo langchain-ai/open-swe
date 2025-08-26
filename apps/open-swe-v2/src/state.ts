@@ -1,18 +1,19 @@
 import "@langchain/langgraph/zod";
 import { z } from "zod";
+import { withLangGraph } from "@langchain/langgraph/zod";
 import * as path from "path";
 import { DeepAgentState } from "deepagents";
 import { FILE_EDIT_COMMANDS } from "./constants.js";
-import { Command, CommandArgs, ApprovalKey } from "./types.js";
-
-const ApprovedOperationsSchema = z
-  .object({
-    cached_approvals: z.set(z.string()).default(() => new Set<string>()),
-  })
-  .optional();
+import { Command, CommandArgs, ApprovalKey, FileEditCommandArgs, ExecuteBashCommandArgs, FileSystemCommandArgs, ApprovedOperations } from "./types.js";
 
 export const CodingAgentState: any = DeepAgentState.extend({
-  approved_operations: ApprovedOperationsSchema,
+  approved_operations: withLangGraph(z.custom<ApprovedOperations>().optional(), {
+    reducer: {
+      schema: z.custom<ApprovedOperations>().optional(),
+      fn: (_state: ApprovedOperations | undefined, update: ApprovedOperations | undefined) => update,
+    },
+    default: () => ({ cached_approvals: new Set<string>() }),
+  }),
 });
 
 export type CodingAgentStateType = z.infer<typeof CodingAgentState>;
@@ -25,14 +26,17 @@ export class AgentStateHelpers {
     let targetDir: string | null = null;
 
     if (FILE_EDIT_COMMANDS.has(command)) {
-      const filePath = args.file_path || args.path;
+      const fileArgs = args as FileEditCommandArgs;
+      const filePath = fileArgs.file_path || fileArgs.path;
       if (filePath) {
         targetDir = path.dirname(path.resolve(filePath));
       }
     } else if (command === "execute_bash") {
-      targetDir = args.cwd || process.cwd();
+      const bashArgs = args as ExecuteBashCommandArgs;
+      targetDir = bashArgs.cwd || process.cwd();
     } else if (["ls", "glob", "grep"].includes(command)) {
-      targetDir = args.path || args.directory || process.cwd();
+      const fsArgs = args as FileSystemCommandArgs;
+      targetDir = fsArgs.path || fsArgs.directory || process.cwd();
     }
 
     if (!targetDir) {
