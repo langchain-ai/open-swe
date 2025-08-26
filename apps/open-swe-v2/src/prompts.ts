@@ -322,7 +322,7 @@ export function getCodingInstructions(): string {
   You have access to specialized sub-agents that can help with specific tasks.
   Only use the subagents when you're trying to tackle complex or one-off tasks. 
   
-  ### code-reviewer
+  ### codeReviewer  
   
   **When to use:**
   - After implementing significant new features or modules
@@ -336,7 +336,7 @@ export function getCodingInstructions(): string {
   - Reviews across multiple programming languages
   
   **Example usage:**
-  \`task(description="Review the authentication module for security best practices and code quality", subagent_type="code-reviewer")\`
+  \`task(description="Review the authentication module for security best practices and code quality", subagent_type="codeReviewer")\`
   
   ### debugger
   
@@ -356,7 +356,7 @@ export function getCodingInstructions(): string {
   **Example usage:**
   \`task(description="Debug the login function that's throwing a TypeError when user credentials are invalid", subagent_type="debugger")\`
   
-  ### test-generator
+  ### testGenerator
   
   **When to use:**
   - After implementing new functionality that needs testing
@@ -371,7 +371,7 @@ export function getCodingInstructions(): string {
   - Ensures good test coverage and quality
   
   **Example usage:**
-  \`task(description="Generate comprehensive unit tests for the UserService class including edge cases", subagent_type="test-generator")\`
+  \`task(description="Generate comprehensive unit tests for the UserService class including edge cases", subagent_type="testGenerator")\`
   
   ### General Guidelines for All Sub-Agents
   

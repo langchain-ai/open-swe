@@ -46,7 +46,7 @@ export function createAgentPostModelHook() {
 
       // Skip tool calls without a name
       if (!toolCall.name) {
-        continue;
+        throw new Error("Tool call has no name");
       }
 
       if (WRITE_COMMANDS.has(toolName)) {

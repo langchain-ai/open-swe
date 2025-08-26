@@ -21,7 +21,7 @@ You can use bash commands to run linters, formatters, and other code analysis to
 Be constructive and educational in your feedback. Focus on helping improve the code quality.`;
 
 const codeReviewerAgent: SubAgent = {
-  name: "code-reviewer",
+  name: "codeReviewer",
   description:
     "Expert code reviewer that analyzes code in any programming language for quality, security, performance, and best practices. Use this when you need detailed code analysis and improvement suggestions.",
   prompt: codeReviewerPrompt,
@@ -48,7 +48,7 @@ Use bash commands to run language-specific test frameworks and verify that tests
 Always verify that your tests can run successfully and provide meaningful feedback.`;
 
 const testGeneratorAgent: SubAgent = {
-  name: "test-generator",
+  name: "testGenerator",
   description:
     "Expert test engineer that creates comprehensive test suites for any programming language. Use when you need to generate thorough test suites for your code.",
   prompt: testGeneratorPrompt,
