@@ -1,7 +1,7 @@
 import type { SubAgent } from "deepagents";
 
 // Sub-agent for code review and analysis
-const code_reviewer_prompt = `You are an expert code reviewer for all programming languages. Your job is to analyze code for:
+const codeReviewerPrompt = `You are an expert code reviewer for all programming languages. Your job is to analyze code for:
 
 1. **Code Quality**: Check for clean, readable, and maintainable code
 2. **Best Practices**: Ensure adherence to language-specific best practices and conventions
@@ -20,16 +20,16 @@ When reviewing code, provide:
 You can use bash commands to run linters, formatters, and other code analysis tools for any language.
 Be constructive and educational in your feedback. Focus on helping improve the code quality.`;
 
-const code_reviewer_agent: SubAgent = {
+const codeReviewerAgent: SubAgent = {
   name: "code-reviewer",
   description:
     "Expert code reviewer that analyzes code in any programming language for quality, security, performance, and best practices. Use this when you need detailed code analysis and improvement suggestions.",
-  prompt: code_reviewer_prompt,
+  prompt: codeReviewerPrompt,
   tools: ["execute_bash"],
 };
 
 // Sub-agent for test generation
-const test_generator_prompt = `You are an expert test engineer for all programming languages. Your job is to create comprehensive test suites for any codebase.
+const testGeneratorPrompt = `You are an expert test engineer for all programming languages. Your job is to create comprehensive test suites for any codebase.
 
 When generating tests:
 1. **Test Coverage**: Create tests that cover all functions, methods, and edge cases
@@ -47,12 +47,12 @@ Test categories to consider:
 Use bash commands to run language-specific test frameworks and verify that tests execute successfully.
 Always verify that your tests can run successfully and provide meaningful feedback.`;
 
-const test_generator_agent: SubAgent = {
+const testGeneratorAgent: SubAgent = {
   name: "test-generator",
   description:
     "Expert test engineer that creates comprehensive test suites for any programming language. Use when you need to generate thorough test suites for your code.",
-  prompt: test_generator_prompt,
+  prompt: testGeneratorPrompt,
   tools: ["execute_bash"],
 };
 
-export { code_reviewer_agent, test_generator_agent };
+export { codeReviewerAgent, testGeneratorAgent };

@@ -1,7 +1,7 @@
 import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { interrupt } from "@langchain/langgraph";
 import { WRITE_COMMANDS } from "./constants.js";
-import { CodingAgentStateHelpers, type CodingAgentStateType } from "./state.js";
+import { AgentStateHelpers, type CodingAgentStateType } from "./state.js";
 
 interface StateType extends CodingAgentStateType {
   todos: any[];
@@ -15,15 +15,12 @@ interface ToolCall {
   [key: string]: any;
 }
 
-export function createCodingAgentPostModelHook() {
+export function createAgentPostModelHook() {
   /**
    * Post model hook that checks for write tool calls and uses caching to avoid
    * redundant approval prompts for the same command/directory combinations.
    */
-  async function postModelHook(
-    state: StateType,
-    _model?: any,
-  ): Promise<StateType> {
+  async function postModelHook(state: StateType): Promise<StateType> {
     // Get the last message from the state
     const messages = state.messages || [];
     if (messages.length === 0) {
@@ -59,12 +56,10 @@ export function createCodingAgentPostModelHook() {
 
       if (WRITE_COMMANDS.has(toolName)) {
         // Check if this command/directory combination has been approved before
-        if (
-          CodingAgentStateHelpers.isOperationApproved(state, toolName, toolArgs)
-        ) {
+        if (AgentStateHelpers.isOperationApproved(state, toolName, toolArgs)) {
           approvedToolCalls.push(toolCall);
         } else {
-          const approvalKey = CodingAgentStateHelpers.getApprovalKey(
+          const approvalKey = AgentStateHelpers.getApprovalKey(
             toolName,
             toolArgs,
           );
@@ -76,11 +71,7 @@ export function createCodingAgentPostModelHook() {
           });
 
           if (isApproved) {
-            CodingAgentStateHelpers.addApprovedOperation(
-              state,
-              toolName,
-              toolArgs,
-            );
+            AgentStateHelpers.addApprovedOperation(state, toolName, toolArgs);
             approvedToolCalls.push(toolCall);
           } else {
             continue;

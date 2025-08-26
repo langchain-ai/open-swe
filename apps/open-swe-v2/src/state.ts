@@ -20,7 +20,7 @@ export type CodingAgentStateType = z.infer<typeof CodingAgentState>;
 /**
  * Helper functions for the coding agent state
  */
-export class CodingAgentStateHelpers {
+export class AgentStateHelpers {
   static getApprovalKey(command: Command, args: CommandArgs): ApprovalKey {
     let targetDir: string | null = null;
 

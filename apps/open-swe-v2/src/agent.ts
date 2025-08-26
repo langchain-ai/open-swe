@@ -1,9 +1,9 @@
 import "@langchain/langgraph/zod";
 import { createDeepAgent } from "deepagents";
 import "dotenv/config";
-import { code_reviewer_agent, test_generator_agent } from "./subagents.js";
+import { codeReviewerAgent, testGeneratorAgent } from "./subagents.js";
 import { getCodingInstructions } from "./prompts.js";
-import { createCodingAgentPostModelHook } from "./post-model-hook.js";
+import { createAgentPostModelHook } from "./post-model-hook.js";
 import { CodingAgentState } from "./state.js";
 import { executeBash, httpRequest, webSearch } from "./tools.js";
 
@@ -15,12 +15,12 @@ if (process.env.LANGCHAIN_TRACING_V2 !== "false") {
 }
 
 const codingInstructions = getCodingInstructions();
-const postModelHook = createCodingAgentPostModelHook();
+const postModelHook = createAgentPostModelHook();
 
 const agent = createDeepAgent({
   tools: [executeBash, httpRequest, webSearch],
   instructions: codingInstructions,
-  subagents: [code_reviewer_agent, test_generator_agent],
+  subagents: [codeReviewerAgent, testGeneratorAgent],
   isLocalFileSystem: true,
   postModelHook: postModelHook,
   stateSchema: CodingAgentState,

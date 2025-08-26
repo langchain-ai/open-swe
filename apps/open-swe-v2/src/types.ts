@@ -60,7 +60,7 @@ export const ApprovedOperationsSchema = z
 
 export type ApprovedOperations = z.infer<typeof ApprovedOperationsSchema>;
 
-// Note: CodingAgentStateHelpers class uses static methods, so no interface implementation is needed
+// Note: AgentStateHelpers class uses static methods, so no interface implementation is needed
 // The method signatures are:
 // - static getApprovalKey(command: Command, args: CommandArgs): ApprovalKey
 // - static isOperationApproved(state: CodingAgentStateType, command: Command, args: CommandArgs): boolean
