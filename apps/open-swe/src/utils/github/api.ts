@@ -230,7 +230,7 @@ export async function createPullRequest({
   }
 
   try {
-    logger.info("Adding 'open-swe' label to pull request", {
+    logger.info("Adding 'agentmojo' label to pull request", {
       pullRequestNumber: pullRequest.number,
     });
     await octokit.issues.addLabels({
@@ -239,11 +239,11 @@ export async function createPullRequest({
       issue_number: pullRequest.number,
       labels: [getOpenSWELabel()],
     });
-    logger.info("Added 'open-swe' label to pull request", {
+    logger.info("Added 'agentmojo' label to pull request", {
       pullRequestNumber: pullRequest.number,
     });
   } catch (labelError) {
-    logger.warn("Failed to add 'open-swe' label to pull request", {
+    logger.warn("Failed to add 'agentmojo' label to pull request", {
       pullRequestNumber: pullRequest.number,
       labelError,
     });

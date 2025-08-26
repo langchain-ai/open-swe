@@ -1,37 +1,37 @@
 /**
- * @returns "open-swe" or "open-swe-dev" based on the NODE_ENV.
+ * @returns "agentmojo" or "agentmojo-dev" based on the NODE_ENV.
  */
-export function getOpenSWELabel(): "open-swe" | "open-swe-dev" {
-  return process.env.NODE_ENV === "production" ? "open-swe" : "open-swe-dev";
+export function getOpenSWELabel(): "agentmojo" | "agentmojo-dev" {
+  return process.env.NODE_ENV === "production" ? "agentmojo" : "agentmojo-dev";
 }
 
 /**
- * @returns "open-swe-auto" or "open-swe-auto-dev" based on the NODE_ENV.
+ * @returns "agentmojo-auto" or "agentmojo-auto-dev" based on the NODE_ENV.
  */
 export function getOpenSWEAutoAcceptLabel():
-  | "open-swe-auto"
-  | "open-swe-auto-dev" {
+  | "agentmojo-auto"
+  | "agentmojo-auto-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-auto"
-    : "open-swe-auto-dev";
+    ? "agentmojo-auto"
+    : "agentmojo-auto-dev";
 }
 
 /**
- * @returns "open-swe-max" or "open-swe-max-dev" based on the NODE_ENV.
+ * @returns "agentmojo-max" or "agentmojo-max-dev" based on the NODE_ENV.
  */
-export function getOpenSWEMaxLabel(): "open-swe-max" | "open-swe-max-dev" {
+export function getOpenSWEMaxLabel(): "agentmojo-max" | "agentmojo-max-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-max"
-    : "open-swe-max-dev";
+    ? "agentmojo-max"
+    : "agentmojo-max-dev";
 }
 
 /**
- * @returns "open-swe-max-auto" or "open-swe-max-auto-dev" based on the NODE_ENV.
+ * @returns "agentmojo-max-auto" or "agentmojo-max-auto-dev" based on the NODE_ENV.
  */
 export function getOpenSWEMaxAutoAcceptLabel():
-  | "open-swe-max-auto"
-  | "open-swe-max-auto-dev" {
+  | "agentmojo-max-auto"
+  | "agentmojo-max-auto-dev" {
   return process.env.NODE_ENV === "production"
-    ? "open-swe-max-auto"
-    : "open-swe-max-auto-dev";
+    ? "agentmojo-max-auto"
+    : "agentmojo-max-auto-dev";
 }

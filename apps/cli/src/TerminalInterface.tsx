@@ -17,7 +17,7 @@ const TerminalInterface: React.FC<TerminalInterfaceProps> = ({
   return (
     <Box flexDirection="column" padding={1}>
       <Box justifyContent="center" marginBottom={0}>
-        <Text bold>LangChain Open SWE CLI</Text>
+        <Text bold>LangChain AgentMojo CLI</Text>
       </Box>
       <Box flexDirection="column">
         <Text>Describe your coding task in as much detail as possible...</Text>

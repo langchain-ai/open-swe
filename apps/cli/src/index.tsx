@@ -30,8 +30,8 @@ import { TraceReplayService } from "./trace_replay.js";
 const program = new Command();
 
 program
-  .name("open-swe")
-  .description("Open SWE CLI - Local Mode")
+  .name("agentmojo")
+  .description("AgentMojo CLI - Local Mode")
   .version(OPEN_SWE_CLI_VERSION)
   .option("--replay <file>", "Replay from LangSmith trace file")
   .option("--speed <ms>", "Replay speed in milliseconds", "500")

@@ -105,11 +105,11 @@ export async function getMissingMessages(
   return [...(issueMessage ? [issueMessage] : []), ...untrackedCommentMessages];
 }
 
-export const DEFAULT_ISSUE_TITLE = "New Open SWE Request";
-export const ISSUE_TITLE_OPEN_TAG = "<open-swe-issue-title>";
-export const ISSUE_TITLE_CLOSE_TAG = "</open-swe-issue-title>";
-export const ISSUE_CONTENT_OPEN_TAG = "<open-swe-issue-content>";
-export const ISSUE_CONTENT_CLOSE_TAG = "</open-swe-issue-content>";
+export const DEFAULT_ISSUE_TITLE = "New AgentMojo Request";
+export const ISSUE_TITLE_OPEN_TAG = "<agentmojo-issue-title>";
+export const ISSUE_TITLE_CLOSE_TAG = "</agentmojo-issue-title>";
+export const ISSUE_CONTENT_OPEN_TAG = "<agentmojo-issue-content>";
+export const ISSUE_CONTENT_CLOSE_TAG = "</agentmojo-issue-content>";
 
 export function extractIssueTitleAndContentFromMessage(content: string) {
   let messageTitle: string | null = null;

@@ -9,11 +9,11 @@ import { createLogger, LogLevel } from "../logger.js";
 import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 
-export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";
-export const TASK_CLOSE_TAG = "</open-swe-do-not-edit-task-plan>";
+export const TASK_OPEN_TAG = "<agentmojo-do-not-edit-task-plan>";
+export const TASK_CLOSE_TAG = "</agentmojo-do-not-edit-task-plan>";
 
-export const PROPOSED_PLAN_OPEN_TAG = "<open-swe-do-not-edit-proposed-plan>";
-export const PROPOSED_PLAN_CLOSE_TAG = "</open-swe-do-not-edit-proposed-plan>";
+export const PROPOSED_PLAN_OPEN_TAG = "<agentmojo-do-not-edit-proposed-plan>";
+export const PROPOSED_PLAN_CLOSE_TAG = "</agentmojo-do-not-edit-proposed-plan>";
 
 export const DETAILS_OPEN_TAG = "<details>";
 export const DETAILS_CLOSE_TAG = "</details>";

@@ -10,8 +10,8 @@ import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPlan");
 
-const PLAN_MESSAGE_OPEN_TAG = "<open-swe-plan-message>";
-const PLAN_MESSAGE_CLOSE_TAG = "</open-swe-plan-message>";
+const PLAN_MESSAGE_OPEN_TAG = "<agentmojo-plan-message>";
+const PLAN_MESSAGE_CLOSE_TAG = "</agentmojo-plan-message>";
 
 function formatBodyWithPlanMessage(body: string, message: string): string {
   if (

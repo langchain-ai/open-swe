@@ -38,7 +38,7 @@ export function createDevMetadataComment(runId: string, threadId: string) {
 }
 
 export function mentionsGitHubUserForTrigger(commentBody: string): boolean {
-  return /@open-swe\b/.test(commentBody);
+  return /@agentmojo\b/.test(commentBody);
 }
 
 export function extractLinkedIssues(prBody: string): number[] {

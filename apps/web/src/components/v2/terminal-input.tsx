@@ -255,7 +255,7 @@ export function TerminalInput({
     <div className="border-border bg-muted hover:border-muted-foreground/50 hover:bg-muted/80 focus-within:border-muted-foreground/70 focus-within:bg-muted/80 focus-within:shadow-muted-foreground/20 rounded-md border p-2 font-mono text-xs transition-all duration-200 focus-within:shadow-md">
       <div className="text-foreground flex items-center gap-1">
         <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200">
-          <span className="text-muted-foreground">open-swe</span>
+          <span className="text-muted-foreground">agentmojo</span>
           <span className="text-muted-foreground/70">@</span>
           <span className="text-muted-foreground">github</span>
         </div>

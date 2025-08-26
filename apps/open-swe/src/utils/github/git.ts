@@ -119,7 +119,7 @@ export function getBranchName(configOrThreadId: GraphConfig | string): string {
     throw new Error("No thread ID provided");
   }
 
-  return `open-swe/${threadId}`;
+  return `agentmojo/${threadId}`;
 }
 
 export async function getChangedFilesStatus(
