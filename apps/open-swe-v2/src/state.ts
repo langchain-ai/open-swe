@@ -1,3 +1,4 @@
+import "@langchain/langgraph/zod";
 import { z } from "zod";
 import * as path from "path";
 import { DeepAgentState } from "deepagents";
@@ -10,7 +11,6 @@ const ApprovedOperationsSchema = z
   })
   .optional();
 
-// Extend the base DeepAgentState with coding-specific fields
 export const CodingAgentState: any = DeepAgentState.extend({
   approved_operations: ApprovedOperationsSchema,
 });
