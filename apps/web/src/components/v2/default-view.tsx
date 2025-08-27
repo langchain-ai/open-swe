@@ -226,7 +226,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   </TooltipIconButton>
                   <TooltipIconButton
                     variant={customFramework ? "default" : "ghost"}
-                    tooltip="Use Langgraph Engineer when writing Langgraph code for better results"
+                    tooltip="Use LangGraph Engineer when writing LangGraph code for better results"
                     className={cn(
                       "transition-colors duration-200",
                       customFramework

@@ -1,3 +1,5 @@
+import { cn } from '@/lib/utils';
+
 export function OpenSWELogo({
   className,
   width = 130,
@@ -16,7 +18,7 @@ export function OpenSWELogo({
       viewBox="0 0 1625 250"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      className={className}
+      className={cn(className)}
       style={style}
     >
       <path
