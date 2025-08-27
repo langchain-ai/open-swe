@@ -1,9 +1,9 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { loadModel } from "../llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { createLogger, LogLevel } from "../logger.js";
 import { DOCUMENT_TOC_GENERATION_PROMPT } from "./prompt.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { truncateOutput } from "../truncate-outputs.js";
 
 const logger = createLogger(LogLevel.INFO, "McpOutputHandler");

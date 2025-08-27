@@ -1,5 +1,5 @@
-import { GITHUB_PAT } from "@open-swe/shared/constants";
-import { decryptSecret } from "@open-swe/shared/crypto";
+import { GITHUB_PAT } from "@openswe/shared/constants";
+import { decryptSecret } from "@openswe/shared/crypto";
 
 /**
  * Simple helper to check if request has GitHub PAT and return decrypted value

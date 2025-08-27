@@ -4,22 +4,22 @@ import {
   GraphConfig,
   TargetRepository,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+} from "@openswe/shared/open-swe/types";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { getSandboxErrorFields } from "../sandbox-error-fields.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
 import { withRetry } from "../retry.js";
 import {
   addPullRequestNumberToActiveTask,
   getActiveTask,
   getPullRequestNumberFromActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import { createPullRequest, getBranch } from "./api.js";
 import { addTaskPlanToIssue } from "./issue-task.js";
 import { DEFAULT_EXCLUDED_PATTERNS } from "./constants.js";
 import { escapeRegExp } from "../string-utils.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../shell-executor/index.js";
 import { shouldCreateIssue } from "../should-create-issue.js";
 

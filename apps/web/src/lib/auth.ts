@@ -3,7 +3,7 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_TOKEN_TYPE_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 
 export const GITHUB_INSTALLATION_STATE_COOKIE = "github_installation_state";
 export const GITHUB_INSTALLATION_RETURN_TO_COOKIE = "installation_return_to";

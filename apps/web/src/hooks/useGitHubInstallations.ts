@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 import { getCookie } from "@/lib/utils";
 import { Endpoints } from "@octokit/types";
 

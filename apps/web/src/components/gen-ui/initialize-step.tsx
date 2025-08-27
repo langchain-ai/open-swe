@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Step } from "@open-swe/shared/open-swe/custom-node-events";
+import { Step } from "@openswe/shared/open-swe/custom-node-events";
 
 type InitializeStepProps = {
   status: "loading" | "generating" | "done";

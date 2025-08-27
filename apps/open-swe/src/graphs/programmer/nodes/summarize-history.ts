@@ -4,9 +4,9 @@ import {
   GraphState,
   GraphUpdate,
   PlanItem,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { loadModel } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   AIMessage,
   BaseMessage,
@@ -15,10 +15,10 @@ import {
 } from "@langchain/core/messages";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { createConversationHistorySummaryToolFields } from "@open-swe/shared/open-swe/tools";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
+import { createConversationHistorySummaryToolFields } from "@openswe/shared/open-swe/tools";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
 import { trackCachePerformance } from "../../../utils/caching.js";

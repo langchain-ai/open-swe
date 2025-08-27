@@ -3,9 +3,9 @@ import {
   createReplyToCommentToolFields,
   createReplyToReviewCommentToolFields,
   createReplyToReviewToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
 import {
   quoteReplyToPullRequestComment,
   quoteReplyToReview,
@@ -13,7 +13,7 @@ import {
 } from "../utils/github/api.js";
 import { getRecentUserRequest } from "../utils/user-request.js";
 import { RequestSource } from "../constants.js";
-import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
+import { GITHUB_USER_LOGIN_HEADER } from "@openswe/shared/constants";
 
 export function shouldIncludeReviewCommentTool(
   state: GraphState,

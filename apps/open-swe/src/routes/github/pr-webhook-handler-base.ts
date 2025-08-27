@@ -3,7 +3,7 @@ import {
   WebhookHandlerContext,
 } from "./webhook-handler-base.js";
 import { RequestSource } from "../../constants.js";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import {
   mentionsGitHubUserForTrigger,
   extractLinkedIssues,
@@ -18,7 +18,7 @@ import {
   SimpleTriggerComment,
 } from "./types.js";
 import { GitHubPullRequestGet } from "../../utils/github/types.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { GITHUB_TRIGGER_USERNAME } from "./constants.js";
 
 export interface PRWebhookContext extends WebhookHandlerContext {

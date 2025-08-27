@@ -1,13 +1,13 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { createInstallDependenciesToolFields } from "@open-swe/shared/open-swe/tools";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { createInstallDependenciesToolFields } from "@openswe/shared/open-swe/tools";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "InstallDependenciesTool");
 

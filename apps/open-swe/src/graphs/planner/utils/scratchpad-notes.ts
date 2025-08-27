@@ -1,5 +1,5 @@
 import { BaseMessage, isAIMessage } from "@langchain/core/messages";
-import { createScratchpadFields } from "@open-swe/shared/open-swe/tools";
+import { createScratchpadFields } from "@openswe/shared/open-swe/tools";
 import z from "zod";
 
 export function getScratchpad(messages: BaseMessage[]): string[] {

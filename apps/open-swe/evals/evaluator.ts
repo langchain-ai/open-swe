@@ -2,11 +2,11 @@ import "dotenv/config";
 import { OpenSWEInput, CodeTestDetails } from "./open-swe-types.js";
 import { Daytona, Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
-import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@openswe/shared/open-swe/types";
 import { cloneRepo } from "../src/utils/github/git.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
 import {
   runRuffLint,

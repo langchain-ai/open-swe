@@ -1,6 +1,6 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "EnvSetup");
 

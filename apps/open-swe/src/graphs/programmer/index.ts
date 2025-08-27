@@ -4,7 +4,7 @@ import {
   GraphConfig,
   GraphConfiguration,
   GraphState,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   generateAction,
   takeAction,
@@ -20,8 +20,8 @@ import { BaseMessage, isAIMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
 import { graph as reviewerGraph } from "../reviewer/index.js";
 import { getRemainingPlanItems } from "../../utils/current-task.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 
 function lastMessagesMissingToolCalls(
   messages: BaseMessage[],

@@ -1,8 +1,8 @@
 import { tool } from "@langchain/core/tools";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { createGetURLContentToolFields } from "@open-swe/shared/open-swe/tools";
+import { createGetURLContentToolFields } from "@openswe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { parseUrl } from "../utils/url-parser.js";
 
 const logger = createLogger(LogLevel.INFO, "GetURLContentTool");

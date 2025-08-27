@@ -4,13 +4,13 @@ import {
   GraphConfig,
   GraphState,
   GraphUpdate,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END, interrupt, Command } from "@langchain/langgraph";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   GITHUB_USER_LOGIN_HEADER,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import {
   getSandboxWithErrorHandling,
   stopSandbox,
@@ -19,10 +19,10 @@ import { getOpenSweAppUrl } from "../../../utils/url-helpers.js";
 import {
   CustomNodeEvent,
   REQUEST_HELP_NODE_ID,
-} from "@open-swe/shared/open-swe/custom-node-events";
+} from "@openswe/shared/open-swe/custom-node-events";
 import { postGitHubIssueComment } from "../../../utils/github/plan.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 const constructDescription = (helpRequest: string): string => {
   return `The agent has requested help. Here is the help request:

@@ -4,21 +4,21 @@ import {
   GraphConfig,
   GraphState,
   GraphUpdate,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { Command } from "@langchain/langgraph";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import {
   completePlanItem,
   getActivePlanItems,
   getActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import {
   getCurrentPlanItem,
   getRemainingPlanItems,
 } from "../../../utils/current-task.js";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,

@@ -9,9 +9,9 @@ import {
   MessageContent,
   ToolMessage,
 } from "@langchain/core/messages";
-import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, ModelTokenData } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "./logger.js";
-import { calculateCostSavings } from "@open-swe/shared/caching";
+import { calculateCostSavings } from "@openswe/shared/caching";
 
 const logger = createLogger(LogLevel.INFO, "Caching");
 

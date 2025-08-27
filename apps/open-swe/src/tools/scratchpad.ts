@@ -1,5 +1,5 @@
 import { tool } from "@langchain/core/tools";
-import { createScratchpadFields } from "@open-swe/shared/open-swe/tools";
+import { createScratchpadFields } from "@openswe/shared/open-swe/tools";
 
 export function createScratchpadTool(whenMessage: string) {
   const scratchpadTool = tool(

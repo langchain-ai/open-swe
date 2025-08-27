@@ -3,7 +3,7 @@ import {
   GITHUB_INSTALLATION_ID_COOKIE,
   GITHUB_TOKEN_TYPE_COOKIE,
   GITHUB_TOKEN_COOKIE,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { getInstallationCookieOptions } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 

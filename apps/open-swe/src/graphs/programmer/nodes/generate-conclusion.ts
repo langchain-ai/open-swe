@@ -3,10 +3,10 @@ import {
   GraphState,
   GraphUpdate,
   PlanItem,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { loadModel } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { getMessageString } from "../../../utils/message/content.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
@@ -14,11 +14,11 @@ import {
   completeTask,
   getActivePlanItems,
   getActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { Command, END } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
