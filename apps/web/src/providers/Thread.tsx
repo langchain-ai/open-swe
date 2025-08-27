@@ -11,7 +11,7 @@ import {
   useEffect,
 } from "react";
 import { createClient } from "./client";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 
 interface ThreadContextType {
   threads: Thread<GraphState>[];

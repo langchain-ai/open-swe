@@ -9,13 +9,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import {
   GraphState,
   CacheMetrics,
   ModelTokenData,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { ActionsRenderer } from "./actions-renderer";
 import { ThemeToggle } from "../theme-toggle";
 import {
@@ -26,7 +26,7 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
   PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { useThreadStatus } from "@/hooks/useThreadStatus";
 import { cn } from "@/lib/utils";
 
@@ -38,16 +38,16 @@ import { ManagerChat } from "./manager-chat";
 import { CancelStreamButton } from "./cancel-stream-button";
 import { ProgressBar } from "@/components/tasks/progress-bar";
 import { TasksSidebar } from "@/components/tasks";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
 import { ErrorState } from "./types";
 import {
   CustomNodeEvent,
   isCustomNodeEvent,
-} from "@open-swe/shared/open-swe/custom-node-events";
+} from "@openswe/shared/open-swe/custom-node-events";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
 import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { useUser } from "@/hooks/useUser";
 
 interface ThreadViewProps {
@@ -279,7 +279,7 @@ export function ThreadView({
       (plannerStream.values.programmerSession.runId !==
         programmerSession?.runId ||
         plannerStream.values.programmerSession.threadId !==
-          programmerSession?.threadId)
+        programmerSession?.threadId)
     ) {
       setProgrammerSession?.(plannerStream.values.programmerSession);
 
@@ -351,9 +351,9 @@ export function ThreadView({
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage
     ? [
-        optimisticMessage,
-        ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
-      ]
+      optimisticMessage,
+      ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
+    ]
     : filteredMessages;
 
   const shouldDisableManagerInput = !hasGitHubIssue

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInstallationToken } from "@open-swe/shared/github/auth";
+import { getInstallationToken } from "@openswe/shared/github/auth";
 import { getInstallationRepositories, Repository } from "@/utils/github";
-import { GITHUB_INSTALLATION_ID_COOKIE } from "@open-swe/shared/constants";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 
 /**
  * Fetches repositories accessible to the GitHub App installation

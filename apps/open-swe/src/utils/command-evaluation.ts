@@ -1,6 +1,6 @@
 import { createLogger, LogLevel } from "./logger.js";
 import { createCommandSafetyEvaluator } from "../tools/command-safety-evaluator.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   formatGrepCommand,
   formatShellCommand,
@@ -14,7 +14,7 @@ import {
   createSearchDocumentForToolFields,
   createGetURLContentToolFields,
   createTextEditorToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import { ToolCall } from "@langchain/core/messages/tool";
 import { z } from "zod";
 

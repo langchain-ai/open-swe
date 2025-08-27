@@ -6,8 +6,8 @@ import { ThreadErrorCard } from "@/components/v2/thread-error-card";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { use, useEffect, useRef, useState } from "react";
@@ -65,12 +65,12 @@ export default function ThreadPage({
   // We need a thread object for the hook, so use a dummy if not found
   const dummyThread = thread ||
     initialFetchedThread || {
-      thread_id,
-      values: {},
-      status: "idle" as const,
-      updated_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-    };
+    thread_id,
+    values: {},
+    status: "idle" as const,
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  };
 
   const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,

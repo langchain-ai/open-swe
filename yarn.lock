@@ -4133,16 +4133,25 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@open-swe/agent-v2@workspace:apps/open-swe-v2":
+"@openapi-contrib/openapi-schema-to-json-schema@npm:~3.2.0":
+  version: 3.2.0
+  resolution: "@openapi-contrib/openapi-schema-to-json-schema@npm:3.2.0"
+  dependencies:
+    fast-deep-equal: ^3.1.3
+  checksum: c47cbf85bee3e38e06a627efbbdffd78c95cdadebf6d935092c8ff616e31a69fcfd739a5d9cca5b4b2c6aef49f8dbced6c300eac1f8ade66b3fab403df19ccb2
+  languageName: node
+  linkType: hard
+
+"@openswe/agent-v2@workspace:apps/open-swe-v2":
   version: 0.0.0-use.local
-  resolution: "@open-swe/agent-v2@workspace:apps/open-swe-v2"
+  resolution: "@openswe/agent-v2@workspace:apps/open-swe-v2"
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
     "@langchain/core": ^0.3.65
     "@langchain/langgraph-cli": ^0.0.47
-    "@open-swe/shared": "*"
+    "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/jest": ^29.5.0
     "@types/node": ^22.13.5
@@ -4163,9 +4172,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@open-swe/agent@workspace:apps/open-swe":
+"@openswe/agent@workspace:apps/open-swe":
   version: 0.0.0-use.local
-  resolution: "@open-swe/agent@workspace:apps/open-swe"
+  resolution: "@openswe/agent@workspace:apps/open-swe"
   dependencies:
     "@daytonaio/sdk": ^0.25.5
     "@eslint/eslintrc": ^3.1.0
@@ -4185,7 +4194,7 @@ __metadata:
     "@octokit/core": ^7.0.2
     "@octokit/rest": ^22.0.0
     "@octokit/webhooks": ^14.0.2
-    "@open-swe/shared": "*"
+    "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/bcrypt": ^6.0.0
     "@types/commander": ^2.12.5
@@ -4218,14 +4227,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@open-swe/cli@workspace:apps/cli":
+"@openswe/cli@workspace:apps/cli":
   version: 0.0.0-use.local
-  resolution: "@open-swe/cli@workspace:apps/cli"
+  resolution: "@openswe/cli@workspace:apps/cli"
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@langchain/langgraph-sdk": ^0.0.95
-    "@open-swe/shared": "*"
+    "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/node": ^24.1.0
     "@types/react": ^19.1.8
@@ -4248,18 +4257,18 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@open-swe/docs@workspace:apps/docs":
+"@openswe/docs@workspace:apps/docs":
   version: 0.0.0-use.local
-  resolution: "@open-swe/docs@workspace:apps/docs"
+  resolution: "@openswe/docs@workspace:apps/docs"
   dependencies:
     mint: ^4.2.12
     prettier: ^3.5.2
   languageName: unknown
   linkType: soft
 
-"@open-swe/shared@*, @open-swe/shared@workspace:packages/shared":
+"@openswe/shared@*, @openswe/shared@workspace:packages/shared":
   version: 0.0.0-use.local
-  resolution: "@open-swe/shared@workspace:packages/shared"
+  resolution: "@openswe/shared@workspace:packages/shared"
   dependencies:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
@@ -4289,9 +4298,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@open-swe/web@workspace:apps/web":
+"@openswe/web@workspace:apps/web":
   version: 0.0.0-use.local
-  resolution: "@open-swe/web@workspace:apps/web"
+  resolution: "@openswe/web@workspace:apps/web"
   dependencies:
     "@eslint/js": ^9.19.0
     "@langchain/core": ^0.3.65
@@ -4299,7 +4308,7 @@ __metadata:
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/app": ^16.0.1
     "@octokit/types": ^14.1.0
-    "@open-swe/shared": "*"
+    "@openswe/shared": "*"
     "@radix-ui/react-alert-dialog": ^1.1.14
     "@radix-ui/react-avatar": ^1.1.3
     "@radix-ui/react-collapsible": ^1.1.11
@@ -4371,15 +4380,6 @@ __metadata:
     zustand: ^5.0.5
   languageName: unknown
   linkType: soft
-
-"@openapi-contrib/openapi-schema-to-json-schema@npm:~3.2.0":
-  version: 3.2.0
-  resolution: "@openapi-contrib/openapi-schema-to-json-schema@npm:3.2.0"
-  dependencies:
-    fast-deep-equal: ^3.1.3
-  checksum: c47cbf85bee3e38e06a627efbbdffd78c95cdadebf6d935092c8ff616e31a69fcfd739a5d9cca5b4b2c6aef49f8dbced6c300eac1f8ade66b3fab403df19ccb2
-  languageName: node
-  linkType: hard
 
 "@oxlint/darwin-arm64@npm:1.7.0":
   version: 1.7.0

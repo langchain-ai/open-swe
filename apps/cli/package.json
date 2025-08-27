@@ -1,5 +1,5 @@
 {
-  "name": "@open-swe/cli",
+  "name": "@openswe/cli",
   "version": "0.0.0",
   "license": "MIT",
   "private": true,
@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@langchain/langgraph-sdk": "^0.0.95",
-    "@open-swe/shared": "*",
+    "@openswe/shared": "*",
     "commander": "^12.0.0",
     "dotenv": "^16.6.1",
     "ink": "^6.0.1",

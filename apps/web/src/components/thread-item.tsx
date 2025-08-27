@@ -8,7 +8,7 @@ import { StatusIndicator } from "@/components/status-indicator";
 import { GitHubSVG } from "./icons/github";
 import { useQueryState } from "nuqs";
 import { Thread } from "@langchain/langgraph-sdk";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { getThreadTasks, getThreadTitle } from "@/lib/thread";
 
 interface ThreadItemProps {

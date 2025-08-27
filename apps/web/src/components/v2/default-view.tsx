@@ -20,13 +20,13 @@ import { ApiKeyBanner } from "../api-key-banner";
 import { IssuesRequiredBanner } from "../github/forked-repository-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { UserPopover } from "../user-popover";
 
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";

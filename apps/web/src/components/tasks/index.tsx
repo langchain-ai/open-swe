@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProgressBar } from "./progress-bar";
-import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { PlanItem, TaskPlan } from "@openswe/shared/open-swe/types";
 import { BasicMarkdownText } from "../thread/markdown-text";
 
 interface TasksSidebarProps {
@@ -314,11 +314,11 @@ export function TasksSidebar({
                     className={cn(
                       "rounded-lg border p-3",
                       state === "current" &&
-                        "border-orange-200 bg-orange-50 dark:border-orange-800/50 dark:bg-orange-950/20",
+                      "border-orange-200 bg-orange-50 dark:border-orange-800/50 dark:bg-orange-950/20",
                       state === "completed" &&
-                        "border-green-200/80 bg-green-50/60 dark:border-green-800/30 dark:bg-green-950/15",
+                      "border-green-200/80 bg-green-50/60 dark:border-green-800/30 dark:bg-green-950/15",
                       state === "remaining" &&
-                        "bg-muted dark:bg-muted border-gray-200 dark:border-gray-700",
+                      "bg-muted dark:bg-muted border-gray-200 dark:border-gray-700",
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -342,11 +342,11 @@ export function TasksSidebar({
                               className={cn(
                                 "rounded-full px-2 py-1 text-xs",
                                 state === "completed" &&
-                                  "bg-green-100/70 text-green-600 dark:bg-green-900/20 dark:text-green-300/90",
+                                "bg-green-100/70 text-green-600 dark:bg-green-900/20 dark:text-green-300/90",
                                 state === "current" &&
-                                  "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+                                "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
                                 state === "remaining" &&
-                                  "bg-muted dark:bg-muted text-gray-700 dark:text-gray-300",
+                                "bg-muted dark:bg-muted text-gray-700 dark:text-gray-300",
                               )}
                             >
                               {state === "completed"

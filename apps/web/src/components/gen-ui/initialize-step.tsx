@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Step } from "@open-swe/shared/open-swe/custom-node-events";
+import { Step } from "@openswe/shared/open-swe/custom-node-events";
 
 type InitializeStepProps = {
   status: "loading" | "generating" | "done";
@@ -110,12 +110,12 @@ export function InitializeStep({
                     {stepStatusIcon[
                       step.status as keyof typeof stepStatusIcon
                     ] ?? (
-                      <div
-                        className={cn(
-                          "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
-                        )}
-                      />
-                    )}
+                        <div
+                          className={cn(
+                            "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
+                          )}
+                        />
+                      )}
                   </span>
                   <span
                     className={cn(

@@ -1,8 +1,8 @@
-import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, ModelTokenData } from "@openswe/shared/open-swe/types";
 import {
   calculateCostSavings,
   tokenDataReducer,
-} from "@open-swe/shared/caching";
+} from "@openswe/shared/caching";
 import { Badge } from "../ui/badge";
 import { Separator } from "../ui/separator";
 import {
@@ -337,9 +337,9 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                     const modelCachePercentage =
                       modelTotalTokens > 0
                         ? (
-                            (modelCachedTokens / modelTotalTokens) *
-                            100
-                          ).toFixed(1)
+                          (modelCachedTokens / modelTotalTokens) *
+                          100
+                        ).toFixed(1)
                         : "0";
 
                     return (

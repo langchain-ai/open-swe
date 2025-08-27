@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { ThreadMetadata } from "@/components/v2/types";
 import { getThreadTitle } from "./thread";
 

@@ -6,7 +6,7 @@ import {
   getOpenSWEMaxAutoAcceptLabel,
 } from "../../utils/github/label.js";
 import { RequestSource } from "../../constants.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 
 class IssueWebhookHandler extends WebhookHandlerBase {
   constructor() {

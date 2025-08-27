@@ -1,4 +1,4 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import {
   createIssueComment,
@@ -6,7 +6,7 @@ import {
   updateIssueComment,
 } from "./api.js";
 import { createLogger, LogLevel } from "../logger.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPlan");
 

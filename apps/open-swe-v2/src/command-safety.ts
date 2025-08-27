@@ -2,7 +2,7 @@ import "@langchain/langgraph/zod";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { StructuredOutputParser } from "@langchain/core/output_parsers";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 
 export const CommandSafetyValidationSchema = z.object({
   is_safe: z.boolean().describe("Whether the command is safe to execute"),

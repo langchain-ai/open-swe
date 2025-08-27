@@ -7,14 +7,14 @@ import {
   GraphConfig,
   TaskPlan,
   PlanItem,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   ActionRequest,
   HumanInterrupt,
   HumanResponse,
 } from "@langchain/langgraph/prebuilt";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { createNewTask } from "@open-swe/shared/open-swe/tasks";
+import { createNewTask } from "@openswe/shared/open-swe/tasks";
 import {
   getInitialUserRequest,
   getRecentUserRequest,
@@ -29,8 +29,8 @@ import {
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_PAT,
-} from "@open-swe/shared/constants";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/constants";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   addProposedPlanToIssue,
@@ -40,10 +40,10 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   ACCEPTED_PLAN_NODE_ID,
   CustomNodeEvent,
-} from "@open-swe/shared/open-swe/custom-node-events";
+} from "@openswe/shared/open-swe/custom-node-events";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import {
   postGitHubIssueComment,
   cleanTaskItems,

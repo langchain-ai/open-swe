@@ -1,5 +1,5 @@
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadStatus } from "./useThreadStatus";
 import { useMemo } from "react";

@@ -17,8 +17,8 @@ import { Skeleton } from "../ui/skeleton";
 import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 import { computeThreadTitle } from "@/lib/thread";
 
@@ -206,11 +206,11 @@ export function ThreadCard({
                   "h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:text-gray-300",
                   getPRStatusColor(thread.pullRequest.status),
                   thread.pullRequest.status === "merged" &&
-                    "hover:bg-purple-100 dark:hover:bg-purple-950",
+                  "hover:bg-purple-100 dark:hover:bg-purple-950",
                   thread.pullRequest.status === "open" &&
-                    "hover:bg-green-100 dark:hover:bg-green-950",
+                  "hover:bg-green-100 dark:hover:bg-green-950",
                   thread.pullRequest.status === "closed" &&
-                    "hover:bg-red-100 dark:hover:bg-red-950",
+                  "hover:bg-red-100 dark:hover:bg-red-950",
                 )}
                 onClick={(e) => {
                   e.stopPropagation();

@@ -4,14 +4,14 @@ import {
   GraphConfig,
   GraphUpdate,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   getModelManager,
   loadModel,
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   createShellTool,
   createApplyPatchTool,
@@ -25,8 +25,8 @@ import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getMessageContentString } from "@openswe/shared/messages";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import {
   CODE_REVIEW_PROMPT,
   DEPENDENCIES_INSTALLED_PROMPT,
@@ -35,7 +35,7 @@ import {
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
 } from "./prompt.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
@@ -52,7 +52,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   BaseMessage,
   BaseMessageLike,

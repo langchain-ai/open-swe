@@ -1,4 +1,4 @@
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import { GITHUB_WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
 
 const IDENTITY_PROMPT = `<identity>

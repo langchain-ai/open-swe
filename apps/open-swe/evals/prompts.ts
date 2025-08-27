@@ -1,8 +1,8 @@
 import { OpenSWEInput } from "./open-swe-types.js";
-import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@openswe/shared/open-swe/types";
 import { HumanMessage } from "@langchain/core/messages";
 import { Octokit } from "@octokit/rest";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 
 async function getRepoReadmeContents(
   targetRepository: TargetRepository,

@@ -2,7 +2,7 @@ import {
   createReplyToCommentToolFields,
   createReplyToReviewCommentToolFields,
   createReplyToReviewToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import {
   PullRequestReviewTriggerData,
   SimpleIssue,

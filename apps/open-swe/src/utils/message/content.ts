@@ -10,7 +10,7 @@ import {
   ToolMessage,
 } from "@langchain/core/messages";
 import { ToolCall } from "@langchain/core/messages/tool";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 
 export function getToolCallsString(toolCalls: ToolCall[] | undefined): string {
   if (!toolCalls?.length) return "";

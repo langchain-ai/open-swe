@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
-import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
+import { createOpenPrToolFields } from "@openswe/shared/open-swe/tools";
 import { z } from "zod";
-import { TargetRepository } from "@open-swe/shared/open-swe/types";
+import { TargetRepository } from "@openswe/shared/open-swe/types";
 
 function constructPullRequestUrl(
   targetRepository: TargetRepository,

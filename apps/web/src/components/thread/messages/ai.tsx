@@ -48,15 +48,15 @@ import {
   createScratchpadFields,
   createTextEditorToolFields,
   createViewToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { OPEN_SWE_STREAM_MODE } from "@open-swe/shared/constants";
-import { CustomNodeEvent } from "@open-swe/shared/open-swe/custom-node-events";
+import { OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
+import { CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };
@@ -153,8 +153,8 @@ function CustomComponent({
   const customComponents =
     "ui" in values
       ? (values.ui as UIMessage[]).filter(
-          (ui) => ui.metadata?.message_id === message.id,
-        )
+        (ui) => ui.metadata?.message_id === message.id,
+      )
       : [];
 
   if (!customComponents?.length) return null;
@@ -420,18 +420,18 @@ export function AssistantMessage({
 
   const actionableToolCalls = message
     ? aiToolCalls.filter(
-        (tc) =>
-          tc.name === shellTool.name ||
-          tc.name === applyPatchTool.name ||
-          tc.name === grepTool.name ||
-          tc.name === installDependenciesTool.name ||
-          tc.name === scratchpadTool.name ||
-          tc.name === getURLContentTool.name ||
-          tc.name === textEditorTool.name ||
-          tc.name === viewTool.name ||
-          tc.name === searchDocumentForTool.name ||
-          isMcpTool(tc.name),
-      )
+      (tc) =>
+        tc.name === shellTool.name ||
+        tc.name === applyPatchTool.name ||
+        tc.name === grepTool.name ||
+        tc.name === installDependenciesTool.name ||
+        tc.name === scratchpadTool.name ||
+        tc.name === getURLContentTool.name ||
+        tc.name === textEditorTool.name ||
+        tc.name === viewTool.name ||
+        tc.name === searchDocumentForTool.name ||
+        isMcpTool(tc.name),
+    )
     : [];
 
   const markTaskCompletedToolCall = message
@@ -448,14 +448,14 @@ export function AssistantMessage({
 
   const markFinalReviewTaskCompletedToolCall = message
     ? aiToolCalls.find(
-        (tc) => tc.name === markFinalReviewTaskCompletedTool.name,
-      )
+      (tc) => tc.name === markFinalReviewTaskCompletedTool.name,
+    )
     : undefined;
 
   const markFinalReviewTaskIncompleteToolCall = message
     ? aiToolCalls.find(
-        (tc) => tc.name === markFinalReviewTaskIncompleteTool.name,
-      )
+      (tc) => tc.name === markFinalReviewTaskIncompleteTool.name,
+    )
     : undefined;
 
   const diagnoseErrorToolCall = message
@@ -546,9 +546,9 @@ export function AssistantMessage({
     // Get the appropriate summary text based on which tool was called
     const summaryText = markTaskCompletedToolCall
       ? (markTaskCompletedToolCall.args as MarkTaskCompletedToolArgs)
-          .completed_task_summary
+        .completed_task_summary
       : (markTaskNotCompletedToolCall!.args as MarkTaskNotCompletedToolArgs)
-          .reasoning;
+        .reasoning;
 
     return (
       <div className="flex flex-col gap-4">

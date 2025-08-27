@@ -12,7 +12,7 @@ import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
 } from "../utils/tokens.js";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 
 describe("calculateConversationHistoryTokenCount", () => {
   it("should return 0 for empty messages array", async () => {

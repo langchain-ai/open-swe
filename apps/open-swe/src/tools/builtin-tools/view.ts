@@ -1,16 +1,16 @@
 import { join } from "path";
 import { tool } from "@langchain/core/tools";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxSessionOrThrow } from "../utils/get-sandbox-id.js";
-import { createViewToolFields } from "@open-swe/shared/open-swe/tools";
+import { createViewToolFields } from "@openswe/shared/open-swe/tools";
 import { handleViewCommand } from "./handlers.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+} from "@openswe/shared/open-swe/local-mode";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");

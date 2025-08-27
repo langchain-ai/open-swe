@@ -14,8 +14,8 @@ import { Settings, AlertTriangle, CircleAlert } from "lucide-react";
 import { ConfigField } from "@/components/configuration/config-field";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ConfigurableFieldUIMetadata } from "@open-swe/shared/configurable-metadata";
-import { GraphConfigurationMetadata } from "@open-swe/shared/open-swe/types";
+import type { ConfigurableFieldUIMetadata } from "@openswe/shared/configurable-metadata";
+import { GraphConfigurationMetadata } from "@openswe/shared/open-swe/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -213,7 +213,7 @@ export function ConfigManager() {
                       step={config.step}
                       value={
                         configs[DEFAULT_CONFIG_KEY]?.[config.label] !==
-                        undefined
+                          undefined
                           ? configs[DEFAULT_CONFIG_KEY][config.label]
                           : config.default
                       }
