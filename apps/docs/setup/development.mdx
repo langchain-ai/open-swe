@@ -80,6 +80,11 @@ Before starting, ensure you have the following installed:
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
+
+    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # This is only used in production. In development every user is an "allowed user".
+    # Must be a valid JSON array of strings.
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
 
     ### Agent Environment Variables (`apps/open-swe/.env`)
@@ -120,7 +125,14 @@ Before starting, ensure you have the following installed:
 
     # CI/CD. See the /labs/swe/setup/ci for more information
     SKIP_CI_UNTIL_LAST_COMMIT="true"
+
+    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # This is only used in production. In development every user is an "allowed user".
+    # Must be a valid JSON array of strings.
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
+
+    If you don't set the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable, every user will be required to set their own LLM API keys to use the agent. Additionally, none of the webhook features (triggering new runs by adding labels to GitHub issues, tagging the agent in PR reviews, etc.) will work unless you include the username's of the GitHub users you want to allow access to in the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable (in both web and agent deployments).
 
     <Tip>
     Generate the `SECRETS_ENCRYPTION_KEY` using: `openssl rand -hex 32`. This key must be identical in both environment files.

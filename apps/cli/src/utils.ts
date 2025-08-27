@@ -5,15 +5,15 @@
 import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import {
   OPEN_SWE_STREAM_MODE,
-  PLANNER_GRAPH_ID,
   LOCAL_MODE_HEADER,
+  OPEN_SWE_V2_GRAPH_ID,
 } from "@open-swe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";
 
 /**
- * Submit feedback to the planner
+ * Submit feedback to the coding agent
  */
 export async function submitFeedback({
   plannerFeedback,
@@ -46,45 +46,27 @@ export async function submitFeedback({
     }
 
     // Create a new stream with the feedback
-    const stream = await client.runs.stream(plannerThreadId, PLANNER_GRAPH_ID, {
-      command: {
-        resume: [
-          {
-            type: plannerFeedback === "approve" ? "accept" : "ignore",
-            args: null,
-          },
-        ],
+    const stream = await client.runs.stream(
+      plannerThreadId,
+      OPEN_SWE_V2_GRAPH_ID,
+      {
+        command: {
+          resume: [
+            {
+              type: plannerFeedback === "approve" ? "accept" : "ignore",
+              args: null,
+            },
+          ],
+        },
+        streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
       },
-      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-    });
+    );
 
-    let programmerStreamed = false;
     // Process the stream response
     for await (const chunk of stream) {
       const formatted = formatDisplayLog(chunk);
       if (formatted.length > 0) {
         setLogs((prev) => [...prev, ...formatted]);
-      }
-
-      // Check for programmer session in the resumed planner stream
-      const chunkData = chunk.data as any;
-      if (
-        !programmerStreamed &&
-        chunkData?.programmerSession?.threadId &&
-        typeof chunkData.programmerSession.threadId === "string" &&
-        typeof chunkData.programmerSession.runId === "string"
-      ) {
-        programmerStreamed = true;
-        // Join programmer stream
-        for await (const programmerChunk of client.runs.joinStream(
-          chunkData.programmerSession.threadId,
-          chunkData.programmerSession.runId,
-        )) {
-          const formatted = formatDisplayLog(programmerChunk);
-          if (formatted.length > 0) {
-            setLogs((prev) => [...prev, ...formatted]);
-          }
-        }
       }
     }
 

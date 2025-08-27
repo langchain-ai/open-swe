@@ -152,15 +152,13 @@ This should match the username from Step 1 (without the @ symbol).
 
 ### Step 4: Update Allowed Users
 
-Add the GitHub usernames who should be allowed to trigger runs to the `ALLOWED_USERS` list in `packages/shared/src/github/allowed-users.ts`:
+Add the GitHub usernames who should be allowed to trigger runs to the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable in your agent's deployment environment (include in the production deployments for both the web app and agent to take advantage of the allowed users functionality).
 
-```typescript
-export const ALLOWED_USERS = [
-  "your-github-username",
-  "teammate-username",
-  // ... other allowed users
-];
+```bash
+NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
 ```
+
+When running locally, every user is an "allowed user". It's also recommended to set this environment variable in your web app's production environment variables so your users won't need to set their own API keys when invoking Open SWE via the web app.
 
 <Tip>
   After making these configuration changes, restart your Open SWE instance to ensure the new settings take effect. You can then test the functionality by tagging your custom username in a PR comment.
