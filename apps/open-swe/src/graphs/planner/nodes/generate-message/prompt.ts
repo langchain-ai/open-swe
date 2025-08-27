@@ -77,6 +77,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
         Parameters:
             - \`url\`: The URL to fetch the contents of
             - \`query\`: The query to search for within the document. This should be a natural language query. The query will be passed to a separate LLM and prompted to extract context from the document which answers this query.
+    
     {DEV_SERVER_PROMPT}
 </tool_usage>
 
