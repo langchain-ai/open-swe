@@ -1,7 +1,7 @@
 import { Sandbox } from "@daytonaio/sdk";
 import { readFile, writeFile } from "../../utils/read-write.js";
 import { getSandboxErrorFields } from "../../utils/sandbox-error-fields.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 
 interface ViewCommandInputs {

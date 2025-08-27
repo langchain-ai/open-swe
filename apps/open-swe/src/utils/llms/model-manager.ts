@@ -2,15 +2,15 @@ import {
   ConfigurableModel,
   initChatModel,
 } from "langchain/chat_models/universal";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
 import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
-} from "@open-swe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
-import { decryptSecret } from "@open-swe/shared/crypto";
-import { API_KEY_REQUIRED_MESSAGE } from "@open-swe/shared/constants";
+} from "@openswe/shared/open-swe/llm-task";
+import { isAllowedUser } from "@openswe/shared/github/allowed-users";
+import { decryptSecret } from "@openswe/shared/crypto";
+import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 

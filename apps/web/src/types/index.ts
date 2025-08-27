@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction } from "react";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
 
 // Task with status extended from the agent
 export interface TaskWithStatus extends TaskPlan {

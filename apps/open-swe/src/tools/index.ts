@@ -7,7 +7,7 @@ export {
   createUpdatePlanToolFields,
   createSessionPlanToolFields,
   createRequestHumanHelpToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 export * from "./grep.js";
 export * from "./install-dependencies.js";
 export * from "./default-tsconfig.js";

@@ -16,10 +16,10 @@ import {
   GITHUB_INSTALLATION_ID,
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
-} from "@open-swe/shared/constants";
-import { encryptSecret } from "@open-swe/shared/crypto";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/constants";
+import { encryptSecret } from "@openswe/shared/crypto";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { extractContentWithoutDetailsFromIssueBody } from "../../utils/github/issue-messages.js";
 

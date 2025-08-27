@@ -2,7 +2,7 @@
 - Always use Yarn as the package manager - never use npm or other package managers
 - Run all general commands (e.g. not for starting a server) from the repository root using Turbo orchestration (yarn build, yarn lint, yarn format)
 - Before creating new utilities or shared functions, search in packages/shared/src to see if one already exists
-- When importing from the shared package, use the @open-swe/shared namespace with specific module paths
+- When importing from the shared package, use the @openswe/shared namespace with specific module paths
 - Follow strict TypeScript practices - the codebase uses strict mode across all packages
 - Use ESLint and Prettier for code quality - run yarn lint:fix and yarn format before committing
 - Console logging is prohibited in the open-swe app (ESLint error) - use the `createLogger` function to create a new logger instance instead
@@ -26,7 +26,7 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 
 **packages/shared**: Common utilities package
 - Central workspace dependency providing shared types, constants, and utilities
-- Exports modules via @open-swe/shared namespace (e.g., @open-swe/shared/open-swe/types)
+- Exports modules via @openswe/shared namespace (e.g., @openswe/shared/open-swe/types)
 - Must be built before other packages can import from it
 - Contains crypto utilities, GraphState types, and open-swe specific modules
 
@@ -49,7 +49,7 @@ This is a Yarn workspace monorepo with Turbo build orchestration containing thre
 - TypeScript with strict mode across all packages
 - Jest with ts-jest for testing framework
 
-**Workspace Structure**: Dependencies are managed on a per-package basis, meaning dependencies should only be installed in their specific app/package. Individual packages reference the shared package via @open-swe/shared workspace dependency.
+**Workspace Structure**: Dependencies are managed on a per-package basis, meaning dependencies should only be installed in their specific app/package. Individual packages reference the shared package via @openswe/shared workspace dependency.
 </dependencies_and_installation>
 
 <testing_instructions>

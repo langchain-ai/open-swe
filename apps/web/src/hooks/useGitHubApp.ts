@@ -7,7 +7,7 @@ import {
   searchBranch,
 } from "@/utils/github";
 import { getRepository } from "@/utils/github";
-import type { TargetRepository } from "@open-swe/shared/open-swe/types";
+import type { TargetRepository } from "@openswe/shared/open-swe/types";
 import {
   useGitHubInstallations,
   type Installation,

@@ -5,7 +5,7 @@ import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { Toaster } from "@/components/ui/sonner";
 import { Suspense } from "react";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 
 function ChatPageComponent() {
   const { currentInstallation } = useGitHubAppProvider();

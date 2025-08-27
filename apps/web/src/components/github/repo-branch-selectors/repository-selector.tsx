@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import type { TargetRepository } from "@open-swe/shared/open-swe/types";
+import type { TargetRepository } from "@openswe/shared/open-swe/types";
 import { GitHubSVG } from "@/components/icons/github";
 import { Repository } from "@/utils/github";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";

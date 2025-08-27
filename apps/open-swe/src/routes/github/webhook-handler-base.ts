@@ -1,13 +1,13 @@
 import { v4 as uuidv4 } from "uuid";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { GitHubApp } from "../../utils/github-app.js";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
+import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { HumanMessage } from "@langchain/core/messages";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { RequestSource } from "../../constants.js";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 import { createRunFromWebhook, createDevMetadataComment } from "./utils.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { Octokit } from "@octokit/core";
 
 export interface WebhookHandlerContext {

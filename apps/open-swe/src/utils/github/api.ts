@@ -10,11 +10,11 @@ import {
   GitHubReviewComment,
 } from "./types.js";
 import { getOpenSWELabel } from "./label.js";
-import { getInstallationToken } from "@open-swe/shared/github/auth";
+import { getInstallationToken } from "@openswe/shared/github/auth";
 import { getConfig } from "@langchain/langgraph";
-import { GITHUB_INSTALLATION_ID } from "@open-swe/shared/constants";
+import { GITHUB_INSTALLATION_ID } from "@openswe/shared/constants";
 import { updateConfig } from "../update-config.js";
-import { encryptSecret } from "@open-swe/shared/crypto";
+import { encryptSecret } from "@openswe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "GitHub-API");
 

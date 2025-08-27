@@ -1,8 +1,8 @@
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { useEffect, useState } from "react";
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@openswe/shared/open-swe/types";
 import { convertPlanItemsToInterruptString } from "@/lib/plan-utils";
-import { PLAN_INTERRUPT_ACTION_TITLE } from "@open-swe/shared/constants";
+import { PLAN_INTERRUPT_ACTION_TITLE } from "@openswe/shared/constants";
 import { useStream } from "@langchain/langgraph-sdk/react";
 
 export function useProposedPlan(

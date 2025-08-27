@@ -48,15 +48,15 @@ import {
   createScratchpadFields,
   createTextEditorToolFields,
   createViewToolFields,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { OPEN_SWE_STREAM_MODE } from "@open-swe/shared/constants";
-import { CustomNodeEvent } from "@open-swe/shared/open-swe/custom-node-events";
+import { OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
+import { CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 
 // Used only for Zod type inference.
 const dummyRepo = { owner: "dummy", repo: "dummy" };

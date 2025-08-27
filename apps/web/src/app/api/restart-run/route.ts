@@ -9,7 +9,7 @@ import {
   PLANNER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   MANAGER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import {
   getGitHubInstallationTokenOrThrow,
   getInstallationNameFromReq,
@@ -18,15 +18,15 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { RestartRunRequest } from "./types";
 import { Client, StreamMode, ThreadState } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import {
   AgentSession,
   GraphConfig,
   GraphState,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { END } from "@langchain/langgraph/web";
-import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
+import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 
 async function getRequestHeaders(
   req: NextRequest,

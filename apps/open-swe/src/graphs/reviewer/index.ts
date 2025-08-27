@@ -2,8 +2,8 @@ import { END, START, StateGraph } from "@langchain/langgraph";
 import {
   ReviewerGraphState,
   ReviewerGraphStateObj,
-} from "@open-swe/shared/open-swe/reviewer/types";
-import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/reviewer/types";
+import { GraphConfiguration } from "@openswe/shared/open-swe/types";
 import {
   finalReview,
   generateReviewActions,

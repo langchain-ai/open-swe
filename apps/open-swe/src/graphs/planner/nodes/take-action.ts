@@ -7,17 +7,17 @@ import {
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import {
   createGetURLContentTool,
   createShellTool,
   createSearchDocumentForTool,
 } from "../../../tools/index.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   safeSchemaToString,
@@ -29,14 +29,14 @@ import {
   getChangedFilesStatus,
   stashAndClearChanges,
 } from "../../../utils/github/git.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { Command } from "@langchain/langgraph";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 

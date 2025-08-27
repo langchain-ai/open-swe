@@ -1,7 +1,7 @@
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import { Command } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";
@@ -13,14 +13,14 @@ import {
   isHumanMessage,
   RemoveMessage,
 } from "@langchain/core/messages";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   getMessageContentFromIssue,
   getUntrackedComments,
 } from "../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 export async function prepareGraphState(

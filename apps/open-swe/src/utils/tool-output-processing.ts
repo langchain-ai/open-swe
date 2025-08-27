@@ -1,4 +1,4 @@
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
 import { truncateOutput } from "./truncate-outputs.js";
 import { handleMcpDocumentationOutput } from "./mcp-output/index.js";
 import { parseUrl } from "./url-parser.js";

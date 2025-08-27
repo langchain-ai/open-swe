@@ -1,5 +1,5 @@
 import { Client, StreamMode } from "@langchain/langgraph-sdk";
-import { LOCAL_MODE_HEADER } from "@open-swe/shared/constants";
+import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";

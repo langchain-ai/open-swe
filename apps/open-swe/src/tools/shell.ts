@@ -1,8 +1,8 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { createShellToolFields } from "@open-swe/shared/open-swe/tools";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { createShellToolFields } from "@openswe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 
 const DEFAULT_ENV = {

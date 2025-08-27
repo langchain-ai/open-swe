@@ -1,8 +1,8 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../../utils/langgraph-client.js";
 import {
   BaseMessage,
@@ -15,9 +15,9 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { Command, END } from "@langchain/langgraph";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   createIssue,
   createIssueComment,
@@ -36,14 +36,14 @@ import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
 import { StreamMode, Thread } from "@langchain/langgraph-sdk";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");

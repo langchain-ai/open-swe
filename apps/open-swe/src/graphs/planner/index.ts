@@ -2,8 +2,8 @@ import { END, START, StateGraph } from "@langchain/langgraph";
 import {
   PlannerGraphState,
   PlannerGraphStateObj,
-} from "@open-swe/shared/open-swe/planner/types";
-import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/planner/types";
+import { GraphConfiguration } from "@openswe/shared/open-swe/types";
 import {
   generateAction,
   generatePlan,

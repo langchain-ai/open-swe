@@ -9,23 +9,23 @@ import {
   GraphState,
   GraphUpdate,
   PlanItem,
-} from "@open-swe/shared/open-swe/types";
-import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/types";
+import { createDiagnoseErrorToolFields } from "@openswe/shared/open-swe/tools";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { getMessageString } from "../../../utils/message/content.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { z } from "zod";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   getCompletedPlanItems,
   getCurrentPlanItem,
 } from "../../../utils/current-task.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 
 const logger = createLogger(LogLevel.INFO, "DiagnoseError");
 

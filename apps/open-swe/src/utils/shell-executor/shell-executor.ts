@@ -1,10 +1,10 @@
 import { Sandbox } from "@daytonaio/sdk";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { getLocalShellExecutor } from "./local-shell-executor.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { ExecuteCommandOptions, LocalExecuteResponse } from "./types.js";

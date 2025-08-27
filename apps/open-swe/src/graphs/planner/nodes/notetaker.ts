@@ -1,22 +1,22 @@
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { getMessageString } from "../../../utils/message/content.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { getScratchpad } from "../utils/scratchpad-notes.js";
 import { ToolMessage } from "@langchain/core/messages";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
-import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
+import { createWriteTechnicalNotesToolFields } from "@openswe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 
