@@ -7,7 +7,7 @@ import {
   OPEN_SWE_STREAM_MODE,
   LOCAL_MODE_HEADER,
   OPEN_SWE_V2_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { formatDisplayLog } from "./logger.js";
 
 const LANGGRAPH_URL = process.env.LANGGRAPH_URL || "http://localhost:2024";

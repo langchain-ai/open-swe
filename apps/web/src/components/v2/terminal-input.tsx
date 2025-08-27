@@ -10,7 +10,7 @@ import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
@@ -18,12 +18,12 @@ import {
   API_KEY_REQUIRED_MESSAGE,
   GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
-} from "@open-swe/shared/constants";
-import { ManagerGraphUpdate } from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/constants";
+import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
-import { isAllowedUser } from "@open-swe/shared/github/allowed-users";
+import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
 
 interface TerminalInputProps {

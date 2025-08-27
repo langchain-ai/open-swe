@@ -1,13 +1,13 @@
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   McpServerConfig,
   McpServerConfigSchema,
   McpServers,
-} from "@open-swe/shared/open-swe/mcp";
+} from "@openswe/shared/open-swe/mcp";
 import { createLogger, LogLevel } from "./logger.js";
-import { DEFAULT_MCP_SERVERS } from "@open-swe/shared/constants";
+import { DEFAULT_MCP_SERVERS } from "@openswe/shared/constants";
 import { shouldUseCustomFramework } from "./should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "MCP Client");

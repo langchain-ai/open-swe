@@ -36,7 +36,7 @@ The monorepo is organized into two main directories:
 
 - Centralized location for shared types, constants, and utilities
 - Used by both the agent and web applications
-- Exports modules via `@open-swe/shared` namespace
+- Exports modules via `@openswe/shared` namespace
 - Contains crypto utilities, GraphState types, and Open SWE specific modules
 
 <Note>
@@ -134,7 +134,7 @@ The `apps/open-swe` package includes a critical `postinstall` hook:
 ### Why This Matters
 
 1. **Deployment Compatibility**: The LangGraph Platform needs all dependencies built and available
-2. **Shared Package Access**: The agent imports utilities from `@open-swe/shared` which must be compiled
+2. **Shared Package Access**: The agent imports utilities from `@openswe/shared` which must be compiled
 3. **Build Order**: Ensures the shared package is built before the agent attempts to use it
 
 <Tip>

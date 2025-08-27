@@ -1,4 +1,4 @@
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@openswe/shared/open-swe/types";
 
 export function getCurrentPlanItem(plan: PlanItem[]): PlanItem {
   return (

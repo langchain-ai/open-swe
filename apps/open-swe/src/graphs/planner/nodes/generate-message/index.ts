@@ -3,7 +3,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -12,10 +12,10 @@ import {
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/planner/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
@@ -29,7 +29,7 @@ import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";

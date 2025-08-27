@@ -4,7 +4,7 @@ import {
 } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
+import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
 
 /**
  * Initiates the GitHub App installation flow

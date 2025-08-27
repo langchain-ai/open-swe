@@ -5,12 +5,12 @@ import * as ls from "langsmith/vitest";
 import { formatInputs } from "./prompts.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { evaluator } from "./evaluator.js";
-import { MANAGER_GRAPH_ID, GITHUB_PAT } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID, GITHUB_PAT } from "@openswe/shared/constants";
 import { createLangGraphClient } from "../src/utils/langgraph-client.js";
-import { encryptSecret } from "@open-swe/shared/crypto";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { encryptSecret } from "@openswe/shared/crypto";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { withRetry } from "./utils/retry.js";
 
 const logger = createLogger(LogLevel.DEBUG, "Evaluator");

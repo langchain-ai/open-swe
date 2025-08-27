@@ -1,7 +1,7 @@
 import {
   GraphConfig,
   GraphConfigurationMetadata,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 
 export function getCustomConfigurableFields(
   config: GraphConfig,

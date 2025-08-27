@@ -4,21 +4,21 @@ import {
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
-} from "@open-swe/shared/open-swe/reviewer/types";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/reviewer/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   PREVIOUS_REVIEW_PROMPT,
   SYSTEM_PROMPT,
   CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
 import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import {
   createGrepTool,
   createShellTool,
@@ -26,7 +26,7 @@ import {
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { formatPlanPromptWithSummaries } from "../../../../utils/plan-prompt.js";
 import {
   formatCodeReviewPrompt,

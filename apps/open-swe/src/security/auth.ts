@@ -3,7 +3,7 @@ import {
   verifyGithubUser,
   GithubUser,
   verifyGithubUserId,
-} from "@open-swe/shared/github/verify-user";
+} from "@openswe/shared/github/verify-user";
 import {
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_NAME,
@@ -12,8 +12,8 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   LOCAL_MODE_HEADER,
-} from "@open-swe/shared/constants";
-import { decryptSecret } from "@open-swe/shared/crypto";
+} from "@openswe/shared/constants";
+import { decryptSecret } from "@openswe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";

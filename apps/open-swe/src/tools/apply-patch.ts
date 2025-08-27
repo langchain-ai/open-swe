@@ -1,17 +1,17 @@
 import { tool } from "@langchain/core/tools";
 import { applyPatch } from "diff";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { readFile, writeFile } from "../utils/read-write.js";
 import { fixGitPatch } from "../utils/diff.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { createApplyPatchToolFields } from "@open-swe/shared/open-swe/tools";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { createApplyPatchToolFields } from "@openswe/shared/open-swe/tools";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
 import { Sandbox } from "@daytonaio/sdk";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { createShellExecutor } from "../utils/shell-executor/shell-executor.js";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";

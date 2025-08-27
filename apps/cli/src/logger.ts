@@ -6,8 +6,8 @@ import {
   isToolMessage,
 } from "@langchain/core/messages";
 
-import { getMessageContentString } from "@open-swe/shared/messages";
-import { createWriteTechnicalNotesToolFields } from "@open-swe/shared/open-swe/tools";
+import { getMessageContentString } from "@openswe/shared/messages";
+import { createWriteTechnicalNotesToolFields } from "@openswe/shared/open-swe/tools";
 
 export type ToolCall = {
   name: string;

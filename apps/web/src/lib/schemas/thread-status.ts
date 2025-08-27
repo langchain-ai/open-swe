@@ -2,9 +2,9 @@ import {
   MANAGER_GRAPH_ID,
   PLANNER_GRAPH_ID,
   PROGRAMMER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
 
 /**
  * UI-specific thread status that extends LangGraph's states

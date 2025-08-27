@@ -4,10 +4,10 @@ import {
   isToolMessage,
   ToolMessage,
 } from "@langchain/core/messages";
-import { createDiagnoseErrorToolFields } from "@open-swe/shared/open-swe/tools";
+import { createDiagnoseErrorToolFields } from "@openswe/shared/open-swe/tools";
 
 import { z } from "zod";
-import { ModelTokenData, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { ModelTokenData, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getAllLastFailedActions } from "../../utils/tool-message-error.js";
 import { getMessageString } from "../../utils/message/content.js";
@@ -15,7 +15,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { trackCachePerformance } from "../../utils/caching.js";
 import { getModelManager } from "../../utils/llms/model-manager.js";
 

@@ -5,17 +5,17 @@ import {
   PlanItem,
   GraphUpdate,
   CustomRules,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { z } from "zod";
 import {
   getActiveTask,
   updateTaskPlanItems,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import {
   AIMessage,
   BaseMessage,
@@ -25,13 +25,13 @@ import {
 import { getMessageString } from "../../../utils/message/content.js";
 import { formatPlanPrompt } from "../../../utils/plan-prompt.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { createUpdatePlanToolFields } from "@open-swe/shared/open-swe/tools";
+import { createUpdatePlanToolFields } from "@openswe/shared/open-swe/tools";
 import { formatCustomRulesPrompt } from "../../../utils/custom-rules.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "UpdatePlanNode");
 

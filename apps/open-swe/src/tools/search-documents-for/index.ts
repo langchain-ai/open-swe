@@ -1,11 +1,11 @@
 import { tool } from "@langchain/core/tools";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { createSearchDocumentForToolFields } from "@open-swe/shared/open-swe/tools";
+import { createSearchDocumentForToolFields } from "@openswe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
 import { loadModel } from "../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
+import { GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { DOCUMENT_SEARCH_PROMPT } from "./prompt.js";
 import { parseUrl } from "../../utils/url-parser.js";
 import { z } from "zod";

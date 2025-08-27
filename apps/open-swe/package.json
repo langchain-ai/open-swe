@@ -1,5 +1,5 @@
 {
-  "name": "@open-swe/agent",
+  "name": "@openswe/agent",
   "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
@@ -38,7 +38,7 @@
     "@octokit/core": "^7.0.2",
     "@octokit/rest": "^22.0.0",
     "@octokit/webhooks": "^14.0.2",
-    "@open-swe/shared": "*",
+    "@openswe/shared": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.1",
     "hono": "^4.8.3",

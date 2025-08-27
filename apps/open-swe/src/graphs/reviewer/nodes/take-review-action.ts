@@ -9,11 +9,11 @@ import {
   createInstallDependenciesTool,
   createShellTool,
 } from "../../../tools/index.js";
-import { GraphConfig, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { GraphConfig, TaskPlan } from "@openswe/shared/open-swe/types";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
-} from "@open-swe/shared/open-swe/reviewer/types";
+} from "@openswe/shared/open-swe/reviewer/types";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
@@ -24,17 +24,17 @@ import {
   getChangedFilesStatus,
 } from "../../../utils/github/git.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
-import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
+import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 

@@ -1,4 +1,4 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_TOKEN_COOKIE,
@@ -7,7 +7,7 @@ import {
   GITHUB_INSTALLATION_NAME,
   GITHUB_PAT,
   GITHUB_INSTALLATION_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 
 export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
   const githubPat = config.configurable?.[GITHUB_PAT];

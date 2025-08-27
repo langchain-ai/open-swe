@@ -1,15 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/open-swe/manager/types";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
 import { getIssue } from "../../../utils/github/api.js";
 import { extractTasksFromIssueContent } from "../../../utils/github/issue-task.js";
 import { getMessageContentFromIssue } from "../../../utils/github/issue-messages.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 /**
  * The initialize function will do nothing if there's already a human message

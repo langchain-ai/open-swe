@@ -4,9 +4,9 @@ import { fetchThreadStatus } from "@/services/thread-status.service";
 import { THREAD_STATUS_SWR_CONFIG } from "@/lib/swr-config";
 import { useMemo, useRef } from "react";
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import { GraphState, TaskPlan } from "@openswe/shared/open-swe/types";
 
 export interface SessionCacheData {
   plannerData?: { thread: Thread<PlannerGraphState> };

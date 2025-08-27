@@ -1,16 +1,16 @@
 import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createSessionPlanToolFields } from "../../../../tools/index.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   formatFollowupMessagePrompt,
@@ -30,7 +30,7 @@ import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
 function formatSystemPrompt(
   state: PlannerGraphState,

@@ -1,6 +1,6 @@
 import { ScrollToBottom, StickyToBottomContent } from "@/utils/scroll-utils";
 import { Message } from "@langchain/langgraph-sdk";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
