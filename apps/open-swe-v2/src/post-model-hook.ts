@@ -1,18 +1,22 @@
-import { AIMessage, isAIMessage, isAIMessageChunk } from "@langchain/core/messages";
+import {
+  AIMessage,
+  isAIMessage,
+  isAIMessageChunk,
+} from "@langchain/core/messages";
 import { interrupt } from "@langchain/langgraph";
 import { WRITE_COMMANDS } from "./constants.js";
 import { AgentStateHelpers, type CodingAgentStateType } from "./state.js";
 import { ToolCall } from "@langchain/core/messages/tool";
 import { ApprovedOperations } from "./types.js";
 
-
-
 export function createAgentPostModelHook() {
   /**
    * Post model hook that checks for write tool calls and uses caching to avoid
    * redundant approval prompts for the same command/directory combinations.
    */
-  async function postModelHook(state: CodingAgentStateType): Promise<CodingAgentStateType> {
+  async function postModelHook(
+    state: CodingAgentStateType,
+  ): Promise<CodingAgentStateType> {
     // Get the last message from the state
     const messages = state.messages || [];
     if (messages.length === 0) {
@@ -22,10 +26,7 @@ export function createAgentPostModelHook() {
     const lastMessage = messages[messages.length - 1];
 
     if (
-      !(
-        isAIMessage(lastMessage) ||
-        isAIMessageChunk(lastMessage)
-      ) ||
+      !(isAIMessage(lastMessage) || isAIMessageChunk(lastMessage)) ||
       !lastMessage.tool_calls
     ) {
       return state;
