@@ -1,6 +1,5 @@
 import "@langchain/langgraph/zod";
 import { createDeepAgent } from "deepagents";
-import "dotenv/config";
 import { codeReviewerAgent, testGeneratorAgent } from "./subagents.js";
 import { getCodingInstructions } from "./prompts.js";
 import { createAgentPostModelHook } from "./post-model-hook.js";
