@@ -95,8 +95,8 @@ const formatDynamicContextPrompt = (state: GraphState) => {
 
 const formatStaticInstructionsPrompt = (
   state: GraphState,
-  isAnthropicModel: boolean,
   config: GraphConfig,
+  isAnthropicModel: boolean,
 ) => {
   return (
     isAnthropicModel
@@ -125,8 +125,8 @@ const formatCacheablePrompt = (
       type: "text",
       text: formatStaticInstructionsPrompt(
         state,
-        !!args?.isAnthropicModel,
         config,
+        !!args?.isAnthropicModel,
       ),
       ...(!args?.excludeCacheControl
         ? { cache_control: { type: "ephemeral" } }
