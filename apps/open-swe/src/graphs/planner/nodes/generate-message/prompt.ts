@@ -36,6 +36,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
     9. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd. You may use cd if the User explicitly requests it.
     {LANGGRAPH_DOCUMENTATION_PROMPT}
 </context_gathering_guidelines>
+
 {EXTERNAL_LIBRARIES_PLAN_PROMPT}
 
 <tool_usage>
