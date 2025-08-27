@@ -31,8 +31,8 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
-import { OpenSWELogoSVG } from "../icons/openswe";
-import { OpenSWEIcon } from "../icons/openswe-2";
+import { OpenSWELogo } from "../icons/openswe-logo";
+import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
 function OpenSettingsButton() {
@@ -130,7 +130,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="border-border bg-card border-b px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <OpenSWELogoSVG
+            <OpenSWELogo
               width={120}
               height={18}
             />
