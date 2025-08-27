@@ -103,15 +103,15 @@ export class StreamingService {
         input: {
           messages: [
             {
-              role: "system",
-              content:
-                "You are working on " +
-                (process.env.OPEN_SWE_LOCAL_PROJECT_PATH || ""),
+              role: "user",
+              content: prompt,
             },
-            { role: "user", content: prompt },
           ],
+          working_directory:
+            process.env.OPEN_SWE_LOCAL_PROJECT_PATH || process.cwd(),
         },
         streamMode: ["updates"] as StreamMode[],
+        config: { recursion_limit: 1000 },
       });
 
       // Process the stream
@@ -166,6 +166,7 @@ export class StreamingService {
       const stream = await this.client.runs.stream(this.threadId, "coding", {
         command: { resume: response },
         streamMode: ["updates"] as StreamMode[],
+        config: { recursion_limit: 1000 },
       });
 
       // Process the stream
@@ -219,6 +220,7 @@ export class StreamingService {
           messages: [{ role: "user", content: prompt }],
         },
         streamMode: ["updates"] as StreamMode[],
+        config: { recursion_limit: 1000 },
       });
 
       // Process the stream

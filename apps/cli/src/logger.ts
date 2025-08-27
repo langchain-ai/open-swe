@@ -424,9 +424,10 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
         if (isHumanMessage(message)) {
           const text = getMessageContentString(message.content);
           if (text) {
-            // Single line human messages
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◉ ${cleanText}`);
+            if (cleanText) {
+              logs.push(`◉ ${cleanText}`);
+            }
           }
         }
       } catch (error: any) {
@@ -454,7 +455,9 @@ export function formatDisplayLog(chunk: LogChunk | string): string[] {
           const text = getMessageContentString(msg.content);
           if (text) {
             const cleanText = text.replace(/\s+/g, " ").trim();
-            logs.push(`◉ ${cleanText}`);
+            if (cleanText) {
+              logs.push(`◉ ${cleanText}`);
+            }
           }
         }
       }

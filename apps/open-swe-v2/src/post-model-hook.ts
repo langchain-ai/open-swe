@@ -1,22 +1,29 @@
-import {
-  AIMessage,
-  isAIMessage,
-  isAIMessageChunk,
-} from "@langchain/core/messages";
+import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { interrupt } from "@langchain/langgraph";
 import { WRITE_COMMANDS } from "./constants.js";
-import { AgentStateHelpers, type CodingAgentStateType } from "./state.js";
-import { ToolCall } from "@langchain/core/messages/tool";
-import { ApprovedOperations } from "./types.js";
+import { CodingAgentStateHelpers, type CodingAgentStateType } from "./state.js";
 
-export function createAgentPostModelHook() {
+interface StateType extends CodingAgentStateType {
+  todos: any[];
+  files: Record<string, string>;
+  messages: any[];
+}
+
+interface ToolCall {
+  name?: string;
+  args?: Record<string, any>;
+  [key: string]: any;
+}
+
+export function createCodingAgentPostModelHook() {
   /**
    * Post model hook that checks for write tool calls and uses caching to avoid
    * redundant approval prompts for the same command/directory combinations.
    */
   async function postModelHook(
-    state: CodingAgentStateType,
-  ): Promise<CodingAgentStateType> {
+    state: StateType,
+    _model?: any,
+  ): Promise<StateType> {
     // Get the last message from the state
     const messages = state.messages || [];
     if (messages.length === 0) {
@@ -26,17 +33,17 @@ export function createAgentPostModelHook() {
     const lastMessage = messages[messages.length - 1];
 
     if (
-      !(isAIMessage(lastMessage) || isAIMessageChunk(lastMessage)) ||
+      !(
+        lastMessage instanceof AIMessage ||
+        lastMessage instanceof AIMessageChunk
+      ) ||
       !lastMessage.tool_calls
     ) {
       return state;
     }
 
     if (!state.approved_operations) {
-      const approved_operations: ApprovedOperations = {
-        cached_approvals: new Set<string>(),
-      };
-      state.approved_operations = approved_operations;
+      state.approved_operations = { cached_approvals: new Set<string>() };
     }
 
     const approvedToolCalls: ToolCall[] = [];
@@ -47,15 +54,17 @@ export function createAgentPostModelHook() {
 
       // Skip tool calls without a name
       if (!toolCall.name) {
-        throw new Error("Tool call has no name");
+        continue;
       }
 
       if (WRITE_COMMANDS.has(toolName)) {
         // Check if this command/directory combination has been approved before
-        if (AgentStateHelpers.isOperationApproved(state, toolName, toolArgs)) {
+        if (
+          CodingAgentStateHelpers.isOperationApproved(state, toolName, toolArgs)
+        ) {
           approvedToolCalls.push(toolCall);
         } else {
-          const approvalKey = AgentStateHelpers.getApprovalKey(
+          const approvalKey = CodingAgentStateHelpers.getApprovalKey(
             toolName,
             toolArgs,
           );
@@ -67,7 +76,11 @@ export function createAgentPostModelHook() {
           });
 
           if (isApproved) {
-            AgentStateHelpers.addApprovedOperation(state, toolName, toolArgs);
+            CodingAgentStateHelpers.addApprovedOperation(
+              state,
+              toolName,
+              toolArgs,
+            );
             approvedToolCalls.push(toolCall);
           } else {
             continue;
@@ -78,18 +91,20 @@ export function createAgentPostModelHook() {
       }
     }
 
-    // Return the updated message if any tool calls were filtered out
+    // Update the message if any tool calls were filtered out
     if (approvedToolCalls.length !== lastMessage.tool_calls.length) {
       const originalToolCalls = lastMessage.tool_calls.filter((toolCall) =>
         approvedToolCalls.some((approved) => approved.name === toolCall.name),
       );
 
-      const newMessage = new AIMessage({
-        ...lastMessage,
+      const MessageClass =
+        lastMessage instanceof AIMessageChunk ? AIMessageChunk : AIMessage;
+      const newMessage = new MessageClass({
+        content: lastMessage.content,
         tool_calls: originalToolCalls,
+        additional_kwargs: lastMessage.additional_kwargs,
       });
 
-      // Update the messages in the state
       const newMessages = [...messages.slice(0, -1), newMessage];
       state.messages = newMessages;
     }

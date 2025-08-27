@@ -25,7 +25,7 @@
   "dependencies": {
     "@langchain/core": "^0.3.65",
     "@open-swe/shared": "*",
-    "deepagents": "0.0.0-rc.2"
+    "deepagents": "0.0.0-rc.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",

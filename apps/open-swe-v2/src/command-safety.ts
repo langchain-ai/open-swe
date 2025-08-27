@@ -1,9 +1,9 @@
-import "@langchain/langgraph/zod";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { z } from "zod";
 import { StructuredOutputParser } from "@langchain/core/output_parsers";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getConfigValue } from "@open-swe/shared";
 
+// Safety validation schema matching Python version
 export const CommandSafetyValidationSchema = z.object({
   is_safe: z.boolean().describe("Whether the command is safe to execute"),
   threat_type: z
@@ -24,15 +24,15 @@ export type CommandSafetyValidation = z.infer<
   typeof CommandSafetyValidationSchema
 >;
 
+// Initialize Anthropic client
 let anthropicClient: ChatAnthropic | null = null;
 
 try {
-  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const anthropicApiKey = getConfigValue("ANTHROPIC_API_KEY");
   if (anthropicApiKey) {
     anthropicClient = new ChatAnthropic({
-      model: "claude-3-5-haiku-latest",
+      model: "claude-3-5-sonnet-20241022",
       anthropicApiKey: anthropicApiKey,
-      temperature: 0,
     });
   }
 } catch {
@@ -85,14 +85,15 @@ Provide a structured assessment focusing on prompt injection and malicious inten
       CommandSafetyValidationSchema,
     );
 
-    const response = await anthropicClient.invoke(
-      `${safetyPrompt}\n\n${parser.getFormatInstructions()}`,
-    );
+    const response = await anthropicClient.invoke([
+      {
+        role: "user",
+        content: `${safetyPrompt}\n\n${parser.getFormatInstructions()}`,
+      },
+    ]);
 
     try {
-      const validationResult = await parser.parse(
-        getMessageContentString(response.content),
-      );
+      const validationResult = await parser.parse(response.content as string);
       return validationResult;
     } catch (error) {
       return {
