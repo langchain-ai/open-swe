@@ -1,0 +1,95 @@
+---
+title: "Custom Framework Configuration"
+description: "How to configure and customize OpenSWE for custom libraries"
+---
+
+Open SWE includes support for LangGraph development through the **LangGraph Engineer** toggle. This feature adds framework-specific prompts and MCP tools for building LangGraph agents and workflows.
+
+You can use a similar approach to build your own customization.
+
+## LangGraph Engineer Configuration
+
+### Setting Configuration in the UI
+
+Enabling the **LangGraph Engineer** toggle in the main input area activates specialized LangGraph prompts and documentation access.
+
+This sets the following configuration:
+
+```typescript
+const config = {
+  configurable: {
+    customFramework: true
+  }
+}
+```
+
+## How Custom Framework Configuration Works
+
+The configuration is passed to all agent nodes and used to conditionally include specialized prompts:
+
+```typescript
+// In prompt formatting functions
+.replace(
+  "{CUSTOM_FRAMEWORK_PROMPT}",
+  shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+)
+```
+
+The `shouldUseCustomFramework(config)` function checks if `config.configurable?.customFramework === true`.
+
+## Custom Framework Prompts
+
+When the LangGraph Engineer toggle is enabled, additional prompts are included:
+
+| File Path | Prompt Constant | Description |
+|-----------|-----------------|-------------|
+| `apps/open-swe/src/graphs/planner/nodes/generate-message/prompt.ts` | `EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT` | Adds LangGraph documentation access instructions |
+| `apps/open-swe/src/graphs/planner/nodes/generate-message/prompt.ts` | `EXTERNAL_FRAMEWORK_PLAN_PROMPT` | Provides LangGraph-specific planning requirements |
+| `apps/open-swe/src/graphs/programmer/nodes/generate-message/prompt.ts` | `CUSTOM_FRAMEWORK_PROMPT` | Comprehensive LangGraph implementation patterns and best practices |
+| `apps/open-swe/src/graphs/reviewer/nodes/generate-review-actions/prompt.ts` | `CUSTOM_FRAMEWORK_PROMPT` | LangGraph validation and testing requirements |
+
+## Customizing Prompts
+
+To customize the prompts for your own library:
+
+1. **Locate the relevant prompt file** from the table above
+2. **Edit the custom framework prompt constants** (e.g., `CUSTOM_FRAMEWORK_PROMPT`, `EXTERNAL_FRAMEWORK_PLAN_PROMPT`)
+3. **Rebuild the application** for changes to take effect:
+   ```bash
+   cd apps/open-swe
+   yarn build
+   ```
+
+## MCP Server Configuration
+
+Enabling the toggle connects to the default MCP servers defined in `apps/open-swe/src/utils/mcp-client.ts`:
+
+```typescript
+const DEFAULT_MCP_SERVERS: McpServers = {
+  "langgraph-docs-mcp": {
+    command: "uvx",
+    args: ["langgraph-docs-mcp"],
+  },
+};
+```
+
+You can add your own MCP servers by modifying this configuration.
+
+## Building Your Own Customization
+
+To create similar functionality for your own library:
+
+1. **Add a new UI toggle** in `apps/web/src/components/v2/default-view.tsx`
+2. **Create or modify custom prompt constants** in the relevant prompt files
+3. **Add or use the existing conditional logic** in prompt formatting functions:
+   ```typescript
+   .replace(
+     "{YOUR_FRAMEWORK_PROMPT}",
+     shouldUseYourFramework(config) ? YOUR_FRAMEWORK_PROMPT : "",
+   )
+   ```
+4. **Add MCP servers** in `mcp-client.ts` for documentation access (optional)
+
+<Note>
+  You can add another toggle button for your own library or customize the existing LangGraph Engineer toggle.
+</Note>

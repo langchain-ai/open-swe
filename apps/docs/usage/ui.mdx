@@ -173,6 +173,30 @@ Once a plan is accepted, the Programmer graph executes the implementation.
   work is preserved even if the session is interrupted.
 </Note>
 
+## LangGraph Engineer Toggle
+
+The UI includes a **LangGraph Engineer** toggle button that optimizes the agent's performance when working with LangGraph code:
+
+<Note>
+  The LangGraph Engineer toggle is located in the main input area, represented by the Open SWE icon.
+</Note>
+
+### When to Enable LangGraph Engineer
+
+Enable this toggle when your request involves creating or modifying LangGraph agents or workflows. It is very useful for building LLM apps from scratch.
+
+### What LangGraph Engineer Does
+
+When enabled, the toggle:
+
+- **Provides specific prompts**: Adds LangGraph-specific guidance and best practices to all agent prompts
+- **Includes documentation access**: Agents can automatically fetch up-to-date LangGraph documentation during planning and implementation through an MCP server.
+- **Follows LangGraph patterns**: Ensures agents use proper LangGraph structure, primitives, and deployment methods.
+
+<Tip>
+  Enable LangGraph Engineer for any project that imports from `@langchain/langgraph` or `langgraph` to get the best results.
+</Tip>
+
 ## Getting Started
 
 To begin using the Open SWE UI:
