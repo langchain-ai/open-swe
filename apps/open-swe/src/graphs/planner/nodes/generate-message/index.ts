@@ -88,7 +88,9 @@ function formatSystemPrompt(
     .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
     .replace(
       "{EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT}",
-      shouldUseCustomFramework(config) ? EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT : "",
+      shouldUseCustomFramework(config)
+        ? EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT
+        : "",
     )
     .replace(
       "{EXTERNAL_FRAMEWORK_PLAN_PROMPT}",

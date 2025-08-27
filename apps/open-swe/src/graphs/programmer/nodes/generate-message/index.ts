@@ -105,7 +105,10 @@ const formatStaticInstructionsPrompt = (
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
-    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
+    .replace(
+      "{CUSTOM_FRAMEWORK_PROMPT}",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+    )
     .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 };
 
