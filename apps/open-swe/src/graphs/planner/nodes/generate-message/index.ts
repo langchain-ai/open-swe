@@ -25,7 +25,7 @@ import {
   EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT,
   EXTERNAL_FRAMEWORK_PLAN_PROMPT,
 } from "./prompt.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
