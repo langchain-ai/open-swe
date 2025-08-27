@@ -17,7 +17,7 @@ import {
   SYSTEM_PROMPT,
   CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
-import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import {
   createGrepTool,
@@ -63,7 +63,10 @@ function formatSystemPrompt(
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll("{CHANGED_FILES}", state.changedFiles)
     .replaceAll("{BASE_BRANCH_NAME}", state.baseBranchName)
-    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
+    .replace(
+      "{CUSTOM_FRAMEWORK_PROMPT}",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+    )
     .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", tasksString)
     .replaceAll(
       "{DEPENDENCIES_INSTALLED}",

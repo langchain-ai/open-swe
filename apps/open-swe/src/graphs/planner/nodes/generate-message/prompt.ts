@@ -34,10 +34,10 @@ Your sole objective in this phase is to gather comprehensive context about the c
         - You will always be able to gather more context after the planning phase, so ensure that the actions you perform in this planning phase are only the most necessary and targeted actions to gather context.
         - Avoid rabbit holes for gathering context. You should always first consider whether or not the action you're about to take is necessary to generate a plan for the user's request. If it is not, do not take it.
     9. Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd. You may use cd if the User explicitly requests it.
-    {LANGGRAPH_DOCUMENTATION_PROMPT}
+    {EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT}
 </context_gathering_guidelines>
 
-{EXTERNAL_LIBRARIES_PLAN_PROMPT}
+{EXTERNAL_FRAMEWORK_PLAN_PROMPT}
 
 <tool_usage>
     ### Grep search tool
@@ -101,7 +101,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
     </user_request>
 </task_context>`;
 
-export const LANGGRAPH_DOCUMENTATION_PROMPT = `
+export const EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT = `
 10. LangGraph Documentation Access:
   - You have access to the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools. Use them when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
   - In the case of generating a plan, mention in the plan to use the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools to get up to date information on the LangGraph API while coding.
@@ -117,7 +117,7 @@ export const LANGGRAPH_DOCUMENTATION_PROMPT = `
        - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
 `;
 
-export const EXTERNAL_LIBRARIES_PLAN_PROMPT = `
+export const EXTERNAL_FRAMEWORK_PLAN_PROMPT = `
 <external_libraries_and_frameworks_planning>
    <langgraph_planning_requirements>
        When planning LangGraph agents, ensure tasks include:

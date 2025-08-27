@@ -102,8 +102,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const [shouldCreateIssue, setShouldCreateIssue] = useState(
     config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
   );
-  const [langEng, setLangEng] = useState(
-    config?.langEng != null ? !!config.langEng : false,
+  const [customFramework, setCustomFramework] = useState(
+    config?.customFramework != null ? !!config.customFramework : false,
   );
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
@@ -184,8 +184,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   setAutoAcceptPlan={setAutoAccept}
                   shouldCreateIssue={shouldCreateIssue}
                   setShouldCreateIssue={setShouldCreateIssue}
-                  langEng={langEng}
-                  setLangEng={setLangEng}
+                  customFramework={customFramework}
+                  setCustomFramework={setCustomFramework}
                 />
                 <div className="flex items-center gap-2">
                   <TooltipIconButton
@@ -225,18 +225,18 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                     )}
                   </TooltipIconButton>
                   <TooltipIconButton
-                    variant={langEng ? "default" : "ghost"}
+                    variant={customFramework ? "default" : "ghost"}
                     tooltip="Use Langgraph Engineer when writing Langgraph code for better results"
                     className={cn(
                       "transition-colors duration-200",
-                      langEng
+                      customFramework
                         ? "bg-primary hover:bg-primary/90"
                         : "text-muted-foreground hover:text-foreground",
                     )}
-                    onClick={() => setLangEng((prev) => !prev)}
+                    onClick={() => setCustomFramework((prev) => !prev)}
                     side="bottom"
                   >
-                    {langEng ? (
+                    {customFramework ? (
                       <OpenSWEIcon className="size-5" />
                     ) : (
                       <OpenSWEIcon className="size-5" />

@@ -8,7 +8,7 @@ import {
 } from "@open-swe/shared/open-swe/mcp";
 import { createLogger, LogLevel } from "./logger.js";
 import { DEFAULT_MCP_SERVERS } from "@open-swe/shared/constants";
-import { shouldUseLangEng } from "./should-use-langEng.js";
+import { shouldUseCustomFramework } from "./should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "MCP Client");
 
@@ -87,10 +87,9 @@ export async function getMcpTools(
   config: GraphConfig,
 ): Promise<StructuredToolInterface[]> {
   try {
-    const mergedServers: McpServers = {};
-    if (shouldUseLangEng(config)) {
-      mergedServers["langgraph-docs-mcp"] =
-        DEFAULT_MCP_SERVERS["langgraph-docs-mcp"];
+    let mergedServers: McpServers = {};
+    if (shouldUseCustomFramework(config)) {
+      mergedServers = { ...DEFAULT_MCP_SERVERS };
     }
 
     const mcpServersConfig = config?.configurable?.["mcpServers"];

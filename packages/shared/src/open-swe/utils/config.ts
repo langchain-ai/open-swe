@@ -16,7 +16,7 @@ export function getCustomConfigurableFields(
     if (key in config.configurable) {
       if (
         metadataValue.x_open_swe_ui_config.type !== "hidden" ||
-        ["apiKeys", "reviewPullNumber", "langEng"].includes(key)
+        ["apiKeys", "reviewPullNumber", "customFramework"].includes(key)
       ) {
         result[key as keyof GraphConfig["configurable"]] =
           config.configurable[key as keyof GraphConfig["configurable"]];

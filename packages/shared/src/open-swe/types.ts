@@ -430,7 +430,7 @@ export const GraphConfigurationMetadata: {
       type: "json",
       default: "{}",
       description:
-        "JSON configuration for custom MCP servers. LangGraph docs server is automatically added when LangEng is enabled. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
+        "JSON configuration for custom MCP servers. LangGraph docs server is automatically added when custom LangGraph prompts are enabled. See the `mcpServers` field of the LangChain MCP Adapters `ClientConfig` type for information on this schema. [Documentation here](https://v03.api.js.langchain.com/types/_langchain_mcp_adapters.ClientConfig.html).",
     },
   },
   shouldCreateIssue: {
@@ -441,7 +441,7 @@ export const GraphConfigurationMetadata: {
         "Whether or not to create GitHub issues for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
     },
   },
-  langEng: {
+  customFramework: {
     x_open_swe_ui_config: {
       type: "hidden",
     },
@@ -624,11 +624,11 @@ export const GraphConfiguration = z.object({
     metadata: GraphConfigurationMetadata.shouldCreateIssue,
   }),
   /**
-   * Whether or not to use the LangEng mode for the request.
+   * Whether or not to use the custom framework for the request.
    * @default false
    */
-  langEng: withLangGraph(z.boolean().optional(), {
-    metadata: GraphConfigurationMetadata.langEng,
+  customFramework: withLangGraph(z.boolean().optional(), {
+    metadata: GraphConfigurationMetadata.customFramework,
   }),
   /**
    * The pull request number that this run is associated with.

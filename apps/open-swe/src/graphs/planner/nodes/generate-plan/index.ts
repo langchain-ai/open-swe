@@ -21,7 +21,7 @@ import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
 import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT, CUSTOM_FRAMEWORK_PROMPT } from "./prompt.js";
-import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
@@ -55,7 +55,7 @@ function formatSystemPrompt(
     )
     .replace(
       "{ADDITIONAL_INSTRUCTIONS}",
-      shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
     );
 }
 

@@ -67,7 +67,7 @@ import {
   shouldIncludeReviewCommentTool,
   createReplyToReviewTool,
 } from "../../../../tools/reply-to-review-comment.js";
-import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -105,7 +105,7 @@ const formatStaticInstructionsPrompt = (
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
-    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
+    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
     .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 };
 
