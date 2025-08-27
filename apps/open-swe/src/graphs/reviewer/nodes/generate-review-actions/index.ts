@@ -15,7 +15,7 @@ import { getMessageContentString } from "@open-swe/shared/messages";
 import {
   PREVIOUS_REVIEW_PROMPT,
   SYSTEM_PROMPT,
-  LANGENG_PROMPT,
+  CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
 import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
@@ -63,7 +63,7 @@ function formatSystemPrompt(
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll("{CHANGED_FILES}", state.changedFiles)
     .replaceAll("{BASE_BRANCH_NAME}", state.baseBranchName)
-    .replace("{LANGENG_PROMPT}", shouldUseLangEng(config) ? LANGENG_PROMPT : "")
+    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
     .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", tasksString)
     .replaceAll(
       "{DEPENDENCIES_INSTALLED}",

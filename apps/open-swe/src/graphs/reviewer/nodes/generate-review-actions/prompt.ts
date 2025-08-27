@@ -107,7 +107,7 @@ By reviewing these actions, and comparing them to the plan and original user req
     You are ONLY gathering context. Any non-read actions you believe are necessary to take can be executed after you've provided your final review.
     Only gather context right now in order to inform your final review, and to provide any additional steps to take after the review.
     
-    {LANGENG_PROMPT}
+    {CUSTOM_FRAMEWORK_PROMPT}
 </instructions>
 
 <tool_usage>
@@ -173,7 +173,7 @@ By reviewing these actions, and comparing them to the plan and original user req
 {USER_REQUEST_PROMPT}
 </task_context>`;
 
-export const LANGENG_PROMPT = `
+export const CUSTOM_FRAMEWORK_PROMPT = `
 <langgraph_validation>
     When reviewing LangGraph implementations:
     

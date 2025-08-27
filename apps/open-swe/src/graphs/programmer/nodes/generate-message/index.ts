@@ -34,7 +34,7 @@ import {
   DYNAMIC_SYSTEM_PROMPT,
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
-  LANGENG_PROMPT,
+  CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@open-swe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
@@ -105,7 +105,7 @@ const formatStaticInstructionsPrompt = (
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
-    .replace("{LANGENG_PROMPT}", shouldUseLangEng(config) ? LANGENG_PROMPT : "")
+    .replace("{CUSTOM_FRAMEWORK_PROMPT}", shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "")
     .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 };
 

@@ -20,7 +20,7 @@ import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
-import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT, LANGENG_PROMPT } from "./prompt.js";
+import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT, CUSTOM_FRAMEWORK_PROMPT } from "./prompt.js";
 import { shouldUseLangEng } from "../../../../utils/should-use-langEng.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
@@ -55,7 +55,7 @@ function formatSystemPrompt(
     )
     .replace(
       "{ADDITIONAL_INSTRUCTIONS}",
-      shouldUseLangEng(config) ? LANGENG_PROMPT : "",
+      shouldUseLangEng(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
     );
 }
 

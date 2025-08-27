@@ -196,7 +196,7 @@ ${CORE_BEHAVIOR_PROMPT}
 
     ${CODING_STANDARDS_PROMPT}
 
-    {LANGENG_PROMPT}
+    {CUSTOM_FRAMEWORK_PROMPT}
 
     ${COMMUNICATION_GUIDELINES_PROMPT}
 
@@ -223,7 +223,7 @@ ${CORE_BEHAVIOR_PROMPT}
 
     ${CODING_STANDARDS_PROMPT}
 
-    {LANGENG_PROMPT}
+    {CUSTOM_FRAMEWORK_PROMPT}
 
     ${COMMUNICATION_GUIDELINES_PROMPT}
 
@@ -307,7 +307,7 @@ export const DEV_SERVER_PROMPT = `
       
        The tool will start the server, send a test request, capture logs, and return the results for your review.`;
 
-export const LANGENG_PROMPT = `
+export const CUSTOM_FRAMEWORK_PROMPT = `
 <langgraph_specific_patterns>
        <critical_structure>
            **MANDATORY FIRST STEP**: Before creating any files, search the codebase for existing LangGraph-related files. Look for:
@@ -377,6 +377,7 @@ export const LANGENG_PROMPT = `
                }
            \`\`\`
        </message_and_state_handling>
+
        <langgraph_streaming_and_interrupts_patterns>
            - Interrupts only work with stream_mode="updates", not stream_mode="values"
            - In "updates" mode, events are structured as {node_name: node_data, ...}
@@ -384,13 +385,13 @@ export const LANGENG_PROMPT = `
            - Iterate through event.items() to access individual node outputs
            - Interrupts appear as event["__interrupt__"] containing tuple of Interrupt objects
            - Access interrupt data via interrupt_obj.value where interrupt_obj = event["__interrupt__"][0]
-          
            <important_documentation>
                - LangGraph Streaming: https://langchain-ai.github.io/langgraph/how-tos/stream-updates/
                - SDK Streaming: https://langchain-ai.github.io/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
                - Concurrent Interrupts: https://docs.langchain.com/langgraph-platform/interrupt-concurrent
            </important_documentation>
        </langgraph_streaming_and_interrupts_patterns>
+
        <when_to_use_interrupts>
            **Use interrupt() when you need:**
            - User approval for generated plans or proposed changes
@@ -399,6 +400,7 @@ export const LANGENG_PROMPT = `
            - User input for decision points that require human judgment
            - Feedback on partially completed work before proceeding
        </when_to_use_interrupts>
+
        <framework_integration_patterns>
            <integration_debugging>
                **When building integrations, always start with debugging**:
@@ -423,7 +425,8 @@ export const LANGENG_PROMPT = `
                   
                    return result
                \`\`\`
-           </integration_debugging>          
+           </integration_debugging>
+
            <config_propagation_verification>
                - **Backend Verification Pattern**: Always verify the receiving end actually uses configuration:
                    \`\`\`python
@@ -451,7 +454,6 @@ export const LANGENG_PROMPT = `
                - Asyncio with Web Frameworks: https://docs.python.org/3/library/asyncio-eventloop.html#running-and-stopping-the-loop
            </important_documentation>
        </framework_integration_patterns>
-
 
        <langgraph_specific_coding_standards>
            - Test small components before building complex graphs
@@ -491,7 +493,6 @@ export const LANGENG_PROMPT = `
        - Work within the established structure rather than imposing new patterns
        - Do not create agent.py if graphs are already exported elsewhere
    </deployment_first_principles>
-
 
    <prefer_prebuilt_components>
        **Always use prebuilt components when possible** They are deployment-ready and well-tested.
@@ -548,7 +549,6 @@ export const LANGENG_PROMPT = `
       
        <important_documentation>https://langchain-ai.github.io/langgraph/concepts/agentic_concepts/</important_documentation>
    </prefer_prebuilt_components>
-
 
    <patterns_to_avoid>
        **AVOID these patterns:**
@@ -618,6 +618,7 @@ export const LANGENG_PROMPT = `
        \`\`\`
        <important_documentation>https://langchain-ai.github.io/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming</important_documentation>
    </patterns_to_avoid>
+
    <async_event_loop_patterns>
        <web_framework_async_rules>
            **Framework-Specific Async Patterns**:
@@ -669,6 +670,7 @@ export const LANGENG_PROMPT = `
            - Python asyncio: https://docs.python.org/3/library/asyncio-dev.html#common-mistakes
        </important_documentation>
    </async_event_loop_patterns>
+
    <streamlit_specific_patterns>
        <session_state_management>
            **Centralized State Pattern**:
@@ -741,7 +743,6 @@ export const LANGENG_PROMPT = `
            - Widget behavior: https://docs.streamlit.io/library/advanced-features/widget-behavior
        </reference_docs>
    </streamlit_specific_patterns>
-
 
    <model_preferences>
        **LLM MODEL PRIORITY** (follow this order):

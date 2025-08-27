@@ -53,6 +53,7 @@ Create your plan following these guidelines:
 6. **Combine simple, related steps:**
    - If you have multiple simple steps that are related, and should be executed one after the other, combine them into a single step.
    - For example, if you have multiple steps to run a linter, formatter, etc., combine them into a single step. The same goes for passing arguments, or editing files.
+
 {ADDITIONAL_INSTRUCTIONS}
 
 ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
@@ -74,7 +75,7 @@ Always format your plan items with proper markdown. Avoid large headers, but you
 
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
 
-export const LANGENG_PROMPT = `
+export const CUSTOM_FRAMEWORK_PROMPT = `
 7. **LangGraph-specific planning:**
   - When the user's request involves LangGraph code generation, editing, or bug fixing, ensure the execution agent will have access to up-to-date LangGraph documentation
   - If the codebase contains any existing LangGraph files (such as graph.py, main.py, app.py) or any files that import/export graphs, do NOT plan new agent files unless asked. Always work with the existing file structure.
