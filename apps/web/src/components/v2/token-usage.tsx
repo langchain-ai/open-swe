@@ -337,9 +337,9 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                     const modelCachePercentage =
                       modelTotalTokens > 0
                         ? (
-                          (modelCachedTokens / modelTotalTokens) *
-                          100
-                        ).toFixed(1)
+                            (modelCachedTokens / modelTotalTokens) *
+                            100
+                          ).toFixed(1)
                         : "0";
 
                     return (

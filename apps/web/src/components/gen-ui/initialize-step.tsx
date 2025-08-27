@@ -110,12 +110,12 @@ export function InitializeStep({
                     {stepStatusIcon[
                       step.status as keyof typeof stepStatusIcon
                     ] ?? (
-                        <div
-                          className={cn(
-                            "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
-                          )}
-                        />
-                      )}
+                      <div
+                        className={cn(
+                          "h-3.5 w-3.5 rounded-full border border-gray-300 dark:border-gray-600",
+                        )}
+                      />
+                    )}
                   </span>
                   <span
                     className={cn(

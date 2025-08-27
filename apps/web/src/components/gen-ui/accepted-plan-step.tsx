@@ -191,7 +191,7 @@ export function AcceptedPlanStep({
                             className={cn(
                               "flex-shrink-0 text-xs",
                               item.completed &&
-                              "border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400",
+                                "border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400",
                             )}
                           >
                             {idx + 1}

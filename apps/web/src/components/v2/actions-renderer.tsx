@@ -14,11 +14,7 @@ import { Message } from "@langchain/langgraph-sdk";
 import { InitializeStep } from "../gen-ui/initialize-step";
 import { AcceptedPlanStep } from "../gen-ui/accepted-plan-step";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
-import {
-  GraphState,
-  PlanItem,
-  TaskPlan,
-} from "@openswe/shared/open-swe/types";
+import { GraphState, PlanItem, TaskPlan } from "@openswe/shared/open-swe/types";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { LoadingActionsCardContent } from "./thread-view-loading";
 import { Interrupt } from "../thread/messages/interrupt";

@@ -213,7 +213,7 @@ export function ConfigManager() {
                       step={config.step}
                       value={
                         configs[DEFAULT_CONFIG_KEY]?.[config.label] !==
-                          undefined
+                        undefined
                           ? configs[DEFAULT_CONFIG_KEY][config.label]
                           : config.default
                       }

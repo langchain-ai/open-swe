@@ -65,12 +65,12 @@ export default function ThreadPage({
   // We need a thread object for the hook, so use a dummy if not found
   const dummyThread = thread ||
     initialFetchedThread || {
-    thread_id,
-    values: {},
-    status: "idle" as const,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  };
+      thread_id,
+      values: {},
+      status: "idle" as const,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
 
   const { metadata: currentDisplayThread, statusError } = useThreadMetadata(
     dummyThread as any,

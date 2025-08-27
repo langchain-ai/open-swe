@@ -279,7 +279,7 @@ export function ThreadView({
       (plannerStream.values.programmerSession.runId !==
         programmerSession?.runId ||
         plannerStream.values.programmerSession.threadId !==
-        programmerSession?.threadId)
+          programmerSession?.threadId)
     ) {
       setProgrammerSession?.(plannerStream.values.programmerSession);
 
@@ -351,9 +351,9 @@ export function ThreadView({
   // Merge optimistic message with stream messages
   const displayMessages = optimisticMessage
     ? [
-      optimisticMessage,
-      ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
-    ]
+        optimisticMessage,
+        ...filteredMessages.filter((msg) => msg.id !== optimisticMessage.id),
+      ]
     : filteredMessages;
 
   const shouldDisableManagerInput = !hasGitHubIssue
