@@ -20,7 +20,11 @@ import { RestartRunRequest } from "./types";
 import { Client, StreamMode, ThreadState } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { AgentSession, GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import {
+  AgentSession,
+  GraphConfig,
+  GraphState,
+} from "@open-swe/shared/open-swe/types";
 import { END } from "@langchain/langgraph/web";
 import { getCustomConfigurableFields } from "@open-swe/shared/open-swe/utils/config";
 
@@ -76,10 +80,7 @@ async function createNewSession(
     streamResumable: true,
     config: {
       recursion_limit: 400,
-      configurable: getCustomConfigurableFields({
-        ...inputs.threadState.metadata as Record<string, any>,
-        ...inputs.threadConfig?.configurable as Record<string, any>,
-      }),
+      configurable: getCustomConfigurableFields(inputs.threadConfig),
     },
   });
   return {
@@ -104,19 +105,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       defaultHeaders: await getRequestHeaders(request),
     });
 
-    const [managerThread, managerThreadState, plannerThread, plannerThreadState, programmerThread, programmerThreadState] =
-      await Promise.all([
-        langGraphClient.threads.get<ManagerGraphState>(managerThreadId),
-        langGraphClient.threads.getState<ManagerGraphState>(managerThreadId),
-        langGraphClient.threads.get<PlannerGraphState>(plannerThreadId),
-        langGraphClient.threads.getState<PlannerGraphState>(plannerThreadId),
-        programmerThreadId
-          ? langGraphClient.threads.get<GraphState>(programmerThreadId)
-          : null,
-        programmerThreadId
-          ? langGraphClient.threads.getState<GraphState>(programmerThreadId)
-          : null,
-      ]);
+    const [
+      managerThread,
+      managerThreadState,
+      plannerThread,
+      plannerThreadState,
+      programmerThread,
+      programmerThreadState,
+    ] = await Promise.all([
+      langGraphClient.threads.get<ManagerGraphState>(managerThreadId),
+      langGraphClient.threads.getState<ManagerGraphState>(managerThreadId),
+      langGraphClient.threads.get<PlannerGraphState>(plannerThreadId),
+      langGraphClient.threads.getState<PlannerGraphState>(plannerThreadId),
+      programmerThreadId
+        ? langGraphClient.threads.get<GraphState>(programmerThreadId)
+        : null,
+      programmerThreadId
+        ? langGraphClient.threads.getState<GraphState>(programmerThreadId)
+        : null,
+    ]);
     if (!managerThreadState || !plannerThreadState) {
       return NextResponse.json(
         {
