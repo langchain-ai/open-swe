@@ -4,7 +4,10 @@ import {
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@openswe/shared/open-swe/llm-task";
+import {
+  LLMTask,
+  TASK_TO_CONFIG_DEFAULTS_MAP,
+} from "@openswe/shared/open-swe/llm-task";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -192,11 +195,13 @@ function createToolsAndPrompt(
       anthropic: anthropicTools,
       openai: nonAnthropicTools,
       "google-genai": nonAnthropicTools,
+      "azure-openai": nonAnthropicTools,
     },
     providerMessages: {
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,
+      "azure-openai": nonAnthropicMessages,
     },
   };
 }
@@ -212,6 +217,10 @@ export async function generateReviewActions(
     LLMTask.REVIEWER,
   );
   const isAnthropicModel = modelName.includes("claude-");
+  const modelStr =
+    config.configurable?.[`${LLMTask.REVIEWER}ModelName`] ??
+    TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.REVIEWER].modelName;
+  const provider = modelStr.split(":")[0] as Provider;
 
   const { providerTools, providerMessages } = createToolsAndPrompt(
     state,
@@ -223,7 +232,7 @@ export async function generateReviewActions(
     providerMessages,
   });
   const modelWithTools = model.bindTools(
-    isAnthropicModel ? providerTools.anthropic : providerTools.openai,
+    isAnthropicModel ? providerTools.anthropic : providerTools[provider],
     {
       tool_choice: "auto",
       ...(modelSupportsParallelToolCallsParam
@@ -235,7 +244,7 @@ export async function generateReviewActions(
   );
 
   const response = await modelWithTools.invoke(
-    isAnthropicModel ? providerMessages.anthropic : providerMessages.openai,
+    isAnthropicModel ? providerMessages.anthropic : providerMessages[provider],
   );
 
   logger.info("Generated review actions", {

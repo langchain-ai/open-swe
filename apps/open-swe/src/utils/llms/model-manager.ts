@@ -184,9 +184,9 @@ export class ModelManager {
 
     if (provider === "azure-openai") {
       const client = new AzureOpenAI({
-        api_key: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
-        api_version: process.env.AZURE_OPENAI_API_VERSION,
-        azure_endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+        apiKey: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION,
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT,
       });
 
       logger.debug("Initializing model", {
