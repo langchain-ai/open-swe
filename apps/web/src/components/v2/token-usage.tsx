@@ -123,6 +123,17 @@ function getModelPricingPlaceholder(model: string): {
     },
 
     // OpenAI models (actual pricing - no caching support)
+    "openai:gpt-5": { inputPrice: 10.0, outputPrice: 40.0, cachePrice: 10.0 },
+    "openai:gpt-5-mini": {
+      inputPrice: 1.0,
+      outputPrice: 4.0,
+      cachePrice: 1.0,
+    },
+    "openai:gpt-5-nano": {
+      inputPrice: 0.2,
+      outputPrice: 0.8,
+      cachePrice: 0.2,
+    },
     "openai:o4": { inputPrice: 1.1, outputPrice: 4.4, cachePrice: 1.1 },
     "openai:o4-mini": { inputPrice: 1.1, outputPrice: 4.4, cachePrice: 1.1 },
     "openai:o3": { inputPrice: 2.0, outputPrice: 8.0, cachePrice: 2.0 },
