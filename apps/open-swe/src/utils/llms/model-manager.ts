@@ -2,6 +2,7 @@ import {
   ConfigurableModel,
   initChatModel,
 } from "langchain/chat_models/universal";
+import { AzureOpenAI } from "openai";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
 import {
@@ -47,6 +48,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "azure-openai",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -82,6 +84,8 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "azure-openai":
+      return apiKeys.azureApiKey;
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -177,6 +181,25 @@ export class ModelManager {
     }
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
+
+    if (provider === "azure-openai") {
+      const client = new AzureOpenAI({
+        api_key: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
+        api_version: process.env.AZURE_OPENAI_API_VERSION,
+        azure_endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+      });
+
+      logger.debug("Initializing model", {
+        provider,
+        modelName,
+      });
+
+      return await initChatModel(process.env.AZURE_OPENAI_DEPLOYMENT!, {
+        client,
+        maxTokens: finalMaxTokens,
+        temperature,
+      });
+    }
 
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
@@ -398,6 +421,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      "azure-openai": {
+        [LLMTask.PLANNER]: process.env.AZURE_OPENAI_DEPLOYMENT ?? "",
+        [LLMTask.PROGRAMMER]: process.env.AZURE_OPENAI_DEPLOYMENT ?? "",
+        [LLMTask.REVIEWER]: process.env.AZURE_OPENAI_DEPLOYMENT ?? "",
+        [LLMTask.ROUTER]: process.env.AZURE_OPENAI_DEPLOYMENT ?? "",
+        [LLMTask.SUMMARIZER]: process.env.AZURE_OPENAI_DEPLOYMENT ?? "",
       },
     };
 
