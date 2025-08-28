@@ -451,6 +451,26 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  azureEndpoint: {
+    x_open_swe_ui_config: {
+      type: "text",
+      placeholder: "https://<resource>.openai.azure.com",
+      description: "Azure OpenAI endpoint URL",
+    },
+  },
+  azureApiVersion: {
+    x_open_swe_ui_config: {
+      type: "text",
+      default: "2024-08-01-preview",
+      description: "Azure OpenAI API version",
+    },
+  },
+  azureDeployment: {
+    x_open_swe_ui_config: {
+      type: "text",
+      description: "Azure OpenAI deployment name",
+    },
+  },
   apiKeys: {
     x_open_swe_ui_config: {
       type: "hidden",
@@ -638,11 +658,39 @@ export const GraphConfiguration = z.object({
     metadata: GraphConfigurationMetadata.reviewPullNumber,
   }),
   /**
+   * Azure OpenAI endpoint URL
+   */
+  azureEndpoint: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.azureEndpoint,
+  }),
+  /**
+   * Azure OpenAI API version
+   */
+  azureApiVersion: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.azureApiVersion,
+  }),
+  /**
+   * Azure OpenAI deployment name
+   */
+  azureDeployment: withLangGraph(z.string().optional(), {
+    metadata: GraphConfigurationMetadata.azureDeployment,
+  }),
+  /**
    * User defined API keys to use
    */
-  apiKeys: withLangGraph(z.record(z.string(), z.string()).optional(), {
-    metadata: GraphConfigurationMetadata.apiKeys,
-  }),
+  apiKeys: withLangGraph(
+    z
+      .object({
+        anthropicApiKey: z.string().optional(),
+        openaiApiKey: z.string().optional(),
+        googleApiKey: z.string().optional(),
+        azureApiKey: z.string().optional(),
+      })
+      .optional(),
+    {
+      metadata: GraphConfigurationMetadata.apiKeys,
+    },
+  ),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */

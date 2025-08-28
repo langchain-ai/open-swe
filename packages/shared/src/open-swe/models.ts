@@ -45,6 +45,18 @@ export const MODEL_OPTIONS = [
     value: "openai:gpt-5-nano",
   },
   {
+    label: "Azure GPT 5",
+    value: "azure-openai:gpt-5",
+  },
+  {
+    label: "Azure GPT 5 mini",
+    value: "azure-openai:gpt-5-mini",
+  },
+  {
+    label: "Azure GPT 5 nano",
+    value: "azure-openai:gpt-5-nano",
+  },
+  {
     label: "o4",
     value: "openai:o4",
   },
@@ -75,6 +87,22 @@ export const MODEL_OPTIONS = [
   {
     label: "GPT 4.1 mini",
     value: "openai:gpt-4.1-mini",
+  },
+  {
+    label: "Azure GPT 4o",
+    value: "azure-openai:gpt-4o",
+  },
+  {
+    label: "Azure GPT 4o mini",
+    value: "azure-openai:gpt-4o-mini",
+  },
+  {
+    label: "Azure GPT 4.1",
+    value: "azure-openai:gpt-4.1",
+  },
+  {
+    label: "Azure GPT 4.1 mini",
+    value: "azure-openai:gpt-4.1-mini",
   },
   {
     label: "Gemini 2.5 Pro",
