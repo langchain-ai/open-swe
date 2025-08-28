@@ -11,7 +11,10 @@ import {
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@openswe/shared/open-swe/llm-task";
+import {
+  LLMTask,
+  TASK_TO_CONFIG_DEFAULTS_MAP,
+} from "@openswe/shared/open-swe/llm-task";
 import {
   createShellTool,
   createApplyPatchTool,
@@ -284,11 +287,13 @@ async function createToolsAndPrompt(
       anthropic: anthropicModelTools,
       openai: nonAnthropicModelTools,
       "google-genai": nonAnthropicModelTools,
+      "azure-openai": nonAnthropicModelTools,
     },
     providerMessages: {
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,
+      "azure-openai": nonAnthropicMessages,
     },
   };
 }
@@ -308,6 +313,10 @@ export async function generateAction(
   );
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
+  const modelStr =
+    config.configurable?.[`${LLMTask.PROGRAMMER}ModelName`] ??
+    TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.PROGRAMMER].modelName;
+  const provider = modelStr.split(":")[0] as Provider;
 
   const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
     config,
@@ -328,23 +337,21 @@ export async function generateAction(
   );
 
   const model = await loadModel(config, LLMTask.PROGRAMMER, {
-    providerTools: providerTools,
-    providerMessages: providerMessages,
+    providerTools,
+    providerMessages,
   });
 
   const modelWithTools = model.bindTools(
-    isAnthropicModel ? providerTools.anthropic : providerTools.openai,
+    isAnthropicModel ? providerTools.anthropic : providerTools[provider],
     {
       tool_choice: "auto",
       ...(modelSupportsParallelToolCallsParam
-        ? {
-            parallel_tool_calls: true,
-          }
+        ? { parallel_tool_calls: true }
         : {}),
     },
   );
   const response = await modelWithTools.invoke(
-    isAnthropicModel ? providerMessages.anthropic : providerMessages.openai,
+    isAnthropicModel ? providerMessages.anthropic : providerMessages[provider],
   );
 
   const hasToolCalls = !!response.tool_calls?.length;
