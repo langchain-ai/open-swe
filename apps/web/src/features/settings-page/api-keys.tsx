@@ -43,6 +43,29 @@ const API_KEY_DEFINITIONS = {
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
+    {
+      id: "azureApiKey",
+      name: "Azure OpenAI",
+      fieldLabel: "Subscription Key",
+      placeholder: "Enter your Azure OpenAI subscription key",
+      extraFields: [
+        {
+          id: "azureEndpoint",
+          label: "Endpoint URL",
+          placeholder: "https://<resource>.openai.azure.com",
+        },
+        {
+          id: "azureApiVersion",
+          label: "API Version",
+          placeholder: "2024-08-01-preview",
+        },
+        {
+          id: "azureDeployment",
+          label: "Deployment Name",
+          placeholder: "gpt-4o-mini",
+        },
+      ],
+    },
   ],
   // infrastructure: [
   //   {
@@ -89,6 +112,11 @@ export function APIKeysTab() {
     const updatedApiKeys = { ...currentApiKeys };
     delete updatedApiKeys[keyId];
     updateConfig(DEFAULT_CONFIG_KEY, "apiKeys", updatedApiKeys);
+    if (keyId === "azureApiKey") {
+      updateConfig(DEFAULT_CONFIG_KEY, "azureEndpoint", "");
+      updateConfig(DEFAULT_CONFIG_KEY, "azureApiVersion", "");
+      updateConfig(DEFAULT_CONFIG_KEY, "azureDeployment", "");
+    }
   };
 
   const getApiKeySections = (): Record<string, ApiKeySection> => {
@@ -104,6 +132,10 @@ export function APIKeysTab() {
           ...keyDef,
           value: apiKeys[keyDef.id] || "",
           isVisible: visibilityState[keyDef.id] || false,
+          extraFields: keyDef.extraFields?.map((field) => ({
+            ...field,
+            value: config[field.id] || "",
+          })),
         })),
       };
     });
@@ -177,7 +209,7 @@ export function APIKeysTab() {
                         htmlFor={`${apiKey.id}-key`}
                         className="text-sm font-medium"
                       >
-                        API Key
+                        {apiKey.fieldLabel ?? "API Key"}
                       </Label>
                       {apiKey.description && (
                         <p className="text-muted-foreground text-xs">
@@ -192,7 +224,10 @@ export function APIKeysTab() {
                           onChange={(e) =>
                             updateApiKey(apiKey.id, e.target.value)
                           }
-                          placeholder={`Enter your ${apiKey.name} API key`}
+                          placeholder={
+                            apiKey.placeholder ??
+                            `Enter your ${apiKey.name} API key`
+                          }
                           className="font-mono text-sm"
                           autoFocus={shouldAutofocus(apiKey.id, !!apiKey.value)}
                         />
@@ -224,6 +259,32 @@ export function APIKeysTab() {
                       </div>
                     </div>
                   </div>
+                  {apiKey.extraFields?.map((field) => (
+                    <div key={field.id}>
+                      <Label
+                        htmlFor={field.id}
+                        className="text-sm font-medium"
+                      >
+                        {field.label}
+                      </Label>
+                      <div className="mt-1">
+                        <Input
+                          id={field.id}
+                          type="text"
+                          value={field.value}
+                          onChange={(e) =>
+                            updateConfig(
+                              DEFAULT_CONFIG_KEY,
+                              field.id,
+                              e.target.value,
+                            )
+                          }
+                          placeholder={field.placeholder}
+                          className="font-mono text-sm"
+                        />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
