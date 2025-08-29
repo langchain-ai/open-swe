@@ -1,7 +1,7 @@
 "use client";
 import { Archive, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useThreadsContext } from "@/providers/Thread";
+import { useThreadsContext } from "@/hooks/useThreadsContext";
 import { useQueryState, parseAsString } from "nuqs";
 import { useState, useCallback } from "react";
 import { ThreadItem } from "./thread-item";

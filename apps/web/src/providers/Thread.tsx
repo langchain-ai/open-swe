@@ -1,34 +1,11 @@
+"use client";
+
 import { validate } from "uuid";
 import { Thread } from "@langchain/langgraph-sdk";
-import {
-  createContext,
-  useContext,
-  ReactNode,
-  useCallback,
-  useState,
-  Dispatch,
-  SetStateAction,
-  useEffect,
-} from "react";
+import { ReactNode, useCallback, useState, useEffect } from "react";
 import { createClient } from "./client";
 import { GraphState } from "@openswe/shared/open-swe/types";
-
-interface ThreadContextType {
-  threads: Thread<GraphState>[];
-  setThreads: Dispatch<SetStateAction<Thread<GraphState>[]>>;
-  threadsLoading: boolean;
-  setThreadsLoading: Dispatch<SetStateAction<boolean>>;
-  refreshThreads: () => Promise<void>;
-  getThread: (threadId: string) => Promise<Thread<GraphState> | null>;
-  recentlyUpdatedThreads: Set<string>;
-  handleThreadClick: (
-    thread: Thread<GraphState>,
-    currentThreadId: string | null,
-    setThreadId: (id: string) => void,
-  ) => void;
-}
-
-const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
+import { ThreadContext, ThreadContextType } from "./thread-context";
 
 function getThreadSearchMetadata(
   assistantId: string,
@@ -47,7 +24,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<Thread<GraphState>[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
-  const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
+  const [recentlyUpdatedThreads, _setRecentlyUpdatedThreads] = useState<
     Set<string>
   >(new Set());
 
@@ -131,17 +108,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     getThread,
     recentlyUpdatedThreads,
     handleThreadClick,
-  };
+  } as ThreadContextType;
 
   return (
     <ThreadContext.Provider value={value}>{children}</ThreadContext.Provider>
   );
-}
-
-export function useThreadsContext() {
-  const context = useContext(ThreadContext);
-  if (context === undefined) {
-    throw new Error("useThreadsContext must be used within a ThreadProvider");
-  }
-  return context;
 }

@@ -15,13 +15,23 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
 
+interface ApiKeyExtraField {
+  id: string;
+  label: string;
+  placeholder?: string;
+  value: string;
+}
+
 interface ApiKey {
   id: string;
   name: string;
   description?: string;
+  fieldLabel?: string;
+  placeholder?: string;
   value: string;
   isVisible: boolean;
   lastUsed?: string;
+  extraFields?: ApiKeyExtraField[];
 }
 
 interface ApiKeySection {
