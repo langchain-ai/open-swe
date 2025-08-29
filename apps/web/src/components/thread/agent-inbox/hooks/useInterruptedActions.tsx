@@ -12,7 +12,7 @@ import { createDefaultHumanResponse } from "../utils";
 import { toast } from "sonner";
 import { HumanInterrupt, HumanResponse } from "@langchain/langgraph/prebuilt";
 import { END } from "@langchain/langgraph/web";
-import { useThreadsContext } from "@/providers/Thread";
+import { useThreadsContext } from "@/hooks/useThreadsContext";
 import { useStream } from "@langchain/langgraph-sdk/react";
 
 interface UseInterruptedActionsInput {

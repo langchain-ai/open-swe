@@ -2,7 +2,7 @@
 import { memo } from "react";
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
 import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
-import { useThreadsContext } from "@/providers/Thread";
+import { useThreadsContext } from "@/hooks/useThreadsContext";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
 import { GitHubSVG } from "./icons/github";
