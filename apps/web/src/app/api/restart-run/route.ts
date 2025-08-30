@@ -105,7 +105,8 @@ async function createNewSession(
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: RestartRunRequest = await request.json();
+    const reqCopy = request.clone();
+    const body: RestartRunRequest = await reqCopy.json();
     const { managerThreadId, plannerThreadId, programmerThreadId } = body;
 
     const langGraphClient = new Client({
@@ -137,6 +138,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         {
           error:
             "Failed to restart run. Must have existing planner and manager threads.",
+        },
+        { status: 500 },
+      );
+    }
+
+    if (!("config" in managerThread)) {
+      return NextResponse.json(
+        {
+          error: "Failed to restart run. Manager thread must have a config.",
+        },
+        { status: 500 },
+      );
+    }
+    if (!("config" in plannerThread)) {
+      return NextResponse.json(
+        {
+          error: "Failed to restart run. Planner thread must have a config.",
+        },
+        { status: 500 },
+      );
+    }
+    if (programmerThread && !("config" in programmerThread)) {
+      return NextResponse.json(
+        {
+          error: "Failed to restart run. Programmer thread must have a config.",
         },
         { status: 500 },
       );
