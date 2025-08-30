@@ -144,6 +144,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     if (!("config" in managerThread)) {
+      console.error("Manager thread must have a config.");
+      console.dir(managerThread, { depth: null });
       return NextResponse.json(
         {
           error: "Failed to restart run. Manager thread must have a config.",
@@ -152,6 +154,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
     if (!("config" in plannerThread)) {
+      console.error("Planner thread must have a config.");
+      console.dir(plannerThread, { depth: null });
       return NextResponse.json(
         {
           error: "Failed to restart run. Planner thread must have a config.",
@@ -160,6 +164,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
     if (programmerThread && !("config" in programmerThread)) {
+      console.error("Programmer thread must have a config.");
+      console.dir(programmerThread, { depth: null });
       return NextResponse.json(
         {
           error: "Failed to restart run. Programmer thread must have a config.",
