@@ -1,0 +1,16 @@
+{
+    "node_version": "20",
+    "graphs": {
+      "programmer": "./src/graphs/programmer/index.ts:graph",
+      "planner": "./src/graphs/planner/index.ts:graph",
+      "manager": "./src/graphs/manager/index.ts:graph"
+    },
+    "env": ".env",
+    "auth": {
+      "path": "./src/security/auth.ts:auth"
+    },
+    "http": {
+      "app": "./src/routes/app.ts:app"
+    }
+  }
+  
