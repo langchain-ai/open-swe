@@ -163,13 +163,6 @@ All CI checks must pass before your PR can be merged.
 - `apps/cli/` - Terminal interface  
 - `apps/docs/` - Documentation
 
-## Guidelines
-
-- **Small, focused PRs** - One feature/fix per PR
-- **Follow existing patterns** - Study similar code before implementing
-- **Include tests** for new functionality
-- **No `@ts-ignore`** - Use proper TypeScript types
-- **Clear PR descriptions** with context and motivation
 
 ## Security
 
