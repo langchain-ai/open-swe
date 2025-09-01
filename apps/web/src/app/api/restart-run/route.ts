@@ -178,7 +178,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       programmerSession: newProgrammerSession,
     });
   } catch (error) {
-    console.error("Failed to restart run", error);
     return NextResponse.json(
       { error: "Failed to restart run" },
       { status: 500 },
