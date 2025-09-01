@@ -177,7 +177,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       plannerSession: newPlannerSession,
       programmerSession: newProgrammerSession,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to restart run" },
       { status: 500 },
