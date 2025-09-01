@@ -158,7 +158,8 @@ All CI checks must pass before your PR can be merged.
 
 ## Project Structure
 
-- `apps/openswe/` - Core LangGraph agent
+- `apps/open-swe/` - Core LangGraph agent
+- `apps/open-swe-v2/` - Core Deep Agents system (In progress)
 - `apps/web/` - Next.js web interface
 - `apps/cli/` - Terminal interface  
 - `apps/docs/` - Documentation
