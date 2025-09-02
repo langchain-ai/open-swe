@@ -12,13 +12,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Folder } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import type { TargetRepository } from "@openswe/shared/open-swe/types";
 import { GitHubSVG } from "@/components/icons/github";
 import { Repository } from "@/utils/github";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { useLocalRepositories } from "@/hooks/useLocalRepositories";
+
+const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
 
 interface RepositorySelectorProps {
   disabled?: boolean;
@@ -45,6 +48,9 @@ export function RepositorySelector({
   streamTargetRepository,
 }: RepositorySelectorProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const { repositories: localRepos, isLoading: localLoading } =
+    useLocalRepositories(search);
   const {
     repositories,
     selectedRepository,
@@ -67,11 +73,114 @@ export function RepositorySelector({
     }
   };
 
+  if (GITHUB_DISABLED) {
+    const handleLocalSelect = (repoPath: string) => {
+      setSelectedRepository({ owner: "", repo: repoPath });
+      setOpen(false);
+    };
+
+    const selectedValue = selectedRepository?.repo;
+    const displayValue =
+      chatStarted && streamTargetRepository
+        ? streamTargetRepository.repo
+        : selectedValue;
+
+    if (localLoading) {
+      return (
+        <Button
+          variant="outline"
+          disabled
+          className={cn(buttonClassName)}
+          size="sm"
+        >
+          <span>Loading repositories...</span>
+        </Button>
+      );
+    }
+
+    if (chatStarted) {
+      return (
+        <Button
+          variant="outline"
+          className={cn(buttonClassName)}
+          size="sm"
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Folder />
+            <span className="truncate text-left">
+              {displayValue || placeholder}
+            </span>
+          </div>
+        </Button>
+      );
+    }
+
+    return (
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className={cn(buttonClassName)}
+            disabled={disabled}
+            size="sm"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <Folder />
+              <span className="truncate text-left">
+                {selectedValue || placeholder}
+              </span>
+            </div>
+            <ChevronsUpDown className="h-4 w-4 shrink-0" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[340px] p-0">
+          <Command>
+            <CommandInput
+              placeholder="Search repositories..."
+              value={search}
+              onValueChange={setSearch}
+            />
+            <CommandList>
+              <CommandEmpty>No repositories found.</CommandEmpty>
+              <CommandGroup>
+                {localRepos.map((repo) => {
+                  const key = repo.path;
+                  const isSelected = selectedValue === key;
+                  return (
+                    <CommandItem
+                      key={key}
+                      value={key}
+                      onSelect={() => handleLocalSelect(key)}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <div className="flex flex-col">
+                        <span className="font-medium">{repo.name}</span>
+                      </div>
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
   const selectedValue = selectedRepository
     ? `${selectedRepository.owner}/${selectedRepository.repo}`
     : undefined;
 
-  // When chatStarted and streamTargetRepository is available, use it for display
   const displayValue =
     chatStarted && streamTargetRepository
       ? `${streamTargetRepository.owner}/${streamTargetRepository.repo}`
@@ -129,25 +238,6 @@ export function RepositorySelector({
             height="16"
           />
           <span>GitHub App not installed</span>
-        </div>
-      </Button>
-    );
-  }
-
-  if (repositories.length === 0) {
-    return (
-      <Button
-        variant="outline"
-        disabled
-        className={cn(buttonClassName)}
-        size="sm"
-      >
-        <div className="flex items-center gap-2">
-          <GitHubSVG
-            width="16"
-            height="16"
-          />
-          <span>No repositories available</span>
         </div>
       </Button>
     );
