@@ -14,6 +14,7 @@ function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const githubDisabled = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
 
   const {
     token: githubToken,
@@ -51,6 +52,10 @@ function AuthStatusContent() {
 
   const checkAuthStatus = async () => {
     try {
+      if (githubDisabled) {
+        setIsAuth(true);
+        return;
+      }
       const response = await fetch("/api/auth/status");
       const data = await response.json();
       setIsAuth(data.authenticated);
