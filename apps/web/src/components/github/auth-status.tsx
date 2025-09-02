@@ -45,10 +45,9 @@ function AuthStatusContent() {
 
   useEffect(() => {
     if (githubToken) {
-      console.log("redirecting to chat");
       router.push("/chat");
     }
-  }, [githubToken]);
+  }, [githubToken, router]);
 
   const checkAuthStatus = async () => {
     try {
@@ -185,6 +184,19 @@ function AuthStatusContent() {
 }
 
 export default function AuthStatus() {
+  const router = useRouter();
+  const githubDisabled = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+
+  useEffect(() => {
+    if (githubDisabled) {
+      router.push("/chat");
+    }
+  }, [githubDisabled, router]);
+
+  if (githubDisabled) {
+    return null;
+  }
+
   return (
     <GitHubAppProvider>
       <AuthStatusContent />

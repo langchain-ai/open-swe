@@ -41,6 +41,7 @@ export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
     };
 
     const isSidebarOpen = historyOpen || configOpen;
+    const githubDisabled = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
 
     return (
       <motion.div
@@ -106,7 +107,7 @@ export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
             >
               <History className="size-5" />
             </TooltipIconButton>
-            <AuthStatus />
+            {!githubDisabled && <AuthStatus />}
           </div>
         </div>
       </motion.div>
