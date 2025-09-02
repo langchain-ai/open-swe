@@ -5,7 +5,12 @@ import {
 } from "@openswe/shared/constants";
 import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 
+const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+
 export async function middleware(request: NextRequest) {
+  if (GITHUB_DISABLED) {
+    return NextResponse.next();
+  }
   const token = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   const installationId = request.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,

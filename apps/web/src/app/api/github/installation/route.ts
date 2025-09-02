@@ -12,6 +12,12 @@ import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
  * select which repositories to grant access to
  */
 export async function GET(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   try {
     const accessToken = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
 

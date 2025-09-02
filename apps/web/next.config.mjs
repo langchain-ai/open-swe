@@ -5,6 +5,9 @@ const nextConfig = {
       bodySizeLimit: "10mb",
     },
   },
+  env: {
+    NEXT_PUBLIC_GITHUB_DISABLED: process.env.NEXT_PUBLIC_GITHUB_DISABLED,
+  },
 };
 
 export default nextConfig;

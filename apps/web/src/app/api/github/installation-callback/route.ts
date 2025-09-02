@@ -11,6 +11,12 @@ import { NextRequest, NextResponse } from "next/server";
  * This endpoint is called by GitHub after a user installs or configures the GitHub App
  */
 export async function GET(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   try {
     const { searchParams } = new URL(request.url);
     const installationId = searchParams.get("installation_id");

@@ -10,6 +10,12 @@ type GitHubInstallationsResponse =
  * Uses the user's access token from GITHUB_TOKEN_COOKIE to call GET /user/installations
  */
 export async function GET(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   try {
     // Get the user's access token from cookies
     const tokenData = getGitHubToken(request);
