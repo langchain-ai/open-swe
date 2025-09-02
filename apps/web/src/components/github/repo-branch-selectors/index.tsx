@@ -2,6 +2,8 @@ import { BranchSelector } from "./branch-selector";
 import { RepositorySelector } from "./repository-selector";
 import { useQueryState } from "nuqs";
 
+const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+
 export function RepositoryBranchSelectors() {
   const [threadId] = useQueryState("threadId");
   const chatStarted = !!threadId;
@@ -21,16 +23,20 @@ export function RepositoryBranchSelectors() {
           }
         />
       </div>
-      <span className="text-muted-foreground/70">:</span>
-      <div className="flex items-center gap-0">
-        <BranchSelector
-          chatStarted={chatStarted}
-          buttonClassName={
-            defaultButtonStyles +
-            (chatStarted ? " " + defaultStylesChatStarted : "")
-          }
-        />
-      </div>
+      {!GITHUB_DISABLED && (
+        <>
+          <span className="text-muted-foreground/70">:</span>
+          <div className="flex items-center gap-0">
+            <BranchSelector
+              chatStarted={chatStarted}
+              buttonClassName={
+                defaultButtonStyles +
+                (chatStarted ? " " + defaultStylesChatStarted : "")
+              }
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
