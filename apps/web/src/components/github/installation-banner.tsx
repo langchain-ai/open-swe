@@ -6,8 +6,17 @@ import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 const GITHUB_INSTALLATION_SEEN_KEY = "github_installation_seen";
+const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
 
 export function GitHubInstallationBanner() {
+  if (GITHUB_DISABLED) {
+    return null;
+  }
+
+  return <GitHubInstallationBannerContent />;
+}
+
+function GitHubInstallationBannerContent() {
   const { isInstalled, isLoading } = useGitHubAppProvider();
   const [dismissed, setDismissed] = useState(false);
   const [isNewUser, setIsNewUser] = useState(false);
