@@ -6,14 +6,41 @@ import { handleIssueLabeled } from "./issue-labeled.js";
 import { handlePullRequestComment } from "./pull-request-comment.js";
 import { handlePullRequestReview } from "./pull-request-review.js";
 import { handlePullRequestReviewComment } from "./pull-request-review-comment.js";
+import { isLocalModeFromEnv } from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "GitHubUnifiedWebhook");
 
-const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET!;
+let webhooks: Webhooks | null = null;
 
-const webhooks = new Webhooks({
-  secret: GITHUB_WEBHOOK_SECRET,
-});
+if (!isLocalModeFromEnv()) {
+  const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET;
+  if (!GITHUB_WEBHOOK_SECRET) {
+    throw new Error("GITHUB_WEBHOOK_SECRET is not configured");
+  }
+  webhooks = new Webhooks({
+    secret: GITHUB_WEBHOOK_SECRET,
+  });
+
+  // Issue labeling events
+  webhooks.on("issues.labeled", async ({ payload }) => {
+    await handleIssueLabeled(payload);
+  });
+
+  // PR general comment events (discussion area)
+  webhooks.on("issue_comment.created", async ({ payload }) => {
+    await handlePullRequestComment(payload);
+  });
+
+  // PR review events (approve/request changes/comment)
+  webhooks.on("pull_request_review.submitted", async ({ payload }) => {
+    await handlePullRequestReview(payload);
+  });
+
+  // PR review comment events (inline code comments)
+  webhooks.on("pull_request_review_comment.created", async ({ payload }) => {
+    await handlePullRequestReviewComment(payload);
+  });
+}
 
 const getPayload = (body: string): Record<string, any> | null => {
   try {
@@ -43,29 +70,15 @@ const getHeaders = (
   return { id: webhookId, name: webhookEvent, installationId, targetType };
 };
 
-// Issue labeling events
-webhooks.on("issues.labeled", async ({ payload }) => {
-  await handleIssueLabeled(payload);
-});
-
-// PR general comment events (discussion area)
-webhooks.on("issue_comment.created", async ({ payload }) => {
-  await handlePullRequestComment(payload);
-});
-
-// PR review events (approve/request changes/comment)
-webhooks.on("pull_request_review.submitted", async ({ payload }) => {
-  await handlePullRequestReview(payload);
-});
-
-// PR review comment events (inline code comments)
-webhooks.on("pull_request_review_comment.created", async ({ payload }) => {
-  await handlePullRequestReviewComment(payload);
-});
+// When running in local mode, GitHub webhooks are disabled
 
 export async function unifiedWebhookHandler(
   c: Context<BlankEnv, "/webhooks/github", BlankInput>,
 ) {
+  if (!webhooks) {
+    logger.info("GitHub integration is disabled");
+    return c.json({ error: "GitHub integration is disabled" }, { status: 501 });
+  }
   const payload = getPayload(await c.req.text());
   if (!payload) {
     logger.error("Missing payload");

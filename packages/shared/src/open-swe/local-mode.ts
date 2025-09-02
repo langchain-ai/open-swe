@@ -28,5 +28,5 @@ export function getLocalWorkingDirectory(): string {
  * (useful for contexts where GraphConfig is not available)
  */
 export function isLocalModeFromEnv(): boolean {
-  return process.env.OPEN_SWE_LOCAL_MODE === "true";
+  return process.env.OPEN_SWE_LOCAL_MODE !== "false";
 }
