@@ -6,6 +6,10 @@ import { isAuthenticated } from "@/lib/auth";
  */
 export async function GET(request: NextRequest) {
   try {
+    if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+      return NextResponse.json({ authenticated: true });
+    }
+
     const authenticated = isAuthenticated(request);
     return NextResponse.json({ authenticated });
   } catch (error) {
