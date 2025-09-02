@@ -8,6 +8,12 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
  * Requires a valid GitHub installation ID in the cookies. Supports pagination via 'page' query parameter.
  */
 export async function GET(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   try {
     // Get the installation ID from cookies
     const installationId = request.cookies.get(

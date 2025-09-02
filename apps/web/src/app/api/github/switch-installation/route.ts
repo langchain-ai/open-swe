@@ -6,6 +6,12 @@ import { getInstallationCookieOptions } from "@/lib/auth";
  * Updates the current GitHub installation ID in the cookie
  */
 export async function POST(request: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   try {
     const body = await request.json();
     const { installationId } = body;

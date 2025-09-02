@@ -5,6 +5,12 @@ import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 const GITHUB_API_URL = "https://api.github.com";
 
 async function handler(req: NextRequest) {
+  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+    return NextResponse.json(
+      { error: "GitHub integration disabled" },
+      { status: 404 },
+    );
+  }
   const path = req.nextUrl.pathname.replace(/^\/api\/github\/proxy\//, "");
   const installationIdCookie = req.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,

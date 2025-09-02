@@ -12,15 +12,25 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+
 export default function SettingsPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useQueryState("tab", {
-    defaultValue: "github" as "github" | "api-keys" | "configuration",
+    defaultValue: (GITHUB_DISABLED ? "api-keys" : "github") as
+      | "github"
+      | "api-keys"
+      | "configuration",
     parse: (value: string) => {
-      if (["github", "api-keys", "configuration"].includes(value)) {
+      const allowed = ["api-keys", "configuration"];
+      if (!GITHUB_DISABLED) allowed.push("github");
+      if (allowed.includes(value)) {
         return value as "github" | "api-keys" | "configuration";
       }
-      return "github";
+      return (GITHUB_DISABLED ? "api-keys" : "github") as
+        | "github"
+        | "api-keys"
+        | "configuration";
     },
     serialize: (value) => value,
   });
@@ -59,18 +69,20 @@ export default function SettingsPage() {
 
         <div className="mb-6">
           <div className="border-border bg-muted/50 flex rounded-t-lg border-b">
-            <button
-              onClick={() => setActiveTab("github")}
-              className={getTabClassName(activeTab === "github")}
-            >
-              <span className="flex items-center gap-2 font-mono">
-                <GitHubSVG
-                  height="16"
-                  width="16"
-                />
-                GitHub
-              </span>
-            </button>
+            {!GITHUB_DISABLED && (
+              <button
+                onClick={() => setActiveTab("github")}
+                className={getTabClassName(activeTab === "github")}
+              >
+                <span className="flex items-center gap-2 font-mono">
+                  <GitHubSVG
+                    height="16"
+                    width="16"
+                  />
+                  GitHub
+                </span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab("api-keys")}
               className={getTabClassName(activeTab === "api-keys")}
@@ -93,7 +105,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="border-border bg-background rounded-b-lg border border-t-0 p-6">
-          {activeTab === "github" && <GitHubManager />}
+          {!GITHUB_DISABLED && activeTab === "github" && <GitHubManager />}
           {activeTab === "api-keys" && <APIKeysTab />}
           {activeTab === "configuration" && <ConfigManager />}
         </div>
