@@ -9,6 +9,7 @@ import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 import { createRunFromWebhook, createDevMetadataComment } from "./utils.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { Octokit } from "@octokit/core";
+import { isLocalModeFromEnv } from "@openswe/shared/open-swe/local-mode";
 
 export interface WebhookHandlerContext {
   installationId: number;
@@ -32,10 +33,13 @@ export interface CommentConfiguration {
 
 export class WebhookHandlerBase {
   protected logger: ReturnType<typeof createLogger>;
-  protected githubApp: GitHubApp;
+  protected githubApp?: GitHubApp;
 
   constructor(loggerName: string) {
     this.logger = createLogger(LogLevel.INFO, loggerName);
+    if (isLocalModeFromEnv()) {
+      return;
+    }
     this.githubApp = new GitHubApp();
   }
 
@@ -55,6 +59,11 @@ export class WebhookHandlerBase {
       this.logger.error("User is not a member of allowed orgs", {
         username: payload.sender.login,
       });
+      return null;
+    }
+
+    if (!this.githubApp) {
+      this.logger.error("GitHub integration is disabled");
       return null;
     }
 

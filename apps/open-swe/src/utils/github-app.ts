@@ -1,11 +1,12 @@
 import { App } from "@octokit/app";
 import { Octokit } from "@octokit/core";
+import { isLocalModeFromEnv } from "@openswe/shared/open-swe/local-mode";
 
 const replaceNewlinesWithBackslashN = (str: string) =>
   str.replace(/\n/g, "\\n");
 
 export class GitHubApp {
-  app: App;
+  app?: App;
 
   constructor() {
     const appId = process.env.GITHUB_APP_ID;
@@ -14,6 +15,10 @@ export class GitHubApp {
       : undefined;
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
     if (!appId || !privateKey || !webhookSecret) {
+      if (isLocalModeFromEnv()) {
+        this.app = undefined;
+        return;
+      }
       throw new Error(
         "GitHub App ID, Private Key, or Webhook Secret is not configured.",
       );
@@ -29,6 +34,9 @@ export class GitHubApp {
   }
 
   async getInstallationOctokit(installationId: number): Promise<Octokit> {
+    if (!this.app) {
+      throw new Error("GitHub App is not initialized");
+    }
     return await this.app.getInstallationOctokit(installationId);
   }
 
@@ -36,6 +44,9 @@ export class GitHubApp {
     token: string;
     expiresAt: string;
   }> {
+    if (!this.app) {
+      throw new Error("GitHub App is not initialized");
+    }
     const octokit = await this.app.getInstallationOctokit(installationId);
 
     // The installation access token is available on the auth property
