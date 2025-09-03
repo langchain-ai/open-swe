@@ -1,10 +1,10 @@
 import {
   GITHUB_AUTH_STATE_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
-  GITHUB_TOKEN_TYPE_COOKIE,
   GITHUB_TOKEN_COOKIE,
 } from "@openswe/shared/constants";
-import { getInstallationCookieOptions } from "@/lib/auth";
+import { getInstallationCookieOptions, createSession } from "@/lib/auth";
+import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -67,7 +67,6 @@ export async function GET(request: NextRequest) {
     );
 
     if (!tokenResponse.ok) {
-      console.error("Token exchange failed:", await tokenResponse.text());
       return NextResponse.redirect(
         new URL("/?error=token_exchange_failed", request.url),
       );
@@ -80,38 +79,44 @@ export async function GET(request: NextRequest) {
         new URL(`/?error=${encodeURIComponent(tokenData.error)}`, request.url),
       );
     }
+    const user = await verifyGithubUser(tokenData.access_token);
+    if (!user) {
+      return NextResponse.redirect(
+        new URL("/?error=invalid_token", request.url),
+      );
+    }
 
-    // Create the success response
     const response = NextResponse.redirect(new URL("/chat", request.url));
 
-    // Clear the state cookie as it's no longer needed
     response.cookies.set(GITHUB_AUTH_STATE_COOKIE, "", {
       expires: new Date(0),
       path: "/",
     });
 
-    // Set token cookies directly on the response
+    createSession(
+      {
+        accessToken: tokenData.access_token,
+        tokenType: tokenData.token_type || "bearer",
+        installationId: installationId ?? undefined,
+        user: {
+          login: user.login,
+          avatar_url: user.avatar_url,
+          html_url: user.html_url,
+          name: user.name,
+          email: user.email,
+        },
+      },
+      response,
+    );
+
     response.cookies.set(GITHUB_TOKEN_COOKIE, tokenData.access_token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: 60 * 60 * 24 * 30,
       path: "/",
     });
 
-    response.cookies.set(
-      GITHUB_TOKEN_TYPE_COOKIE,
-      tokenData.token_type || "bearer",
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
-        path: "/",
-      },
-    );
-
-    // If there's an installation_id, store that as well for future API calls
     if (installationId) {
       response.cookies.set(
         GITHUB_INSTALLATION_ID_COOKIE,
@@ -121,8 +126,7 @@ export async function GET(request: NextRequest) {
     }
 
     return response;
-  } catch (error) {
-    console.error("GitHub App callback error:", error);
+  } catch {
     return NextResponse.redirect(
       new URL("/?error=callback_failed", request.url),
     );

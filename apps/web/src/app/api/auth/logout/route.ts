@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clearGitHubToken } from "@/lib/auth";
+import { clearSession } from "@/lib/auth";
 
 /**
  * API route to handle GitHub logout
@@ -7,10 +7,9 @@ import { clearGitHubToken } from "@/lib/auth";
 export async function POST(request: NextRequest) {
   try {
     const response = NextResponse.json({ success: true });
-    clearGitHubToken(response);
+    clearSession(response);
     return response;
-  } catch (error) {
-    console.error("Error during logout:", error);
+  } catch {
     return NextResponse.json(
       { success: false, error: "Failed to logout" },
       { status: 500 },
