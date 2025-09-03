@@ -1,4 +1,4 @@
-import { ENABLE_GITHUB } from "./config";
+import { ENABLE_GITHUB } from "./config.js";
 
 export const TIMEOUT_SEC = 60; // 1 minute
 export const SANDBOX_ROOT_DIR = "/home/daytona";
