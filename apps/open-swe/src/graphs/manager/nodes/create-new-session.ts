@@ -14,8 +14,7 @@ import {
   OPEN_SWE_STREAM_MODE,
 } from "@openswe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import { createIssue } from "../../../utils/github/api.js";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { getIssueService } from "../../../services/issue-service.js";
 import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
 import {
   ISSUE_TITLE_CLOSE_TAG,
@@ -23,7 +22,7 @@ import {
   ISSUE_CONTENT_CLOSE_TAG,
   ISSUE_CONTENT_OPEN_TAG,
   formatContentForIssueBody,
-} from "../../../utils/github/issue-messages.js";
+} from "../../../utils/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
@@ -52,18 +51,16 @@ export async function createNewSession(
 
   let newIssueNumber: number | undefined;
   if (shouldCreateIssue(config)) {
-    const { githubAccessToken } = getGitHubTokensFromConfig(config);
-    const newIssue = await createIssue({
-      owner: state.targetRepository.owner,
-      repo: state.targetRepository.repo,
+    const issueService = getIssueService(config);
+    const newIssue = await issueService.createIssue({
+      repo: state.targetRepository,
       title: titleAndContent.title,
       body: formatContentForIssueBody(titleAndContent.body),
-      githubAccessToken,
     });
     if (!newIssue) {
       throw new Error("Failed to create new issue");
     }
-    newIssueNumber = newIssue.number;
+    newIssueNumber = Number(newIssue.id);
   }
 
   const inputMessages: BaseMessage[] = [

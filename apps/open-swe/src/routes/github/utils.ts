@@ -21,7 +21,7 @@ import { encryptSecret } from "@openswe/shared/crypto";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { StreamMode } from "@langchain/langgraph-sdk";
-import { extractContentWithoutDetailsFromIssueBody } from "../../utils/github/issue-messages.js";
+import { extractContentWithoutDetailsFromIssueBody } from "../../utils/issue-messages.js";
 
 export function createDevMetadataComment(runId: string, threadId: string) {
   return `<details>

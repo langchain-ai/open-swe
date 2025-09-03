@@ -40,7 +40,10 @@ import {
   CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
+import {
+  getIssueService,
+  getMissingMessages,
+} from "../../../../services/issue-service.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
 import { createInstallDependenciesTool } from "../../../../tools/install-dependencies.js";
@@ -318,14 +321,17 @@ export async function generateAction(
     TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.PROGRAMMER].modelName;
   const provider = modelStr.split(":")[0] as Provider;
 
-  const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
-    config,
-  )
-    ? await Promise.all([
-        getMissingMessages(state, config),
-        getPlansFromIssue(state, config),
-      ])
-    : [[], { taskPlan: null }];
+  const [missingMessages, { taskPlan: latestTaskPlan }] =
+    shouldCreateIssue(config) && state.githubIssueId
+      ? await Promise.all([
+          getMissingMessages(getIssueService(config), {
+            messages: state.messages,
+            issueId: state.githubIssueId,
+            repo: state.targetRepository,
+          }),
+          getPlansFromIssue(state, config),
+        ])
+      : [[], { taskPlan: null }];
 
   const { providerTools, providerMessages } = await createToolsAndPrompt(
     state,

@@ -10,7 +10,10 @@ import {
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
-import { getMissingMessages } from "../../../utils/github/issue-messages.js";
+import {
+  getIssueService,
+  getMissingMessages,
+} from "../../../services/issue-service.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";
 import { getMessageContentString } from "@openswe/shared/messages";
@@ -119,7 +122,13 @@ export async function determineNeedsContext(
   config: GraphConfig,
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
-    shouldCreateIssue(config) ? getMissingMessages(state, config) : [],
+    shouldCreateIssue(config) && state.githubIssueId
+      ? getMissingMessages(getIssueService(config), {
+          messages: state.messages,
+          issueId: state.githubIssueId,
+          repo: state.targetRepository,
+        })
+      : [],
     loadModel(config, LLMTask.ROUTER),
   ]);
   const modelManager = getModelManager();

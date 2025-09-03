@@ -3,8 +3,6 @@ import {
   PlannerGraphUpdate,
 } from "@openswe/shared/open-swe/planner/types";
 import { Command } from "@langchain/langgraph";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { getIssue, getIssueComments } from "../../../utils/github/api.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   AIMessage,
@@ -15,9 +13,10 @@ import {
 } from "@langchain/core/messages";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
+  getIssueService,
   getMessageContentFromIssue,
   getUntrackedComments,
-} from "../../../utils/github/issue-messages.js";
+} from "../../../services/issue-service.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
@@ -42,18 +41,15 @@ export async function prepareGraphState(
     throw new Error("No target repository provided");
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-  const baseGetIssueInputs = {
-    owner: state.targetRepository.owner,
-    repo: state.targetRepository.repo,
-    issueNumber: state.githubIssueId,
-    githubInstallationToken,
-  };
+  const issueService = getIssueService(config);
   const [issue, comments] = await Promise.all([
-    getIssue(baseGetIssueInputs),
-    getIssueComments({
-      ...baseGetIssueInputs,
-      filterBotComments: true,
+    issueService.getIssue({
+      repo: state.targetRepository,
+      issueId: state.githubIssueId,
+    }),
+    issueService.listComments({
+      repo: state.targetRepository,
+      issueId: state.githubIssueId,
     }),
   ]);
   if (!issue) {
