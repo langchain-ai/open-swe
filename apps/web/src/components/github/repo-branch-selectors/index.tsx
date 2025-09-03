@@ -1,8 +1,9 @@
 import { BranchSelector } from "./branch-selector";
 import { RepositorySelector } from "./repository-selector";
 import { useQueryState } from "nuqs";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
-const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+const GITHUB_DISABLED = !ENABLE_GITHUB;
 
 export function RepositoryBranchSelectors() {
   const [threadId] = useQueryState("threadId");

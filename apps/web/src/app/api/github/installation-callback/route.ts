@@ -5,13 +5,14 @@ import {
   getInstallationCookieOptions,
 } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 /**
  * Handles callbacks from GitHub App installations
  * This endpoint is called by GitHub after a user installs or configures the GitHub App
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },

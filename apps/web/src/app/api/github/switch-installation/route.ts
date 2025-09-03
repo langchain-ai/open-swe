@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 import { getInstallationCookieOptions } from "@/lib/auth";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 /**
  * Updates the current GitHub installation ID in the cookie
  */
 export async function POST(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },

@@ -1,6 +1,9 @@
 import { Hono } from "hono";
-import { unifiedWebhookHandler } from "./github/unified-webhook.js";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 export const app = new Hono();
 
-app.post("/webhooks/github", unifiedWebhookHandler);
+if (ENABLE_GITHUB) {
+  const { unifiedWebhookHandler } = await import("./github/unified-webhook.js");
+  app.post("/webhooks/github", unifiedWebhookHandler);
+}

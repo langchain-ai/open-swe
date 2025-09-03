@@ -3,8 +3,7 @@
 import { useGitHubApp } from "@/hooks/useGitHubApp";
 import { createContext, useContext, ReactNode, useState } from "react";
 import type { TargetRepository } from "@openswe/shared/open-swe/types";
-
-const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 type GitHubAppContextType = ReturnType<typeof useGitHubApp>;
 
@@ -15,7 +14,7 @@ const GitHubAppContext = createContext<GitHubAppContextType | undefined>(
 export function GitHubAppProvider({ children }: { children: ReactNode }) {
   const [localSelectedRepository, setLocalSelectedRepository] =
     useState<TargetRepository | null>(null);
-  if (GITHUB_DISABLED) {
+  if (!ENABLE_GITHUB) {
     const finalValue: GitHubAppContextType = {
       isInstalled: null,
       isLoading: false,

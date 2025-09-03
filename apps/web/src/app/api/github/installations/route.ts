@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { Endpoints } from "@octokit/types";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 type GitHubInstallationsResponse =
   Endpoints["GET /user/installations"]["response"]["data"];
@@ -10,7 +11,7 @@ type GitHubInstallationsResponse =
  * Uses the user's access token from GITHUB_TOKEN_COOKIE to call GET /user/installations
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },

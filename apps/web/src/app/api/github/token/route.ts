@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInstallationToken } from "@openswe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 /**
  * Returns a GitHub installation token that can be used for Git operations
  * This endpoint is intended for internal use by the AI coding agent
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },
