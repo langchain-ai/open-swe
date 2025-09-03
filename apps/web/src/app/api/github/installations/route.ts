@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGitHubToken } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { Endpoints } from "@octokit/types";
 
 type GitHubInstallationsResponse =
@@ -17,10 +17,9 @@ export async function GET(request: NextRequest) {
     );
   }
   try {
-    // Get the user's access token from cookies
-    const tokenData = getGitHubToken(request);
+    const session = getSession(request);
 
-    if (!tokenData || !tokenData.access_token) {
+    if (!session || !session.accessToken) {
       return NextResponse.json(
         {
           error: "GitHub access token not found. Please authenticate first.",
@@ -32,7 +31,7 @@ export async function GET(request: NextRequest) {
     // Fetch installations from GitHub API
     const response = await fetch("https://api.github.com/user/installations", {
       headers: {
-        Authorization: `${tokenData.token_type} ${tokenData.access_token}`,
+        Authorization: `${session.tokenType} ${session.accessToken}`,
         Accept: "application/vnd.github.v3+json",
         "User-Agent": "OpenSWE-Agent",
       },
@@ -51,8 +50,7 @@ export async function GET(request: NextRequest) {
     const data: GitHubInstallationsResponse = await response.json();
 
     return NextResponse.json(data);
-  } catch (error) {
-    console.error("Error fetching GitHub installations:", error);
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch installations" },
       { status: 500 },

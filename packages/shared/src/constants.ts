@@ -15,7 +15,7 @@ export const LOCAL_MODE_HEADER = "x-local-mode";
 export const DO_NOT_RENDER_ID_PREFIX = "do-not-render-";
 export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
-export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
+export const SESSION_COOKIE = "session";
 
 export const OPEN_SWE_V2_GRAPH_ID = "open-swe-v2";
 export const MANAGER_GRAPH_ID = "manager";
