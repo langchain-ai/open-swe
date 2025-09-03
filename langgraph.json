@@ -11,6 +11,18 @@
     "path": "./apps/open-swe/src/security/auth.ts:auth"
   },
   "http": {
-    "app": "./apps/open-swe/src/routes/app.ts:app"
+    "app": "./apps/open-swe/src/routes/app.ts:app",
+    "configurable_headers": {
+      "include": [
+        "x-github-access-token",
+        "x-github-installation-token",
+        "x-github-user-id",
+        "x-github-user-login",
+        "x-github-installation-name",
+        "x-github-installation-id",
+        "x-github-pat",
+        "x-local-mode"
+      ]
+    }
   }
 }
