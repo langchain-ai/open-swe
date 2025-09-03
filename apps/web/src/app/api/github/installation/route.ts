@@ -5,6 +5,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 /**
  * Initiates the GitHub App installation flow
@@ -12,7 +13,7 @@ import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
  * select which repositories to grant access to
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },

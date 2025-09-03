@@ -11,8 +11,9 @@ import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
-const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+const GITHUB_DISABLED = !ENABLE_GITHUB;
 
 export default function SettingsPage() {
   const router = useRouter();

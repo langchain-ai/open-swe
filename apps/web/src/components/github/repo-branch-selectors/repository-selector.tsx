@@ -20,8 +20,9 @@ import { GitHubSVG } from "@/components/icons/github";
 import { Repository } from "@/utils/github";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { useLocalRepositories } from "@/hooks/useLocalRepositories";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
-const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+const GITHUB_DISABLED = !ENABLE_GITHUB;
 
 interface RepositorySelectorProps {
   disabled?: boolean;

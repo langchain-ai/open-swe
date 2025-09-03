@@ -6,7 +6,7 @@ const nextConfig = {
     },
   },
   env: {
-    NEXT_PUBLIC_GITHUB_DISABLED: process.env.NEXT_PUBLIC_GITHUB_DISABLED,
+    ENABLE_GITHUB: process.env.ENABLE_GITHUB,
   },
 };
 

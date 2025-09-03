@@ -4,9 +4,10 @@ import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { InstallationPrompt } from "./installation-prompt";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 const GITHUB_INSTALLATION_SEEN_KEY = "github_installation_seen";
-const GITHUB_DISABLED = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+const GITHUB_DISABLED = !ENABLE_GITHUB;
 
 export function GitHubInstallationBanner() {
   if (GITHUB_DISABLED) {

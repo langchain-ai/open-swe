@@ -9,12 +9,13 @@ import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { useRouter } from "next/navigation";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const githubDisabled = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+  const githubDisabled = !ENABLE_GITHUB;
 
   const {
     token: githubToken,
@@ -190,7 +191,7 @@ function AuthStatusContent() {
 
 export default function AuthStatus() {
   const router = useRouter();
-  const githubDisabled = process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true";
+  const githubDisabled = !ENABLE_GITHUB;
 
   useEffect(() => {
     if (githubDisabled) {

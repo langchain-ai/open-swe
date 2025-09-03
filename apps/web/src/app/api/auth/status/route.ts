@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 /**
  * API route to check GitHub authentication status
  */
 export async function GET(request: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json({ authenticated: true });
   }
   try {

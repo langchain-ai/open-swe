@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getInstallationToken } from "@openswe/shared/github/auth";
 import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
+import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 const GITHUB_API_URL = "https://api.github.com";
 
 async function handler(req: NextRequest) {
-  if (process.env.NEXT_PUBLIC_GITHUB_DISABLED === "true") {
+  if (!ENABLE_GITHUB) {
     return NextResponse.json(
       { error: "GitHub integration disabled" },
       { status: 404 },
