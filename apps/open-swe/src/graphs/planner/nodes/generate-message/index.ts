@@ -30,7 +30,10 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
+import {
+  getIssueService,
+  getMissingMessages,
+} from "../../../../services/issue-service.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
@@ -141,14 +144,17 @@ export async function generateAction(
       : {}),
   });
 
-  const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
-    config,
-  )
-    ? await Promise.all([
-        getMissingMessages(state, config),
-        getPlansFromIssue(state, config),
-      ])
-    : [[], { taskPlan: null }];
+  const [missingMessages, { taskPlan: latestTaskPlan }] =
+    shouldCreateIssue(config) && state.githubIssueId
+      ? await Promise.all([
+          getMissingMessages(getIssueService(config), {
+            messages: state.messages,
+            issueId: state.githubIssueId,
+            repo: state.targetRepository,
+          }),
+          getPlansFromIssue(state, config),
+        ])
+      : [[], { taskPlan: null }];
 
   const inputMessages = filterMessagesWithoutContent([
     ...state.messages,

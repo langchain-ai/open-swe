@@ -4,7 +4,7 @@ import {
   HumanMessage,
 } from "@langchain/core/messages";
 import { getMessageContentString } from "@openswe/shared/messages";
-import { extractContentWithoutDetailsFromIssueBody } from "./github/issue-messages.js";
+import { extractContentWithoutDetailsFromIssueBody } from "./issue-messages.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { shouldCreateIssue } from "./should-create-issue.js";

@@ -18,17 +18,13 @@ import {
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@openswe/shared/messages";
-import {
-  createIssue,
-  createIssueComment,
-} from "../../../../utils/github/api.js";
-import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
+import { getIssueService } from "../../../../services/issue-service.js";
 import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
 import {
   extractContentWithoutDetailsFromIssueBody,
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
-} from "../../../../utils/github/issue-messages.js";
+} from "../../../../utils/issue-messages.js";
 import { getDefaultHeaders } from "../../../../utils/default-headers.js";
 import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
@@ -220,7 +216,7 @@ export async function classifyMessage(
     );
   }
 
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
+  const issueService = getIssueService(config);
   let githubIssueId = state.githubIssueId;
 
   const newMessages: BaseMessage[] = [response];
@@ -235,17 +231,15 @@ export async function classifyMessage(
       getMessageContentString(userMessage.content),
     );
 
-    const newIssue = await createIssue({
-      owner: state.targetRepository.owner,
-      repo: state.targetRepository.repo,
+    const newIssue = await issueService.createIssue({
+      repo: state.targetRepository,
       title,
       body: formatContentForIssueBody(body),
-      githubAccessToken,
     });
     if (!newIssue) {
       throw new Error("Failed to create issue.");
     }
-    githubIssueId = newIssue.number;
+    githubIssueId = Number(newIssue.id);
     // Ensure we remove the old message, and replace it with an exact copy,
     // but with the issue ID & isOriginalIssue set in additional_kwargs.
     newMessages.push(
@@ -276,12 +270,10 @@ export async function classifyMessage(
       });
 
     const createCommentsPromise = messagesNotInIssue.map(async (message) => {
-      const createdIssue = await createIssueComment({
-        owner: state.targetRepository.owner,
-        repo: state.targetRepository.repo,
-        issueNumber: githubIssueId,
+      const createdIssue = await issueService.createComment({
+        repo: state.targetRepository,
+        issueId: githubIssueId,
         body: getMessageContentString(message.content),
-        githubToken: githubAccessToken,
       });
       if (!createdIssue?.id) {
         throw new Error("Failed to create issue comment");

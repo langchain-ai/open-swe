@@ -4,17 +4,13 @@ import {
   HumanMessage,
   isHumanMessage,
 } from "@langchain/core/messages";
-import { GitHubIssue, GitHubIssueComment } from "./types.js";
-import { getIssue, getIssueComments } from "./api.js";
-import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
-import { getGitHubTokensFromConfig } from "../github-tokens.js";
-import { DETAILS_CLOSE_TAG, DETAILS_OPEN_TAG } from "./issue-task.js";
-import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { Issue, IssueComment } from "../services/issue-service.js";
+import { DETAILS_CLOSE_TAG, DETAILS_OPEN_TAG } from "./github/issue-task.js";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
   githubIssueId: number,
-  comments: GitHubIssueComment[],
+  comments: IssueComment[],
 ): BaseMessage[] {
   // Get all human messages which contain github comment content. Exclude the original issue message.
   const humanMessages = existingMessages.filter(
@@ -42,67 +38,6 @@ export function getUntrackedComments(
     );
 
   return untrackedCommentMessages;
-}
-
-type GetMissingMessagesInput = {
-  messages: BaseMessage[];
-  githubIssueId: number;
-  targetRepository: TargetRepository;
-};
-
-export async function getMissingMessages(
-  input: GetMissingMessagesInput,
-  config: GraphConfig,
-): Promise<BaseMessage[]> {
-  if (isLocalMode(config)) {
-    return [];
-  }
-
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-  const [issue, comments] = await Promise.all([
-    getIssue({
-      owner: input.targetRepository.owner,
-      repo: input.targetRepository.repo,
-      issueNumber: input.githubIssueId,
-      githubInstallationToken,
-    }),
-    getIssueComments({
-      owner: input.targetRepository.owner,
-      repo: input.targetRepository.repo,
-      issueNumber: input.githubIssueId,
-      githubInstallationToken,
-      filterBotComments: true,
-    }),
-  ]);
-  if (!issue && !comments?.length) {
-    return [];
-  }
-
-  const isIssueMessageTracked = issue
-    ? input.messages.some(
-        (m) =>
-          isHumanMessage(m) &&
-          m.additional_kwargs?.isOriginalIssue &&
-          m.additional_kwargs?.githubIssueId === input.githubIssueId,
-      )
-    : false;
-  let issueMessage: HumanMessage | null = null;
-  if (issue && !isIssueMessageTracked) {
-    issueMessage = new HumanMessage({
-      id: uuidv4(),
-      content: getMessageContentFromIssue(issue),
-      additional_kwargs: {
-        githubIssueId: input.githubIssueId,
-        isOriginalIssue: true,
-      },
-    });
-  }
-
-  const untrackedCommentMessages = comments?.length
-    ? getUntrackedComments(input.messages, input.githubIssueId, comments)
-    : [];
-
-  return [...(issueMessage ? [issueMessage] : []), ...untrackedCommentMessages];
 }
 
 export const DEFAULT_ISSUE_TITLE = "New Open SWE Request";
@@ -170,7 +105,7 @@ export function extractContentWithoutDetailsFromIssueBody(
 }
 
 export function getMessageContentFromIssue(
-  issue: GitHubIssue | GitHubIssueComment,
+  issue: Issue | IssueComment,
 ): string {
   if ("title" in issue) {
     const formattedBody = extractContentWithoutDetailsFromIssueBody(
