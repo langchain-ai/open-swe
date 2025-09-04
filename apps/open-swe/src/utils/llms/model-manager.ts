@@ -109,6 +109,49 @@ export class ModelManager {
     return model;
   }
 
+  /**
+   * Check if a user has a valid API key for a provider without throwing errors
+   * @param graphConfig - The graph configuration containing user and API key information
+   * @param provider - The provider to check API key availability for
+   * @returns true if the user is allowed or has a valid API key, false otherwise
+   */
+  public hasApiKeyForProvider(
+    graphConfig: GraphConfig,
+    provider: Provider,
+  ): boolean {
+    try {
+      const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
+        ?.display_name;
+      const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+
+      if (!secretsEncryptionKey || !userLogin) {
+        return false;
+      }
+
+      // If the user is allowed, they don't need API keys
+      if (isAllowedUser(userLogin)) {
+        return true;
+      }
+
+      const apiKeys = graphConfig.configurable?.apiKeys;
+      if (!apiKeys) {
+        return false;
+      }
+
+      const providerApiKey = providerToApiKey(provider, apiKeys);
+      if (!providerApiKey) {
+        return false;
+      }
+
+      // Try to decrypt the API key to validate it
+      const apiKey = decryptSecret(providerApiKey, secretsEncryptionKey);
+      return !!apiKey;
+    } catch {
+      // If any error occurs during the check, return false
+      return false;
+    }
+  }
+
   private getUserApiKey(
     graphConfig: GraphConfig,
     provider: Provider,
@@ -250,6 +293,14 @@ export class ModelManager {
 
     // Add fallback models
     for (const provider of this.config.fallbackOrder) {
+      // Check if the user has an API key for this provider
+      if (!this.hasApiKeyForProvider(config, provider)) {
+        logger.debug(
+          `Skipping fallback provider ${provider} - no API key configured`,
+        );
+        continue;
+      }
+
       const fallbackModel = this.getDefaultModelForProvider(provider, task);
       if (
         fallbackModel &&
