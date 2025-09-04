@@ -52,7 +52,7 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
      ```bash
      ngrok http 2024  # Port 2024 is where the agent runs
      ```
-     Use the ngrok URL + `/webhook/github` (e.g., `https://abc123.ngrok.io/webhook/github`)
+     Use the ngrok URL + `/webhooks/github` (e.g., `https://abc123.ngrok.io/webhooks/github`)
    - **Webhook secret:** Generate and save:
      ```bash
      openssl rand -hex 32
