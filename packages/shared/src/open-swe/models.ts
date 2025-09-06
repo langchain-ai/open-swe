@@ -13,6 +13,10 @@ export const MODEL_OPTIONS = [
     value: "anthropic:claude-sonnet-4-0",
   },
   {
+    label: "Claude Sonnet 4 (1M Context)",
+    value: "anthropic:claude-sonnet-4-1m",
+  },
+  {
     label: "Claude Opus 4.1",
     value: "anthropic:claude-opus-4-1",
   },
