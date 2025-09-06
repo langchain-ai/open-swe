@@ -7,8 +7,8 @@ import {
 import { getMessageContentString } from "@openswe/shared/messages";
 import { traceable } from "langsmith/traceable";
 
-// After 80k tokens, summarize the conversation history.
-export const MAX_INTERNAL_TOKENS = 80_000;
+// After 1M tokens, summarize the conversation history.
+export const MAX_INTERNAL_TOKENS = 1_000_000; // Updated to support 1M tokens
 
 export function calculateConversationHistoryTokenCount(
   messages: BaseMessage[],
