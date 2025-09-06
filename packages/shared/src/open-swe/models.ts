@@ -9,12 +9,13 @@ export const MODEL_OPTIONS = [
   //   value: "anthropic:extended-thinking:claude-opus-4-0",
   // },
   {
-    label: "Claude Sonnet 4",
-    value: "anthropic:claude-sonnet-4-0",
+    label: "Claude Sonnet 4 (1M Context)",
+    value: "anthropic:claude-sonnet-4",
+    betaHeader: "context-1m-2025-08-07", // Add the beta header here
   },
   {
-    label: "Claude Sonnet 4 (1M Context)",
-    value: "anthropic:claude-sonnet-4-1m",
+    label: "Claude Sonnet 4",
+    value: "anthropic:claude-sonnet-4-0",
   },
   {
     label: "Claude Opus 4.1",
