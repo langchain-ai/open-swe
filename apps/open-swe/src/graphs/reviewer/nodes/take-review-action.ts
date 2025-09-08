@@ -9,7 +9,7 @@ import {
   createInstallDependenciesTool,
   createShellTool,
 } from "../../../tools/index.js";
-import { GraphConfig, TaskPlan } from "@openswe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
@@ -19,22 +19,14 @@ import { zodSchemaToString } from "../../../utils/zod-to-string.js";
 import { formatBadArgsError } from "../../../utils/zod-to-string.js";
 import { truncateOutput } from "../../../utils/truncate-outputs.js";
 import { createGrepTool } from "../../../tools/grep.js";
-import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
-} from "../../../utils/github/git.js";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { Command } from "@langchain/langgraph";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
-import { getActiveTask } from "@openswe/shared/open-swe/tasks";
-import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { createViewTool } from "../../../tools/builtin-tools/view.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
-import { getRepoAbsolutePath } from "@openswe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeReviewAction");
 
@@ -170,39 +162,6 @@ export async function takeReviewerActions(
 
   const toolCallResults = await Promise.all(toolCallResultsPromise);
 
-  let branchName: string | undefined = state.branchName;
-  let pullRequestNumber: number | undefined;
-  let updatedTaskPlan: TaskPlan | undefined;
-
-  if (!isLocalMode(config)) {
-    const repoPath = getRepoAbsolutePath(state.targetRepository, config);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
-
-    if (changedFiles.length > 0) {
-      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-        changedFiles,
-      });
-
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-      const result = await checkoutBranchAndCommit(
-        config,
-        state.targetRepository,
-        sandbox,
-        {
-          branchName,
-          githubInstallationToken,
-          taskPlan: state.taskPlan,
-          githubIssueId: state.githubIssueId,
-        },
-      );
-      branchName = result.branchName;
-      pullRequestNumber = result.updatedTaskPlan
-        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-        : undefined;
-      updatedTaskPlan = result.updatedTaskPlan;
-    }
-  }
-
   let wereDependenciesInstalled: boolean | null = null;
   toolCallResults.forEach((toolCallResult) => {
     if (toolCallResult.name === installDependenciesTool.name) {
@@ -225,16 +184,7 @@ export async function takeReviewerActions(
     })),
   });
 
-  const userFacingMessagesUpdate = [
-    ...toolCallResults,
-    ...(updatedTaskPlan && pullRequestNumber
-      ? createPullRequestToolCallMessage(
-          state.targetRepository,
-          pullRequestNumber,
-          true,
-        )
-      : []),
-  ];
+  const userFacingMessagesUpdate = [...toolCallResults];
 
   // Include the modified message if it was filtered
   const reviewerMessagesUpdate =
@@ -245,10 +195,6 @@ export async function takeReviewerActions(
   const commandUpdate: ReviewerGraphUpdate = {
     messages: userFacingMessagesUpdate,
     reviewerMessages: reviewerMessagesUpdate,
-    ...(branchName && { branchName }),
-    ...(updatedTaskPlan && {
-      taskPlan: updatedTaskPlan,
-    }),
     ...(codebaseTree ? { codebaseTree } : {}),
     ...(dependenciesInstalledUpdate !== null && {
       dependenciesInstalled: dependenciesInstalledUpdate,

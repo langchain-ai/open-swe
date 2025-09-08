@@ -1,29 +1,19 @@
 import { v4 as uuidv4 } from "uuid";
 import * as crypto from "crypto";
-import { getRepoAbsolutePath } from "@openswe/shared/git";
-import { getGitHubTokensFromConfig } from "../../utils/github-tokens.js";
 import {
   CustomRules,
   GraphConfig,
   TargetRepository,
 } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { daytonaClient } from "../../utils/sandbox.js";
-import { cloneRepo, pullLatestChanges } from "../../utils/github/git.js";
-import {
-  FAILED_TO_GENERATE_TREE_MESSAGE,
-  getCodebaseTree,
-} from "../../utils/tree.js";
+import { getCodebaseTree } from "../../utils/tree.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import {
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
 } from "@openswe/shared/open-swe/custom-node-events";
-import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
 import { getCustomRules } from "../../utils/custom-rules.js";
-import { withRetry } from "../../utils/retry.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
@@ -45,9 +35,9 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
-  const { sandboxSessionId, targetRepository, branchName } = state;
-  const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-  const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
+  if (!isLocalMode(config)) {
+    throw new Error("Remote sandbox mode is not supported");
+  }
 
   const events: CustomNodeEvent[] = [];
   const emitStepEvent = (
@@ -83,293 +73,12 @@ export async function initializeSandbox(
     }),
   ];
 
-  // Check if we're in local mode before trying to get GitHub tokens
-  if (isLocalMode(config)) {
-    return initializeSandboxLocal(
-      state,
-      config,
-      emitStepEvent,
-      createEventsMessage,
-    );
-  }
-
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-
-  if (!sandboxSessionId) {
-    emitStepEvent(
-      {
-        nodeId: INITIALIZE_NODE_ID,
-        createdAt: new Date().toISOString(),
-        actionId: uuidv4(),
-        action: "Resuming sandbox",
-        data: {
-          status: "skipped",
-          branch: branchName,
-          repo: repoName,
-        },
-      },
-      "skipped",
-    );
-    emitStepEvent(
-      {
-        nodeId: INITIALIZE_NODE_ID,
-        createdAt: new Date().toISOString(),
-        actionId: uuidv4(),
-        action: "Pulling latest changes",
-        data: {
-          status: "skipped",
-          branch: branchName,
-          repo: repoName,
-        },
-      },
-      "skipped",
-    );
-  }
-
-  if (sandboxSessionId) {
-    const resumeSandboxActionId = uuidv4();
-    const baseResumeSandboxAction: CustomNodeEvent = {
-      nodeId: INITIALIZE_NODE_ID,
-      createdAt: new Date().toISOString(),
-      actionId: resumeSandboxActionId,
-      action: "Resuming sandbox",
-      data: {
-        status: "pending",
-        sandboxSessionId,
-        branch: branchName,
-        repo: repoName,
-      },
-    };
-    emitStepEvent(baseResumeSandboxAction, "pending");
-
-    try {
-      const existingSandbox = await daytonaClient().get(sandboxSessionId);
-      emitStepEvent(baseResumeSandboxAction, "success");
-
-      const pullLatestChangesActionId = uuidv4();
-      const basePullLatestChangesAction: CustomNodeEvent = {
-        nodeId: INITIALIZE_NODE_ID,
-        createdAt: new Date().toISOString(),
-        actionId: pullLatestChangesActionId,
-        action: "Pulling latest changes",
-        data: {
-          status: "pending",
-          sandboxSessionId,
-          branch: branchName,
-          repo: repoName,
-        },
-      };
-      emitStepEvent(basePullLatestChangesAction, "pending");
-
-      const pullChangesRes = await pullLatestChanges(
-        absoluteRepoDir,
-        existingSandbox,
-        {
-          githubInstallationToken,
-        },
-      );
-      if (!pullChangesRes) {
-        emitStepEvent(basePullLatestChangesAction, "skipped");
-        throw new Error("Failed to pull latest changes.");
-      }
-      emitStepEvent(basePullLatestChangesAction, "success");
-
-      const generateCodebaseTreeActionId = uuidv4();
-      const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
-        nodeId: INITIALIZE_NODE_ID,
-        createdAt: new Date().toISOString(),
-        actionId: generateCodebaseTreeActionId,
-        action: "Generating codebase tree",
-        data: {
-          status: "pending",
-          sandboxSessionId,
-          branch: branchName,
-          repo: repoName,
-        },
-      };
-      emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
-      try {
-        const codebaseTree = await getCodebaseTree(config, existingSandbox.id);
-        if (codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE) {
-          emitStepEvent(
-            baseGenerateCodebaseTreeAction,
-            "error",
-            FAILED_TO_GENERATE_TREE_MESSAGE,
-          );
-        } else {
-          emitStepEvent(baseGenerateCodebaseTreeAction, "success");
-        }
-
-        return {
-          sandboxSessionId: existingSandbox.id,
-          codebaseTree,
-          messages: createEventsMessage(),
-          customRules: await getCustomRules(
-            existingSandbox,
-            absoluteRepoDir,
-            config,
-          ),
-        };
-      } catch {
-        emitStepEvent(
-          baseGenerateCodebaseTreeAction,
-          "error",
-          FAILED_TO_GENERATE_TREE_MESSAGE,
-        );
-        return {
-          sandboxSessionId: existingSandbox.id,
-          codebaseTree: FAILED_TO_GENERATE_TREE_MESSAGE,
-          messages: createEventsMessage(),
-          customRules: await getCustomRules(
-            existingSandbox,
-            absoluteRepoDir,
-            config,
-          ),
-        };
-      }
-    } catch {
-      emitStepEvent(
-        baseResumeSandboxAction,
-        "skipped",
-        "Unable to resume sandbox. A new environment will be created.",
-      );
-    }
-  }
-
-  // Creating sandbox
-  const createSandboxActionId = uuidv4();
-  const baseCreateSandboxAction: CustomNodeEvent = {
-    nodeId: INITIALIZE_NODE_ID,
-    createdAt: new Date().toISOString(),
-    actionId: createSandboxActionId,
-    action: "Creating sandbox",
-    data: {
-      status: "pending",
-      sandboxSessionId: null,
-      branch: branchName,
-      repo: repoName,
-    },
-  };
-
-  emitStepEvent(baseCreateSandboxAction, "pending");
-  let sandbox: Sandbox;
-  try {
-    sandbox = await daytonaClient().create(DEFAULT_SANDBOX_CREATE_PARAMS);
-    emitStepEvent(baseCreateSandboxAction, "success");
-  } catch (e) {
-    logger.error("Failed to create sandbox environment", { e });
-    emitStepEvent(
-      baseCreateSandboxAction,
-      "error",
-      "Failed to create sandbox environment. Please try again later.",
-    );
-    throw new Error("Failed to create sandbox environment.");
-  }
-
-  // Cloning repository
-  const cloneRepoActionId = uuidv4();
-  const baseCloneRepoAction: CustomNodeEvent = {
-    nodeId: INITIALIZE_NODE_ID,
-    createdAt: new Date().toISOString(),
-    actionId: cloneRepoActionId,
-    action: "Cloning repository",
-    data: {
-      status: "pending",
-      sandboxSessionId: sandbox.id,
-      branch: branchName,
-      repo: repoName,
-    },
-  };
-  emitStepEvent(baseCloneRepoAction, "pending");
-
-  // Retry the clone command up to 3 times. Sometimes, it can timeout if the repo is large.
-  const cloneRepoRes = await withRetry(
-    async () => {
-      return await cloneRepo(sandbox, targetRepository, {
-        githubInstallationToken,
-        stateBranchName: branchName,
-      });
-    },
-    { retries: 0, delay: 0 },
+  return initializeSandboxLocal(
+    state,
+    config,
+    emitStepEvent,
+    createEventsMessage,
   );
-
-  if (
-    cloneRepoRes instanceof Error &&
-    !cloneRepoRes.message.includes("repository already exists")
-  ) {
-    emitStepEvent(
-      baseCloneRepoAction,
-      "error",
-      "Failed to clone repository. Please check your repo URL and permissions.",
-    );
-    const errorFields = {
-      ...(cloneRepoRes instanceof Error
-        ? {
-            name: cloneRepoRes.name,
-            message: cloneRepoRes.message,
-            stack: cloneRepoRes.stack,
-          }
-        : cloneRepoRes),
-    };
-    logger.error("Cloning repository failed", errorFields);
-    throw new Error("Failed to clone repository.");
-  }
-  const newBranchName =
-    typeof cloneRepoRes === "string" ? cloneRepoRes : branchName;
-  emitStepEvent(baseCloneRepoAction, "success");
-
-  // Checking out branch
-  const checkoutBranchActionId = uuidv4();
-  const baseCheckoutBranchAction: CustomNodeEvent = {
-    nodeId: INITIALIZE_NODE_ID,
-    createdAt: new Date().toISOString(),
-    actionId: checkoutBranchActionId,
-    action: "Checking out branch",
-    data: {
-      status: "pending",
-      sandboxSessionId: sandbox.id,
-      branch: newBranchName,
-      repo: repoName,
-    },
-  };
-  emitStepEvent(baseCheckoutBranchAction, "success");
-
-  // Generating codebase tree
-  const generateCodebaseTreeActionId = uuidv4();
-  const baseGenerateCodebaseTreeAction: CustomNodeEvent = {
-    nodeId: INITIALIZE_NODE_ID,
-    createdAt: new Date().toISOString(),
-    actionId: generateCodebaseTreeActionId,
-    action: "Generating codebase tree",
-    data: {
-      status: "pending",
-      sandboxSessionId: sandbox.id,
-      branch: newBranchName,
-      repo: repoName,
-    },
-  };
-  emitStepEvent(baseGenerateCodebaseTreeAction, "pending");
-  let codebaseTree: string | undefined;
-  try {
-    codebaseTree = await getCodebaseTree(config, sandbox.id);
-    emitStepEvent(baseGenerateCodebaseTreeAction, "success");
-  } catch (_) {
-    emitStepEvent(
-      baseGenerateCodebaseTreeAction,
-      "error",
-      "Failed to generate codebase tree.",
-    );
-  }
-
-  return {
-    sandboxSessionId: sandbox.id,
-    targetRepository,
-    codebaseTree,
-    messages: createEventsMessage(),
-    dependenciesInstalled: false,
-    customRules: await getCustomRules(sandbox, absoluteRepoDir, config),
-    branchName: newBranchName,
-  };
 }
 
 /**

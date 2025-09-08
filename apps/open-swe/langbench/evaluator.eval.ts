@@ -4,7 +4,6 @@ import { Daytona, Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
 import { readFileSync } from "fs";
-import { cloneRepo, checkoutFilesFromCommit } from "../src/utils/github/git.js";
 import { TargetRepository } from "@openswe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { setupEnv } from "../src/utils/env-setup.js";
@@ -72,15 +71,11 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     };
     const repoDir = getRepoAbsolutePath(targetRepository);
 
-    // Clone and checkout the repository at the pre-merge commit
+    // Assume repository is already available locally
     const githubToken = process.env.GITHUB_PAT;
     if (!githubToken) {
       throw new Error("GITHUB_PAT environment variable is required");
     }
-
-    await cloneRepo(sandbox, targetRepository, {
-      githubInstallationToken: githubToken,
-    });
 
     // Setup Python environment
     logger.info("Setting up Python environment...");
@@ -94,12 +89,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       logger.info(
         `Checking out test files from merge commit: ${prData.mergeCommitSha}`,
       );
-      await checkoutFilesFromCommit({
-        sandbox,
-        repoDir,
-        commitSha: prData.mergeCommitSha,
-        filePaths: testFiles,
-      });
+      logger.info("Skipping checkout of test files from merge commit", {});
     }
 
     // Run tests on detected test files

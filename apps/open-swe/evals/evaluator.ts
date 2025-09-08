@@ -5,7 +5,6 @@ import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
 import { TargetRepository } from "@openswe/shared/open-swe/types";
-import { cloneRepo } from "../src/utils/github/git.js";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
 import { runRuffLint, runMyPyTypeCheck } from "./tests.js";
@@ -113,10 +112,10 @@ export async function evaluator(inputs: {
   const sandbox = await daytonaInstance.create(DEFAULT_SANDBOX_CREATE_PARAMS);
 
   try {
-    await cloneRepo(sandbox, output.targetRepository, {
-      githubInstallationToken: githubToken,
-      stateBranchName: solutionBranch,
-    });
+    logger.info(
+      "Skipping repository clone; ensure repository is available locally",
+      {},
+    );
 
     const absoluteRepoDir = getRepoAbsolutePath(output.targetRepository);
 

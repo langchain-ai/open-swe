@@ -13,12 +13,7 @@ import {
   GraphState,
   GraphConfig,
   GraphUpdate,
-  TaskPlan,
 } from "@openswe/shared/open-swe/types";
-import {
-  checkoutBranchAndCommit,
-  getChangedFilesStatus,
-} from "../../../utils/github/git.js";
 import {
   safeSchemaToString,
   safeBadArgsError,
@@ -35,12 +30,8 @@ import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
-import { getActiveTask } from "@openswe/shared/open-swe/tasks";
-import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
-import { getRepoAbsolutePath } from "@openswe/shared/git";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -225,39 +216,6 @@ export async function takeAction(
     }
   });
 
-  let branchName: string | undefined = state.branchName;
-  let pullRequestNumber: number | undefined;
-  let updatedTaskPlan: TaskPlan | undefined;
-
-  if (!isLocalMode(config)) {
-    const repoPath = getRepoAbsolutePath(state.targetRepository);
-    const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
-
-    if (changedFiles.length > 0) {
-      logger.info(`Has ${changedFiles.length} changed files. Committing.`, {
-        changedFiles,
-      });
-
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-      const result = await checkoutBranchAndCommit(
-        config,
-        state.targetRepository,
-        sandbox,
-        {
-          branchName,
-          githubInstallationToken,
-          taskPlan: state.taskPlan,
-          githubIssueId: state.githubIssueId,
-        },
-      );
-      branchName = result.branchName;
-      pullRequestNumber = result.updatedTaskPlan
-        ? getActiveTask(result.updatedTaskPlan)?.pullRequestNumber
-        : undefined;
-      updatedTaskPlan = result.updatedTaskPlan;
-    }
-  }
-
   const shouldRouteDiagnoseNode = shouldDiagnoseError([
     ...state.internalMessages,
     ...toolCallResults,
@@ -278,18 +236,6 @@ export async function takeAction(
         ? dependenciesInstalled
         : null;
 
-  // Add the tool call messages for the draft PR to the user facing messages if a draft PR was opened
-  const userFacingMessagesUpdate = [
-    ...toolCallResults,
-    ...(updatedTaskPlan && pullRequestNumber
-      ? createPullRequestToolCallMessage(
-          state.targetRepository,
-          pullRequestNumber,
-          true,
-        )
-      : []),
-  ];
-
   // Include the modified message if it was filtered
   const internalMessagesUpdate =
     wasFiltered && modifiedMessage
@@ -297,12 +243,8 @@ export async function takeAction(
       : toolCallResults;
 
   const commandUpdate: GraphUpdate = {
-    messages: userFacingMessagesUpdate,
+    messages: toolCallResults,
     internalMessages: internalMessagesUpdate,
-    ...(branchName && { branchName }),
-    ...(updatedTaskPlan && {
-      taskPlan: updatedTaskPlan,
-    }),
     codebaseTree: codebaseTreeToReturn,
     sandboxSessionId: sandbox.id,
     ...(dependenciesInstalledUpdate !== null && {

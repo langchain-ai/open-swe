@@ -26,29 +26,16 @@ import {
   PROGRAMMER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   LOCAL_MODE_HEADER,
-  GITHUB_INSTALLATION_ID,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_PAT,
 } from "@openswe/shared/constants";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
-import {
-  addProposedPlanToIssue,
-  addTaskPlanToIssue,
-} from "../../../utils/github/issue-task.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import {
   ACCEPTED_PLAN_NODE_ID,
   CustomNodeEvent,
 } from "@openswe/shared/open-swe/custom-node-events";
-import { getDefaultHeaders } from "../../../utils/default-headers.js";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
-import {
-  postGitHubIssueComment,
-  cleanTaskItems,
-} from "../../../utils/github/plan.js";
-import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "ProposedPlan");
@@ -93,22 +80,7 @@ async function startProgrammerRun(input: {
 }) {
   const { runInput, state, config, newMessages } = input;
   const isLocal = isLocalMode(config);
-  const defaultHeaders = isLocal
-    ? { [LOCAL_MODE_HEADER]: "true" }
-    : getDefaultHeaders(config);
-
-  // Only regenerate if its not running in local mode, and the GITHUB_PAT is not in the headers
-  // If the GITHUB_PAT is in the headers, then it means we're running an eval and this does not need to be regenerated
-  if (!isLocal && !(GITHUB_PAT in defaultHeaders)) {
-    logger.info(
-      "Regenerating installation token before starting programmer run.",
-    );
-    defaultHeaders[GITHUB_INSTALLATION_TOKEN_COOKIE] =
-      await regenerateInstallationToken(defaultHeaders[GITHUB_INSTALLATION_ID]);
-    logger.info(
-      "Regenerated installation token before starting programmer run.",
-    );
-  }
+  const defaultHeaders = isLocal ? { [LOCAL_MODE_HEADER]: "true" } : {};
 
   const langGraphClient = createLangGraphClient({
     defaultHeaders,
@@ -149,16 +121,8 @@ async function startProgrammerRun(input: {
     },
   );
 
-  // Skip GitHub operations in local mode
   if (!isLocalMode(config) && shouldCreateIssue(config)) {
-    await addTaskPlanToIssue(
-      {
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-      },
-      config,
-      runInput.taskPlan,
-    );
+    logger.info("Skipping remote issue update: not supported");
   }
 
   return new Command({
@@ -212,12 +176,7 @@ export async function interruptProposedPlan(
 
     // Post comment to GitHub issue about auto-accepting the plan (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
-      await postGitHubIssueComment({
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-        commentBody: `### 🤖 Plan Generated\n\nI've generated a plan for this issue and will proceed to implement it since auto-accept is enabled.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nProceeding to implementation...`,
-        config,
-      });
+      logger.info("Plan generated; skipping remote issue comment");
     }
 
     planItems = proposedPlan.map((p, index) => ({
@@ -250,22 +209,7 @@ export async function interruptProposedPlan(
   }
 
   if (!isLocalMode(config) && state.githubIssueId) {
-    await addProposedPlanToIssue(
-      {
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-      },
-      config,
-      proposedPlan,
-    );
-
-    // Post comment to GitHub issue about plan being ready for approval
-    await postGitHubIssueComment({
-      githubIssueId: state.githubIssueId,
-      targetRepository: state.targetRepository,
-      commentBody: `### 🟠 Plan Ready for Approval 🟠\n\nI've generated a plan for this issue and it's ready for your review.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${proposedPlan.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step)}`).join("\n")}\n\nPlease review the plan and let me know if you'd like me to proceed, make changes, or if you have any feedback.`,
-      config,
-    });
+    logger.info("Plan ready for approval; skipping remote issue comment");
   }
 
   const interruptResponse = interrupt<
@@ -323,12 +267,7 @@ export async function interruptProposedPlan(
 
     // Update the comment to notify the user that the plan was accepted (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
-      await postGitHubIssueComment({
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-        commentBody: `### ✅ Plan Accepted ✅\n\nThe proposed plan was accepted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
-        config,
-      });
+      logger.info("Plan accepted; skipping remote issue comment");
     }
   } else if (humanResponse.type === "edit") {
     const editedPlan = (humanResponse.args as ActionRequest).args.plan
@@ -350,12 +289,7 @@ export async function interruptProposedPlan(
 
     // Update the comment to notify the user that the plan was edited (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
-      await postGitHubIssueComment({
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-        commentBody: `### ✅ Plan Edited & Submitted ✅\n\nThe proposed plan was edited and submitted.\n\n**Plan: ${state.proposedPlanTitle}**\n\n${planItems.map((step, index) => `- Task ${index + 1}:\n${cleanTaskItems(step.plan)}`).join("\n")}\n\nProceeding to implementation...`,
-        config,
-      });
+      logger.info("Plan edited and submitted; skipping remote issue comment");
     }
   } else {
     throw new Error("Unknown interrupt type." + humanResponse.type);

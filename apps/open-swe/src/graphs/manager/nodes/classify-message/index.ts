@@ -25,9 +25,7 @@ import {
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
 } from "../../../../utils/issue-messages.js";
-import { getDefaultHeaders } from "../../../../utils/default-headers.js";
 import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
-import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import {
   OPEN_SWE_STREAM_MODE,
@@ -65,7 +63,7 @@ export async function classifyMessage(
   if (!isLocalMode(config)) {
     // Only create LangGraph client if not in local mode
     langGraphClient = createLangGraphClient({
-      defaultHeaders: getDefaultHeaders(config),
+      defaultHeaders: {},
     });
 
     plannerThread = state.plannerSession?.threadId
@@ -83,17 +81,14 @@ export async function classifyMessage(
   const plannerStatus = plannerThread?.status ?? "not_started";
 
   // If the githubIssueId is defined, fetch the most recent task plan (if exists). Otherwise fallback to state task plan
-  const issuePlans = state.githubIssueId
-    ? await getPlansFromIssue(state, config)
-    : null;
-  const taskPlan = issuePlans?.taskPlan ?? state.taskPlan;
+  const taskPlan = state.taskPlan;
 
   const { prompt, schema } = createClassificationPromptAndToolSchema({
     programmerStatus,
     plannerStatus,
     messages: state.messages,
     taskPlan,
-    proposedPlan: issuePlans?.proposedPlan ?? undefined,
+    proposedPlan: undefined,
     requestSource: userMessage.additional_kwargs?.requestSource as
       | string
       | undefined,
