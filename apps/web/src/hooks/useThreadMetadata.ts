@@ -36,12 +36,6 @@ export function useThreadMetadata(thread: Thread<ManagerGraphState>): {
       branch: values?.targetRepository?.branch || "main",
       taskPlan: realTimeTaskPlan,
       status,
-      githubIssue: values?.githubIssueId
-        ? {
-            number: values?.githubIssueId,
-            url: `https://github.com/${values?.targetRepository?.owner}/${values?.targetRepository?.repo}/issues/${values?.githubIssueId}`,
-          }
-        : undefined,
     };
   }, [thread, status, realTimeTaskPlan]);
 

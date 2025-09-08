@@ -1,11 +1,10 @@
 "use client";
 import { memo } from "react";
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
-import { GitBranch, ArrowRight, ListTodo } from "lucide-react";
+import { GitBranch, ArrowRight, ListTodo, Folder } from "lucide-react";
 import { useThreadsContext } from "@/hooks/useThreadsContext";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
-import { GitHubSVG } from "./icons/github";
 import { useQueryState } from "nuqs";
 import { Thread } from "@langchain/langgraph-sdk";
 import { GraphState } from "@openswe/shared/open-swe/types";
@@ -80,11 +79,7 @@ export const ThreadItem = memo(function ThreadItem({
 
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-gray-500">
             <div className="mr-1 flex flex-row items-center justify-start gap-1">
-              <GitHubSVG
-                width="16"
-                height="16"
-                className="flex-shrink-0"
-              />
+              <Folder className="size-4 flex-shrink-0" />
               <span className="max-w-[90px] truncate">
                 {thread.values?.targetRepository?.repo || "x"}
               </span>

@@ -1,8 +1,6 @@
 import {
-  Bug,
   CheckCircle,
   GitBranch,
-  GitPullRequest,
   AlertCircle,
   Pause,
   XCircle,
@@ -12,7 +10,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { useRouter } from "next/navigation";
 import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
@@ -111,21 +108,6 @@ export function ThreadCard({
     }
   };
 
-  const getPRStatusColor = (status: string) => {
-    switch (status) {
-      case "merged":
-        return "dark:text-purple-400 text-purple-600";
-      case "open":
-        return "dark:text-green-400 text-green-600";
-      case "draft":
-        return "dark:text-gray-400 text-gray-600";
-      case "closed":
-        return "dark:text-red-400 text-red-600";
-      default:
-        return "dark:text-gray-400 text-gray-600";
-    }
-  };
-
   return (
     <Card
       key={thread.id}
@@ -172,7 +154,7 @@ export function ThreadCard({
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center">
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs">
               {!taskPlan || !taskPlan.tasks.length
@@ -183,43 +165,6 @@ export function ThreadCard({
             <span className="text-muted-foreground text-xs">
               {thread.lastActivity}
             </span>
-          </div>
-          <div className="flex items-center gap-1">
-            {thread.githubIssue && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:bg-orange-100 dark:hover:bg-orange-950"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.githubIssue!.url, "_blank");
-                }}
-              >
-                <Bug className="h-3 w-3 transition-colors duration-200" />
-              </Button>
-            )}
-            {thread.pullRequest && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-5 w-5 p-0 transition-all duration-200 hover:scale-110 hover:text-gray-300",
-                  getPRStatusColor(thread.pullRequest.status),
-                  thread.pullRequest.status === "merged" &&
-                    "hover:bg-purple-100 dark:hover:bg-purple-950",
-                  thread.pullRequest.status === "open" &&
-                    "hover:bg-green-100 dark:hover:bg-green-950",
-                  thread.pullRequest.status === "closed" &&
-                    "hover:bg-red-100 dark:hover:bg-red-950",
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  window.open(thread.pullRequest!.url, "_blank");
-                }}
-              >
-                <GitPullRequest className="h-3 w-3 transition-colors duration-200" />
-              </Button>
-            )}
           </div>
         </div>
       </CardContent>
@@ -245,16 +190,10 @@ export function ThreadCardLoading() {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-3 w-1" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-          <div className="flex items-center gap-1">
-            <Skeleton className="h-5 w-5 rounded-full" />
-            <Skeleton className="h-5 w-5 rounded-full" />
-          </div>
+        <div className="flex items-center">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-3 w-1" />
+          <Skeleton className="h-3 w-24" />
         </div>
       </CardContent>
     </Card>
