@@ -115,7 +115,8 @@ function routeToReviewOrConclusion(
   state: GraphState,
   config: GraphConfig,
 ): Command {
-  const maxAllowedReviews = config.configurable?.maxReviewCount ?? 3;
+  const maxAllowedReviews =
+    (config.configurable?.maxReviewCount as number | undefined) ?? 3;
   if (state.reviewsCount >= maxAllowedReviews) {
     return new Command({
       goto: "generate-conclusion",

@@ -35,7 +35,9 @@ export async function startPlanner(
   });
 
   const localMode = isLocalMode(config);
-  const defaultHeaders = localMode ? { [LOCAL_MODE_HEADER]: "true" } : {};
+  const defaultHeaders: Record<string, string> = localMode
+    ? { [LOCAL_MODE_HEADER]: "true" }
+    : {};
 
   try {
     const langGraphClient = createLangGraphClient({

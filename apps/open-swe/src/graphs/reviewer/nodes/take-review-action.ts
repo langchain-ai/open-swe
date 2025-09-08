@@ -201,7 +201,8 @@ export async function takeReviewerActions(
     }),
   };
 
-  const maxReviewActions = config.configurable?.maxReviewActions ?? 30;
+  const maxReviewActions =
+    (config.configurable?.maxReviewActions as number | undefined) ?? 30;
   const maxActionsCount = maxReviewActions * 2;
   // Exclude hidden messages, and messages that are not AI messages or tool messages.
   const filteredMessages = filterHiddenMessages([

@@ -302,8 +302,9 @@ export async function generateAction(
   const markTaskCompletedTool = createMarkTaskCompletedToolFields();
   const isAnthropicModel = modelName.includes("claude-");
   const modelStr =
-    config.configurable?.[`${LLMTask.PROGRAMMER}ModelName`] ??
-    TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.PROGRAMMER].modelName;
+    (config.configurable?.[`${LLMTask.PROGRAMMER}ModelName`] as
+      | string
+      | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.PROGRAMMER].modelName;
   const provider = modelStr.split(":")[0] as Provider;
 
   const missingMessages = state.githubIssueId
@@ -381,8 +382,8 @@ export async function generateAction(
   return {
     messages: newMessagesList,
     internalMessages: newMessagesList,
-    ...(newSandboxSessionId && { sandboxSessionId: newSandboxSessionId }),
-    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    ...(newSandboxSessionId ? { sandboxSessionId: newSandboxSessionId } : {}),
+    ...(latestTaskPlan ? { taskPlan: latestTaskPlan } : {}),
     tokenData: trackCachePerformance(response, modelName),
   };
 }

@@ -5,9 +5,8 @@ import * as ls from "langsmith/vitest";
 import { formatInputs } from "./prompts.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { evaluator } from "./evaluator.js";
-import { MANAGER_GRAPH_ID, GITHUB_PAT } from "@openswe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { createLangGraphClient } from "../src/utils/langgraph-client.js";
-import { encryptSecret } from "@openswe/shared/crypto";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { GraphState } from "@openswe/shared/open-swe/types";
@@ -77,20 +76,8 @@ ls.describe(DATASET_NAME, () => {
         inputs,
       });
 
-      const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-      const githubPat = process.env.GITHUB_PAT;
-
-      if (!encryptionKey || !githubPat) {
-        throw new Error(
-          "SECRETS_ENCRYPTION_KEY and GITHUB_PAT environment variables are required",
-        );
-      }
-
-      const encryptedGitHubToken = encryptSecret(githubPat, encryptionKey);
-
       const lgClient = createLangGraphClient({
         includeApiKey: true,
-        defaultHeaders: { [GITHUB_PAT]: encryptedGitHubToken },
       });
 
       const input = await formatInputs(inputs);
