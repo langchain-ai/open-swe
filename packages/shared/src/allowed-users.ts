@@ -1,7 +1,5 @@
-// HACK: Until we setup proper support for API credits, we will only allow users to self host Open SWE
 export function isAllowedUser(username: string): boolean {
   const nodeEnv = process.env.NODE_ENV;
-  // Allow all users in non-production environments
   if (nodeEnv !== "production") {
     return true;
   }

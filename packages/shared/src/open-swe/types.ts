@@ -8,15 +8,6 @@ import {
 } from "@langchain/langgraph/web";
 import { MODEL_OPTIONS, MODEL_OPTIONS_NO_THINKING } from "./models.js";
 import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
-import {
-  GITHUB_INSTALLATION_NAME,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-  GITHUB_PAT,
-  GITHUB_INSTALLATION_ID,
-} from "../constants.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 import { tokenDataReducer } from "../caching.js";
@@ -438,7 +429,7 @@ export const GraphConfigurationMetadata: {
       type: "boolean",
       default: true,
       description:
-        "Whether or not to create GitHub issues for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
+        "Whether or not to create issue tracking entries for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
     },
   },
   customFramework: {
@@ -472,41 +463,6 @@ export const GraphConfigurationMetadata: {
     },
   },
   apiKeys: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_TOKEN_COOKIE]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_INSTALLATION_TOKEN_COOKIE]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_USER_ID_HEADER]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_USER_LOGIN_HEADER]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_INSTALLATION_NAME]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_INSTALLATION_ID]: {
-    x_open_swe_ui_config: {
-      type: "hidden",
-    },
-  },
-  [GITHUB_PAT]: {
     x_open_swe_ui_config: {
       type: "hidden",
     },
@@ -691,50 +647,6 @@ export const GraphConfiguration = z.object({
       metadata: GraphConfigurationMetadata.apiKeys,
     },
   ),
-  /**
-   * The user's GitHub access token. To be used in requests to get information about the user.
-   */
-  [GITHUB_TOKEN_COOKIE]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_TOKEN_COOKIE],
-  }),
-  /**
-   * The installation token from the GitHub app. This token allows us to take actions
-   * on the repos the user has granted us access to, but on behalf of the app, not the user.
-   */
-  [GITHUB_INSTALLATION_TOKEN_COOKIE]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_TOKEN_COOKIE],
-  }),
-  /**
-   * The user's GitHub ID. Required when creating runs triggered by a bot (e.g. GitHub issue)
-   */
-  [GITHUB_USER_ID_HEADER]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_USER_ID_HEADER],
-  }),
-  /**
-   * The user's GitHub login. Required when creating runs triggered by a bot (e.g. GitHub issue)
-   */
-  [GITHUB_USER_LOGIN_HEADER]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_USER_LOGIN_HEADER],
-  }),
-  /**
-   * The installation name of the GitHub app. Required when creating runs triggered by a bot (e.g. GitHub issue)
-   */
-  [GITHUB_INSTALLATION_NAME]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_NAME],
-  }),
-  /**
-   * The installation ID of the GitHub app the user is using to create the run.
-   */
-  [GITHUB_INSTALLATION_ID]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_INSTALLATION_ID],
-  }),
-  /**
-   * GitHub Personal Access Token. Used for simpler authentication in environments like evals
-   * where GitHub App installation tokens are not available or needed.
-   */
-  [GITHUB_PAT]: withLangGraph(z.string().optional(), {
-    metadata: GraphConfigurationMetadata[GITHUB_PAT],
-  }),
   /**
    * Custom MCP servers configuration as JSON string. Merges with default servers.
    * @default Default LangGraph docs MCP server

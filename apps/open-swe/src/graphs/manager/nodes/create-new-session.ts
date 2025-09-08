@@ -77,7 +77,9 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
   ];
 
   const isLocal = isLocalMode(config);
-  const defaultHeaders = isLocal ? { [LOCAL_MODE_HEADER]: "true" } : {};
+  const defaultHeaders: Record<string, string> = isLocal
+    ? { [LOCAL_MODE_HEADER]: "true" }
+    : {};
 
   const langGraphClient = createLangGraphClient({
     defaultHeaders,

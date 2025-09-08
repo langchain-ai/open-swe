@@ -13,7 +13,7 @@ import {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@openswe/shared/open-swe/planner/types";
-import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { GraphConfig, TaskPlan } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getMessageContentString } from "@openswe/shared/messages";
 import {
@@ -178,9 +178,9 @@ export async function generateAction(
     ]);
 
   logger.info("Generated planning message", {
-    ...(getMessageContentString(response.content) && {
-      content: getMessageContentString(response.content),
-    }),
+    ...(getMessageContentString(response.content)
+      ? { content: getMessageContentString(response.content) }
+      : {}),
     ...response.tool_calls?.map((tc) => ({
       name: tc.name,
       args: tc.args,
@@ -189,7 +189,7 @@ export async function generateAction(
 
   return {
     messages: [...missingMessages, response],
-    ...(latestTaskPlan && { taskPlan: latestTaskPlan }),
+    ...(latestTaskPlan ? { taskPlan: latestTaskPlan } : {}),
     tokenData: trackCachePerformance(response, modelName),
   };
 }

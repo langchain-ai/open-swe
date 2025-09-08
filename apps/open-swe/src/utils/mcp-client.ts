@@ -92,7 +92,9 @@ export async function getMcpTools(
       mergedServers = { ...DEFAULT_MCP_SERVERS };
     }
 
-    const mcpServersConfig = config?.configurable?.["mcpServers"];
+    const mcpServersConfig = config?.configurable?.["mcpServers"] as
+      | string
+      | undefined;
     if (mcpServersConfig) {
       try {
         const userServers: McpServers = JSON.parse(mcpServersConfig);
