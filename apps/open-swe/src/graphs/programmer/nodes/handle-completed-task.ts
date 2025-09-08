@@ -17,7 +17,6 @@ import {
   getRemainingPlanItems,
 } from "../../../utils/current-task.js";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
-import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
@@ -25,7 +24,6 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
-import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "HandleCompletedTask");
 
@@ -89,17 +87,8 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  if (!isLocalMode(config) && shouldCreateIssue(config)) {
-    await addTaskPlanToIssue(
-      {
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-      },
-      config,
-      updatedPlanTasks,
-    );
-  } else {
-    logger.info("Skipping GitHub issue update in local mode");
+  if (!isLocalMode(config)) {
+    logger.info("Skipping remote issue update: not supported");
   }
 
   const commandUpdate: GraphUpdate = {

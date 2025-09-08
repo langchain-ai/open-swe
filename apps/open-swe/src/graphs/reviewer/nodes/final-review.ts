@@ -24,7 +24,6 @@ import {
 import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { GraphConfig, PlanItem } from "@openswe/shared/open-swe/types";
 import { z } from "zod";
-import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import {
   AIMessage,
@@ -194,16 +193,7 @@ export async function finalReview(
   );
 
   if (!isLocalMode(config) && shouldCreateIssue(config)) {
-    await addTaskPlanToIssue(
-      {
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-      },
-      config,
-      updatedTaskPlan,
-    );
-  } else {
-    logger.info("Skipping GitHub issue update in local mode");
+    logger.info("Skipping remote issue update: not supported");
   }
 
   const toolMessage = new ToolMessage({

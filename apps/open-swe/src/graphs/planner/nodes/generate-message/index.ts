@@ -34,7 +34,6 @@ import {
   getIssueService,
   getMissingMessages,
 } from "../../../../services/issue-service.js";
-import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { createScratchpadTool } from "../../../../tools/scratchpad.js";
@@ -47,7 +46,6 @@ import {
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 import { createViewTool } from "../../../../tools/builtin-tools/view.js";
-import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
@@ -144,17 +142,14 @@ export async function generateAction(
       : {}),
   });
 
-  const [missingMessages, { taskPlan: latestTaskPlan }] =
-    shouldCreateIssue(config) && state.githubIssueId
-      ? await Promise.all([
-          getMissingMessages(getIssueService(config), {
-            messages: state.messages,
-            issueId: state.githubIssueId,
-            repo: state.targetRepository,
-          }),
-          getPlansFromIssue(state, config),
-        ])
-      : [[], { taskPlan: null }];
+  const missingMessages = state.githubIssueId
+    ? await getMissingMessages(getIssueService(config), {
+        messages: state.messages,
+        issueId: state.githubIssueId,
+        repo: state.targetRepository,
+      })
+    : [];
+  const latestTaskPlan: TaskPlan | null = null;
 
   const inputMessages = filterMessagesWithoutContent([
     ...state.messages,

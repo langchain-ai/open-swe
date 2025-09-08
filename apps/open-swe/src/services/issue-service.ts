@@ -5,14 +5,6 @@ import {
   isHumanMessage,
 } from "@langchain/core/messages";
 import { TargetRepository, GraphConfig } from "@openswe/shared/open-swe/types";
-import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
-import { getGitHubTokensFromConfig } from "../utils/github-tokens.js";
-import {
-  createIssue,
-  createIssueComment,
-  getIssue,
-  getIssueComments,
-} from "../utils/github/api.js";
 
 export interface Issue {
   id: string;
@@ -92,92 +84,8 @@ class InMemoryIssueService implements IssueService {
   }
 }
 
-class GitHubIssueService implements IssueService {
-  constructor(
-    private tokens: {
-      githubAccessToken: string;
-      githubInstallationToken: string;
-    },
-  ) {}
-
-  async createIssue(input: {
-    repo: TargetRepository;
-    title: string;
-    body: string;
-  }): Promise<Issue | null> {
-    const issue = await createIssue({
-      owner: input.repo.owner,
-      repo: input.repo.repo,
-      title: input.title,
-      body: input.body,
-      githubAccessToken: this.tokens.githubAccessToken,
-    });
-    if (!issue) return null;
-    return {
-      id: String(issue.number),
-      title: issue.title,
-      body: issue.body ?? "",
-    };
-  }
-
-  async createComment(input: {
-    repo: TargetRepository;
-    issueId: number | string;
-    body: string;
-  }): Promise<IssueComment | null> {
-    const comment = await createIssueComment({
-      owner: input.repo.owner,
-      repo: input.repo.repo,
-      issueNumber: Number(input.issueId),
-      body: input.body,
-      githubToken: this.tokens.githubAccessToken,
-    });
-    if (!comment) return null;
-    return { id: String(comment.id), body: comment.body ?? "" };
-  }
-
-  async listComments(input: {
-    repo: TargetRepository;
-    issueId: number | string;
-  }): Promise<IssueComment[]> {
-    const comments = await getIssueComments({
-      owner: input.repo.owner,
-      repo: input.repo.repo,
-      issueNumber: Number(input.issueId),
-      githubInstallationToken: this.tokens.githubInstallationToken,
-      filterBotComments: true,
-    });
-    return (comments ?? []).map((c) => ({
-      id: String(c.id),
-      body: c.body ?? "",
-    }));
-  }
-
-  async getIssue(input: {
-    repo: TargetRepository;
-    issueId: number | string;
-  }): Promise<Issue | null> {
-    const issue = await getIssue({
-      owner: input.repo.owner,
-      repo: input.repo.repo,
-      issueNumber: Number(input.issueId),
-      githubInstallationToken: this.tokens.githubInstallationToken,
-    });
-    if (!issue) return null;
-    return {
-      id: String(issue.number),
-      title: issue.title,
-      body: issue.body ?? "",
-    };
-  }
-}
-
-export function getIssueService(config: GraphConfig): IssueService {
-  if (isLocalMode(config)) {
-    return new InMemoryIssueService();
-  }
-  const tokens = getGitHubTokensFromConfig(config);
-  return new GitHubIssueService(tokens);
+export function getIssueService(_config: GraphConfig): IssueService {
+  return new InMemoryIssueService();
 }
 
 /**

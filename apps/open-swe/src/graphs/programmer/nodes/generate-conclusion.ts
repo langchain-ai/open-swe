@@ -15,10 +15,8 @@ import {
   getActivePlanItems,
   getActiveTask,
 } from "@openswe/shared/open-swe/tasks";
-import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
-import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { Command, END } from "@langchain/langgraph";
 
 const logger = createLogger(LogLevel.INFO, "GenerateConclusionNode");
@@ -79,37 +77,14 @@ Given all of this, please respond with the concise conclusion. Do not include an
     getMessageContentString(response.content),
   );
 
-  // Update the github issue to include the new overall task summary (only if not in local mode)
-  if (!isLocalMode(config) && state.githubIssueId) {
-    await addTaskPlanToIssue(
-      {
-        githubIssueId: state.githubIssueId,
-        targetRepository: state.targetRepository,
-      },
-      config,
-      updatedTaskPlan,
-    );
-  }
-
   const graphUpdate: GraphUpdate = {
     messages: [response],
     internalMessages: [response],
     taskPlan: updatedTaskPlan,
     tokenData: trackCachePerformance(response, modelName),
   };
-
-  // Route based on mode: END for local mode, open-pr for sandbox mode
-  if (isLocalMode(config)) {
-    logger.info("Local mode: routing to END");
-    return new Command({
-      update: graphUpdate,
-      goto: END,
-    });
-  } else {
-    logger.info("Sandbox mode: routing to open-pr");
-    return new Command({
-      update: graphUpdate,
-      goto: "open-pr",
-    });
-  }
+  return new Command({
+    update: graphUpdate,
+    goto: END,
+  });
 }

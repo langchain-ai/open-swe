@@ -5,7 +5,6 @@ import {
   ManagerGraphUpdate,
 } from "@openswe/shared/open-swe/manager/types";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
-import { extractTasksFromIssueContent } from "../../../utils/github/issue-task.js";
 import {
   getIssueService,
   getMessageContentFromIssue,
@@ -25,7 +24,7 @@ export async function initializeGithubIssue(
     // The human message should already be in the state from the CLI input
     return {};
   }
-  let taskPlan = state.taskPlan;
+  const taskPlan = state.taskPlan;
 
   if (state.messages.length && state.messages.some(isHumanMessage)) {
     // If there are messages, & at least one is a human message, only attempt to read the updated plan from the issue.
@@ -38,12 +37,7 @@ export async function initializeGithubIssue(
       if (!issue) {
         throw new Error("Issue not found");
       }
-      if (issue.body) {
-        const extractedTaskPlan = extractTasksFromIssueContent(issue.body);
-        if (extractedTaskPlan) {
-          taskPlan = extractedTaskPlan;
-        }
-      }
+      // no remote issue parsing
     }
 
     return {
@@ -67,12 +61,7 @@ export async function initializeGithubIssue(
   if (!issue) {
     throw new Error("Issue not found");
   }
-  if (issue.body) {
-    const extractedTaskPlan = extractTasksFromIssueContent(issue.body);
-    if (extractedTaskPlan) {
-      taskPlan = extractedTaskPlan;
-    }
-  }
+  // no remote issue parsing
 
   const newMessage = new HumanMessage({
     id: uuidv4(),
