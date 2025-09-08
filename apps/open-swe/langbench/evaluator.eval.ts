@@ -72,11 +72,6 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     const repoDir = getRepoAbsolutePath(targetRepository);
 
     // Assume repository is already available locally
-    const githubToken = process.env.GITHUB_PAT;
-    if (!githubToken) {
-      throw new Error("GITHUB_PAT environment variable is required");
-    }
-
     // Setup Python environment
     logger.info("Setting up Python environment...");
     const envSetupSuccess = await setupEnv(sandbox, repoDir);
