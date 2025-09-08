@@ -1,11 +1,7 @@
-import { BranchSelector } from "./branch-selector";
 import { RepositorySelector } from "./repository-selector";
 import { useQueryState } from "nuqs";
-import { ENABLE_GITHUB } from "@openswe/shared/config";
 
-const GITHUB_DISABLED = !ENABLE_GITHUB;
-
-export function RepositoryBranchSelectors() {
+export function LocalRepositorySelector() {
   const [threadId] = useQueryState("threadId");
   const chatStarted = !!threadId;
   const defaultButtonStyles =
@@ -24,20 +20,6 @@ export function RepositoryBranchSelectors() {
           }
         />
       </div>
-      {!GITHUB_DISABLED && (
-        <>
-          <span className="text-muted-foreground/70">:</span>
-          <div className="flex items-center gap-0">
-            <BranchSelector
-              chatStarted={chatStarted}
-              buttonClassName={
-                defaultButtonStyles +
-                (chatStarted ? " " + defaultStylesChatStarted : "")
-              }
-            />
-          </div>
-        </>
-      )}
     </div>
   );
 }
