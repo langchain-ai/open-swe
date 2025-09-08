@@ -4,7 +4,6 @@ import { GitHubApp } from "../../utils/github-app.js";
 import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { HumanMessage } from "@langchain/core/messages";
 import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
-import { RequestSource } from "../../constants.js";
 import { getOpenSweAppUrl } from "../../utils/url-helpers.js";
 import { createRunFromWebhook, createDevMetadataComment } from "./utils.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
@@ -142,7 +141,7 @@ export class WebhookHandlerBase {
    */
   protected createHumanMessage(
     content: string,
-    requestSource: RequestSource,
+    requestSource: string,
     additionalKwargs: Record<string, any> = {},
   ): HumanMessage {
     return new HumanMessage({

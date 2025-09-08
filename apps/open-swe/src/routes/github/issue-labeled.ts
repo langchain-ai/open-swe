@@ -5,7 +5,6 @@ import {
   getOpenSWEMaxLabel,
   getOpenSWEMaxAutoAcceptLabel,
 } from "../../utils/github/label.js";
-import { RequestSource } from "../../constants.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 
 class IssueWebhookHandler extends WebhookHandlerBase {
@@ -66,7 +65,7 @@ class IssueWebhookHandler extends WebhookHandlerBase {
         messages: [
           this.createHumanMessage(
             `**${issueData.issueTitle}**\n\n${issueData.issueBody}`,
-            RequestSource.GITHUB_ISSUE_WEBHOOK,
+            "github_issue_webhook",
             {
               isOriginalIssue: true,
               githubIssueId: issueData.issueNumber,
