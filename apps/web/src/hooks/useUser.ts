@@ -1,12 +1,6 @@
+import { useEffect } from "react";
 import useSWR from "swr";
-
-interface UserData {
-  login: string;
-  avatar_url: string;
-  html_url: string;
-  name: string | null;
-  email: string | null;
-}
+import { useUserStore, UserData } from "@/stores/user-store";
 
 interface UserResponse {
   user: UserData;
@@ -29,10 +23,22 @@ async function fetchUser(): Promise<UserData> {
 }
 
 export function useUser(): UseUserResult {
+  const { user, setUser } = useUserStore();
   const { data, error, isLoading, mutate } = useSWR<UserData>(
     "user",
     fetchUser,
   );
 
-  return { user: data || null, isLoading, error, mutate };
+  useEffect(() => {
+    if (data) {
+      setUser(data);
+    }
+  }, [data, setUser]);
+
+  return {
+    user: user || null,
+    isLoading,
+    error: (error as Error) || null,
+    mutate,
+  };
 }
