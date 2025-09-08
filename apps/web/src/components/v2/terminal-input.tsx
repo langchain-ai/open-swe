@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from "uuid";
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, Loader2 } from "lucide-react";
-import { LocalRepositorySelector } from "../github/local-repository-selector";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
@@ -246,13 +245,10 @@ export function TerminalInput({
     <div className="border-border bg-muted hover:border-muted-foreground/50 hover:bg-muted/80 focus-within:border-muted-foreground/70 focus-within:bg-muted/80 focus-within:shadow-muted-foreground/20 rounded-md border p-2 font-mono text-xs transition-all duration-200 focus-within:shadow-md">
       <div className="text-foreground flex items-center gap-1">
         <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200">
-          <span className="text-muted-foreground">open-swe</span>
+          <span className="text-muted-foreground">agent</span>
           <span className="text-muted-foreground/70">@</span>
-          <span className="text-muted-foreground">github</span>
+          <span className="text-muted-foreground">workspace</span>
         </div>
-
-        {/* Repository & Branch Selectors */}
-        <LocalRepositorySelector />
 
         {/* Prompt */}
         <span className="text-muted-foreground">$</span>
