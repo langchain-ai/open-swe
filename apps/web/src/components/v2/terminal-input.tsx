@@ -5,11 +5,11 @@ import { v4 as uuidv4 } from "uuid";
 import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, Loader2 } from "lucide-react";
-import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
+import { LocalRepositorySelector } from "../github/local-repository-selector";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { useQueryState } from "nuqs";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
@@ -24,7 +24,6 @@ import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
 import { isAllowedUser } from "@openswe/shared/allowed-users";
-import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -84,7 +83,7 @@ export function TerminalInput({
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
   const { getConfig } = useConfigStore();
-  const { selectedRepository, repositories } = useGitHubAppProvider();
+  const [selectedRepository] = useQueryState("repo");
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
 
@@ -122,24 +121,6 @@ export function TerminalInput({
       return;
     }
 
-    const selectedRepo = repositories.find(
-      (repo) =>
-        repo.full_name ===
-        `${selectedRepository.owner}/${selectedRepository.repo}`,
-    );
-    const issuesDisabled = selectedRepo && !repoHasIssuesEnabled(selectedRepo);
-    if (issuesDisabled) {
-      toast.error(
-        "Open SWE requires issues to be enabled on the repository. Please enable issues on the repository to use Open SWE.",
-        {
-          richColors: true,
-          closeButton: true,
-          duration: 30_000,
-        },
-      );
-      return;
-    }
-
     setLoading(true);
 
     const trimmedMessage = message.trim();
@@ -159,7 +140,7 @@ export function TerminalInput({
         const newThreadId = uuidv4();
         const runInput: ManagerGraphUpdate = {
           messages: [newHumanMessage],
-          targetRepository: selectedRepository,
+          targetRepository: { owner: "", repo: selectedRepository },
           autoAcceptPlan,
         };
 
@@ -271,7 +252,7 @@ export function TerminalInput({
         </div>
 
         {/* Repository & Branch Selectors */}
-        <RepositoryBranchSelectors />
+        <LocalRepositorySelector />
 
         {/* Prompt */}
         <span className="text-muted-foreground">$</span>
