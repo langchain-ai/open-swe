@@ -156,7 +156,7 @@ export async function classifyMessage(
   }
 
   if (isLocalMode(config)) {
-    // In local mode, just route to planner without GitHub issue creation
+    // In local mode, just route to planner without issue creation
     const newMessages: BaseMessage[] = [response];
     const commandUpdate: ManagerGraphUpdate = {
       messages: newMessages,
@@ -206,7 +206,7 @@ export async function classifyMessage(
     }
 
     throw new Error(
-      `Unsupported route received: ${toolCallArgs.route}\nUnable to route message there when not creating GitHub issues for request.`,
+      `Unsupported route received: ${toolCallArgs.route}\nUnable to route message there when not creating issues for request.`,
     );
   }
 
@@ -215,7 +215,7 @@ export async function classifyMessage(
 
   const newMessages: BaseMessage[] = [response];
 
-  // If it's not a no_op, ensure there is a GitHub issue with the user's request.
+  // If it's not a no_op, ensure there is an issue with the user's request.
   if (!githubIssueId) {
     const { title } = await createIssueFieldsFromMessages(
       state.messages,
@@ -254,7 +254,7 @@ export async function classifyMessage(
     githubIssueId &&
     state.messages.filter(isHumanMessage).length > 1
   ) {
-    // If there already is a GitHub issue ID in state, and multiple human messages, add any
+    // If there already is an issue ID in state and multiple human messages, add any
     // human messages to the issue which weren't already added.
     const messagesNotInIssue = state.messages
       .filter(isHumanMessage)
@@ -266,7 +266,7 @@ export async function classifyMessage(
     const createCommentsPromise = messagesNotInIssue.map(async (message) => {
       const createdIssue = await issueService.createComment({
         repo: state.targetRepository,
-        issueId: githubIssueId,
+        issueId: githubIssueId!,
         body: getMessageContentString(message.content),
       });
       if (!createdIssue?.id) {

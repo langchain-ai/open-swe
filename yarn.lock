@@ -4001,7 +4001,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@octokit/plugin-paginate-rest@npm:^13.0.0, @octokit/plugin-paginate-rest@npm:^13.0.1":
+"@octokit/plugin-paginate-rest@npm:^13.0.0":
   version: 13.1.1
   resolution: "@octokit/plugin-paginate-rest@npm:13.1.1"
   dependencies:
@@ -4009,26 +4009,6 @@ __metadata:
   peerDependencies:
     "@octokit/core": ">=6"
   checksum: 5c99c4f84672b3447b62025111b9dc08f4cdff80713f5b3fb15a518b22f2dcfafb36d8b13892847ee0daddf22e2b2163934a64ba3b53e8e965bd4312d24fb4d6
-  languageName: node
-  linkType: hard
-
-"@octokit/plugin-request-log@npm:^6.0.0":
-  version: 6.0.0
-  resolution: "@octokit/plugin-request-log@npm:6.0.0"
-  peerDependencies:
-    "@octokit/core": ">=6"
-  checksum: 8a79973b1429bfead9113c4117f418aaef5ff368795daded3415ba14623d97d5fc08d1e822dbd566ecc9f041119e1a48a11853a9c48d9eb1caa62baa79c17f83
-  languageName: node
-  linkType: hard
-
-"@octokit/plugin-rest-endpoint-methods@npm:^16.0.0":
-  version: 16.0.0
-  resolution: "@octokit/plugin-rest-endpoint-methods@npm:16.0.0"
-  dependencies:
-    "@octokit/types": ^14.1.0
-  peerDependencies:
-    "@octokit/core": ">=6"
-  checksum: 8ebb30b41628b839cca0b1051459f92001db37f4c3b8a87551915cdf5707d9e87f300565795ca2c12b5767b0d294b15bb0cd1ab3da99620c82690b37eddbd635
   languageName: node
   linkType: hard
 
@@ -4054,18 +4034,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@octokit/rest@npm:^22.0.0":
-  version: 22.0.0
-  resolution: "@octokit/rest@npm:22.0.0"
-  dependencies:
-    "@octokit/core": ^7.0.2
-    "@octokit/plugin-paginate-rest": ^13.0.1
-    "@octokit/plugin-request-log": ^6.0.0
-    "@octokit/plugin-rest-endpoint-methods": ^16.0.0
-  checksum: 6a7eff019c0889b23c0820831936e5dc8fa7643bdf0e98ba073b36a10f5602b9f283ca2c74ec8172b8529d0647dfa4a7857dcd81ca028b303937f26750a6c7f6
-  languageName: node
-  linkType: hard
-
 "@octokit/types@npm:^14.0.0, @octokit/types@npm:^14.1.0":
   version: 14.1.0
   resolution: "@octokit/types@npm:14.1.0"
@@ -4082,7 +4050,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@octokit/webhooks@npm:^14.0.0, @octokit/webhooks@npm:^14.0.2":
+"@octokit/webhooks@npm:^14.0.0":
   version: 14.1.1
   resolution: "@octokit/webhooks@npm:14.1.1"
   dependencies:
@@ -4174,10 +4142,6 @@ __metadata:
     "@langchain/mcp-adapters": ^0.5.2
     "@langchain/openai": ^0.5.10
     "@mendable/firecrawl-js": ^1.29.1
-    "@octokit/app": ^16.0.1
-    "@octokit/core": ^7.0.2
-    "@octokit/rest": ^22.0.0
-    "@octokit/webhooks": ^14.0.2
     "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/bcrypt": ^6.0.0

@@ -176,7 +176,7 @@ export async function interruptProposedPlan(
       isLocalMode: isLocalMode(config),
     });
 
-    // Post comment to GitHub issue about auto-accepting the plan (only if not in local mode)
+    // Post comment to issue about auto-accepting the plan (only if not in local mode)
     if (!isLocalMode(config) && state.githubIssueId) {
       logger.info("Plan generated; skipping remote issue comment");
     }

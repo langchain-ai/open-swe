@@ -1,20 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
 import {
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_INSTALLATION_ID_COOKIE,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_INSTALLATION_NAME,
-  GITHUB_INSTALLATION_ID,
   PROGRAMMER_GRAPH_ID,
   PLANNER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   MANAGER_GRAPH_ID,
 } from "@openswe/shared/constants";
-import {
-  getGitHubInstallationTokenOrThrow,
-  getInstallationNameFromReq,
-  getGitHubAccessTokenOrThrow,
-} from "../[..._path]/utils";
 import { NextRequest, NextResponse } from "next/server";
 import { RestartRunRequest } from "./types";
 import { Client, StreamMode, ThreadState } from "@langchain/langgraph-sdk";
@@ -27,35 +17,6 @@ import {
 } from "@openswe/shared/open-swe/types";
 import { END } from "@langchain/langgraph/web";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
-
-async function getRequestHeaders(
-  req: NextRequest,
-): Promise<Record<string, string>> {
-  const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-  if (!encryptionKey) {
-    throw new Error("SECRETS_ENCRYPTION_KEY environment variable is required");
-  }
-  const installationIdCookie = req.cookies.get(
-    GITHUB_INSTALLATION_ID_COOKIE,
-  )?.value;
-
-  if (!installationIdCookie) {
-    throw new Error(
-      "No GitHub installation ID found. GitHub App must be installed first.",
-    );
-  }
-  const [installationToken, installationName] = await Promise.all([
-    getGitHubInstallationTokenOrThrow(installationIdCookie, encryptionKey),
-    getInstallationNameFromReq(req, installationIdCookie),
-  ]);
-
-  return {
-    [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
-    [GITHUB_INSTALLATION_TOKEN_COOKIE]: installationToken,
-    [GITHUB_INSTALLATION_NAME]: installationName,
-    [GITHUB_INSTALLATION_ID]: installationIdCookie,
-  };
-}
 
 async function createNewSession(
   client: Client,
@@ -102,7 +63,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const langGraphClient = new Client({
       apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
-      defaultHeaders: await getRequestHeaders(request),
     });
 
     const [

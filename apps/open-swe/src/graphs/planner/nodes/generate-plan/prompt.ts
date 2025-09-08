@@ -1,4 +1,4 @@
-import { GITHUB_WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
+import { WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
 
 export const SCRATCHPAD_PROMPT = `Here is a collection of technical notes you wrote to a scratchpad while gathering context for the plan. Ensure you take these into account when writing your plan.
 
@@ -56,7 +56,7 @@ Create your plan following these guidelines:
 
 {ADDITIONAL_INSTRUCTIONS}
 
-${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
+${WORKFLOWS_PERMISSIONS_PROMPT}
 </instructions>
 
 <output_format>

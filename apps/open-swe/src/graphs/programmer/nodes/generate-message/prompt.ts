@@ -1,5 +1,5 @@
 import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
-import { GITHUB_WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
+import { WORKFLOWS_PERMISSIONS_PROMPT } from "../../../shared/prompts.js";
 
 const IDENTITY_PROMPT = `<identity>
 You are a terminal-based agentic coding assistant built by LangChain. You wrap LLM models to enable natural language interaction with local codebases. You are precise, safe, and helpful.
@@ -67,7 +67,7 @@ const CODING_STANDARDS_PROMPT = `<coding_standards>
         - Ensure package manager files are updated to include the new dependency.
     - If a command you run fails (e.g. a test, build, lint, etc.), and you make changes to fix the issue, ensure you always re-run the command after making the changes to ensure the fix was successful.
     - IMPORTANT: You are NEVER allowed to create backup files. All changes in the codebase are tracked by git, so never create file copies, or backups.
-    - ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
+    - ${WORKFLOWS_PERMISSIONS_PROMPT}
 </coding_standards>`;
 
 const COMMUNICATION_GUIDELINES_PROMPT = `<communication_guidelines>

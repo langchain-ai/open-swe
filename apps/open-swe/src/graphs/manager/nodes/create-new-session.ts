@@ -29,7 +29,7 @@ import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
  * Create new manager session.
  * This node will extract the issue title & body from the conversation history,
  * create a new issue with those fields, then start a new manager session to
- * handle the user's new request/GitHub issue.
+ * handle the user's new request/issue.
  */
 export async function createNewSession(
   state: ManagerGraphState,
@@ -72,7 +72,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     new AIMessage({
       id: uuidv4(),
       content:
-        "I've successfully created a new GitHub issue for your request, and started a planning session for it!",
+        "I've created a new issue for your request and started a planning session for it!",
     }),
   ];
 

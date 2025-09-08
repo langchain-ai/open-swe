@@ -1,9 +1,9 @@
 import * as crypto from "node:crypto";
 
 /**
- * Encryption utility for GitHub tokens using AES-256-GCM
+ * Encryption utility for access tokens using AES-256-GCM
  *
- * This module provides secure encryption and decryption of GitHub access tokens
+ * This module provides secure encryption and decryption of access tokens
  * using AES-256-GCM encryption with authenticated encryption.
  */
 

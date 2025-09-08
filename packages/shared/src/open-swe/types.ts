@@ -230,11 +230,11 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => ({}),
   }),
   /**
-   * The ID of the Github issue this thread is associated with
+   * The ID of the issue this thread is associated with
    */
-  githubIssueId: withLangGraph(z.custom<number>(), {
+  githubIssueId: withLangGraph(z.custom<number>().optional(), {
     reducer: {
-      schema: z.custom<number>(),
+      schema: z.custom<number>().optional(),
       fn: (_state, update) => update,
     },
   }),
