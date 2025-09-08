@@ -31,12 +31,6 @@ export function threadsToMetadata(
       branch: values?.targetRepository?.branch || "main",
       taskPlan: values?.taskPlan,
       status: "idle" as const, // Default status - consumers can override with real status
-      githubIssue: values?.githubIssueId
-        ? {
-            number: values?.githubIssueId,
-            url: `https://github.com/${values?.targetRepository?.owner}/${values?.targetRepository?.repo}/issues/${values?.githubIssueId}`,
-          }
-        : undefined,
     };
   });
 }

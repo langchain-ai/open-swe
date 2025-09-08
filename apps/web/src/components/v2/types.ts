@@ -15,10 +15,6 @@ export interface ThreadMetadata {
   branch: string;
   taskPlan?: TaskPlan;
   status: ThreadUIStatus;
-  githubIssue?: {
-    number: number;
-    url: string;
-  };
   pullRequest?: {
     number: number;
     url: string;
