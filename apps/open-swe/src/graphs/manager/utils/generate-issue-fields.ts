@@ -13,9 +13,9 @@ export async function createIssueFieldsFromMessages(
   configurable: GraphConfig["configurable"],
 ): Promise<{ title: string; body: string }> {
   const model = await loadModel({ configurable }, LLMTask.ROUTER);
-  const githubIssueTool = {
-    name: "create_github_issue",
-    description: "Create a new GitHub issue with the given title and body.",
+  const issueTool = {
+    name: "create_issue",
+    description: "Create a new issue with the given title and body.",
     schema: z.object({
       title: z
         .string()
@@ -34,8 +34,8 @@ export async function createIssueFieldsFromMessages(
     LLMTask.ROUTER,
   );
   const modelWithTools = model
-    .bindTools([githubIssueTool], {
-      tool_choice: githubIssueTool.name,
+    .bindTools([issueTool], {
+      tool_choice: issueTool.name,
       ...(modelSupportsParallelToolCallsParam
         ? {
             parallel_tool_calls: false,
@@ -44,14 +44,14 @@ export async function createIssueFieldsFromMessages(
     })
     .withConfig({ tags: ["nostream"], runName: "create-issue-fields" });
 
-  const prompt = `You're an AI programmer, tasked with taking the conversation history provided below, and creating a new GitHub issue.
+  const prompt = `You're an AI programmer, tasked with taking the conversation history provided below and creating a new issue.
 Ensure the issue title and body are both clear and concise. Do not hallucinate any information not found in the conversation history.
 You should mainly be looking at the human messages as context for the issue.
 
 # Conversation History
 ${messages.map(getMessageString).join("\n")}
 
-With the above conversation history in mind, please call the ${githubIssueTool.name} tool to create a new GitHub issue based on the user's request.`;
+With the above conversation history in mind, please call the ${issueTool.name} tool to create a new issue based on the user's request.`;
 
   const result = await modelWithTools.invoke([
     {
@@ -63,5 +63,5 @@ With the above conversation history in mind, please call the ${githubIssueTool.n
   if (!toolCall) {
     throw new Error("No tool call found in result");
   }
-  return toolCall.args as z.infer<typeof githubIssueTool.schema>;
+  return toolCall.args as z.infer<typeof issueTool.schema>;
 }

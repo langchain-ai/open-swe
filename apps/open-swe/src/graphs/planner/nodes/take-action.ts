@@ -210,7 +210,8 @@ export async function takeActions(
     ...allStateUpdates,
   };
 
-  const maxContextActions = config.configurable?.maxContextActions ?? 75;
+  const maxContextActions =
+    (config.configurable?.maxContextActions as number | undefined) ?? 75;
   const maxActionsCount = maxContextActions * 2;
   // Exclude hidden messages, and messages that are not AI messages or tool messages.
   const filteredMessages = filterHiddenMessages([

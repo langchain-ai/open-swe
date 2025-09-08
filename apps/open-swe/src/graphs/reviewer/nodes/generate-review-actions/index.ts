@@ -218,8 +218,9 @@ export async function generateReviewActions(
   );
   const isAnthropicModel = modelName.includes("claude-");
   const modelStr =
-    config.configurable?.[`${LLMTask.REVIEWER}ModelName`] ??
-    TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.REVIEWER].modelName;
+    (config.configurable?.[`${LLMTask.REVIEWER}ModelName`] as
+      | string
+      | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.REVIEWER].modelName;
   const provider = modelStr.split(":")[0] as Provider;
 
   const { providerTools, providerMessages } = createToolsAndPrompt(

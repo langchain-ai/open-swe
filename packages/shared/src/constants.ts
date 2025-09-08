@@ -15,7 +15,6 @@ export const GITHUB_INSTALLATION_TOKEN_COOKIE = ENABLE_GITHUB
 export const GITHUB_INSTALLATION_NAME = ENABLE_GITHUB
   ? "x-github-installation-name"
   : "";
-export const GITHUB_PAT = ENABLE_GITHUB ? "x-github-pat" : "";
 export const GITHUB_INSTALLATION_ID = ENABLE_GITHUB
   ? "x-github-installation-id"
   : "";

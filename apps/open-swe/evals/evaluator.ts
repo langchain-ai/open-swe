@@ -95,11 +95,6 @@ export async function evaluator(inputs: {
 }): Promise<SimpleEvaluationResult[]> {
   const { openSWEInputs, output } = inputs;
 
-  const githubToken = process.env.GITHUB_PAT;
-  if (!githubToken) {
-    throw new Error("GITHUB_PAT environment variable is not set");
-  }
-
   const daytonaInstance = new Daytona();
   const solutionBranch = output.branchName;
   logger.info("Creating sandbox...", {

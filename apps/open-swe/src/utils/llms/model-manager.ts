@@ -9,7 +9,7 @@ import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@openswe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@openswe/shared/github/allowed-users";
+import { isAllowedUser } from "@openswe/shared/allowed-users";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 
@@ -135,7 +135,9 @@ export class ModelManager {
       return null;
     }
 
-    const apiKeys = graphConfig.configurable?.apiKeys;
+    const apiKeys = graphConfig.configurable?.apiKeys as
+      | Record<string, string>
+      | undefined;
     if (!apiKeys) {
       throw new Error(API_KEY_REQUIRED_MESSAGE);
     }
@@ -329,35 +331,45 @@ export class ModelManager {
     const taskMap = {
       [LLMTask.PLANNER]: {
         modelName:
-          config.configurable?.[`${task}ModelName`] ??
+          (config.configurable?.[`${task}ModelName`] as string | undefined) ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature:
+          (config.configurable?.[`${task}Temperature`] as number | undefined) ??
+          0,
       },
       [LLMTask.PROGRAMMER]: {
         modelName:
-          config.configurable?.[`${task}ModelName`] ??
+          (config.configurable?.[`${task}ModelName`] as string | undefined) ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature:
+          (config.configurable?.[`${task}Temperature`] as number | undefined) ??
+          0,
       },
       [LLMTask.REVIEWER]: {
         modelName:
-          config.configurable?.[`${task}ModelName`] ??
+          (config.configurable?.[`${task}ModelName`] as string | undefined) ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature:
+          (config.configurable?.[`${task}Temperature`] as number | undefined) ??
+          0,
       },
       [LLMTask.ROUTER]: {
         modelName:
-          config.configurable?.[`${task}ModelName`] ??
+          (config.configurable?.[`${task}ModelName`] as string | undefined) ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature:
+          (config.configurable?.[`${task}Temperature`] as number | undefined) ??
+          0,
       },
       [LLMTask.SUMMARIZER]: {
         modelName:
-          config.configurable?.[`${task}ModelName`] ??
+          (config.configurable?.[`${task}ModelName`] as string | undefined) ??
           TASK_TO_CONFIG_DEFAULTS_MAP[task].modelName,
-        temperature: config.configurable?.[`${task}Temperature`] ?? 0,
+        temperature:
+          (config.configurable?.[`${task}Temperature`] as number | undefined) ??
+          0,
       },
-    };
+    } as Record<LLMTask, { modelName: string; temperature: number }>;
 
     const taskConfig = taskMap[task];
     const modelStr = taskConfig.modelName;
@@ -381,16 +393,18 @@ export class ModelManager {
       provider: modelProvider as Provider,
       ...(modelName.includes("gpt-5")
         ? {
-            max_completion_tokens: config.configurable?.maxTokens ?? 10_000,
+            max_completion_tokens:
+              (config.configurable?.maxTokens as number | undefined) ?? 10_000,
             temperature: 1,
           }
         : {
-            maxTokens: config.configurable?.maxTokens ?? 10_000,
-            temperature: taskConfig.temperature,
+            maxTokens:
+              (config.configurable?.maxTokens as number | undefined) ?? 10_000,
+            temperature: taskConfig.temperature as number,
           }),
       thinkingModel,
       thinkingBudgetTokens,
-    };
+    } as ModelLoadConfig;
   }
 
   /**

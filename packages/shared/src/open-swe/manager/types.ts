@@ -5,12 +5,12 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 
 export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
-   * The GitHub issue number that the user's request is associated with.
+   * The issue number that the user's request is associated with.
    * If not provided when the graph is invoked, it will create an issue.
    */
-  githubIssueId: z.number(),
+  githubIssueId: z.number().optional(),
   /**
-   * The GitHub pull request number of the PR which resolves the user's request.
+   * The pull request number that resolves the user's request.
    * If not provided when the graph is invoked, it will create a PR.
    */
   githubPullRequestId: z.number().optional(),
