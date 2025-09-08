@@ -20,10 +20,8 @@ import {
   User,
   Github,
   LogIn,
-  Plus,
 } from "lucide-react";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { InstallationSelector } from "@/components/github/installation-selector";
 import { cn } from "@/lib/utils";
 
 export function GitHubManager() {
@@ -31,11 +29,9 @@ export function GitHubManager() {
     isInstalled,
     isLoading,
     error,
-    installations,
     currentInstallation,
     installationsLoading,
     installationsError,
-    switchInstallation,
     refreshInstallations,
     repositories,
     repositoriesLoadingMore,
@@ -240,47 +236,6 @@ export function GitHubManager() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="border-border bg-muted/50 flex items-center justify-between rounded-lg border p-4">
-            <div className="flex-1">
-              <h3 className="text-foreground mb-1 font-semibold">
-                Current{" "}
-                {currentInstallation?.accountType === "Organization"
-                  ? "Organization"
-                  : "User"}
-              </h3>
-              <p className="text-muted-foreground text-sm">
-                Select which GitHub organization or user account to work with
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <InstallationSelector
-                size="default"
-                className="min-w-[250px]"
-              />
-              <Button
-                onClick={handleInstallApp}
-                variant="outline"
-                size="sm"
-                title="Add new organization"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-              <Button
-                onClick={refreshInstallations}
-                variant="outline"
-                size="sm"
-                disabled={installationsLoading}
-              >
-                <RefreshCw
-                  className={cn(
-                    "h-4 w-4",
-                    installationsLoading && "animate-spin",
-                  )}
-                />
-              </Button>
-            </div>
-          </div>
-
           {currentInstallation && (
             <div className="border-border flex items-center gap-4 rounded-lg border p-4">
               <img
