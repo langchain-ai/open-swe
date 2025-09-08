@@ -15,6 +15,7 @@ import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
 import { parsePartialJson } from "@langchain/core/output_parsers";
 import { RestartRun } from "./restart-run";
+import { useUser } from "@/hooks/useUser";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -76,13 +77,6 @@ interface ManagerChatProps {
   managerThreadId?: string;
   plannerThreadId?: string;
   programmerThreadId?: string;
-  githubUser?: {
-    login: string;
-    avatar_url: string;
-    html_url: string;
-    name: string | null;
-    email: string | null;
-  };
   disableSubmit?: boolean;
 }
 
@@ -172,9 +166,9 @@ export function ManagerChat({
   managerThreadId,
   plannerThreadId,
   programmerThreadId,
-  githubUser,
   disableSubmit,
 }: ManagerChatProps) {
+  const { user } = useUser();
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
       <div className="relative flex-1">
@@ -197,11 +191,11 @@ export function ManagerChat({
                     >
                       <div className="mt-0.5 flex-shrink-0">
                         {message.type === "human" ? (
-                          githubUser?.avatar_url ? (
+                          user?.avatar_url ? (
                             <div className="bg-muted flex h-6 w-6 items-center justify-center overflow-hidden rounded-full">
                               <img
-                                src={githubUser.avatar_url}
-                                alt={githubUser.login}
+                                src={user.avatar_url}
+                                alt={user.login}
                                 className="h-full w-full object-cover"
                               />
                             </div>
@@ -220,7 +214,7 @@ export function ManagerChat({
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human"
-                              ? githubUser?.login || "You"
+                              ? user?.login || "You"
                               : "Open SWE"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
