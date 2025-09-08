@@ -1,5 +1,3 @@
-import { RequestSource } from "../../../../constants.js";
-
 export const UPDATE_PROGRAMMER_ROUTING_OPTION = `- update_programmer: You should call this route if the user's message should be added to the programmer's currently running session. This should be called if you determine the user is trying to provide extra context to the programmer's current session.\n`;
 
 export const START_PLANNER_ROUTING_OPTION = `- start_planner: You should call this route if the user's message is a complete request you can send to the planner, which it can use to generate a plan. This route may be called when the planner has not started yet.\n`;
@@ -42,9 +40,6 @@ Below you're provided with routes you may take given the user's request. Your re
 Ensure your response is clear, and concise.
 
 Although you're only supposed to classify & respond to the latest message, this does not mean you should look at it in isolation. You should consider the conversation history as a whole, and the current status of your two AI assistants (programmer and planner) to determine how to respond & route the user's new message.
-
-If the source is from a '${RequestSource.GITHUB_ISSUE_WEBHOOK}', '${RequestSource.GITHUB_PULL_REQUEST_WEBHOOK}', you should ALWAYS classify it as a full request which should be routed to the planner.
-The instances where the source will be a GitHub webhook are when the user takes some action in GitHub which triggers a webhook, such as labeling an issue or pull request, or tagging you to review a pull request.
 
 # Context
 Although it's not shown here, you do have access to the full repository contents the user is referencing. Because of this, you should always assume you'll have access to any/all files or folders the user is referencing.

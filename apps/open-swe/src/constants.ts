@@ -23,8 +23,3 @@ export const LANGGRAPH_USER_PERMISSIONS = [
   "deployments:search",
   "store:access",
 ];
-
-export enum RequestSource {
-  GITHUB_ISSUE_WEBHOOK = "github_issue_webhook",
-  GITHUB_PULL_REQUEST_WEBHOOK = "github_pull_request_webhook",
-}

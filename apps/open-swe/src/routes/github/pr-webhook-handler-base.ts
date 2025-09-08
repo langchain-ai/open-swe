@@ -2,7 +2,6 @@ import {
   WebhookHandlerBase,
   WebhookHandlerContext,
 } from "./webhook-handler-base.js";
-import { RequestSource } from "../../constants.js";
 import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import {
   mentionsGitHubUserForTrigger,
@@ -116,10 +115,7 @@ export abstract class PRWebhookHandlerBase extends WebhookHandlerBase {
   ): ManagerGraphUpdate {
     return {
       messages: [
-        this.createHumanMessage(
-          prompt,
-          RequestSource.GITHUB_PULL_REQUEST_WEBHOOK,
-        ),
+        this.createHumanMessage(prompt, "github_pull_request_webhook"),
       ],
       targetRepository: {
         owner: context.owner,
