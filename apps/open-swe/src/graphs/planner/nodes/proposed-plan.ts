@@ -80,7 +80,9 @@ async function startProgrammerRun(input: {
 }) {
   const { runInput, state, config, newMessages } = input;
   const isLocal = isLocalMode(config);
-  const defaultHeaders = isLocal ? { [LOCAL_MODE_HEADER]: "true" } : {};
+  const defaultHeaders: Record<string, string> = isLocal
+    ? { [LOCAL_MODE_HEADER]: "true" }
+    : {};
 
   const langGraphClient = createLangGraphClient({
     defaultHeaders,
@@ -202,7 +204,7 @@ export async function interruptProposedPlan(
           planTitle: state.proposedPlanTitle,
           planItems,
           interruptType: "accept",
-          runId: config.configurable?.run_id ?? "",
+          runId: (config.configurable?.run_id as string | undefined) ?? "",
         }),
       ],
     });
@@ -306,7 +308,7 @@ export async function interruptProposedPlan(
         planTitle: state.proposedPlanTitle,
         planItems,
         interruptType: humanResponse.type,
-        runId: config.configurable?.run_id ?? "",
+        runId: (config.configurable?.run_id as string | undefined) ?? "",
       }),
     ],
   });

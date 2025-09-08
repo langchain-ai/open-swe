@@ -5,7 +5,9 @@ import {
   isHumanMessage,
 } from "@langchain/core/messages";
 import { Issue, IssueComment } from "../services/issue-service.js";
-import { DETAILS_CLOSE_TAG, DETAILS_OPEN_TAG } from "./github/issue-task.js";
+
+export const DETAILS_OPEN_TAG = "<details>";
+export const DETAILS_CLOSE_TAG = "</details>";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
