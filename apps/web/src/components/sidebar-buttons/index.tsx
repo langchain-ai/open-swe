@@ -1,16 +1,16 @@
-import { forwardRef, ForwardedRef } from "react";
+import { forwardRef, ForwardedRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Settings,
   History,
   EllipsisVertical,
   ChevronRight,
+  LogIn,
+  LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TooltipIconButton } from "@/components/ui/tooltip-icon-button";
-import AuthStatus from "@/components/github/auth-status";
-import { ENABLE_GITHUB } from "@openswe/shared/config";
 
 interface SidebarButtonsProps {
   historyOpen: boolean;
@@ -41,8 +41,13 @@ export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
       setHistoryOpen(false);
     };
 
+    const [signedIn, setSignedIn] = useState(false);
+
+    const handleAuthClick = () => {
+      setSignedIn((prev) => !prev);
+    };
+
     const isSidebarOpen = historyOpen || configOpen;
-    const githubDisabled = !ENABLE_GITHUB;
 
     return (
       <motion.div
@@ -108,7 +113,23 @@ export const SidebarButtons = forwardRef<HTMLDivElement, SidebarButtonsProps>(
             >
               <History className="size-5" />
             </TooltipIconButton>
-            {!githubDisabled && <AuthStatus />}
+            <TooltipIconButton
+              tooltip={signedIn ? "Sign Out" : "Sign In"}
+              variant="outline"
+              size="icon"
+              className={cn(
+                "bg-background hover:bg-muted size-9 rounded-full shadow-xs hover:cursor-pointer",
+                isSidebarOpen && "shadow-lg",
+              )}
+              onClick={handleAuthClick}
+              aria-label={signedIn ? "Sign Out" : "Sign In"}
+            >
+              {signedIn ? (
+                <LogOut className="size-5" />
+              ) : (
+                <LogIn className="size-5" />
+              )}
+            </TooltipIconButton>
           </div>
         </div>
       </motion.div>
