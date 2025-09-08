@@ -23,7 +23,7 @@ import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
-import { isAllowedUser } from "@openswe/shared/github/allowed-users";
+import { isAllowedUser } from "@openswe/shared/allowed-users";
 import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
 
 interface TerminalInputProps {

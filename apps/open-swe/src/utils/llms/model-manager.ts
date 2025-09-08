@@ -9,7 +9,7 @@ import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@openswe/shared/open-swe/llm-task";
-import { isAllowedUser } from "@openswe/shared/github/allowed-users";
+import { isAllowedUser } from "@openswe/shared/allowed-users";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
 
