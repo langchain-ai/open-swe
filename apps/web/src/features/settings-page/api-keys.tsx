@@ -22,6 +22,7 @@ interface ApiKey {
   value: string;
   isVisible: boolean;
   lastUsed?: string;
+  fields?: ConfigField[];
 }
 
 interface ApiKeySection {
@@ -38,19 +39,49 @@ const API_KEY_SECTIONS: Record<string, Omit<ApiKeySection, "keys">> = {
   // },
 };
 
+interface ConfigField {
+  id: string;
+  name: string;
+  description?: string;
+  value: string;
+  isVisible: boolean;
+}
+
+const AWS_BEDROCK_FIELDS: ConfigField[] = [
+  {
+    id: "awsAccessKeyId",
+    name: "Access Key ID",
+    description: "Your AWS access key for authenticating with Bedrock",
+    value: "",
+    isVisible: false,
+  },
+  {
+    id: "awsSecretAccessKey",
+    name: "Secret Access Key",
+    description: "Your AWS secret key for authenticating with Bedrock",
+    value: "",
+    isVisible: false,
+  },
+  {
+    id: "awsRegion",
+    name: "Region",
+    description: "The AWS region where Bedrock is enabled",
+    value: "",
+    isVisible: true,
+  },
+];
+
+const FIELD_GROUPS: Record<string, ConfigField[]> = {
+  awsBedrock: AWS_BEDROCK_FIELDS,
+};
+
 const API_KEY_DEFINITIONS = {
   llms: [
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
+    { id: "awsBedrock", name: "AWS Bedrock", fieldGroup: "awsBedrock" },
   ],
-  // infrastructure: [
-  //   {
-  //     id: "daytonaApiKey",
-  //     name: "Daytona",
-  //     description: "Users not required to set this if using the demo",
-  //   },
-  // ],
 };
 
 const shouldAutofocus = (apiKeyId: string, hasValue: boolean): boolean => {
@@ -59,6 +90,17 @@ const shouldAutofocus = (apiKeyId: string, hasValue: boolean): boolean => {
   }
 
   return false;
+};
+
+const isProviderConfigured = (apiKey: ApiKey, apiKeys: Record<string, string>): boolean => {
+  if (apiKey.fields) {
+    const requiredFields = apiKey.fields.filter(field => 
+      !field.name.toLowerCase().includes('optional')
+    );
+    return requiredFields.every(field => apiKeys[field.id]);
+  }
+
+  return !!apiKey.value;
 };
 
 export function APIKeysTab() {
@@ -91,7 +133,7 @@ export function APIKeysTab() {
     updateConfig(DEFAULT_CONFIG_KEY, "apiKeys", updatedApiKeys);
   };
 
-  const getApiKeySections = (): Record<string, ApiKeySection> => {
+  const getApiKeySections = (fieldGroups: Record<string, ConfigField[]>): Record<string, ApiKeySection> => {
     const sections: Record<string, ApiKeySection> = {};
     const apiKeys = config.apiKeys || {};
 
@@ -102,8 +144,9 @@ export function APIKeysTab() {
           sectionKey as keyof typeof API_KEY_DEFINITIONS
         ].map((keyDef) => ({
           ...keyDef,
-          value: apiKeys[keyDef.id] || "",
+          value: keyDef.fieldGroup ? "" : (apiKeys[keyDef.id] || ""),
           isVisible: visibilityState[keyDef.id] || false,
+          fields: keyDef.fieldGroup ? fieldGroups[keyDef.fieldGroup] : undefined,
         })),
       };
     });
@@ -111,7 +154,22 @@ export function APIKeysTab() {
     return sections;
   };
 
-  const apiKeySections = getApiKeySections();
+  const apiKeys = config.apiKeys || {};
+  
+  const getFieldsWithValues = (fields: ConfigField[]): ConfigField[] => {
+    return fields.map((field) => ({
+      ...field,
+      value: apiKeys[field.id] || "",
+      isVisible: visibilityState[field.id] || false,
+    }));
+  };
+  
+  const fieldGroupsWithValues: Record<string, ConfigField[]> = {};
+  Object.entries(FIELD_GROUPS).forEach(([groupId, fields]) => {
+    fieldGroupsWithValues[groupId] = getFieldsWithValues(fields);
+  });
+  
+  const apiKeySections = getApiKeySections(fieldGroupsWithValues);
 
   return (
     <div className="space-y-8">
@@ -150,7 +208,7 @@ export function APIKeysTab() {
                     <h3 className="text-foreground font-mono font-semibold">
                       {apiKey.name}
                     </h3>
-                    {apiKey.value && (
+                    {isProviderConfigured(apiKey, apiKeys) && (
                       <Badge
                         variant="outline"
                         className={cn(
@@ -171,59 +229,113 @@ export function APIKeysTab() {
                 </div>
 
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <Label
-                        htmlFor={`${apiKey.id}-key`}
-                        className="text-sm font-medium"
-                      >
-                        API Key
-                      </Label>
-                      {apiKey.description && (
-                        <p className="text-muted-foreground text-xs">
-                          {apiKey.description}
-                        </p>
-                      )}
-                      <div className="mt-1 flex items-center gap-2">
-                        <Input
-                          id={`${apiKey.id}-key`}
-                          type={apiKey.isVisible ? "text" : "password"}
-                          value={apiKey.value}
-                          onChange={(e) =>
-                            updateApiKey(apiKey.id, e.target.value)
-                          }
-                          placeholder={`Enter your ${apiKey.name} API key`}
-                          className="font-mono text-sm"
-                          autoFocus={shouldAutofocus(apiKey.id, !!apiKey.value)}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleKeyVisibility(apiKey.id)}
-                          className="px-2"
+                  {apiKey.fields ? (
+                    apiKey.fields.map((field) => (
+                      <div key={field.id} className="space-y-2">
+                        <Label
+                          htmlFor={field.id}
+                          className="text-sm font-medium"
                         >
-                          {apiKey.isVisible ? (
-                            <EyeOff className="h-4 w-4" />
-                          ) : (
-                            <Eye className="h-4 w-4" />
-                          )}
-                        </Button>
-                        {apiKey.value && (
+                          {field.name}
+                        </Label>
+                        {field.description && (
+                          <p className="text-xs text-muted-foreground">
+                            {field.description}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Input
+                            id={field.id}
+                            type={field.isVisible ? "text" : "password"}
+                            value={field.value || ""}
+                            onChange={(e) => updateApiKey(field.id, e.target.value)}
+                            placeholder={`Enter your ${field.name}`}
+                            className="font-mono text-sm"
+                          />
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => deleteApiKey(apiKey.id)}
-                            className={cn(
-                              "px-2",
-                              "text-destructive hover:bg-destructive/10 hover:text-destructive",
-                            )}
+                            onClick={() => toggleKeyVisibility(field.id)}
+                            className="px-2"
                           >
-                            <Trash2 className="h-4 w-4" />
+                            {field.isVisible ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
                           </Button>
+                          {field.value && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteApiKey(field.id)}
+                              className={cn(
+                                "px-2",
+                                "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                              )}
+                              type="button"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <Label
+                          htmlFor={`${apiKey.id}-key`}
+                          className="text-sm font-medium"
+                        >
+                          API Key
+                        </Label>
+                        {apiKey.description && (
+                          <p className="text-muted-foreground text-xs">
+                            {apiKey.description}
+                          </p>
                         )}
+                        <div className="mt-1 flex items-center gap-2">
+                          <Input
+                            id={`${apiKey.id}-key`}
+                            type={apiKey.isVisible ? "text" : "password"}
+                            value={apiKey.value}
+                            onChange={(e) =>
+                              updateApiKey(apiKey.id, e.target.value)
+                            }
+                            placeholder={`Enter your ${apiKey.name} API key`}
+                            className="font-mono text-sm"
+                            autoFocus={shouldAutofocus(apiKey.id, !!apiKey.value)}
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleKeyVisibility(apiKey.id)}
+                            className="px-2"
+                          >
+                            {apiKey.isVisible ? (
+                              <EyeOff className="h-4 w-4" />
+                            ) : (
+                              <Eye className="h-4 w-4" />
+                            )}
+                          </Button>
+                          {apiKey.value && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteApiKey(apiKey.id)}
+                              className={cn(
+                                "px-2",
+                                "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                              )}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             ))}
