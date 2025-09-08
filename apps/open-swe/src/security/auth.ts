@@ -1,23 +1,7 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
-import {
-  verifyGithubUser,
-  GithubUser,
-  verifyGithubUserId,
-} from "@openswe/shared/github/verify-user";
-import {
-  GITHUB_INSTALLATION_ID,
-  GITHUB_INSTALLATION_NAME,
-  GITHUB_INSTALLATION_TOKEN_COOKIE,
-  GITHUB_TOKEN_COOKIE,
-  GITHUB_USER_ID_HEADER,
-  GITHUB_USER_LOGIN_HEADER,
-  LOCAL_MODE_HEADER,
-} from "@openswe/shared/constants";
-import { decryptSecret } from "@openswe/shared/crypto";
-import { verifyGitHubWebhookOrThrow } from "./github.js";
+import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
-import { getGitHubPatFromRequest } from "../utils/github-pat.js";
 import { validateApiBearerToken } from "./custom.js";
 
 // TODO: Export from LangGraph SDK
@@ -36,8 +20,6 @@ interface AuthenticateReturn extends BaseAuthReturn {
 
 export const auth = new Auth()
   .authenticate<AuthenticateReturn>(async (request: Request) => {
-    const isProd = process.env.NODE_ENV === "production";
-
     if (request.method === "OPTIONS") {
       return {
         identity: "anonymous",
@@ -83,111 +65,7 @@ export const auth = new Auth()
       throw new HTTPException(401, { message: "Invalid API token" });
     }
 
-    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
-    if (!encryptionKey) {
-      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
-    }
-
-    const ghSecretHashHeader = request.headers.get("X-Hub-Signature-256");
-    if (ghSecretHashHeader) {
-      // This will either return a valid user, or throw an error
-      return await verifyGitHubWebhookOrThrow(request);
-    }
-
-    // Check for GitHub PAT authentication (simpler mode for evals, etc.)
-    const githubPat = getGitHubPatFromRequest(request, encryptionKey);
-    if (githubPat && !isProd) {
-      const user = await verifyGithubUser(githubPat);
-      if (!user) {
-        throw new HTTPException(401, {
-          message: "Invalid GitHub PAT",
-        });
-      }
-
-      return {
-        identity: user.id.toString(),
-        is_authenticated: true,
-        display_name: user.login,
-        metadata: {
-          installation_name: "pat-auth",
-        },
-        permissions: LANGGRAPH_USER_PERMISSIONS,
-      };
-    }
-
-    // GitHub App authentication mode (existing logic)
-    const installationNameHeader = request.headers.get(
-      GITHUB_INSTALLATION_NAME,
-    );
-    if (!installationNameHeader) {
-      throw new HTTPException(401, {
-        message: "GitHub installation name header missing",
-      });
-    }
-    const installationIdHeader = request.headers.get(GITHUB_INSTALLATION_ID);
-    if (!installationIdHeader) {
-      throw new HTTPException(401, {
-        message: "GitHub installation ID header missing",
-      });
-    }
-
-    // We don't do anything with this token right now, but still confirm it
-    // exists as it will cause issues later on if it's not present.
-    const encryptedInstallationToken = request.headers.get(
-      GITHUB_INSTALLATION_TOKEN_COOKIE,
-    );
-    if (!encryptedInstallationToken) {
-      throw new HTTPException(401, {
-        message: "GitHub installation token header missing",
-      });
-    }
-
-    const encryptedAccessToken = request.headers.get(GITHUB_TOKEN_COOKIE);
-    const decryptedAccessToken = encryptedAccessToken
-      ? decryptSecret(encryptedAccessToken, encryptionKey)
-      : undefined;
-    const decryptedInstallationToken = decryptSecret(
-      encryptedInstallationToken,
-      encryptionKey,
-    );
-
-    let user: GithubUser | undefined;
-
-    if (!decryptedAccessToken) {
-      // If there isn't a user access token, check to see if the user info is in headers.
-      // This would indicate a bot created the request.
-      const userIdHeader = request.headers.get(GITHUB_USER_ID_HEADER);
-      const userLoginHeader = request.headers.get(GITHUB_USER_LOGIN_HEADER);
-      if (!userIdHeader || !userLoginHeader) {
-        throw new HTTPException(401, {
-          message: "Github-User-Id or Github-User-Login header missing",
-        });
-      }
-      user = await verifyGithubUserId(
-        decryptedInstallationToken,
-        Number(userIdHeader),
-        userLoginHeader,
-      );
-    } else {
-      // Ensure we decrypt the token before passing to the verification function.
-      user = await verifyGithubUser(decryptedAccessToken);
-    }
-
-    if (!user) {
-      throw new HTTPException(401, {
-        message: "User not found",
-      });
-    }
-
-    return {
-      identity: user.id.toString(),
-      is_authenticated: true,
-      display_name: user.login,
-      metadata: {
-        installation_name: installationNameHeader,
-      },
-      permissions: LANGGRAPH_USER_PERMISSIONS,
-    };
+    throw new HTTPException(401, { message: "Unauthorized" });
   })
 
   // THREADS: create operations with metadata
