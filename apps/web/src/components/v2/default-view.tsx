@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Archive, Eye, EyeOff, List, ListChecks } from "lucide-react";
+import { Archive, List, ListChecks } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { useFileUpload } from "@/hooks/useFileUpload";
@@ -97,9 +97,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     handlePaste,
   } = useFileUpload();
   const [autoAccept, setAutoAccept] = useState(false);
-  const [shouldCreateIssue, setShouldCreateIssue] = useState(
-    config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
-  );
   const [customFramework, setCustomFramework] = useState(
     config?.customFramework != null ? !!config.customFramework : false,
   );
@@ -178,8 +175,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   draftToLoad={draftToLoad}
                   autoAcceptPlan={autoAccept}
                   setAutoAcceptPlan={setAutoAccept}
-                  shouldCreateIssue={shouldCreateIssue}
-                  setShouldCreateIssue={setShouldCreateIssue}
                   customFramework={customFramework}
                   setCustomFramework={setCustomFramework}
                 />
@@ -200,24 +195,6 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                       <ListChecks className="size-4" />
                     ) : (
                       <List className="size-4" />
-                    )}
-                  </TooltipIconButton>
-                  <TooltipIconButton
-                    variant={shouldCreateIssue ? "ghost" : "default"}
-                    tooltip="Whether or not to create a GitHub issue for the request"
-                    className={cn(
-                      "transition-colors duration-200",
-                      shouldCreateIssue
-                        ? "text-muted-foreground hover:text-foreground"
-                        : "bg-primary hover:bg-primary/90",
-                    )}
-                    onClick={() => setShouldCreateIssue((prev) => !prev)}
-                    side="bottom"
-                  >
-                    {shouldCreateIssue ? (
-                      <Eye className="size-4" />
-                    ) : (
-                      <EyeOff className="size-4" />
                     )}
                   </TooltipIconButton>
                   <TooltipIconButton
