@@ -379,6 +379,14 @@ export function ThreadView({
                 <span className="text-muted-foreground truncate text-xs">
                   {displayThread.repository}
                 </span>
+                {displayThread.issueId && (
+                  <>
+                    <span className="text-muted-foreground text-xs">•</span>
+                    <span className="text-muted-foreground truncate text-xs">
+                      #{displayThread.issueId}
+                    </span>
+                  </>
+                )}
               </>
             )}
           </div>

@@ -127,6 +127,14 @@ export function ThreadCard({
               <span className="text-muted-foreground truncate text-xs">
                 {thread.repository}
               </span>
+              {thread.issueId && (
+                <>
+                  <span className="text-muted-foreground text-xs">•</span>
+                  <span className="text-muted-foreground truncate text-xs">
+                    #{thread.issueId}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           <Badge
