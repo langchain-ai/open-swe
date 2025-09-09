@@ -2,6 +2,14 @@ import { useEffect } from "react";
 import useSWR from "swr";
 import { useUserStore, UserData } from "@/stores/user-store";
 
+export const DEFAULT_USER: UserData = {
+  login: "local-user",
+  avatar_url: "",
+  html_url: "",
+  name: null,
+  email: null,
+};
+
 interface UserResponse {
   user: UserData;
 }
@@ -14,12 +22,22 @@ interface UseUserResult {
 }
 
 async function fetchUser(): Promise<UserData> {
-  const response = await fetch("/api/auth/user");
-  if (!response.ok) {
+  try {
+    const response = await fetch("/api/auth/user");
+    if (!response.ok) {
+      if (process.env.NEXT_PUBLIC_OPEN_SWE_LOCAL_MODE === "true") {
+        return DEFAULT_USER;
+      }
+      throw new Error("Failed to fetch user data");
+    }
+    const data: UserResponse = await response.json();
+    return data.user;
+  } catch {
+    if (process.env.NEXT_PUBLIC_OPEN_SWE_LOCAL_MODE === "true") {
+      return DEFAULT_USER;
+    }
     throw new Error("Failed to fetch user data");
   }
-  const data: UserResponse = await response.json();
-  return data.user;
 }
 
 export function useUser(): UseUserResult {
