@@ -10,7 +10,6 @@ import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
@@ -32,14 +31,12 @@ function AllThreadsPageContent() {
   const router = useRouter();
   const limit = 25;
   const [offset, setOffset] = useState(0);
-  const { currentInstallation, installationsLoading } = useGitHubAppProvider();
   const {
     threads,
     isLoading: threadsLoading,
     hasMore,
   } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    currentInstallation,
     pagination: {
       limit,
       offset,
@@ -103,7 +100,7 @@ function AllThreadsPageContent() {
   // Show loading state if threads/status/installation requests are loading, and there are no
   // threads to display (conditional of the status filter)
   const showThreadsLoading =
-    (threadsLoading || statusLoading || installationsLoading) &&
+    (threadsLoading || statusLoading) &&
     (statusFilter === "all"
       ? Object.values(groupedThreads).flat().length === 0
       : filteredThreads.length === 0);
@@ -295,9 +292,7 @@ function AllThreadsPageContent() {
 export default function AllThreadsPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <GitHubAppProvider>
-        <AllThreadsPageContent />
-      </GitHubAppProvider>
+      <AllThreadsPageContent />
     </Suspense>
   );
 }

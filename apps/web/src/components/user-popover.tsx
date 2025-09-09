@@ -9,7 +9,6 @@ import {
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { useUserStore } from "@/stores/user-store";
 import { useUser } from "@/hooks/useUser";
 
 interface UserPopoverProps {
@@ -17,8 +16,7 @@ interface UserPopoverProps {
 }
 
 export function UserPopover({ className }: UserPopoverProps) {
-  const { user } = useUserStore();
-  const { isLoading, error } = useUser();
+  const { user, isLoading, error } = useUser();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
