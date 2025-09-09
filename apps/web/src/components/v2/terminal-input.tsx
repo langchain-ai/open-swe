@@ -87,6 +87,7 @@ export function TerminalInput({
     assistantId,
     reconnectOnMount: true,
     fetchStateHistory: false,
+    defaultHeaders: { "x-local-mode": "true" },
   });
 
   const handleSend = async () => {
