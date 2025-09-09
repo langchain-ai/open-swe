@@ -20,7 +20,7 @@ import {
 import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
-import { useUser } from "@/hooks/useUser";
+import { useUser, DEFAULT_USER } from "@/hooks/useUser";
 import { isAllowedUser } from "@openswe/shared/allowed-users";
 
 interface TerminalInputProps {
@@ -80,6 +80,7 @@ export function TerminalInput({
   const [selectedRepository] = useQueryState("repo");
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
+  const isLocalMode = process.env.NEXT_PUBLIC_OPEN_SWE_LOCAL_MODE === "true";
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -97,7 +98,9 @@ export function TerminalInput({
       return;
     }
 
-    if (!user) {
+    const currentUser = user ?? (isLocalMode ? DEFAULT_USER : null);
+
+    if (!currentUser && !isLocalMode) {
       toast.error("User not found. Please sign in first", {
         richColors: true,
         closeButton: true,
@@ -107,7 +110,11 @@ export function TerminalInput({
 
     const defaultConfig = getConfig(DEFAULT_CONFIG_KEY);
 
-    if (!isAllowedUser(user.login) && !hasApiKeySet(defaultConfig)) {
+    if (
+      currentUser &&
+      !isAllowedUser(currentUser.login) &&
+      !hasApiKeySet(defaultConfig)
+    ) {
       toast.error(
         MISSING_API_KEYS_TOAST_CONTENT,
         MISSING_API_KEYS_TOAST_OPTIONS,
