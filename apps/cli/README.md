@@ -3,7 +3,7 @@
 > **⚠️ Under Development**  
 > This CLI is currently under active development and may contain bugs or incomplete features.
 
-A command-line interface for Open SWE that provides a terminal-based chat experience to interact with the autonomous coding agent. Built with React and Ink, it offers real-time streaming of agent logs and works directly on your local codebase without requiring GitHub authentication.
+A command-line interface for Open SWE that provides a terminal-based chat experience to interact with the autonomous coding agent. Built with React and Ink, it offers real-time streaming of agent logs and works directly on your local codebase without requiring any external authentication.
 
 ## Documentation
 
@@ -39,7 +39,7 @@ The CLI will:
 
 ## Features
 
-- **Local Mode Only**: Works directly on your local codebase without GitHub integration
+- **Local Mode Only**: Works directly on your local codebase without external repository integration
 - **Real-time Streaming**: See agent logs and responses as they happen
 - **Interactive Chat**: Type your requests and get immediate feedback
 - **Plan Approval**: Review and approve/deny proposed plans before execution

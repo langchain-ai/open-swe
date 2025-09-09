@@ -112,9 +112,9 @@ export const EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT = `
        - Determine the base URL from which the current documentation was fetched. It should be the url of the page you you read the relative path from.
        - For ../, go one level up in the URL hierarchy.
        - For ../../, go two levels up, then append the relative path.
-       - If the current page is: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
-           - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
-           - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
+       - If the current page is: https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
+           - Go up two levels: https://docs.langchain.com/langgraph/tutorials/get-started/
+           - Append the relative path to form the full URL: https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/local-server
        - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
 `;
 
@@ -166,24 +166,24 @@ export const EXTERNAL_FRAMEWORK_PLAN_PROMPT = `
    </framework_integration_planning>
    <important_documentation>
        **LangGraph Core Concepts:**
-       - https://langchain-ai.github.io/langgraph/concepts/agentic_concepts/
-       - https://langchain-ai.github.io/langgraph/how-tos/pass-config-to-tools/
+       - https://docs.langchain.com/langgraph/concepts/agentic_concepts/
+       - https://docs.langchain.com/langgraph/how-tos/pass-config-to-tools/
       
        **LangGraph Patterns:**
-       - https://langchain-ai.github.io/langgraph/reference/supervisor/
-       - https://langchain-ai.github.io/langgraph/reference/swarm/
+       - https://docs.langchain.com/langgraph/reference/supervisor/
+       - https://docs.langchain.com/langgraph/reference/swarm/
       
        **LangGraph Streaming & Interrupts (needed when user input required):**
-        - https://langchain-ai.github.io/langgraph/how-tos/stream-updates/
-        - https://langchain-ai.github.io/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
-        - https://langchain-ai.github.io/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming
+        - https://docs.langchain.com/langgraph/how-tos/stream-updates/
+        - https://docs.langchain.com/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
+        - https://docs.langchain.com/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming
         - https://docs.langchain.com/langgraph-platform/interrupt-concurrent
       
        **Framework Integration:**
        - https://docs.streamlit.io/library/api-reference/session-state
        - https://docs.streamlit.io/knowledge-base/using-streamlit/how-to-use-async-await
        - https://docs.python.org/3/library/asyncio-dev.html#common-mistakes
-       - https://github.com/erdewit/nest_asyncio
+       - https://pypi.org/project/nest-asyncio/
    </important_documentation>
 </external_libraries_and_frameworks_planning>`;
 

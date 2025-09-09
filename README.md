@@ -10,7 +10,7 @@
   <h1>Open SWE - An Open-Source Asynchronous Coding Agent</h1>
 </div>
 
-Open SWE is an open-source cloud-based asynchronous coding agent built with [LangGraph](https://langchain-ai.github.io/langgraphjs/). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories.
+Open SWE is an open-source cloud-based asynchronous coding agent built with [LangGraph](https://docs.langchain.com/langgraphjs/). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories.
 
 > [!TIP]
 > Try out Open SWE yourself using our [public demo](https://swe.langchain.com)!
@@ -38,6 +38,10 @@ Open SWE is an open-source cloud-based asynchronous coding agent built with [Lan
 Open SWE can be used in multiple ways:
 
 - 🖥️ **From the UI**. You can create, manage and execute Open SWE tasks from the [web application](https://swe.langchain.com). See the ['From the UI' page](https://docs.langchain.com/labs/swe/usage/ui) in the docs for more information.
+
+## Local Development
+
+Open SWE runs locally without any external repository-hosting dependencies or authentication. Configure your environment variables (such as `AZURE_OPENAI_API_KEY`) and start the agent to connect to Azure-hosted GPT‑5 models or other supported LLMs.
 
 # Documentation
 

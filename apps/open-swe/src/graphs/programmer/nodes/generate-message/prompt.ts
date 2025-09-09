@@ -386,8 +386,8 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
            - Interrupts appear as event["__interrupt__"] containing tuple of Interrupt objects
            - Access interrupt data via interrupt_obj.value where interrupt_obj = event["__interrupt__"][0]
            <important_documentation>
-               - LangGraph Streaming: https://langchain-ai.github.io/langgraph/how-tos/stream-updates/
-               - SDK Streaming: https://langchain-ai.github.io/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
+               - LangGraph Streaming: https://docs.langchain.com/langgraph/how-tos/stream-updates/
+               - SDK Streaming: https://docs.langchain.com/langgraph/cloud/reference/sdk/python_sdk_ref/#stream
                - Concurrent Interrupts: https://docs.langchain.com/langgraph-platform/interrupt-concurrent
            </important_documentation>
        </langgraph_streaming_and_interrupts_patterns>
@@ -449,7 +449,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
            </config_propagation_verification>
           
            <important_documentation>
-               - LangGraph Config: https://langchain-ai.github.io/langgraph/how-tos/pass-config-to-tools/
+               - LangGraph Config: https://docs.langchain.com/langgraph/how-tos/pass-config-to-tools/
                - Streamlit Session State: https://docs.streamlit.io/library/api-reference/session-state
                - Asyncio with Web Frameworks: https://docs.python.org/3/library/asyncio-eventloop.html#running-and-stopping-the-loop
            </important_documentation>
@@ -523,7 +523,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        )
        app = supervisor.compile()
        \`\`\`
-       <important_documentation>https://langchain-ai.github.io/langgraph/reference/supervisor/</important_documentation>
+       <important_documentation>https://docs.langchain.com/langgraph/reference/supervisor/</important_documentation>
       
        **Swarm pattern** (dynamic handoffs):
        \`\`\`python
@@ -539,7 +539,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        workflow = create_swarm([alice, bob], default_active_agent="Alice")
        app = workflow.compile()
        \`\`\`
-       <important_documentation>https://langchain-ai.github.io/langgraph/reference/swarm/</important_documentation>
+       <important_documentation>https://docs.langchain.com/langgraph/reference/swarm/</important_documentation>
       
        **Only build custom StateGraph when:**
        - Prebuilt components don't fit the specific use case.
@@ -547,7 +547,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        - Complex branching logic required.
        - Advanced streaming patterns needed.
       
-       <important_documentation>https://langchain-ai.github.io/langgraph/concepts/agentic_concepts/</important_documentation>
+       <important_documentation>https://docs.langchain.com/langgraph/concepts/agentic_concepts/</important_documentation>
    </prefer_prebuilt_components>
 
    <patterns_to_avoid>
@@ -616,7 +616,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        interrupt("Please confirm action")
        # Execution resumes after human provides input through platform
        \`\`\`
-       <important_documentation>https://langchain-ai.github.io/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming</important_documentation>
+       <important_documentation>https://docs.langchain.com/langgraph/concepts/streaming/#whats-possible-with-langgraph-streaming</important_documentation>
    </patterns_to_avoid>
 
    <async_event_loop_patterns>
@@ -665,7 +665,7 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        </async_error_patterns>
       
        <important_documentation>
-           - nest_asyncio: https://github.com/erdewit/nest_asyncio
+           - nest_asyncio: https://pypi.org/project/nest-asyncio/
            - Streamlit async: https://docs.streamlit.io/knowledge-base/using-streamlit/how-to-use-async-await
            - Python asyncio: https://docs.python.org/3/library/asyncio-dev.html#common-mistakes
        </important_documentation>
@@ -775,9 +775,9 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
            - Determine the base URL from the current documentation page.
            - For ../, go one level up in the URL hierarchy.
            - For ../../, go two levels up, then append the relative path.
-           - Example: From https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/setup/ with link ../../langgraph-platform/local-server
-               - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
-               - Append path: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
+           - Example: From https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/setup/ with link ../../langgraph-platform/local-server
+               - Go up two levels: https://docs.langchain.com/langgraph/tutorials/get-started/
+               - Append path: https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/local-server
            - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
        </documentation_navigation>
    </documentation_guidelines>

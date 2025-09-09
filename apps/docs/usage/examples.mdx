@@ -9,21 +9,12 @@ If you want to try out Open SWE, but aren't sure where to start, here are a few 
   <Step title="Clone the TypeScript template">
     The examples below are all for TypeScript tasks. For these, you should clone an empty TypeScript template repository:
 
-    [bracesproul/typescript-template](https://github.com/bracesproul/typescript-template)
-
-    Visit the GitHub UI, and click `Use this template` to create a new repository based on this template.
+    Use a TypeScript template repository of your choice and create a new project based on it.
 
   </Step>
 
-  <Step title="Give Open SWE access to your repository">
-    If you did not give Open SWE to all of your repositories when setting it up the first time, you'll need to give Open SWE access to this repository.
-
-    1. Visit the settings page on Open SWE: [swe.langchain.com/settings](https://swe.langchain.com/settings)
-    2. To the right of your user inside the `Current User` section, click the `+` button. This will redirect you to GitHub where you can authorize Open SWE to access your repositories.
-    3. Select the new TypeScript template you just created.
-
-    Once done, it will redirect you back to Open SWE. Once here, find the new repository under the repo dropdown above the chat input.
-
+  <Step title="Open the repository in Open SWE">
+    Once you have created the repository, open it in the Open SWE UI using the repository selector above the chat input.
   </Step>
 
   <Step title="Submit one of the example tasks">
@@ -51,14 +42,6 @@ Below are a series of examples you can try out:
   ```
 </Accordion>
 
-<Accordion title="GitHub issue sync CLI">
-  ```txt
-  Implement a CLI (`src/sync-issues.ts`) that reads a `config.json` with
-  one or more GitHub repos, fetches their open issues via the GitHub REST API,
-  and writes a local `issues.{owner}.{repo}.csv`. Use `yargs` for parsing and
-  include a `--since YYYY-MM-DD` flag to filter by creation date.
-  ```
-</Accordion>
 
 <Accordion title="JWT + refresh-token auth layer">
   ```txt

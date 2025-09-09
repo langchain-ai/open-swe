@@ -1,9 +1,8 @@
 {
   "name": "@openswe/agent-v2",
-  "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langchain-ai/open-swe.git"
+    "url": ""
   },
   "private": true,
   "version": "0.0.0",
@@ -53,6 +52,6 @@
   "description": "The core LangGraph agent application that powers Open SWE's autonomous code understanding, planning, and execution capabilities.",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/langchain-ai/open-swe/issues"
+    "url": ""
   }
 }

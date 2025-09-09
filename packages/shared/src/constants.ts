@@ -21,7 +21,7 @@ export const DEFAULT_MCP_SERVERS = {
       "mcpdoc",
       "mcpdoc",
       "--urls",
-      "LangGraphPY:https://langchain-ai.github.io/langgraph/llms.txt LangGraphJS:https://langchain-ai.github.io/langgraphjs/llms.txt",
+      "LangGraphPY:https://docs.langchain.com/langgraph/llms.txt LangGraphJS:https://docs.langchain.com/langgraphjs/llms.txt",
       "--transport",
       "stdio",
     ],
