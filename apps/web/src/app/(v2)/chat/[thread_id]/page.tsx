@@ -6,7 +6,7 @@ import { ThreadErrorCard } from "@/components/v2/thread-error-card";
 import { useThreadMetadata } from "@/hooks/useThreadMetadata";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
+import { MANAGER_GRAPH_ID, LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -52,6 +52,7 @@ export default function ThreadPage({
     threadId: thread_id,
     reconnectOnMount: true,
     fetchStateHistory: false,
+    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
   });
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
