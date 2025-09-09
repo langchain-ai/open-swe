@@ -58,7 +58,7 @@ export const ReviewerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  githubIssueId: withLangGraph(z.custom<number>().optional(), {
+  issueId: withLangGraph(z.custom<number>().optional(), {
     reducer: {
       schema: z.custom<number>().optional(),
       fn: (_state, update) => update,

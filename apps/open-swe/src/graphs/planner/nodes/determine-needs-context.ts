@@ -122,10 +122,10 @@ export async function determineNeedsContext(
   config: GraphConfig,
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
-    shouldCreateIssue(config) && state.githubIssueId
+    shouldCreateIssue(config) && state.issueId
       ? getMissingMessages(getIssueService(config), {
           messages: state.messages,
-          issueId: state.githubIssueId,
+          issueId: state.issueId,
           repo: state.targetRepository,
         })
       : [],

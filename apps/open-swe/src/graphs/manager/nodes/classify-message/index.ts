@@ -80,7 +80,7 @@ export async function classifyMessage(
   const programmerStatus = programmerThread?.status ?? "not_started";
   const plannerStatus = plannerThread?.status ?? "not_started";
 
-  // If the githubIssueId is defined, fetch the most recent task plan (if exists). Otherwise fallback to state task plan
+  // If the issueId is defined, fetch the most recent task plan (if exists). Otherwise fallback to state task plan
   const taskPlan = state.taskPlan;
 
   const { prompt, schema } = createClassificationPromptAndToolSchema({
@@ -211,12 +211,12 @@ export async function classifyMessage(
   }
 
   const issueService = getIssueService(config);
-  let githubIssueId = state.githubIssueId;
+  let issueId = state.issueId;
 
   const newMessages: BaseMessage[] = [response];
 
   // If it's not a no_op, ensure there is an issue with the user's request.
-  if (!githubIssueId) {
+  if (!issueId) {
     const { title } = await createIssueFieldsFromMessages(
       state.messages,
       config.configurable,
@@ -233,7 +233,7 @@ export async function classifyMessage(
     if (!newIssue) {
       throw new Error("Failed to create issue.");
     }
-    githubIssueId = Number(newIssue.id);
+    issueId = Number(newIssue.id);
     // Ensure we remove the old message, and replace it with an exact copy,
     // but with the issue ID & isOriginalIssue set in additional_kwargs.
     newMessages.push(
@@ -244,29 +244,26 @@ export async function classifyMessage(
         new HumanMessage({
           ...userMessage,
           additional_kwargs: {
-            githubIssueId: githubIssueId,
+            issueId: issueId,
             isOriginalIssue: true,
           },
         }),
       ],
     );
-  } else if (
-    githubIssueId &&
-    state.messages.filter(isHumanMessage).length > 1
-  ) {
+  } else if (issueId && state.messages.filter(isHumanMessage).length > 1) {
     // If there already is an issue ID in state and multiple human messages, add any
     // human messages to the issue which weren't already added.
     const messagesNotInIssue = state.messages
       .filter(isHumanMessage)
       .filter((message) => {
-        // If the message doesn't contain `githubIssueId` in additional kwargs, it hasn't been added to the issue.
-        return !message.additional_kwargs?.githubIssueId;
+        // If the message doesn't contain `issueId` in additional kwargs, it hasn't been added to the issue.
+        return !message.additional_kwargs?.issueId;
       });
 
     const createCommentsPromise = messagesNotInIssue.map(async (message) => {
       const createdIssue = await issueService.createComment({
         repo: state.targetRepository,
-        issueId: githubIssueId!,
+        issueId: issueId!,
         body: getMessageContentString(message.content),
       });
       if (!createdIssue?.id) {
@@ -280,8 +277,8 @@ export async function classifyMessage(
           new HumanMessage({
             ...message,
             additional_kwargs: {
-              githubIssueId,
-              githubIssueCommentId: createdIssue.id,
+              issueId,
+              issueCommentId: createdIssue.id,
               ...((toolCallArgs.route as string) ===
               "start_planner_for_followup"
                 ? {
@@ -355,7 +352,7 @@ export async function classifyMessage(
 
   const commandUpdate: ManagerGraphUpdate = {
     messages: newMessages,
-    ...(githubIssueId ? { githubIssueId } : {}),
+    ...(issueId ? { issueId } : {}),
   };
 
   if (
@@ -365,7 +362,7 @@ export async function classifyMessage(
   ) {
     // If the route is one of the above, we don't need to do anything since the issue now contains
     // the new messages, and the coding agent will handle pulling them in. This should never be
-    // reachable since we should return early after adding the Github comment, but include anyways...
+    // reachable since we should return early after adding the issue comment, but include anyways...
     return new Command({
       update: commandUpdate,
       goto: END,

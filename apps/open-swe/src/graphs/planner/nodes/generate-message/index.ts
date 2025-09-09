@@ -142,10 +142,10 @@ export async function generateAction(
       : {}),
   });
 
-  const missingMessages = state.githubIssueId
+  const missingMessages = state.issueId
     ? await getMissingMessages(getIssueService(config), {
         messages: state.messages,
-        issueId: state.githubIssueId,
+        issueId: state.issueId,
         repo: state.targetRepository,
       })
     : [];

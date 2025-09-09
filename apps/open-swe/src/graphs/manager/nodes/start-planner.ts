@@ -45,7 +45,7 @@ export async function startPlanner(
     });
 
     const runInput: PlannerGraphUpdate = {
-      githubIssueId: state.githubIssueId,
+      issueId: state.issueId,
       targetRepository: state.targetRepository,
       taskPlan: state.taskPlan,
       branchName: state.branchName ?? "",

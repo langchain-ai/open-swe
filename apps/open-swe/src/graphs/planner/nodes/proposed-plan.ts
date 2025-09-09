@@ -165,7 +165,7 @@ export async function interruptProposedPlan(
     contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
     targetRepository: state.targetRepository,
-    githubIssueId: state.githubIssueId,
+    issueId: state.issueId,
     internalMessages: state.messages,
     documentCache: state.documentCache,
   };
@@ -177,7 +177,7 @@ export async function interruptProposedPlan(
     });
 
     // Post comment to issue about auto-accepting the plan (only if not in local mode)
-    if (!isLocalMode(config) && state.githubIssueId) {
+    if (!isLocalMode(config) && state.issueId) {
       logger.info("Plan generated; skipping remote issue comment");
     }
 
@@ -210,7 +210,7 @@ export async function interruptProposedPlan(
     });
   }
 
-  if (!isLocalMode(config) && state.githubIssueId) {
+  if (!isLocalMode(config) && state.issueId) {
     logger.info("Plan ready for approval; skipping remote issue comment");
   }
 
@@ -268,7 +268,7 @@ export async function interruptProposedPlan(
     );
 
     // Update the comment to notify the user that the plan was accepted (only if not in local mode)
-    if (!isLocalMode(config) && state.githubIssueId) {
+    if (!isLocalMode(config) && state.issueId) {
       logger.info("Plan accepted; skipping remote issue comment");
     }
   } else if (humanResponse.type === "edit") {
@@ -290,7 +290,7 @@ export async function interruptProposedPlan(
     );
 
     // Update the comment to notify the user that the plan was edited (only if not in local mode)
-    if (!isLocalMode(config) && state.githubIssueId) {
+    if (!isLocalMode(config) && state.issueId) {
       logger.info("Plan edited and submitted; skipping remote issue comment");
     }
   } else {

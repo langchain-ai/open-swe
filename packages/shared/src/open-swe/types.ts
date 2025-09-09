@@ -230,17 +230,14 @@ export const GraphAnnotation = MessagesZodState.extend({
     default: () => ({}),
   }),
   /**
-   * The ID of the issue this thread is associated with
+   * Whether or not the dependencies have been installed already in the sandbox.
    */
-  githubIssueId: withLangGraph(z.custom<number>().optional(), {
+  issueId: withLangGraph(z.custom<number>().optional(), {
     reducer: {
       schema: z.custom<number>().optional(),
       fn: (_state, update) => update,
     },
   }),
-  /**
-   * Whether or not the dependencies have been installed already in the sandbox.
-   */
   dependenciesInstalled: withLangGraph(z.custom<boolean>(), {
     reducer: {
       schema: z.custom<boolean>(),
