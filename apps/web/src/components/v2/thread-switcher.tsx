@@ -29,7 +29,6 @@ export function ThreadSwitcher({ currentThread }: ThreadSwitcherProps) {
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    disableOrgFiltering: true,
   });
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
