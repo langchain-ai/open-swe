@@ -98,7 +98,7 @@ export function PullRequestOpened({
       case "loading":
         return "Preparing to open pull request...";
       case "generating":
-        return "Opening pull request on GitHub...";
+        return "Opening pull request...";
       case "done":
         return branch ? `${branch} → ${targetBranch}` : "Successfully opened";
     }
@@ -154,7 +154,7 @@ export function PullRequestOpened({
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open pull request on GitHub"
+                title="Open pull request"
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
