@@ -26,6 +26,7 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   PROGRAMMER_GRAPH_ID,
   PLANNER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@openswe/shared/constants";
 import { useThreadStatus } from "@/hooks/useThreadStatus";
 import { cn } from "@/lib/utils";
@@ -185,6 +186,7 @@ export function ThreadView({
       }
     },
     fetchStateHistory: false,
+    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
   });
 
   const joinedPlannerRunId = useRef<string | undefined>(undefined);
@@ -211,6 +213,7 @@ export function ThreadView({
       }
     },
     fetchStateHistory: false,
+    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
   });
 
   const joinedProgrammerRunId = useRef<string | undefined>(undefined);
