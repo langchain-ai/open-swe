@@ -196,16 +196,29 @@ export class ModelManager {
 
         );
       }
+      const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
+      const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+
+      logger.info("Creating Azure OpenAI client", {
+        apiVersion,
+        endpoint,
+        modelName,
+        provider,
+      });
+
 
       const client = new AzureOpenAI({
         apiKey: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
-        apiVersion: process.env.AZURE_OPENAI_API_VERSION,
-        endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+        apiVersion,
+        endpoint,
       });
 
-      logger.debug("Initializing model", {
-        provider,
+      logger.info("Initializing Azure OpenAI model", {
+        apiVersion,
+        endpoint,
         modelName,
+        maxTokens: finalMaxTokens,
+        temperature,
       });
 
       return await initChatModel(modelName, {
