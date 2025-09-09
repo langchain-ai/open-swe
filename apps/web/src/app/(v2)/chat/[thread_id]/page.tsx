@@ -56,7 +56,6 @@ export default function ThreadPage({
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    disableOrgFiltering: true,
   });
 
   // Find the thread by ID
