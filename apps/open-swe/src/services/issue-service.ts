@@ -115,7 +115,7 @@ export function getUntrackedComments(
     .filter(
       (c) =>
         !humanMessages.some(
-          (m) => m.additional_kwargs?.githubIssueCommentId === c.id,
+          (m) => m.additional_kwargs?.issueCommentId === c.id,
         ),
     )
     .map(
@@ -124,8 +124,8 @@ export function getUntrackedComments(
           id: uuidv4(),
           content: getMessageContentFromIssue(c),
           additional_kwargs: {
-            githubIssueId: issueId,
-            githubIssueCommentId: c.id,
+            issueId: issueId,
+            issueCommentId: c.id,
           },
         }),
     );
@@ -151,7 +151,7 @@ export async function getMissingMessages(
         (m) =>
           isHumanMessage(m) &&
           m.additional_kwargs?.isOriginalIssue &&
-          m.additional_kwargs?.githubIssueId === input.issueId,
+          m.additional_kwargs?.issueId === input.issueId,
       )
     : false;
   let issueMessage: HumanMessage | null = null;
@@ -160,7 +160,7 @@ export async function getMissingMessages(
       id: uuidv4(),
       content: getMessageContentFromIssue(issue),
       additional_kwargs: {
-        githubIssueId: input.issueId,
+        issueId: input.issueId,
         isOriginalIssue: true,
       },
     });

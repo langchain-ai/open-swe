@@ -86,7 +86,7 @@ export async function handleCompletedTask(
     currentTask.index,
     summary,
   );
-  // Update the github issue to reflect this task as completed.
+  // Update the issue to reflect this task as completed.
   if (!isLocalMode(config)) {
     logger.info("Skipping remote issue update: not supported");
   }

@@ -33,8 +33,8 @@ export async function prepareGraphState(
     });
   }
 
-  if (!state.githubIssueId) {
-    throw new Error("No github issue id provided");
+  if (!state.issueId) {
+    throw new Error("No issue id provided");
   }
 
   if (!state.targetRepository) {
@@ -45,15 +45,15 @@ export async function prepareGraphState(
   const [issue, comments] = await Promise.all([
     issueService.getIssue({
       repo: state.targetRepository,
-      issueId: state.githubIssueId,
+      issueId: state.issueId,
     }),
     issueService.listComments({
       repo: state.targetRepository,
-      issueId: state.githubIssueId,
+      issueId: state.issueId,
     }),
   ]);
   if (!issue) {
-    throw new Error(`Issue not found. Issue ID: ${state.githubIssueId}`);
+    throw new Error(`Issue not found. Issue ID: ${state.issueId}`);
   }
 
   // If the messages state is empty, we can just include all comments as human messages.
@@ -64,7 +64,7 @@ export async function prepareGraphState(
           id: uuidv4(),
           content: getMessageContentFromIssue(issue),
           additional_kwargs: {
-            githubIssueId: state.githubIssueId,
+            issueId: state.issueId,
             isOriginalIssue: true,
           },
         }),
@@ -74,8 +74,8 @@ export async function prepareGraphState(
               id: uuidv4(),
               content: getMessageContentFromIssue(comment),
               additional_kwargs: {
-                githubIssueId: state.githubIssueId,
-                githubIssueCommentId: comment.id,
+                issueId: state.issueId,
+                issueCommentId: comment.id,
               },
             }),
         ),
@@ -89,7 +89,7 @@ export async function prepareGraphState(
 
   const untrackedComments = getUntrackedComments(
     state.messages,
-    state.githubIssueId,
+    state.issueId,
     comments ?? [],
   );
 

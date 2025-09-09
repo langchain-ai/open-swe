@@ -65,7 +65,7 @@ ${ISSUE_CONTENT_OPEN_TAG}
   ${titleAndContent.body}
 ${ISSUE_CONTENT_CLOSE_TAG}`,
       additional_kwargs: {
-        githubIssueId: newIssueNumber,
+        issueId: newIssueNumber,
         isOriginalIssue: true,
       },
     }),
@@ -87,7 +87,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
 
   const newManagerThreadId = uuidv4();
   const commandUpdate: ManagerGraphUpdate = {
-    githubIssueId: newIssueNumber,
+    issueId: newIssueNumber,
     targetRepository: state.targetRepository,
     messages: inputMessages,
     branchName: state.branchName ?? "",

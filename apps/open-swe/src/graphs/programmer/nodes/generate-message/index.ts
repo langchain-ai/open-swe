@@ -307,10 +307,10 @@ export async function generateAction(
       | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[LLMTask.PROGRAMMER].modelName;
   const provider = modelStr.split(":")[0] as Provider;
 
-  const missingMessages = state.githubIssueId
+  const missingMessages = state.issueId
     ? await getMissingMessages(getIssueService(config), {
         messages: state.messages,
-        issueId: state.githubIssueId,
+        issueId: state.issueId,
         repo: state.targetRepository,
       })
     : [];

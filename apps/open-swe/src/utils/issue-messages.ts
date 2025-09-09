@@ -11,10 +11,10 @@ export const DETAILS_CLOSE_TAG = "</details>";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
-  githubIssueId: number,
+  issueId: number,
   comments: IssueComment[],
 ): BaseMessage[] {
-  // Get all human messages which contain github comment content. Exclude the original issue message.
+  // Get all human messages which contain issue comment content. Exclude the original issue message.
   const humanMessages = existingMessages.filter(
     (m) => isHumanMessage(m) && !m.additional_kwargs?.isOriginalIssue,
   );
@@ -24,7 +24,7 @@ export function getUntrackedComments(
     .filter(
       (c) =>
         !humanMessages.some(
-          (m) => m.additional_kwargs?.githubIssueCommentId === c.id,
+          (m) => m.additional_kwargs?.issueCommentId === c.id,
         ),
     )
     .map(
@@ -33,8 +33,8 @@ export function getUntrackedComments(
           id: uuidv4(),
           content: getMessageContentFromIssue(c),
           additional_kwargs: {
-            githubIssueId,
-            githubIssueCommentId: c.id,
+            issueId,
+            issueCommentId: c.id,
           },
         }),
     );

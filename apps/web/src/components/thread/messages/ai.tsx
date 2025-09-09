@@ -653,7 +653,6 @@ export function AssistantMessage({
           status={status}
           title={args.title}
           description={args.body}
-          url={prUrl}
           prNumber={prNumber}
           branch={branch}
           targetBranch={targetBranch}
