@@ -97,8 +97,8 @@ function AllThreadsPageContent() {
     };
   }, [filteredThreads, statusMap]);
 
-  // Show loading state if threads/status/installation requests are loading, and there are no
-  // threads to display (conditional of the status filter)
+  // Show loading state if thread or status requests are loading and there are no
+  // threads to display (conditional on the status filter)
   const showThreadsLoading =
     (threadsLoading || statusLoading) &&
     (statusFilter === "all"

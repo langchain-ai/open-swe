@@ -13,7 +13,6 @@ export interface SessionUser {
 export interface SessionData {
   accessToken: string;
   tokenType: string;
-  installationId?: string;
   user: SessionUser;
 }
 

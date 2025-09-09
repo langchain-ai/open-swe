@@ -49,9 +49,7 @@ export default function SettingsPage() {
 
       <div className="mb-8">
         <h1 className="text-foreground mb-2 text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground">
-          Manage your integrations and API configurations
-        </p>
+        <p className="text-muted-foreground">Manage your API configurations</p>
       </div>
 
       <div className="mb-6">

@@ -427,9 +427,9 @@ export const GraphConfigurationMetadata: {
   shouldCreateIssue: {
     x_open_swe_ui_config: {
       type: "boolean",
-      default: true,
+      default: false,
       description:
-        "Whether or not to create issue tracking entries for all requests. Can be overridden on a per-request basis via the 'eye' icon in the chat input area.",
+        "Whether or not to create issue tracking entries for all requests.",
     },
   },
   customFramework: {
@@ -594,7 +594,7 @@ export const GraphConfiguration = z.object({
   }),
   /**
    * Whether or not to create an issue for this request.
-   * @default true
+   * @default false
    */
   shouldCreateIssue: withLangGraph(z.boolean().optional(), {
     metadata: GraphConfigurationMetadata.shouldCreateIssue,

@@ -35,8 +35,6 @@ interface TerminalInputProps {
   setQuickActionPrompt?: Dispatch<SetStateAction<string>>;
   autoAcceptPlan: boolean;
   setAutoAcceptPlan: Dispatch<SetStateAction<boolean>>;
-  shouldCreateIssue: boolean;
-  setShouldCreateIssue: Dispatch<SetStateAction<boolean>>;
   draftToLoad?: string;
   customFramework: boolean;
   setCustomFramework: Dispatch<SetStateAction<boolean>>;
@@ -72,8 +70,6 @@ export function TerminalInput({
   setQuickActionPrompt,
   autoAcceptPlan,
   setAutoAcceptPlan,
-  shouldCreateIssue,
-  setShouldCreateIssue,
   draftToLoad,
   customFramework,
   setCustomFramework,
@@ -151,7 +147,6 @@ export function TerminalInput({
               recursion_limit: 400,
               configurable: {
                 ...defaultConfig,
-                shouldCreateIssue,
                 customFramework,
               },
             },
@@ -187,11 +182,6 @@ export function TerminalInput({
         setMessage("");
         setContentBlocks([]);
         setAutoAcceptPlan(false);
-        setShouldCreateIssue(
-          defaultConfig?.shouldCreateIssue != null
-            ? !!defaultConfig.shouldCreateIssue
-            : true,
-        );
         setCustomFramework(
           defaultConfig?.customFramework != null
             ? !!defaultConfig.customFramework
