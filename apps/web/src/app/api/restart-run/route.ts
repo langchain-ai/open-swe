@@ -4,6 +4,7 @@ import {
   PLANNER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   MANAGER_GRAPH_ID,
+  LOCAL_MODE_HEADER,
 } from "@openswe/shared/constants";
 import { NextRequest, NextResponse } from "next/server";
 import { RestartRunRequest } from "./types";
@@ -63,6 +64,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const langGraphClient = new Client({
       apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
+      defaultHeaders:
+        process.env.OPEN_SWE_LOCAL_MODE === "true"
+          ? { [LOCAL_MODE_HEADER]: "true" }
+          : undefined,
     });
 
     const [
