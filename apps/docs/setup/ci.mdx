@@ -5,9 +5,9 @@ description: "How to configure your CI pipeline for Open SWE"
 
 ## Skip CI until last commit
 
-Open SWE will push a commit after every change to the repository. This will cause your GitHub CI workflows to run for every commit, which is unnecessary.
+Open SWE will push a commit after every change to the repository. This will cause your CI workflows to run for every commit, which is unnecessary.
 
-To prevent this, Open SWE supports adding an environment variable which will append `[skip ci]` to the commit message. This can be used to make GitHub skip CI for that commit.
+To prevent this, Open SWE supports adding an environment variable which will append `[skip ci]` to the commit message. This can be used to make your CI pipeline skip that commit.
 
 Below are instructions showing how to use this to skip creating Vercel CI preview deployments on every commit:
 

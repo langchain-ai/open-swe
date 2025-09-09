@@ -50,7 +50,7 @@ The Manager agent acts as the central orchestrator, intelligently routing your m
   <Step title="Create New Planning Runs">
     Initiates new planning sessions when you submit coding requests. If your
     message contains a coding request, the manager will create a new planning
-    session & corresponding GitHub issue.
+    session & corresponding issue.
   </Step>
   <Step title="Send Messages to Active Planning Runs">
     Forwards additional context or requirements to running planner sessions. If
@@ -72,7 +72,7 @@ The Manager agent acts as the central orchestrator, intelligently routing your m
     Creates new tasks, independent of the current request. If you send a message
     to the manager with a request for a task that is unrelated to the current
     request, or can be implemented in parallel via a different session, the
-    manager will create a new GitHub issue, and initiate a new planning session
+    manager will create a new issue and initiate a new planning session
     for that issue.
   </Step>
 </Steps>
@@ -111,7 +111,7 @@ Based on the analysis, messages are routed to:
 - **Update Planner**: To add context to active planning sessions
 - **Resume Planner**: To continue interrupted planning with new information
 - **Update Programmer**: To provide context to active implementation sessions
-- **Create New Issue**: For independent requests that should be separate GitHub issues
+- **Create New Issue**: For independent requests that should be separate issues
 - **No Operation**: For messages that don't require specific routing
 
 ## Planning Runs
@@ -203,7 +203,7 @@ To begin using the Open SWE UI:
 
 <Steps>
   <Step title="Select Repository">
-    Choose your GitHub repository and branch using the repository selector
+    Choose your repository and branch using the repository selector
   </Step>
   <Step title="Choose Mode">
     Toggle auto/manual mode based on your preference for plan approval
@@ -218,7 +218,6 @@ To begin using the Open SWE UI:
 </Steps>
 
 <Note>
-  Make sure you have properly configured your GitHub App and authentication
-  before using the UI. See the [Development Setup](/labs/swe/setup/development)
+  Ensure your environment variables and API keys are configured before using the UI. See the [Development Setup](/labs/swe/setup/development)
   guide for details.
 </Note>

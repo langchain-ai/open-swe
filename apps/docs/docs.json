@@ -22,8 +22,6 @@
             "pages": [
               "usage/intro",
               "usage/ui",
-              "usage/github",
-              "usage/pr-tagging",
               "usage/examples",
               "usage/best-practices",
               "usage/custom-rules"
@@ -33,8 +31,6 @@
             "group": "Development Setup",
             "pages": [
               "setup/intro",
-              "setup/development",
-              "setup/authentication",
               "setup/customization",
               "setup/monorepo",
               "setup/ci"
@@ -59,9 +55,9 @@
           "icon": "link"
         },
         {
-          "anchor": "GitHub",
-          "href": "https://github.com/langchain-ai/open-swe",
-          "icon": "github"
+          "anchor": "Repository",
+          "href": "https://example.com/open-swe",
+          "icon": "link"
         }
       ]
     }
@@ -71,16 +67,10 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "GitHub",
-        "href": "https://github.com/langchain-ai/open-swe"
-      }
-    ]
+    "links": []
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/langchain-ai/open-swe",
       "twitter": "https://twitter.com/langchainai"
     }
   }

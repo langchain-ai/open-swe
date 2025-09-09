@@ -1,9 +1,8 @@
 {
   "name": "@openswe/shared",
-  "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/langchain-ai/open-swe.git"
+    "url": ""
   },
   "private": true,
   "version": "0.0.0",

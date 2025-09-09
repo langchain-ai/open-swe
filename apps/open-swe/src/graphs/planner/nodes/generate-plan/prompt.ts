@@ -91,8 +91,8 @@ export const CUSTOM_FRAMEWORK_PROMPT = `
        - Determine the base URL from which the current documentation was fetched. It should be the url of the page you you read the relative path from.
        - For ../, go one level up in the URL hierarchy.
        - For ../../, go two levels up, then append the relative path.
-       - If the current page is: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
-           - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
-           - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
+       - If the current page is: https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
+           - Go up two levels: https://docs.langchain.com/langgraph/tutorials/get-started/
+           - Append the relative path to form the full URL: https://docs.langchain.com/langgraph/tutorials/get-started/langgraph-platform/local-server
        - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
 `;
