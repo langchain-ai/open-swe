@@ -185,6 +185,17 @@ export class ModelManager {
     const apiKey = this.getUserApiKey(graphConfig, provider);
 
     if (provider === "azure-openai") {
+      if (!modelName) {
+        throw new Error(
+          "Azure OpenAI requires a deployment name. Set AZURE_OPENAI_DEPLOYMENT or configure a model name in GraphConfig.",
+        );
+      }
+      if (/^(gpt|o\d)/i.test(modelName)) {
+        logger.warn(
+          `Azure OpenAI expects a deployment name; using "${modelName}" as deployment. Ensure a deployment with this name exists.`,
+        );
+      }
+
       const client = new AzureOpenAI({
         apiKey: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
         apiVersion: process.env.AZURE_OPENAI_API_VERSION,
@@ -196,7 +207,7 @@ export class ModelManager {
         modelName,
       });
 
-      return await initChatModel(process.env.AZURE_OPENAI_DEPLOYMENT!, {
+      return await initChatModel(modelName, {
         client,
         modelProvider: "azure_openai",
         maxTokens: finalMaxTokens,
