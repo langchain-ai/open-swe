@@ -191,8 +191,9 @@ export class ModelManager {
         );
       }
       if (/^(gpt|o\d)/i.test(modelName)) {
-        throw new Error(
-          `Azure OpenAI expects a deployment name, not base model "${modelName}"`,
+        logger.warn(
+          `Azure OpenAI expects a deployment name; using "${modelName}" as deployment. Ensure a deployment with this name exists.`,
+
         );
       }
 
