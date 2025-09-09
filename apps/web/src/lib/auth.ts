@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import jsonwebtoken from "jsonwebtoken";
 import { SESSION_COOKIE } from "@openswe/shared/constants";
 
-export const GITHUB_INSTALLATION_STATE_COOKIE = "github_installation_state";
-export const GITHUB_INSTALLATION_RETURN_TO_COOKIE = "installation_return_to";
-
 export interface SessionUser {
   login: string;
   avatar_url: string;
@@ -25,16 +22,6 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "development-secret";
 function getCookieOptions(expires?: Date) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    maxAge: expires ? undefined : 60 * 60 * 24 * 30,
-    expires,
-    path: "/",
-  };
-}
-
-export function getInstallationCookieOptions(expires?: Date) {
-  return {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     maxAge: expires ? undefined : 60 * 60 * 24 * 30,
