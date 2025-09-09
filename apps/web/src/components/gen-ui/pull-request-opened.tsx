@@ -3,11 +3,10 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  GitPullRequest,
+  FileDiff,
   Loader2,
   ChevronDown,
-  ExternalLink,
-  GitPullRequestDraft,
+  FileClock,
   Clock,
   Check,
 } from "lucide-react";
@@ -19,7 +18,6 @@ type PullRequestOpenedProps = {
   status: "loading" | "generating" | "done";
   title?: string;
   description?: string;
-  url?: string;
   prNumber?: number;
   branch?: string;
   targetBranch?: string;
@@ -30,7 +28,6 @@ export function PullRequestOpened({
   status,
   title,
   description,
-  url,
   prNumber,
   branch,
   targetBranch = "main",
@@ -67,7 +64,7 @@ export function PullRequestOpened({
               variant="secondary"
               className="border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300"
             >
-              <GitPullRequestDraft className="h-3 w-3" />
+              <FileClock className="h-3 w-3" />
               Draft
             </Badge>
           );
@@ -124,9 +121,9 @@ export function PullRequestOpened({
       >
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-500 shadow-md dark:bg-gray-600">
           {isDraft ? (
-            <GitPullRequestDraft className="h-4 w-4 text-white" />
+            <FileClock className="h-4 w-4 text-white" />
           ) : (
-            <GitPullRequest className="h-4 w-4 text-white" />
+            <FileDiff className="h-4 w-4 text-white" />
           )}
         </div>
 
@@ -143,23 +140,6 @@ export function PullRequestOpened({
         </div>
 
         <div className="flex items-center gap-2">
-          {url && status === "done" && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              asChild
-            >
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open pull request"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            </Button>
-          )}
           {shouldShowToggle() && (
             <Button
               variant="ghost"
