@@ -1,7 +1,7 @@
 "use client";
 import { memo } from "react";
 import { differenceInHours, differenceInMinutes, format } from "date-fns";
-import { GitBranch, ArrowRight, ListTodo, Folder } from "lucide-react";
+import { ArrowRight, ListTodo } from "lucide-react";
 import { useThreadsContext } from "@/hooks/useThreadsContext";
 import { cn } from "@/lib/utils";
 import { StatusIndicator } from "@/components/status-indicator";
@@ -78,20 +78,6 @@ export const ThreadItem = memo(function ThreadItem({
           </div>
 
           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-gray-500">
-            <div className="mr-1 flex flex-row items-center justify-start gap-1">
-              <Folder className="size-4 flex-shrink-0" />
-              <span className="max-w-[90px] truncate">
-                {thread.values?.targetRepository?.repo || "x"}
-              </span>
-              <span>/</span>
-              <GitBranch className="size-2.5 flex-shrink-0" />
-              <span className="max-w-[70px] truncate">
-                {thread.values?.targetRepository?.branch || "x"}
-              </span>
-            </div>
-
-            <span>•</span>
-
             <span className="mx-1 whitespace-nowrap">{displayDate}</span>
 
             {!isSidebar && (
