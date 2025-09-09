@@ -284,11 +284,13 @@ async function createToolsAndPrompt(
       anthropic: anthropicModelTools,
       openai: nonAnthropicModelTools,
       "google-genai": nonAnthropicModelTools,
+      bedrock: anthropicModelTools,
     },
     providerMessages: {
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,
+      bedrock: anthropicMessages,
     },
   };
 }
