@@ -13,7 +13,6 @@ export interface ThreadMetadata {
   taskCount: number;
   repository: string;
   branch: string;
-  issueId?: number;
   taskPlan?: TaskPlan;
   status: ThreadUIStatus;
   pullRequest?: {

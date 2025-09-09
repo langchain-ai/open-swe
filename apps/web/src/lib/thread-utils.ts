@@ -29,7 +29,6 @@ export function threadsToMetadata(
         ? `${values.targetRepository.owner}/${values.targetRepository.repo}`
         : "",
       branch: values?.targetRepository?.branch || "main",
-      issueId: values?.githubIssueId,
       taskPlan: values?.taskPlan,
       status: "idle" as const, // Default status - consumers can override with real status
     };
