@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 import {
   API_KEY_REQUIRED_MESSAGE,
-  GITHUB_USER_LOGIN_HEADER,
   MANAGER_GRAPH_ID,
 } from "@openswe/shared/constants";
 import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
@@ -154,7 +153,6 @@ export function TerminalInput({
                 ...defaultConfig,
                 shouldCreateIssue,
                 customFramework,
-                [GITHUB_USER_LOGIN_HEADER]: user.login,
               },
             },
             ifNotExists: "create",
