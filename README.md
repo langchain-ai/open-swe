@@ -43,6 +43,7 @@ Open SWE can be used in multiple ways:
 
 Open SWE runs locally without any external repository-hosting dependencies or authentication. Configure your environment variables (such as `AZURE_OPENAI_API_KEY`) and start the agent to connect to Azure-hosted GPT‑5 models or other supported LLMs.
 
+
 When specifying models, Azure OpenAI expects deployment names rather than raw model IDs. Use the `azure-openai:<deployment-name>` syntax, for example `azure-openai:my-gpt5-deployment`. If your deployment name matches a base model ID (e.g., `azure-openai:gpt-4o`), ensure that a deployment with that name exists.
 
 # Documentation

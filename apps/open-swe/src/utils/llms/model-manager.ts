@@ -193,6 +193,7 @@ export class ModelManager {
       if (/^(gpt|o\d)/i.test(modelName)) {
         logger.warn(
           `Azure OpenAI expects a deployment name; using "${modelName}" as deployment. Ensure a deployment with this name exists.`,
+
         );
       }
 
