@@ -6,6 +6,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -19,6 +20,8 @@ export function UserPopover({ className }: UserPopoverProps) {
   const { user, isLoading, error } = useUser();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const userInitial =
+    (user?.name ?? user?.login)?.charAt(0).toUpperCase() ?? "";
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -72,11 +75,9 @@ export function UserPopover({ className }: UserPopoverProps) {
           size="sm"
           className={cn("hover:bg-accent h-8 w-8 rounded-full p-0", className)}
         >
-          <img
-            src={user.avatar_url}
-            alt={`${user.login} avatar`}
-            className="h-6 w-6 rounded-full"
-          />
+          <Avatar className="h-6 w-6">
+            <AvatarFallback>{userInitial}</AvatarFallback>
+          </Avatar>
         </Button>
       </PopoverTrigger>
       <PopoverContent
@@ -85,11 +86,9 @@ export function UserPopover({ className }: UserPopoverProps) {
       >
         <div className="p-4">
           <div className="mb-4 flex items-center gap-3">
-            <img
-              src={user.avatar_url}
-              alt={`${user.login} avatar`}
-              className="h-10 w-10 rounded-full"
-            />
+            <Avatar className="h-10 w-10">
+              <AvatarFallback>{userInitial}</AvatarFallback>
+            </Avatar>
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">
                 {user.name ?? user.login}
