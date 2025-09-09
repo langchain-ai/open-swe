@@ -193,6 +193,7 @@ export class ModelManager {
       if (/^(gpt|o\d)/i.test(modelName)) {
         logger.warn(
           `Azure OpenAI expects a deployment name; using "${modelName}" as deployment. Ensure a deployment with this name exists.`,
+
         );
       }
       const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
@@ -204,6 +205,7 @@ export class ModelManager {
         modelName,
         provider,
       });
+
 
       const client = new AzureOpenAI({
         apiKey: apiKey ?? process.env.AZURE_OPENAI_API_KEY,
