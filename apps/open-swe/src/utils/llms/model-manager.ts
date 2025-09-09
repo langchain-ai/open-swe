@@ -198,6 +198,7 @@ export class ModelManager {
 
       return await initChatModel(process.env.AZURE_OPENAI_DEPLOYMENT!, {
         client,
+        modelProvider: "azure-openai",
         maxTokens: finalMaxTokens,
         temperature,
       });
