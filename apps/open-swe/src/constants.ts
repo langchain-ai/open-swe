@@ -1,10 +1,20 @@
-import { DAYTONA_SNAPSHOT_NAME } from "@openswe/shared/constants";
 import { CreateSandboxFromSnapshotParams } from "@daytonaio/sdk";
+import { getLocalWorkingDirectory } from "@openswe/shared/open-swe/local-mode";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const DEFAULT_SANDBOX_PATH =
+  process.env.OPEN_SWE_PROJECT_PATH ||
+  getLocalWorkingDirectory() ||
+  mkdtempSync(path.join(os.tmpdir(), "open-swe-"));
 
 export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromSnapshotParams = {
-  user: "daytona",
-  snapshot: DAYTONA_SNAPSHOT_NAME,
+  user: "open-swe",
   autoDeleteInterval: 15, // delete after 15 minutes
+  envVars: {
+    SANDBOX_ROOT_DIR: DEFAULT_SANDBOX_PATH,
+  },
 };
 
 export const LANGGRAPH_USER_PERMISSIONS = [

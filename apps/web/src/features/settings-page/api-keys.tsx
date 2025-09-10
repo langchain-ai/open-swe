@@ -77,13 +77,6 @@ const API_KEY_DEFINITIONS = {
       ],
     },
   ],
-  // infrastructure: [
-  //   {
-  //     id: "daytonaApiKey",
-  //     name: "Daytona",
-  //     description: "Users not required to set this if using the demo",
-  //   },
-  // ],
 };
 
 const shouldAutofocus = (apiKeyId: string, hasValue: boolean): boolean => {
