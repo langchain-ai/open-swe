@@ -195,11 +195,19 @@ export class ModelManager {
           `Azure OpenAI expects a deployment name; using "${modelName}" as deployment. Ensure a deployment with this name exists.`,
         );
       }
-      const apiVersion = process.env.AZURE_OPENAI_API_VERSION;
+      const apiVersion =
+        process.env.AZURE_OPENAI_API_VERSION ?? process.env.OPENAI_API_VERSION;
+      const apiVersionEnvVar =
+        process.env.AZURE_OPENAI_API_VERSION !== undefined
+          ? "AZURE_OPENAI_API_VERSION"
+          : process.env.OPENAI_API_VERSION !== undefined
+            ? "OPENAI_API_VERSION"
+            : undefined;
       const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
 
       logger.info("Creating Azure OpenAI client", {
         apiVersion,
+        apiVersionEnvVar,
         endpoint,
         modelName,
         provider,
@@ -213,6 +221,7 @@ export class ModelManager {
 
       logger.info("Initializing Azure OpenAI model", {
         apiVersion,
+        apiVersionEnvVar,
         endpoint,
         modelName,
         maxTokens: finalMaxTokens,
