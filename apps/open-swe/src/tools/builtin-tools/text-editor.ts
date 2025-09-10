@@ -15,7 +15,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@openswe/shared/constants";
 import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
@@ -41,6 +41,8 @@ export function createTextEditorTool(
         const localAbsolutePath = getLocalWorkingDirectory();
         const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
         const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
+        const projectPrefix = `${SANDBOX_ROOT_DIR}/project/`;
+        const localPrefix = `${SANDBOX_ROOT_DIR}/local/`;
         let result: string;
 
         if (localMode) {
@@ -49,12 +51,12 @@ export function createTextEditorTool(
 
           // Convert sandbox path to local path
           let localPath = path;
-          if (path.startsWith("/home/daytona/project/")) {
+          if (path.startsWith(projectPrefix)) {
             // Remove the sandbox prefix to get the relative path
-            localPath = path.replace("/home/daytona/project/", "");
-          } else if (path.startsWith("/home/daytona/local/")) {
+            localPath = path.replace(projectPrefix, "");
+          } else if (path.startsWith(localPrefix)) {
             // Remove the local sandbox prefix to get the relative path
-            localPath = path.replace("/home/daytona/local/", "");
+            localPath = path.replace(localPrefix, "");
           }
           const filePath = join(workDir, localPath);
 

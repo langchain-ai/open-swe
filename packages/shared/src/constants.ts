@@ -1,5 +1,5 @@
 export const TIMEOUT_SEC = 60; // 1 minute
-export const SANDBOX_ROOT_DIR = "/home/daytona";
+export const SANDBOX_ROOT_DIR = process.env.SANDBOX_ROOT_DIR ?? "/home/daytona";
 export const DAYTONA_IMAGE_NAME = "daytonaio/langchain-open-swe:0.1.0";
 export const DAYTONA_SNAPSHOT_NAME = "open-swe-vcpu2-mem4-disk5";
 export const PLAN_INTERRUPT_DELIMITER = ":::";

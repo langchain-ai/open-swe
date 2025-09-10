@@ -10,7 +10,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@openswe/shared/constants";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
@@ -38,9 +38,10 @@ export function createViewTool(
 
           // Convert sandbox path to local path
           let localPath = path;
-          if (path.startsWith("/home/daytona/project/")) {
+          const projectPrefix = `${SANDBOX_ROOT_DIR}/project/`;
+          if (path.startsWith(projectPrefix)) {
             // Remove the sandbox prefix to get the relative path
-            localPath = path.replace("/home/daytona/project/", "");
+            localPath = path.replace(projectPrefix, "");
           }
           const filePath = join(workDir, localPath);
 
