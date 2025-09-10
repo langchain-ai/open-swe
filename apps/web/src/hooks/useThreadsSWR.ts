@@ -117,6 +117,7 @@ export function useThreadsSWR<
         : undefined;
 
     const start = Date.now();
+
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const searchPromise = client.threads.search<TGraphState>(searchArgs);
@@ -141,6 +142,7 @@ export function useThreadsSWR<
         });
       }
       throw error;
+
     } finally {
       if (timeoutId) {
         clearTimeout(timeoutId);

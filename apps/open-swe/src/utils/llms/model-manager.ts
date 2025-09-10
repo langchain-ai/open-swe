@@ -224,6 +224,7 @@ export class ModelManager {
         modelProvider: "azure_openai",
         maxTokens: finalMaxTokens,
         temperature,
+        openAIApiVersion: apiVersion,
       });
     }
 
