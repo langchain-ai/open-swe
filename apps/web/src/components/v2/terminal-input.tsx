@@ -21,7 +21,7 @@ import { ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser, DEFAULT_USER } from "@/hooks/useUser";
-import { isAllowedUser } from "@openswe/shared/allowed-users";
+import { isAllowedUser } from "@/lib/is-allowed-user";
 
 interface TerminalInputProps {
   placeholder?: string;

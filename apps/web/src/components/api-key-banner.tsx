@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/hooks/useUser";
 import { useConfigStore, DEFAULT_CONFIG_KEY } from "@/hooks/useConfigStore";
-import { isAllowedUser } from "@openswe/shared/allowed-users";
+import { isAllowedUser } from "@/lib/is-allowed-user";
 import Link from "next/link";
 import { hasApiKeySet } from "@/lib/api-keys";
 

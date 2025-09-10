@@ -1,5 +1,5 @@
 import { Thread } from "@langchain/langgraph-sdk";
-import { getMessageContentString } from "@openswe/shared/messages";
+import { getMessageContentString } from "./get-message-content-string";
 import { GraphState, TaskPlan } from "@openswe/shared/open-swe/types";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 
