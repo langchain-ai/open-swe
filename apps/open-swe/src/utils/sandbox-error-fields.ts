@@ -1,4 +1,8 @@
-import { ExecuteResponse } from "@daytonaio/sdk/src/types/ExecuteResponse.js";
+export interface ExecuteResponse {
+  result?: string;
+  exitCode: number;
+  [key: string]: unknown;
+}
 
 export function getSandboxErrorFields(
   error: unknown,

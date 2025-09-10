@@ -10,7 +10,7 @@ import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
 import { createReviewStartedToolFields } from "@openswe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../../../utils/sandbox.js";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";
 
 const logger = createLogger(LogLevel.INFO, "InitializeStateNode");

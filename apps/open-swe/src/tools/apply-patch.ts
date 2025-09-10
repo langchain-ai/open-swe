@@ -7,7 +7,7 @@ import { createLogger, LogLevel } from "../utils/logger.js";
 import { createApplyPatchToolFields } from "@openswe/shared/open-swe/tools";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getSandboxSessionOrThrow } from "./utils/get-sandbox-id.js";
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../utils/sandbox.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,

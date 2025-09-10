@@ -1,16 +1,15 @@
 import { getCurrentTaskInput } from "@langchain/langgraph";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
-import { daytonaClient } from "../../utils/sandbox.js";
-import { Sandbox } from "@daytonaio/sdk";
+import { getSandbox } from "../../utils/sandbox.js";
+import type { Sandbox } from "../../utils/sandbox.js";
 
 const logger = createLogger(LogLevel.INFO, "GetSandboxSessionOrThrow");
 
-export async function getSandboxSessionOrThrow(
+export function getSandboxSessionOrThrow(
   input: Record<string, unknown>,
-): Promise<Sandbox> {
+): Sandbox {
   let sandboxSessionId = "";
-  // Attempt to extract from input.
   if ("xSandboxSessionId" in input && input.xSandboxSessionId) {
     sandboxSessionId = input.xSandboxSessionId as string;
   } else {
@@ -23,6 +22,12 @@ export async function getSandboxSessionOrThrow(
     throw new Error("FAILED TO RUN COMMAND: No sandbox session ID provided");
   }
 
-  const sandbox = await daytonaClient().get(sandboxSessionId);
+  const sandbox = getSandbox(sandboxSessionId);
+  if (!sandbox) {
+    logger.error("FAILED TO RUN COMMAND: Sandbox not found", {
+      sandboxSessionId,
+    });
+    throw new Error("FAILED TO RUN COMMAND: Sandbox not found");
+  }
   return sandbox;
 }

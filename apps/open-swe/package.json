@@ -41,6 +41,7 @@
     "jsonwebtoken": "^9.0.2",
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",
+    "dockerode": "^4.0.2",
     "uuid": "^11.0.5",
     "zod": "^3.25.32"
   },

@@ -1,5 +1,5 @@
 import { CustomRules } from "@openswe/shared/open-swe/types";
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import {

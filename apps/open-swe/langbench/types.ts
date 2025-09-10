@@ -1,4 +1,4 @@
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../src/utils/sandbox.js";
 
 export interface PRData {
   url: string;

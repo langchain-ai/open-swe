@@ -1,4 +1,4 @@
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../sandbox.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import {

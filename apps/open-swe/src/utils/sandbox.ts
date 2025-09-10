@@ -1,62 +1,131 @@
-import { Daytona, Sandbox, SandboxState } from "@daytonaio/sdk";
+import Docker from "dockerode";
+import Stream from "node:stream";
+import { spawn } from "node:child_process";
 import { createLogger, LogLevel } from "./logger.js";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
-import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import {
+  isLocalMode,
+  getLocalWorkingDirectory,
+} from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
-// Singleton instance of Daytona
-let daytonaInstance: Daytona | null = null;
-
-/**
- * Returns a shared Daytona instance
- */
-export function daytonaClient(): Daytona {
-  if (!daytonaInstance) {
-    daytonaInstance = new Daytona();
+let docker: Docker | null = null;
+function dockerClient(): Docker {
+  if (!docker) {
+    docker = new Docker();
   }
-  return daytonaInstance;
+  return docker;
 }
 
-/**
- * Stops the sandbox. Either pass an existing sandbox client, or a sandbox session ID.
- * If no sandbox client is provided, the sandbox will be connected to.
- 
- * @param sandboxSessionId The ID of the sandbox to stop.
- * @param sandbox The sandbox client to stop. If not provided, the sandbox will be connected to.
- * @returns The sandbox session ID.
- */
-export async function stopSandbox(sandboxSessionId: string): Promise<string> {
-  const sandbox = await daytonaClient().get(sandboxSessionId);
-  if (
-    sandbox.state === SandboxState.STOPPED ||
-    sandbox.state === SandboxState.ARCHIVED
-  ) {
-    return sandboxSessionId;
-  } else if (sandbox.state === "started") {
-    await daytonaClient().stop(sandbox);
-  }
-
-  return sandbox.id;
+export interface SandboxProcess {
+  executeCommand(
+    command: string,
+    cwd?: string,
+    env?: Record<string, string>,
+    timeoutSec?: number,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
 }
 
-/**
- * Deletes the sandbox.
- * @param sandboxSessionId The ID of the sandbox to delete.
- * @returns True if the sandbox was deleted, false if it failed to delete.
- */
-export async function deleteSandbox(
-  sandboxSessionId: string,
-): Promise<boolean> {
+export interface Sandbox {
+  id: string;
+  process: SandboxProcess;
+}
+
+const sandboxes = new Map<string, Sandbox>();
+export function getSandbox(id: string): Sandbox | undefined {
+  return sandboxes.get(id);
+}
+
+export async function createDockerSandbox(
+  image: string,
+  repoPath: string,
+  mountPath = "/workspace",
+): Promise<Sandbox> {
+  const docker = dockerClient();
+  const container = await docker.createContainer({
+    Image: image,
+    Tty: true,
+    Cmd: ["/bin/sh", "-c", "while true; do sleep 3600; done"],
+    Env: [`SANDBOX_ROOT_DIR=${mountPath}`],
+  });
+  await container.start();
+
+  const tarStream = spawn("tar", ["-C", repoPath, "-cf", "-", "."]).stdout;
+  if (!tarStream) {
+    throw new Error("Failed to create tar stream of repository");
+  }
+  await container.putArchive(tarStream, { path: mountPath });
+
+  const process: SandboxProcess = {
+    async executeCommand(command, cwd = mountPath, env, timeoutSec) {
+      const exec = await container.exec({
+        Cmd: ["bash", "-lc", command],
+        AttachStdout: true,
+        AttachStderr: true,
+        WorkingDir: cwd,
+        Env: env ? Object.entries(env).map(([k, v]) => `${k}=${v}`) : undefined,
+      });
+      const stream = await exec.start({});
+      let stdout = "";
+      let stderr = "";
+      const stdoutStream = new Stream.PassThrough();
+      const stderrStream = new Stream.PassThrough();
+      docker.modem.demuxStream(stream, stdoutStream, stderrStream);
+      stdoutStream.on("data", (d) => {
+        stdout += d.toString();
+      });
+      stderrStream.on("data", (d) => {
+        stderr += d.toString();
+      });
+      await new Promise<void>((resolve, reject) => {
+        const timer =
+          timeoutSec !== undefined
+            ? setTimeout(() => {
+                stream.destroy(new Error("Command timed out"));
+              }, timeoutSec * 1000)
+            : null;
+        stream.on("end", () => {
+          if (timer) clearTimeout(timer);
+          resolve();
+        });
+        stream.on("error", (err) => {
+          if (timer) clearTimeout(timer);
+          reject(err);
+        });
+      });
+      const inspect = await exec.inspect();
+      return {
+        exitCode: inspect.ExitCode ?? -1,
+        stdout,
+        stderr,
+      };
+    },
+  };
+
+  const sandbox: Sandbox = { id: container.id, process };
+  sandboxes.set(sandbox.id, sandbox);
+  return sandbox;
+}
+
+export async function stopSandbox(sandboxId: string): Promise<string> {
+  const container = dockerClient().getContainer(sandboxId);
   try {
-    const sandbox = await daytonaClient().get(sandboxSessionId);
-    await daytonaClient().delete(sandbox);
+    await container.stop();
+  } catch {
+    /* ignore */
+  }
+  return sandboxId;
+}
+
+export async function deleteSandbox(sandboxId: string): Promise<boolean> {
+  const container = dockerClient().getContainer(sandboxId);
+  try {
+    await container.remove({ force: true });
+    sandboxes.delete(sandboxId);
     return true;
   } catch (error) {
-    logger.error("Failed to delete sandbox", {
-      sandboxSessionId,
-      error,
-    });
+    logger.error("Failed to delete sandbox", { sandboxId, error });
     return false;
   }
 }
@@ -74,15 +143,18 @@ export async function getSandboxWithErrorHandling(
   if (!isLocalMode(config)) {
     throw new Error("Sandbox operations are only supported in local mode");
   }
-
-  const mockSandbox = {
-    id: sandboxSessionId || "local-mock-sandbox",
-    state: "started",
-  } as Sandbox;
-
-  return {
-    sandbox: mockSandbox,
-    codebaseTree: null,
-    dependenciesInstalled: null,
-  };
+  if (sandboxSessionId) {
+    const existing = getSandbox(sandboxSessionId);
+    if (existing) {
+      return {
+        sandbox: existing,
+        codebaseTree: null,
+        dependenciesInstalled: null,
+      };
+    }
+  }
+  const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
+  const repoPath = getLocalWorkingDirectory();
+  const sandbox = await createDockerSandbox(image, repoPath);
+  return { sandbox, codebaseTree: null, dependenciesInstalled: null };
 }
