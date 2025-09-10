@@ -97,6 +97,8 @@ export function useThreadsSWR<
     return baseKey;
   }, [assistantId, pagination, paginationWithDefaults]);
 
+  const THREAD_SEARCH_TIMEOUT_MS = 15000;
+
   const fetcher = async (): Promise<Thread<TGraphState>[]> => {
     if (!apiUrl) {
       throw new Error("API URL is not configured");
@@ -114,7 +116,26 @@ export function useThreadsSWR<
         ? paginationWithDefaults
         : undefined;
 
-    return await client.threads.search<TGraphState>(searchArgs);
+    const start = Date.now();
+    try {
+      return await client.threads.search<TGraphState>(searchArgs, {
+        timeoutMs: THREAD_SEARCH_TIMEOUT_MS,
+      });
+    } catch (error) {
+      const duration = Date.now() - start;
+      if ((error as Error)?.name === "AbortError") {
+        console.error(`Thread search timed out after ${duration}ms`, {
+          assistantId,
+          searchArgs,
+        });
+      } else {
+        console.error("Failed to search threads", error, {
+          assistantId,
+          searchArgs,
+        });
+      }
+      throw error;
+    }
   };
 
   const { data, error, isLoading, mutate, isValidating } = useSWR(
