@@ -3906,6 +3906,7 @@ __metadata:
     "@langchain/core": ^0.3.65
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.8
+    "@langchain/langgraph-checkpoint": ^0.1.0
     "@langchain/langgraph-cli": ^0.0.47
     "@langchain/langgraph-sdk": ^0.0.95
     "@langchain/mcp-adapters": ^0.5.2
