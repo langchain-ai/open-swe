@@ -1,4 +1,7 @@
 import { MessageContent } from "@langchain/core/messages";
+import { createLogger, LogLevel } from "./logger.js";
+
+const logger = createLogger(LogLevel.INFO, "Messages");
 
 export function getMessageContentString(content: MessageContent): string {
   try {
@@ -9,8 +12,7 @@ export function getMessageContentString(content: MessageContent): string {
       .map((c) => c.text)
       .join(" ");
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Failed to get message content string", error);
+    logger.error("Failed to get message content string", error);
     return "";
   }
 }

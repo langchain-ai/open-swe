@@ -1,3 +1,7 @@
+import { createLogger, LogLevel } from "./logger.js";
+
+const logger = createLogger(LogLevel.INFO, "AllowedUsers");
+
 export function isAllowedUser(username: string): boolean {
   const nodeEnv = process.env.NODE_ENV;
   if (nodeEnv !== "production") {
@@ -20,8 +24,7 @@ export function isAllowedUser(username: string): boolean {
       return false;
     }
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error("Failed to parse allowed users list", error);
+    logger.error("Failed to parse allowed users list", error);
     return false;
   }
 
