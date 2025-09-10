@@ -29,6 +29,7 @@ interface ModelLoadConfig {
   modelName: string;
   temperature?: number;
   maxTokens?: number;
+  max_completion_tokens?: number;
   thinkingModel?: boolean;
   thinkingBudgetTokens?: number;
 }
@@ -169,6 +170,7 @@ export class ModelManager {
       modelName,
       temperature,
       maxTokens,
+      max_completion_tokens,
       thinkingModel,
       thinkingBudgetTokens,
     } = config;
@@ -176,8 +178,7 @@ export class ModelManager {
     const thinkingMaxTokens = thinkingBudgetTokens
       ? thinkingBudgetTokens * 4
       : undefined;
-
-    let finalMaxTokens = maxTokens ?? 10_000;
+    let finalMaxTokens = max_completion_tokens ?? maxTokens ?? 10_000;
     if (modelName.includes("claude-3-5-haiku")) {
       finalMaxTokens = finalMaxTokens > 8_192 ? 8_192 : finalMaxTokens;
     }
@@ -197,12 +198,10 @@ export class ModelManager {
       }
       const apiVersion =
         process.env.AZURE_OPENAI_API_VERSION ?? process.env.OPENAI_API_VERSION;
-      const apiVersionEnvVar =
-        process.env.AZURE_OPENAI_API_VERSION !== undefined
-          ? "AZURE_OPENAI_API_VERSION"
-          : process.env.OPENAI_API_VERSION !== undefined
-            ? "OPENAI_API_VERSION"
-            : undefined;
+
+      const apiVersionEnvVar = process.env.AZURE_OPENAI_API_VERSION
+        ? "AZURE_OPENAI_API_VERSION"
+        : "OPENAI_API_VERSION";
       const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
 
       logger.info("Creating Azure OpenAI client", {
@@ -219,20 +218,24 @@ export class ModelManager {
         endpoint,
       });
 
+      const useMaxCompletion = modelName.includes("gpt-5");
+
       logger.info("Initializing Azure OpenAI model", {
         apiVersion,
         apiVersionEnvVar,
         endpoint,
         modelName,
-        maxTokens: finalMaxTokens,
-        temperature,
+        ...(useMaxCompletion
+          ? { max_completion_tokens: finalMaxTokens, temperature: 1 }
+          : { maxTokens: finalMaxTokens, temperature }),
       });
 
       return await initChatModel(modelName, {
         client,
         modelProvider: "azure_openai",
-        maxTokens: finalMaxTokens,
-        temperature,
+        ...(useMaxCompletion
+          ? { max_completion_tokens: finalMaxTokens, temperature: 1 }
+          : { maxTokens: finalMaxTokens, temperature }),
         openAIApiVersion: apiVersion,
       });
     }
