@@ -1,4 +1,4 @@
-import { join } from "path";
+import { resolve } from "path";
 import { SANDBOX_ROOT_DIR } from "./constants.js";
 import { TargetRepository, GraphConfig } from "./open-swe/types.js";
 import {
@@ -20,5 +20,6 @@ export function getRepoAbsolutePath(
     throw new Error("No repository name provided");
   }
 
-  return join(SANDBOX_ROOT_DIR, repoName);
+  const relativeRepo = repoName.replace(/^\/+/, "");
+  return resolve(SANDBOX_ROOT_DIR, relativeRepo);
 }

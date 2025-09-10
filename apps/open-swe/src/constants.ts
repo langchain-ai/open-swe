@@ -1,11 +1,18 @@
-import { getLocalWorkingDirectory } from "@openswe/shared/open-swe/local-mode";
+import {
+  getLocalWorkingDirectory,
+  isLocalModeFromEnv,
+} from "@openswe/shared/open-swe/local-mode";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const CONTAINER_PROJECT_ROOT = "/workspace/project";
+
 const DEFAULT_SANDBOX_PATH =
   process.env.OPEN_SWE_PROJECT_PATH ||
-  getLocalWorkingDirectory() ||
+  (isLocalModeFromEnv()
+    ? getLocalWorkingDirectory()
+    : CONTAINER_PROJECT_ROOT) ||
   mkdtempSync(path.join(os.tmpdir(), "open-swe-"));
 
 export const DEFAULT_SANDBOX_CREATE_PARAMS = {

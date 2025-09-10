@@ -1,8 +1,14 @@
-import { getLocalWorkingDirectory } from "./open-swe/local-mode.js";
+import {
+  getLocalWorkingDirectory,
+  isLocalModeFromEnv,
+} from "./open-swe/local-mode.js";
 
 export const TIMEOUT_SEC = 60; // 1 minute
+const CONTAINER_PROJECT_ROOT = "/workspace/project";
+
 export const SANDBOX_ROOT_DIR =
-  process.env.SANDBOX_ROOT_DIR ?? getLocalWorkingDirectory();
+  process.env.SANDBOX_ROOT_DIR ??
+  (isLocalModeFromEnv() ? getLocalWorkingDirectory() : CONTAINER_PROJECT_ROOT);
 export const PLAN_INTERRUPT_DELIMITER = ":::";
 export const PLAN_INTERRUPT_ACTION_TITLE = "Approve/Edit Plan";
 export const LOCAL_MODE_HEADER = "x-local-mode";
