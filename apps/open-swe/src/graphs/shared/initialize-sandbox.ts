@@ -7,6 +7,8 @@ import {
 } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getCodebaseTree } from "../../utils/tree.js";
+import { createDockerSandbox } from "../../utils/sandbox.js";
+import { createShellExecutor } from "../../utils/shell-executor/index.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import {
   CustomNodeEvent,
@@ -35,10 +37,6 @@ export async function initializeSandbox(
   state: InitializeSandboxState,
   config: GraphConfig,
 ): Promise<Partial<InitializeSandboxState>> {
-  if (!isLocalMode(config)) {
-    throw new Error("Remote sandbox mode is not supported");
-  }
-
   const events: CustomNodeEvent[] = [];
   const emitStepEvent = (
     base: CustomNodeEvent,
@@ -73,7 +71,16 @@ export async function initializeSandbox(
     }),
   ];
 
-  return initializeSandboxLocal(
+  if (isLocalMode(config)) {
+    return initializeSandboxLocal(
+      state,
+      config,
+      emitStepEvent,
+      createEventsMessage,
+    );
+  }
+
+  return initializeSandboxRemote(
     state,
     config,
     emitStepEvent,
@@ -189,5 +196,148 @@ async function initializeSandboxLocal(
     dependenciesInstalled: false,
     customRules: await getCustomRules(null as any, absoluteRepoDir, config),
     branchName: branchName,
+  };
+}
+
+/**
+ * Remote mode version of initializeSandbox using Docker sandbox
+ */
+async function initializeSandboxRemote(
+  state: InitializeSandboxState,
+  config: GraphConfig,
+  emitStepEvent: (
+    base: CustomNodeEvent,
+    status: "pending" | "success" | "error" | "skipped",
+    error?: string,
+  ) => void,
+  createEventsMessage: () => BaseMessage[],
+): Promise<Partial<InitializeSandboxState>> {
+  const { targetRepository, branchName } = state;
+  const repoName = `${targetRepository.owner}/${targetRepository.repo}`;
+
+  // Step 1: Create sandbox
+  const createSandboxAction: CustomNodeEvent = {
+    nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+    actionId: uuidv4(),
+    action: "Creating sandbox",
+    data: {
+      status: "pending",
+      sandboxSessionId: null,
+      branch: branchName,
+      repo: repoName,
+    },
+  };
+  emitStepEvent(createSandboxAction, "pending");
+
+  let sandbox;
+  try {
+    const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
+    const repoPath = getLocalWorkingDirectory();
+    sandbox = await createDockerSandbox(image, repoPath);
+    emitStepEvent(
+      {
+        ...createSandboxAction,
+        data: { ...createSandboxAction.data, sandboxSessionId: sandbox.id },
+      },
+      "success",
+    );
+  } catch (_) {
+    emitStepEvent(createSandboxAction, "error", "Failed to create sandbox.");
+    throw _;
+  }
+
+  // Step 2: Copy repository into /workspace/<repo>
+  const cloneRepoAction: CustomNodeEvent = {
+    nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+    actionId: uuidv4(),
+    action: "Cloning repository",
+    data: {
+      status: "pending",
+      sandboxSessionId: sandbox.id,
+      branch: branchName,
+      repo: repoName,
+    },
+  };
+  emitStepEvent(cloneRepoAction, "pending");
+  try {
+    await sandbox.process.executeCommand(
+      `shopt -s dotglob && mkdir -p ${targetRepository.repo} && for f in *; do [ "$f" = "${targetRepository.repo}" ] || mv "$f" ${targetRepository.repo}/; done`,
+      "/workspace",
+    );
+    emitStepEvent(cloneRepoAction, "success");
+  } catch (_) {
+    emitStepEvent(cloneRepoAction, "error", "Failed to clone repository.");
+  }
+
+  const repoDir = `/workspace/${targetRepository.repo}`;
+
+  // Step 3: Checkout branch
+  const checkoutAction: CustomNodeEvent = {
+    nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+    actionId: uuidv4(),
+    action: "Checking out branch",
+    data: {
+      status: "pending",
+      sandboxSessionId: sandbox.id,
+      branch: branchName,
+      repo: repoName,
+    },
+  };
+  emitStepEvent(checkoutAction, "pending");
+  try {
+    const executor = createShellExecutor(config);
+    const response = await executor.executeCommand({
+      command: `git checkout ${branchName}`,
+      workdir: repoDir,
+      sandbox,
+    });
+    if (response.exitCode === 0) {
+      emitStepEvent(checkoutAction, "success");
+    } else {
+      emitStepEvent(checkoutAction, "error", "Failed to checkout branch.");
+    }
+  } catch (_) {
+    emitStepEvent(checkoutAction, "error", "Failed to checkout branch.");
+  }
+
+  // Step 4: Generate codebase tree
+  const generateTreeActionId = uuidv4();
+  const baseGenerateTreeAction: CustomNodeEvent = {
+    nodeId: INITIALIZE_NODE_ID,
+    createdAt: new Date().toISOString(),
+    actionId: generateTreeActionId,
+    action: "Generating codebase tree",
+    data: {
+      status: "pending",
+      sandboxSessionId: sandbox.id,
+      branch: branchName,
+      repo: repoName,
+    },
+  };
+  emitStepEvent(baseGenerateTreeAction, "pending");
+
+  let codebaseTree: string | undefined = undefined;
+  try {
+    codebaseTree = await getCodebaseTree(config, sandbox.id, targetRepository);
+    emitStepEvent(baseGenerateTreeAction, "success");
+  } catch (_) {
+    emitStepEvent(
+      baseGenerateTreeAction,
+      "error",
+      "Failed to generate codebase tree.",
+    );
+  }
+
+  return {
+    sandboxSessionId: sandbox.id,
+    targetRepository,
+    codebaseTree,
+    messages: [...(state.messages || []), ...createEventsMessage()],
+    dependenciesInstalled: false,
+    customRules: await getCustomRules(sandbox, repoDir, config),
+    branchName,
   };
 }
