@@ -30,10 +30,7 @@ describe("withRetry", () => {
     const mockFn = jest
       .fn<() => Promise<string>>()
       .mockRejectedValue(new Error("always fails"));
-
-    const result = await withRetry(mockFn);
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("always fails");
+    await expect(withRetry(mockFn)).rejects.toThrow("always fails");
     expect(mockFn).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
   });
 
@@ -41,10 +38,9 @@ describe("withRetry", () => {
     const mockFn = jest
       .fn<() => Promise<string>>()
       .mockRejectedValue(new Error("always fails"));
-
-    const result = await withRetry(mockFn, { retries: 2 });
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("always fails");
+    await expect(withRetry(mockFn, { retries: 2 })).rejects.toThrow(
+      "always fails",
+    );
     expect(mockFn).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
   });
 
@@ -53,12 +49,11 @@ describe("withRetry", () => {
       .fn<() => Promise<string>>()
       .mockRejectedValue(new Error("always fails"));
     const startTime = Date.now();
-
-    const result = await withRetry(mockFn, { retries: 2, delay: 100 });
+    await expect(withRetry(mockFn, { retries: 2, delay: 100 })).rejects.toThrow(
+      "always fails",
+    );
     const endTime = Date.now();
 
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("always fails");
     expect(mockFn).toHaveBeenCalledTimes(3);
     expect(endTime - startTime).toBeGreaterThanOrEqual(200); // 2 delays of 100ms each
   });
@@ -68,12 +63,11 @@ describe("withRetry", () => {
       .fn<() => Promise<string>>()
       .mockRejectedValue(new Error("always fails"));
     const startTime = Date.now();
-
-    const result = await withRetry(mockFn, { retries: 2 });
+    await expect(withRetry(mockFn, { retries: 2 })).rejects.toThrow(
+      "always fails",
+    );
     const endTime = Date.now();
 
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("always fails");
     expect(mockFn).toHaveBeenCalledTimes(3);
     expect(endTime - startTime).toBeLessThan(50); // Should be very fast with no delay
   });
@@ -82,10 +76,9 @@ describe("withRetry", () => {
     const mockFn = jest
       .fn<() => Promise<string>>()
       .mockRejectedValue("string error");
-
-    const result = await withRetry(mockFn, { retries: 1 });
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("string error");
+    await expect(withRetry(mockFn, { retries: 1 })).rejects.toThrow(
+      "string error",
+    );
     expect(mockFn).toHaveBeenCalledTimes(2);
   });
 
@@ -100,9 +93,9 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(error2)
       .mockRejectedValue(lastError);
 
-    const result = await withRetry(mockFn, { retries: 2 });
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("last error");
+    await expect(withRetry(mockFn, { retries: 2 })).rejects.toThrow(
+      "last error",
+    );
     expect(mockFn).toHaveBeenCalledTimes(3);
   });
 
@@ -141,10 +134,7 @@ describe("createRetryWrapper", () => {
       .mockRejectedValue(new Error("always fails"));
 
     const wrappedFn = createRetryWrapper(originalFn, { retries: 1 });
-
-    const result = await wrappedFn();
-    expect(result).toBeInstanceOf(Error);
-    expect((result as Error).message).toBe("always fails");
+    await expect(wrappedFn()).rejects.toThrow("always fails");
     expect(originalFn).toHaveBeenCalledTimes(2); // 1 initial + 1 retry
   });
 
