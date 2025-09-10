@@ -1,4 +1,3 @@
-import { CreateSandboxFromSnapshotParams } from "@daytonaio/sdk";
 import { getLocalWorkingDirectory } from "@openswe/shared/open-swe/local-mode";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -9,9 +8,9 @@ const DEFAULT_SANDBOX_PATH =
   getLocalWorkingDirectory() ||
   mkdtempSync(path.join(os.tmpdir(), "open-swe-"));
 
-export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromSnapshotParams = {
+export const DEFAULT_SANDBOX_CREATE_PARAMS = {
   user: "open-swe",
-  autoDeleteInterval: 15, // delete after 15 minutes
+  autoDeleteInterval: 15,
   envVars: {
     SANDBOX_ROOT_DIR: DEFAULT_SANDBOX_PATH,
   },

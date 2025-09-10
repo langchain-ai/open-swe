@@ -1,4 +1,4 @@
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
 

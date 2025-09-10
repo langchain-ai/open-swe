@@ -1,4 +1,4 @@
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../../utils/sandbox.js";
 import { readFile, writeFile } from "../../utils/read-write.js";
 import { getSandboxErrorFields } from "../../utils/sandbox-error-fields.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
