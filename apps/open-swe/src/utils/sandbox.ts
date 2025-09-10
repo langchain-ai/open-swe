@@ -1,12 +1,12 @@
 import Docker from "dockerode";
 import Stream from "node:stream";
-import { spawn } from "node:child_process";
 import { createLogger, LogLevel } from "./logger.js";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
+import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -24,7 +24,13 @@ export interface SandboxProcess {
     cwd?: string,
     env?: Record<string, string>,
     timeoutSec?: number,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  ): Promise<{
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+    result: string;
+    artifacts?: { stdout: string; stderr: string };
+  }>;
 }
 
 export interface Sandbox {
@@ -39,7 +45,6 @@ export function getSandbox(id: string): Sandbox | undefined {
 
 export async function createDockerSandbox(
   image: string,
-  repoPath: string,
   mountPath = "/workspace",
 ): Promise<Sandbox> {
   const docker = dockerClient();
@@ -50,12 +55,6 @@ export async function createDockerSandbox(
     Env: [`SANDBOX_ROOT_DIR=${mountPath}`],
   });
   await container.start();
-
-  const tarStream = spawn("tar", ["-C", repoPath, "-cf", "-", "."]).stdout;
-  if (!tarStream) {
-    throw new Error("Failed to create tar stream of repository");
-  }
-  await container.putArchive(tarStream, { path: mountPath });
 
   const process: SandboxProcess = {
     async executeCommand(command, cwd = mountPath, env, timeoutSec) {
@@ -99,6 +98,8 @@ export async function createDockerSandbox(
         exitCode: inspect.ExitCode ?? -1,
         stdout,
         stderr,
+        result: stdout,
+        artifacts: { stdout, stderr },
       };
     },
   };
@@ -155,6 +156,10 @@ export async function getSandboxWithErrorHandling(
   }
   const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
   const repoPath = getLocalWorkingDirectory();
-  const sandbox = await createDockerSandbox(image, repoPath);
+  const sandbox = await createDockerSandbox(image);
+  await uploadRepoToContainer({
+    containerId: sandbox.id,
+    localRepoPath: repoPath,
+  });
   return { sandbox, codebaseTree: null, dependenciesInstalled: null };
 }

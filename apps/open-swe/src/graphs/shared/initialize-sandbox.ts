@@ -8,6 +8,7 @@ import {
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getCodebaseTree } from "../../utils/tree.js";
 import { createDockerSandbox } from "../../utils/sandbox.js";
+import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import {
@@ -231,10 +232,10 @@ async function initializeSandboxRemote(
   emitStepEvent(createSandboxAction, "pending");
 
   let sandbox;
+  const repoPath = getLocalWorkingDirectory();
   try {
     const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
-    const repoPath = getLocalWorkingDirectory();
-    sandbox = await createDockerSandbox(image, repoPath);
+    sandbox = await createDockerSandbox(image);
     emitStepEvent(
       {
         ...createSandboxAction,
@@ -262,10 +263,10 @@ async function initializeSandboxRemote(
   };
   emitStepEvent(cloneRepoAction, "pending");
   try {
-    await sandbox.process.executeCommand(
-      `shopt -s dotglob && mkdir -p ${targetRepository.repo} && for f in *; do [ "$f" = "${targetRepository.repo}" ] || mv "$f" ${targetRepository.repo}/; done`,
-      "/workspace",
-    );
+    await uploadRepoToContainer({
+      containerId: sandbox.id,
+      localRepoPath: repoPath,
+    });
     emitStepEvent(cloneRepoAction, "success");
   } catch (_) {
     emitStepEvent(cloneRepoAction, "error", "Failed to clone repository.");

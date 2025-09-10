@@ -23,7 +23,6 @@
     "postinstall": "turbo build"
   },
   "dependencies": {
-    "@daytonaio/sdk": "^0.25.5",
     "@langchain/anthropic": "^0.3.26",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",
@@ -37,11 +36,11 @@
     "@openswe/shared": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.1",
+    "dockerode": "^4.0.2",
     "hono": "^4.8.3",
     "jsonwebtoken": "^9.0.2",
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",
-    "dockerode": "^4.0.2",
     "uuid": "^11.0.5",
     "zod": "^3.25.32"
   },
