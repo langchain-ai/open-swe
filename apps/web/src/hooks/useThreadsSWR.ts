@@ -117,13 +117,20 @@ export function useThreadsSWR<
         : undefined;
 
     const start = Date.now();
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await client.threads.search<TGraphState>(searchArgs, {
-        timeoutMs: THREAD_SEARCH_TIMEOUT_MS,
+      const searchPromise = client.threads.search<TGraphState>(searchArgs);
+      const timeoutPromise = new Promise<Thread<TGraphState>[]>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("Thread search timed out")),
+          THREAD_SEARCH_TIMEOUT_MS,
+        );
       });
+      return await Promise.race([searchPromise, timeoutPromise]);
     } catch (error) {
       const duration = Date.now() - start;
-      if ((error as Error)?.name === "AbortError") {
+      if ((error as Error)?.message === "Thread search timed out") {
         console.error(`Thread search timed out after ${duration}ms`, {
           assistantId,
           searchArgs,
@@ -135,6 +142,11 @@ export function useThreadsSWR<
         });
       }
       throw error;
+
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
   };
 
