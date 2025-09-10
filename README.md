@@ -43,6 +43,8 @@ Open SWE can be used in multiple ways:
 
 Open SWE runs locally without any external repository-hosting dependencies or authentication. Configure your environment variables (such as `AZURE_OPENAI_API_KEY`) and start the agent to connect to Azure-hosted GPT‑5 models or other supported LLMs.
 
+When not in local mode, the sandbox environment clones repositories under `/workspace/project` inside the container.
+
 
 For the Azure OpenAI API version, set `AZURE_OPENAI_API_VERSION` (preferred) or `OPENAI_API_VERSION`. The agent will use `AZURE_OPENAI_API_VERSION` when available and fall back to `OPENAI_API_VERSION` otherwise.
 
