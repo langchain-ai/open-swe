@@ -2,7 +2,7 @@ import { GraphConfig } from "@openswe/shared/open-swe/types";
 
 /**
  * Checks if the current execution context is in local mode
- * (working on local files instead of sandbox/Daytona)
+ * (working on local files instead of a remote sandbox)
  */
 export function isLocalMode(config?: GraphConfig): boolean {
   if (!config) {
