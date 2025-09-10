@@ -198,6 +198,7 @@ export class ModelManager {
       }
       const apiVersion =
         process.env.AZURE_OPENAI_API_VERSION ?? process.env.OPENAI_API_VERSION;
+
       const apiVersionEnvVar = process.env.AZURE_OPENAI_API_VERSION
         ? "AZURE_OPENAI_API_VERSION"
         : "OPENAI_API_VERSION";
