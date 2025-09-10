@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 
-const getMock = jest.fn();
-const putMock = jest.fn();
+const getMock =
+  jest.fn<
+    (
+      path: string[],
+      key: string,
+    ) => Promise<{ value: { notes: string[] } } | null>
+  >();
+const putMock =
+  jest.fn<
+    (path: string[], key: string, value: { notes: string[] }) => Promise<void>
+  >();
 
 await jest.unstable_mockModule("@langchain/langgraph", () => ({
   getStore: () => ({ get: getMock, put: putMock }),

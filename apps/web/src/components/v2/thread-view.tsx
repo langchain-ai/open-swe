@@ -48,7 +48,7 @@ import {
 import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
 import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
-import { getMessageContentString } from "@openswe/shared/messages";
+import { getMessageContentString } from "@/lib/get-message-content-string";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;

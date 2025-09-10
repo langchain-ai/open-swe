@@ -53,7 +53,7 @@ import { z } from "zod";
 import { isAIMessageSDK, isToolMessageSDK } from "@/lib/langchain-messages";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ConversationHistorySummary } from "@/components/gen-ui/conversation-summary";
-import { getMessageContentString } from "@openswe/shared/messages";
+import { getMessageContentString } from "@/lib/get-message-content-string";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import { OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
 import { CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";

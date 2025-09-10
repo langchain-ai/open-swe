@@ -142,7 +142,6 @@ export function useThreadsSWR<
         });
       }
       throw error;
-
     } finally {
       if (timeoutId) {
         clearTimeout(timeoutId);
