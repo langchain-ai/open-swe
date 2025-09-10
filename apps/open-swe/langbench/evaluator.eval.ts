@@ -1,12 +1,17 @@
 import * as ls from "langsmith/vitest";
 import dotenv from "dotenv";
-import { Daytona, Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../src/utils/sandbox.js";
+import {
+  createDockerSandbox,
+  stopSandbox,
+  deleteSandbox,
+} from "../src/utils/sandbox.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
 import { readFileSync } from "fs";
 import { TargetRepository } from "@openswe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { setupEnv } from "../src/utils/env-setup.js";
+import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { PRData, PRProcessResult } from "./types.js";
 import { runPytestOnFiles } from "./utils.js";
 
@@ -36,9 +41,6 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     evalsFiles: [],
     testFiles: [],
   };
-  const daytona = new Daytona({
-    organizationId: process.env.DAYTONA_ORGANIZATION_ID,
-  });
   let sandbox: Sandbox | undefined;
 
   try {
@@ -48,13 +50,8 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     const testFiles = prData.testFiles || [];
     result.testFiles = testFiles;
     // Create sandbox
-    sandbox = await daytona.create(DEFAULT_SANDBOX_CREATE_PARAMS);
-
-    // Validate sandbox was created properly
-    if (!sandbox || !sandbox.id) {
-      throw new Error("Failed to create valid sandbox");
-    }
-
+    const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
+    sandbox = await createDockerSandbox(image);
     result.workspaceId = sandbox.id;
     logger.info(`Created sandbox: ${sandbox.id}`);
 
@@ -69,7 +66,12 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       branch: undefined,
       baseCommit: preMergeCommit,
     };
-    const repoDir = getRepoAbsolutePath(targetRepository);
+    const localRepoDir = getRepoAbsolutePath(targetRepository);
+    await uploadRepoToContainer({
+      containerId: sandbox.id,
+      localRepoPath: localRepoDir,
+    });
+    const repoDir = `/workspace/${prData.repoName}`;
 
     // Assume repository is already available locally
     // Setup Python environment
@@ -119,7 +121,8 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     // Cleanup sandbox
     if (sandbox) {
       try {
-        await sandbox.delete();
+        await stopSandbox(sandbox.id);
+        await deleteSandbox(sandbox.id);
         logger.info(`Deleted sandbox: ${sandbox.id}`);
       } catch (cleanupError) {
         logger.warn(`Failed to cleanup sandbox ${sandbox.id}:`, {

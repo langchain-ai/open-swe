@@ -1,9 +1,14 @@
 import "dotenv/config";
 import { OpenSWEInput, CodeTestDetails } from "./open-swe-types.js";
-import { Daytona, Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../src/utils/sandbox.js";
+import {
+  createDockerSandbox,
+  stopSandbox,
+  deleteSandbox,
+} from "../src/utils/sandbox.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
-import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../src/constants.js";
+import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { TargetRepository } from "@openswe/shared/open-swe/types";
 import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
@@ -95,7 +100,6 @@ export async function evaluator(inputs: {
 }): Promise<SimpleEvaluationResult[]> {
   const { openSWEInputs, output } = inputs;
 
-  const daytonaInstance = new Daytona();
   const solutionBranch = output.branchName;
   logger.info("Creating sandbox...", {
     repo: openSWEInputs.repo,
@@ -104,17 +108,21 @@ export async function evaluator(inputs: {
     user_input: openSWEInputs.user_input.substring(0, 100) + "...",
   });
 
-  const sandbox = await daytonaInstance.create(DEFAULT_SANDBOX_CREATE_PARAMS);
+  const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
+  const sandbox = await createDockerSandbox(image);
 
   try {
-    logger.info(
-      "Skipping repository clone; ensure repository is available locally",
-      {},
-    );
+    const localRepoDir = getRepoAbsolutePath(output.targetRepository);
+    await uploadRepoToContainer({
+      containerId: sandbox.id,
+      localRepoPath: localRepoDir,
+    });
+    logger.info("Repository uploaded to sandbox", {
+      repo: output.targetRepository.repo,
+    });
+    const containerRepoDir = `/workspace/${output.targetRepository.repo}`;
 
-    const absoluteRepoDir = getRepoAbsolutePath(output.targetRepository);
-
-    const envSetupSuccess = await setupEnv(sandbox, absoluteRepoDir);
+    const envSetupSuccess = await setupEnv(sandbox, containerRepoDir);
     if (!envSetupSuccess) {
       logger.error("Failed to setup environment");
       return [
@@ -125,7 +133,7 @@ export async function evaluator(inputs: {
       ];
     }
 
-    const analysisResult = await runCodeTests(sandbox, absoluteRepoDir);
+    const analysisResult = await runCodeTests(sandbox, containerRepoDir);
 
     const overallScore = analysisResult.ruffScore + analysisResult.mypyScore;
 
@@ -162,7 +170,8 @@ export async function evaluator(inputs: {
     ];
   } finally {
     try {
-      await sandbox.delete();
+      await stopSandbox(sandbox.id);
+      await deleteSandbox(sandbox.id);
       logger.info("Sandbox cleaned up successfully");
     } catch (cleanupError) {
       logger.error("Failed to cleanup sandbox", { cleanupError });

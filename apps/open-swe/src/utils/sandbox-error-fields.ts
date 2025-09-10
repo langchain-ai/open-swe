@@ -1,6 +1,7 @@
 export interface ExecuteResponse {
   result?: string;
   exitCode: number;
+  artifacts?: { stdout?: string; stderr?: string };
   [key: string]: unknown;
 }
 

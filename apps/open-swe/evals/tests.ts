@@ -1,5 +1,5 @@
 // TODO: Add ruff promise and the mypy promise to the tests.
-import { Sandbox } from "@daytonaio/sdk";
+import type { Sandbox } from "../src/utils/sandbox.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import {
   ExecOptions,

@@ -22,6 +22,7 @@
     "@langchain/core": "^0.3.65",
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
+    "dockerode": "^4.0.2",
     "jsonwebtoken": "^9.0.2",
     "zod": "^3.25.32"
   },
@@ -30,6 +31,7 @@
     "@eslint/js": "^9.19.0",
     "@jest/globals": "^29.7.0",
     "@tsconfig/recommended": "^1.0.8",
+    "@types/dockerode": "^3.3.43",
     "@types/jest": "^29.5.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.13.5",
