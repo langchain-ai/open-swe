@@ -3,17 +3,18 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_ID_COOKIE,
 } from "@openswe/shared/constants";
-import { verifyGithubUser } from "@openswe/shared/github/verify-user";
+// Note: Avoid Node-only libraries in Edge runtime. Do not import Octokit here.
 
 export async function middleware(request: NextRequest) {
   const token = request.cookies.get(GITHUB_TOKEN_COOKIE)?.value;
   const installationId = request.cookies.get(
     GITHUB_INSTALLATION_ID_COOKIE,
   )?.value;
-  const user = token && installationId ? await verifyGithubUser(token) : null;
+  // Edge-safe check: presence of cookies indicates authenticated session
+  const isAuthenticated = Boolean(token && installationId);
 
   if (request.nextUrl.pathname === "/") {
-    if (user) {
+    if (isAuthenticated) {
       const url = request.nextUrl.clone();
       url.pathname = "/chat";
       return NextResponse.redirect(url);
@@ -21,7 +22,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (request.nextUrl.pathname.startsWith("/chat")) {
-    if (!user) {
+    if (!isAuthenticated) {
       const url = request.nextUrl.clone();
       url.pathname = "/";
       return NextResponse.redirect(url);
