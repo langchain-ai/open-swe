@@ -1,5 +1,6 @@
 {
   "name": "@openswe/docs",
+  "version": "0.0.0",
   "author": "LangChain",
   "repository": "https://github.com/langchain-ai/open-swe",
   "private": true,
