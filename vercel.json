@@ -1,0 +1,5 @@
+{
+  "installCommand": "corepack enable && corepack prepare yarn@3.5.1 --activate && yarn install",
+  "buildCommand": "turbo run build",
+  "framework": "nextjs"
+}
