@@ -4,7 +4,8 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["BLOB_READ_WRITE_TOKEN", "EXPERIMENTATION_CONFIG_ITEM_KEY"]
     },
     "lint": {
       "dependsOn": ["^lint"]
