@@ -10,6 +10,7 @@ import { getCodebaseTree } from "../../utils/tree.js";
 import { createDockerSandbox } from "../../utils/sandbox.js";
 import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
+import { SANDBOX_DOCKER_IMAGE } from "../../constants.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import {
   CustomNodeEvent,
@@ -234,8 +235,7 @@ async function initializeSandboxRemote(
   let sandbox;
   const repoPath = getLocalWorkingDirectory();
   try {
-    const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
-    sandbox = await createDockerSandbox(image);
+    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
     emitStepEvent(
       {
         ...createSandboxAction,

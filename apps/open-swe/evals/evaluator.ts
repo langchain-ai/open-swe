@@ -14,6 +14,7 @@ import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { SimpleEvaluationResult } from "langsmith/vitest";
 import { runRuffLint, runMyPyTypeCheck } from "./tests.js";
 import { setupEnv, ENV_CONSTANTS } from "../src/utils/env-setup.js";
+import { SANDBOX_DOCKER_IMAGE } from "../src/constants.js";
 
 const logger = createLogger(LogLevel.INFO, "Evaluator ");
 
@@ -108,8 +109,7 @@ export async function evaluator(inputs: {
     user_input: openSWEInputs.user_input.substring(0, 100) + "...",
   });
 
-  const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
-  const sandbox = await createDockerSandbox(image);
+  const sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
 
   try {
     const localRepoDir = getRepoAbsolutePath(output.targetRepository);

@@ -15,6 +15,11 @@ const DEFAULT_SANDBOX_PATH =
     : CONTAINER_PROJECT_ROOT) ||
   mkdtempSync(path.join(os.tmpdir(), "open-swe-"));
 
+const DEFAULT_SANDBOX_IMAGE = "node:20";
+
+export const SANDBOX_DOCKER_IMAGE =
+  process.env.OPEN_SWE_SANDBOX_IMAGE?.trim() || DEFAULT_SANDBOX_IMAGE;
+
 export const DEFAULT_SANDBOX_CREATE_PARAMS = {
   user: "open-swe",
   autoDeleteInterval: 15,
