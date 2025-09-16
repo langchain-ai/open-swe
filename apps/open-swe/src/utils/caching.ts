@@ -32,6 +32,10 @@ export function trackCachePerformance(
       response.usage_metadata?.input_token_details?.cache_read || 0,
     inputTokens: response.usage_metadata?.input_tokens || 0,
     outputTokens: response.usage_metadata?.output_tokens || 0,
+    reasoningTokens:
+      response.usage_metadata?.completion_tokens_details?.reasoning_tokens ||
+      response.usage_metadata?.output_token_details?.reasoning_tokens ||
+      0,
   };
 
   const totalInputTokens =

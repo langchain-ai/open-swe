@@ -7,6 +7,7 @@ export function calculateCostSavings(metrics: CacheMetrics): {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalOutputTokensCost: number;
+  totalReasoningTokens: number;
 } {
   const SONNET_4_BASE_RATE = 3.0 / 1_000_000; // $3 per MTok
   const SONNET_4_OUTPUT_RATE = 15.0 / 1_000_000; // $15 per MTok
@@ -31,7 +32,9 @@ export function calculateCostSavings(metrics: CacheMetrics): {
     metrics.cacheCreationInputTokens +
     metrics.cacheReadInputTokens +
     metrics.inputTokens;
-  const totalTokens = totalInputTokens + metrics.outputTokens;
+  const totalReasoningTokens = metrics.reasoningTokens;
+  const totalTokens =
+    totalInputTokens + metrics.outputTokens + totalReasoningTokens;
   const costWithoutCaching = totalInputTokens * SONNET_4_BASE_RATE;
 
   // Actual cost with caching
@@ -44,6 +47,7 @@ export function calculateCostSavings(metrics: CacheMetrics): {
     totalInputTokens,
     totalOutputTokens: metrics.outputTokens,
     totalOutputTokensCost,
+    totalReasoningTokens,
   };
 }
 
@@ -76,6 +80,7 @@ export function tokenDataReducer(
           existing.cacheReadInputTokens + data.cacheReadInputTokens,
         inputTokens: existing.inputTokens + data.inputTokens,
         outputTokens: existing.outputTokens + data.outputTokens,
+        reasoningTokens: existing.reasoningTokens + data.reasoningTokens,
       });
     } else {
       // Add new model data

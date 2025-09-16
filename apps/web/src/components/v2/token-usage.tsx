@@ -16,6 +16,7 @@ import {
   CollapsibleTrigger,
 } from "../ui/collapsible";
 import {
+  Brain,
   ChartNoAxesColumnIncreasing,
   ChevronDown,
   ChevronRight,
@@ -46,12 +47,14 @@ function mergeTokenData(
         merged.cacheReadInputTokens + current.cacheReadInputTokens,
       inputTokens: merged.inputTokens + current.inputTokens,
       outputTokens: merged.outputTokens + current.outputTokens,
+      reasoningTokens: merged.reasoningTokens + current.reasoningTokens,
     }),
     {
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
+      reasoningTokens: 0,
     },
   );
 }
@@ -194,6 +197,7 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
   if (!tokenData || tokenData.length === 0) return null;
 
   const mergedTokenData = mergeTokenData(tokenData);
+  const hasReasoningTokens = mergedTokenData.reasoningTokens > 0;
   const totalCachedInputTokens =
     mergedTokenData.cacheCreationInputTokens +
     mergedTokenData.cacheReadInputTokens;
@@ -237,7 +241,9 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
             <h4 className="text-sm font-semibold">Token Usage</h4>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div
+            className={`grid gap-4 ${hasReasoningTokens ? "grid-cols-3" : "grid-cols-2"}`}
+          >
             <div className="space-y-1">
               <div className="flex items-center gap-1.5">
                 <Zap className="h-3 w-3 text-blue-500 dark:text-blue-400" />
@@ -260,6 +266,19 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                 {metrics.totalOutputTokens.toLocaleString()}
               </p>
             </div>
+            {hasReasoningTokens && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <Brain className="h-3 w-3 text-purple-500 dark:text-purple-400" />
+                  <span className="text-muted-foreground text-xs font-medium">
+                    Reasoning
+                  </span>
+                </div>
+                <p className="text-sm font-semibold">
+                  {metrics.totalReasoningTokens.toLocaleString()}
+                </p>
+              </div>
+            )}
           </div>
 
           <Separator />
@@ -341,7 +360,8 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                       model.inputTokens +
                       model.outputTokens +
                       model.cacheCreationInputTokens +
-                      model.cacheReadInputTokens;
+                      model.cacheReadInputTokens +
+                      model.reasoningTokens;
                     const modelCachedTokens =
                       model.cacheCreationInputTokens +
                       model.cacheReadInputTokens;
@@ -397,6 +417,19 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
                               {model.outputTokens.toLocaleString()}
                             </span>
                           </div>
+                          {model.reasoningTokens > 0 && (
+                            <div className="flex justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <Brain className="h-3 w-3 text-purple-500 dark:text-purple-400" />
+                                <span className="text-muted-foreground font-medium">
+                                  Reasoning
+                                </span>
+                              </div>
+                              <span className="font-semibold">
+                                {model.reasoningTokens.toLocaleString()}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         {modelCachedTokens > 0 && (
