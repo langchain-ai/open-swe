@@ -14,6 +14,21 @@ export async function uploadRepoToContainer({
   containerPath = "/workspace",
 }: UploadOptions): Promise<void> {
   const docker = new Docker();
+  try {
+    await docker.ping();
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "";
+    const suffix =
+      detail && detail !== "[object Object]" ? ` Details: ${detail}` : "";
+    throw new Error(
+      `Docker daemon not running or unreachable. Please start Docker and try again.${suffix}`,
+    );
+  }
   const container = docker.getContainer(containerId);
   const repoName = path.basename(localRepoPath);
   const tarStream = spawn("tar", [
