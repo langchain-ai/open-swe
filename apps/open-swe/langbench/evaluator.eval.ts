@@ -14,6 +14,7 @@ import { setupEnv } from "../src/utils/env-setup.js";
 import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { PRData, PRProcessResult } from "./types.js";
 import { runPytestOnFiles } from "./utils.js";
+import { SANDBOX_DOCKER_IMAGE } from "../src/constants.js";
 
 dotenv.config();
 
@@ -50,8 +51,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     const testFiles = prData.testFiles || [];
     result.testFiles = testFiles;
     // Create sandbox
-    const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
-    sandbox = await createDockerSandbox(image);
+    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
     result.workspaceId = sandbox.id;
     logger.info(`Created sandbox: ${sandbox.id}`);
 

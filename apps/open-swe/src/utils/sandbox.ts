@@ -1,6 +1,7 @@
 import Docker from "dockerode";
 import Stream from "node:stream";
 import { createLogger, LogLevel } from "./logger.js";
+import { SANDBOX_DOCKER_IMAGE } from "../constants.js";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
 import {
   isLocalMode,
@@ -154,7 +155,7 @@ export async function getSandboxWithErrorHandling(
       };
     }
   }
-  const image = process.env.OPEN_SWE_SANDBOX_IMAGE || "node:18";
+  const image = SANDBOX_DOCKER_IMAGE;
   const repoPath = getLocalWorkingDirectory();
   const sandbox = await createDockerSandbox(image);
   await uploadRepoToContainer({
