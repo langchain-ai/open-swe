@@ -1,0 +1,19 @@
+services:
+  open-swe:
+    build:
+      context: .
+    image: open-swe:latest
+    command: ["yarn", "workspace", "@openswe/agent", "dev"]
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "2024:2024"
+  web:
+    image: open-swe:latest
+    command: ["yarn", "workspace", "@openswe/web", "start"]
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - open-swe

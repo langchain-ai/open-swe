@@ -51,6 +51,17 @@ For the Azure OpenAI API version, set `AZURE_OPENAI_API_VERSION` (preferred) or 
 
 When specifying models, Azure OpenAI expects deployment names rather than raw model IDs. Use the `azure-openai:<deployment-name>` syntax, for example `azure-openai:my-gpt5-deployment`. If your deployment name matches a base model ID (e.g., `azure-openai:gpt-4o`), ensure that a deployment with that name exists.
 
+## Docker
+
+You can build and run the LangGraph agent together with the web interface using Docker Compose:
+
+```bash
+docker compose build
+docker compose up
+```
+
+The Compose setup builds a single image for the monorepo, then starts the LangGraph agent on port `2024` and the Next.js web UI on port `3000`.
+
 # Documentation
 
 To get started using Open SWE locally, see the [documentation here](https://docs.langchain.com/labs/swe/).
