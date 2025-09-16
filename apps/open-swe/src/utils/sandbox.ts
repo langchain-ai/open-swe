@@ -11,6 +11,34 @@ import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container"
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
+function parsePositiveInt(
+  envValue: string | undefined,
+  fallback: number,
+): number {
+  if (!envValue) return fallback;
+  const parsed = Number.parseInt(envValue, 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+}
+
+/**
+ * Defaults favor isolation: cap resources, drop root, and block networking. Operators can relax
+ * limits via OPEN_SWE_SANDBOX_MEMORY_BYTES, OPEN_SWE_SANDBOX_NANO_CPUS,
+ * OPEN_SWE_SANDBOX_USER, and OPEN_SWE_SANDBOX_ENABLE_NETWORK when needed.
+ */
+const SANDBOX_MEMORY_LIMIT_BYTES = parsePositiveInt(
+  process.env.OPEN_SWE_SANDBOX_MEMORY_BYTES,
+  2 * 1024 * 1024 * 1024,
+);
+const SANDBOX_NANO_CPUS = parsePositiveInt(
+  process.env.OPEN_SWE_SANDBOX_NANO_CPUS,
+  1_000_000_000,
+);
+const SANDBOX_USER = process.env.OPEN_SWE_SANDBOX_USER?.trim() || "node";
+const SANDBOX_NETWORK_DISABLED =
+  process.env.OPEN_SWE_SANDBOX_ENABLE_NETWORK?.trim().toLowerCase() === "true"
+    ? false
+    : true;
+
 let docker: Docker | null = null;
 function dockerClient(): Docker {
   if (!docker) {
@@ -54,6 +82,12 @@ export async function createDockerSandbox(
     Tty: true,
     Cmd: ["/bin/sh", "-c", "while true; do sleep 3600; done"],
     Env: [`SANDBOX_ROOT_DIR=${mountPath}`],
+    HostConfig: {
+      Memory: SANDBOX_MEMORY_LIMIT_BYTES,
+      NanoCPUs: SANDBOX_NANO_CPUS,
+    },
+    NetworkDisabled: SANDBOX_NETWORK_DISABLED,
+    User: SANDBOX_USER,
   });
   await container.start();
 
