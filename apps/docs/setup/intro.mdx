@@ -40,6 +40,22 @@ Open SWE is built with modern technologies designed for scalability and develope
   - Programmer graph for code change execution
 - **Local sandbox** - Sandboxed development environments for safe code execution
 
+## Sandbox image prerequisite
+
+Open SWE executes repositories inside a sandbox Docker container. Before starting local tasks, make sure the sandbox image is available on your machine:
+
+```bash
+docker pull ghcr.io/langchain-ai/open-swe/sandbox:latest
+```
+
+You can also build the image locally using the dedicated Dockerfile provided in the repository root:
+
+```bash
+docker build -f Dockerfile.sandbox -t ghcr.io/langchain-ai/open-swe/sandbox:latest .
+```
+
+The agent uses this image by default via the `OPEN_SWE_SANDBOX_IMAGE` environment variable, so keeping it up to date ensures consistent tooling when the sandbox is created.
+
 ### Web Application
 
 - **Next.js** - React framework with App Router

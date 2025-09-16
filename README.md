@@ -45,6 +45,22 @@ Open SWE runs locally without any external repository-hosting dependencies or au
 
 When not in local mode, the sandbox environment clones repositories under `/workspace/project` inside the container.
 
+### Sandbox image
+
+Open SWE executes tasks inside a sandbox Docker container. Before running local tasks, ensure you have the latest sandbox image available:
+
+```bash
+docker pull ghcr.io/langchain-ai/open-swe/sandbox:latest
+```
+
+If you prefer to build the image yourself, use the dedicated sandbox Dockerfile:
+
+```bash
+docker build -f Dockerfile.sandbox -t ghcr.io/langchain-ai/open-swe/sandbox:latest .
+```
+
+The agent uses this image by default via the `OPEN_SWE_SANDBOX_IMAGE` environment variable, which now defaults to `ghcr.io/langchain-ai/open-swe/sandbox:latest`.
+
 
 For the Azure OpenAI API version, set `AZURE_OPENAI_API_VERSION` (preferred) or `OPENAI_API_VERSION`. The agent will use `AZURE_OPENAI_API_VERSION` when available and fall back to `OPENAI_API_VERSION` otherwise.
 
