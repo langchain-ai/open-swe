@@ -23,6 +23,7 @@ export interface CacheMetrics {
   cacheReadInputTokens: number;
   inputTokens: number;
   outputTokens: number;
+  reasoningTokens: number;
 }
 
 export interface ModelTokenData extends CacheMetrics {
