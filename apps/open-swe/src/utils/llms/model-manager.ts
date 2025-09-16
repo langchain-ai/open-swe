@@ -7,6 +7,7 @@ import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../logger.js";
 import {
   LLMTask,
+  ReasoningEffort,
   TASK_TO_CONFIG_DEFAULTS_MAP,
 } from "@openswe/shared/open-swe/llm-task";
 import { isAllowedUser } from "@openswe/shared/allowed-users";
@@ -32,6 +33,8 @@ interface ModelLoadConfig {
   max_completion_tokens?: number;
   thinkingModel?: boolean;
   thinkingBudgetTokens?: number;
+  reasoningEffort?: ReasoningEffort;
+  reasoningTokens?: number;
 }
 
 export enum CircuitState {
@@ -173,10 +176,16 @@ export class ModelManager {
       max_completion_tokens,
       thinkingModel,
       thinkingBudgetTokens,
+      reasoningEffort,
+      reasoningTokens,
     } = config;
 
     const thinkingMaxTokens = thinkingBudgetTokens
       ? thinkingBudgetTokens * 4
+      : undefined;
+    const isGpt5 = modelName.includes("gpt-5");
+    const reasoningPayload = isGpt5
+      ? { effort: reasoningEffort, max_tokens: reasoningTokens }
       : undefined;
     let finalMaxTokens = max_completion_tokens ?? maxTokens ?? 10_000;
     if (modelName.includes("claude-3-5-haiku")) {
@@ -218,7 +227,7 @@ export class ModelManager {
         endpoint,
       });
 
-      const useMaxCompletion = modelName.includes("gpt-5");
+      const useMaxCompletion = isGpt5;
 
       logger.info("Initializing Azure OpenAI model", {
         apiVersion,
@@ -236,6 +245,7 @@ export class ModelManager {
         ...(useMaxCompletion
           ? { max_completion_tokens: finalMaxTokens, temperature: 1 }
           : { maxTokens: finalMaxTokens, temperature }),
+        ...(isGpt5 ? { reasoning: reasoningPayload } : {}),
         openAIApiVersion: apiVersion,
       });
     }
@@ -249,7 +259,7 @@ export class ModelManager {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
             maxTokens: thinkingMaxTokens,
           }
-        : modelName.includes("gpt-5")
+        : isGpt5
           ? {
               max_completion_tokens: finalMaxTokens,
               temperature: 1,
@@ -258,6 +268,7 @@ export class ModelManager {
               maxTokens: finalMaxTokens,
               temperature: thinkingModel ? undefined : temperature,
             }),
+      ...(isGpt5 ? { reasoning: reasoningPayload } : {}),
     };
 
     logger.debug("Initializing model", {
@@ -288,6 +299,8 @@ export class ModelManager {
         selectedModelConfig = {
           provider,
           modelName,
+          reasoningEffort: baseConfig.reasoningEffort,
+          reasoningTokens: baseConfig.reasoningTokens,
           ...(modelName.includes("gpt-5")
             ? {
                 max_completion_tokens:
@@ -325,6 +338,8 @@ export class ModelManager {
 
         const fallbackConfig = {
           ...fallbackModel,
+          reasoningEffort: baseConfig.reasoningEffort,
+          reasoningTokens: baseConfig.reasoningTokens,
           ...(fallbackModel.modelName.includes("gpt-5")
             ? {
                 max_completion_tokens: baseConfig.maxTokens,
@@ -373,6 +388,14 @@ export class ModelManager {
         temperature:
           (config.configurable?.[`${task}Temperature`] as number | undefined) ??
           0,
+        reasoningEffort:
+          (config.configurable?.[`${task}ReasoningEffort`] as
+            | ReasoningEffort
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+        reasoningTokens:
+          (config.configurable?.[`${task}ReasoningTokens`] as
+            | number
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
       },
       [LLMTask.PROGRAMMER]: {
         modelName:
@@ -381,6 +404,14 @@ export class ModelManager {
         temperature:
           (config.configurable?.[`${task}Temperature`] as number | undefined) ??
           0,
+        reasoningEffort:
+          (config.configurable?.[`${task}ReasoningEffort`] as
+            | ReasoningEffort
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+        reasoningTokens:
+          (config.configurable?.[`${task}ReasoningTokens`] as
+            | number
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
       },
       [LLMTask.REVIEWER]: {
         modelName:
@@ -389,6 +420,14 @@ export class ModelManager {
         temperature:
           (config.configurable?.[`${task}Temperature`] as number | undefined) ??
           0,
+        reasoningEffort:
+          (config.configurable?.[`${task}ReasoningEffort`] as
+            | ReasoningEffort
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+        reasoningTokens:
+          (config.configurable?.[`${task}ReasoningTokens`] as
+            | number
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
       },
       [LLMTask.ROUTER]: {
         modelName:
@@ -397,6 +436,14 @@ export class ModelManager {
         temperature:
           (config.configurable?.[`${task}Temperature`] as number | undefined) ??
           0,
+        reasoningEffort:
+          (config.configurable?.[`${task}ReasoningEffort`] as
+            | ReasoningEffort
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+        reasoningTokens:
+          (config.configurable?.[`${task}ReasoningTokens`] as
+            | number
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
       },
       [LLMTask.SUMMARIZER]: {
         modelName:
@@ -405,8 +452,24 @@ export class ModelManager {
         temperature:
           (config.configurable?.[`${task}Temperature`] as number | undefined) ??
           0,
+        reasoningEffort:
+          (config.configurable?.[`${task}ReasoningEffort`] as
+            | ReasoningEffort
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+        reasoningTokens:
+          (config.configurable?.[`${task}ReasoningTokens`] as
+            | number
+            | undefined) ?? TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
       },
-    } as Record<LLMTask, { modelName: string; temperature: number }>;
+    } as Record<
+      LLMTask,
+      {
+        modelName: string;
+        temperature: number;
+        reasoningEffort?: ReasoningEffort;
+        reasoningTokens?: number;
+      }
+    >;
 
     const taskConfig = taskMap[task];
     const modelStr = taskConfig.modelName;
@@ -439,6 +502,8 @@ export class ModelManager {
               (config.configurable?.maxTokens as number | undefined) ?? 10_000,
             temperature: taskConfig.temperature as number,
           }),
+      reasoningEffort: taskConfig.reasoningEffort,
+      reasoningTokens: taskConfig.reasoningTokens,
       thinkingModel,
       thinkingBudgetTokens,
     } as ModelLoadConfig;
@@ -486,7 +551,12 @@ export class ModelManager {
     if (!modelName) {
       return null;
     }
-    return { provider, modelName };
+    return {
+      provider,
+      modelName,
+      reasoningEffort: TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+      reasoningTokens: TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
+    };
   }
 
   /**

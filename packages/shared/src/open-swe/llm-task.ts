@@ -27,25 +27,45 @@ export enum LLMTask {
   SUMMARIZER = "summarizer",
 }
 
-export const TASK_TO_CONFIG_DEFAULTS_MAP = {
+export type ReasoningEffort = "low" | "medium" | "high";
+
+export const TASK_TO_CONFIG_DEFAULTS_MAP: Record<
+  LLMTask,
+  {
+    modelName: string;
+    temperature: number;
+    reasoningEffort?: ReasoningEffort;
+    reasoningTokens?: number;
+  }
+> = {
   [LLMTask.PLANNER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
+    reasoningEffort: "medium" as ReasoningEffort,
+    reasoningTokens: 4_000,
   },
   [LLMTask.PROGRAMMER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
+    reasoningEffort: "medium" as ReasoningEffort,
+    reasoningTokens: 4_000,
   },
   [LLMTask.REVIEWER]: {
     modelName: "anthropic:claude-sonnet-4-0",
     temperature: 0,
+    reasoningEffort: "medium" as ReasoningEffort,
+    reasoningTokens: 4_000,
   },
   [LLMTask.ROUTER]: {
     modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
+    reasoningEffort: "medium" as ReasoningEffort,
+    reasoningTokens: 4_000,
   },
   [LLMTask.SUMMARIZER]: {
     modelName: "anthropic:claude-3-5-haiku-latest",
     temperature: 0,
+    reasoningEffort: "medium" as ReasoningEffort,
+    reasoningTokens: 4_000,
   },
 };
