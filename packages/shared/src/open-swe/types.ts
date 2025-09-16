@@ -12,6 +12,12 @@ import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 import { tokenDataReducer } from "../caching.js";
 
+const REASONING_EFFORT_OPTIONS = [
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+];
+
 export interface CacheMetrics {
   cacheCreationInputTokens: number;
   cacheReadInputTokens: number;
@@ -327,6 +333,25 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
+  plannerReasoningEffort: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "medium",
+      description:
+        "Controls the reasoning effort for GPT-5 planner calls. Only used when the selected model supports reasoning.",
+      options: REASONING_EFFORT_OPTIONS,
+    },
+  },
+  plannerReasoningTokens: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 4_000,
+      min: 1,
+      max: 64_000,
+      description:
+        "Maximum number of tokens allocated to GPT-5 reasoning for planner tasks. Only used when the selected model supports reasoning.",
+    },
+  },
   programmerModelName: {
     x_open_swe_ui_config: {
       type: "select",
@@ -344,6 +369,25 @@ export const GraphConfigurationMetadata: {
       max: 2,
       step: 0.1,
       description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
+  programmerReasoningEffort: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "medium",
+      description:
+        "Controls the reasoning effort for GPT-5 programmer calls. Only used when the selected model supports reasoning.",
+      options: REASONING_EFFORT_OPTIONS,
+    },
+  },
+  programmerReasoningTokens: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 4_000,
+      min: 1,
+      max: 64_000,
+      description:
+        "Maximum number of tokens allocated to GPT-5 reasoning for programmer tasks. Only used when the selected model supports reasoning.",
     },
   },
   reviewerModelName: {
@@ -365,6 +409,25 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
+  reviewerReasoningEffort: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "medium",
+      description:
+        "Controls the reasoning effort for GPT-5 reviewer calls. Only used when the selected model supports reasoning.",
+      options: REASONING_EFFORT_OPTIONS,
+    },
+  },
+  reviewerReasoningTokens: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 4_000,
+      min: 1,
+      max: 64_000,
+      description:
+        "Maximum number of tokens allocated to GPT-5 reasoning for reviewer tasks. Only used when the selected model supports reasoning.",
+    },
+  },
   routerModelName: {
     x_open_swe_ui_config: {
       type: "select",
@@ -384,6 +447,25 @@ export const GraphConfigurationMetadata: {
       description: "Controls randomness (0 = deterministic, 2 = creative)",
     },
   },
+  routerReasoningEffort: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "medium",
+      description:
+        "Controls the reasoning effort for GPT-5 router calls. Only used when the selected model supports reasoning.",
+      options: REASONING_EFFORT_OPTIONS,
+    },
+  },
+  routerReasoningTokens: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 4_000,
+      min: 1,
+      max: 64_000,
+      description:
+        "Maximum number of tokens allocated to GPT-5 reasoning for router tasks. Only used when the selected model supports reasoning.",
+    },
+  },
   summarizerModelName: {
     x_open_swe_ui_config: {
       type: "select",
@@ -401,6 +483,25 @@ export const GraphConfigurationMetadata: {
       max: 2,
       step: 0.1,
       description: "Controls randomness (0 = deterministic, 2 = creative)",
+    },
+  },
+  summarizerReasoningEffort: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "medium",
+      description:
+        "Controls the reasoning effort for GPT-5 summarizer calls. Only used when the selected model supports reasoning.",
+      options: REASONING_EFFORT_OPTIONS,
+    },
+  },
+  summarizerReasoningTokens: {
+    x_open_swe_ui_config: {
+      type: "number",
+      default: 4_000,
+      min: 1,
+      max: 64_000,
+      description:
+        "Maximum number of tokens allocated to GPT-5 reasoning for summarizer tasks. Only used when the selected model supports reasoning.",
     },
   },
   maxTokens: {
@@ -522,6 +623,21 @@ export const GraphConfiguration = z.object({
   plannerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.plannerTemperature,
   }),
+  /**
+   * Controls the reasoning effort for GPT-5 planner calls.
+   */
+  plannerReasoningEffort: withLangGraph(
+    z.enum(["low", "medium", "high"]).optional(),
+    {
+      metadata: GraphConfigurationMetadata.plannerReasoningEffort,
+    },
+  ),
+  /**
+   * Sets the maximum number of reasoning tokens for GPT-5 planner calls.
+   */
+  plannerReasoningTokens: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.plannerReasoningTokens,
+  }),
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
@@ -536,6 +652,21 @@ export const GraphConfiguration = z.object({
    */
   programmerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.programmerTemperature,
+  }),
+  /**
+   * Controls the reasoning effort for GPT-5 programmer calls.
+   */
+  programmerReasoningEffort: withLangGraph(
+    z.enum(["low", "medium", "high"]).optional(),
+    {
+      metadata: GraphConfigurationMetadata.programmerReasoningEffort,
+    },
+  ),
+  /**
+   * Sets the maximum number of reasoning tokens for GPT-5 programmer calls.
+   */
+  programmerReasoningTokens: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.programmerReasoningTokens,
   }),
 
   /**
@@ -552,6 +683,21 @@ export const GraphConfiguration = z.object({
   reviewerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.reviewerTemperature,
   }),
+  /**
+   * Controls the reasoning effort for GPT-5 reviewer calls.
+   */
+  reviewerReasoningEffort: withLangGraph(
+    z.enum(["low", "medium", "high"]).optional(),
+    {
+      metadata: GraphConfigurationMetadata.reviewerReasoningEffort,
+    },
+  ),
+  /**
+   * Sets the maximum number of reasoning tokens for GPT-5 reviewer calls.
+   */
+  reviewerReasoningTokens: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.reviewerReasoningTokens,
+  }),
 
   /**
    * The model ID to use for routing tasks.
@@ -567,6 +713,21 @@ export const GraphConfiguration = z.object({
   routerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.routerTemperature,
   }),
+  /**
+   * Controls the reasoning effort for GPT-5 router calls.
+   */
+  routerReasoningEffort: withLangGraph(
+    z.enum(["low", "medium", "high"]).optional(),
+    {
+      metadata: GraphConfigurationMetadata.routerReasoningEffort,
+    },
+  ),
+  /**
+   * Sets the maximum number of reasoning tokens for GPT-5 router calls.
+   */
+  routerReasoningTokens: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.routerReasoningTokens,
+  }),
 
   /**
    * The model ID to use for summarizing the conversation history, or extracting key context from large inputs.
@@ -581,6 +742,21 @@ export const GraphConfiguration = z.object({
    */
   summarizerTemperature: withLangGraph(z.number().optional(), {
     metadata: GraphConfigurationMetadata.actionGeneratorTemperature,
+  }),
+  /**
+   * Controls the reasoning effort for GPT-5 summarizer calls.
+   */
+  summarizerReasoningEffort: withLangGraph(
+    z.enum(["low", "medium", "high"]).optional(),
+    {
+      metadata: GraphConfigurationMetadata.summarizerReasoningEffort,
+    },
+  ),
+  /**
+   * Sets the maximum number of reasoning tokens for GPT-5 summarizer calls.
+   */
+  summarizerReasoningTokens: withLangGraph(z.number().optional(), {
+    metadata: GraphConfigurationMetadata.summarizerReasoningTokens,
   }),
   /**
    * The maximum number of tokens to generate in an individual generation.
