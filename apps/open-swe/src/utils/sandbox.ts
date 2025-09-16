@@ -108,15 +108,22 @@ export async function createDockerSandbox(
   mountPath = "/workspace",
 ): Promise<Sandbox> {
   const docker = await dockerClient();
+  const hostConfig: Docker.ContainerCreateOptions["HostConfig"] = {
+    Memory: SANDBOX_MEMORY_LIMIT_BYTES,
+  };
+
+  if (SANDBOX_NANO_CPUS > 0) {
+    (hostConfig as Docker.ContainerCreateOptions["HostConfig"] & {
+      NanoCPUs?: number;
+    }).NanoCPUs = SANDBOX_NANO_CPUS;
+  }
+
   const container = await docker.createContainer({
     Image: image,
     Tty: true,
     Cmd: ["/bin/sh", "-c", "while true; do sleep 3600; done"],
     Env: [`SANDBOX_ROOT_DIR=${mountPath}`],
-    HostConfig: {
-      Memory: SANDBOX_MEMORY_LIMIT_BYTES,
-      NanoCPUs: SANDBOX_NANO_CPUS,
-    },
+    HostConfig: hostConfig,
     NetworkDisabled: SANDBOX_NETWORK_DISABLED,
     User: SANDBOX_USER,
   });
