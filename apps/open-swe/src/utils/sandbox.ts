@@ -40,11 +40,42 @@ const SANDBOX_NETWORK_DISABLED =
     : true;
 
 let docker: Docker | null = null;
-function dockerClient(): Docker {
-  if (!docker) {
-    docker = new Docker();
+let dockerInitializationPromise: Promise<Docker> | null = null;
+
+async function dockerClient(): Promise<Docker> {
+  if (docker) return docker;
+
+  if (!dockerInitializationPromise) {
+    dockerInitializationPromise = (async () => {
+      const client = new Docker();
+      try {
+        await client.ping();
+      } catch (error) {
+        const detail =
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "";
+        const suffix =
+          detail && detail !== "[object Object]" ? ` Details: ${detail}` : "";
+        throw new Error(
+          `Docker daemon not running or unreachable. Please start Docker and try again.${suffix}`,
+        );
+      }
+      docker = client;
+      return client;
+    })();
   }
-  return docker;
+
+  try {
+    const client = await dockerInitializationPromise;
+    dockerInitializationPromise = null;
+    return client;
+  } catch (error) {
+    dockerInitializationPromise = null;
+    throw error;
+  }
 }
 
 export interface SandboxProcess {
@@ -76,7 +107,7 @@ export async function createDockerSandbox(
   image: string,
   mountPath = "/workspace",
 ): Promise<Sandbox> {
-  const docker = dockerClient();
+  const docker = await dockerClient();
   const container = await docker.createContainer({
     Image: image,
     Tty: true,
@@ -145,7 +176,8 @@ export async function createDockerSandbox(
 }
 
 export async function stopSandbox(sandboxId: string): Promise<string> {
-  const container = dockerClient().getContainer(sandboxId);
+  const docker = await dockerClient();
+  const container = docker.getContainer(sandboxId);
   try {
     await container.stop();
   } catch {
@@ -155,7 +187,8 @@ export async function stopSandbox(sandboxId: string): Promise<string> {
 }
 
 export async function deleteSandbox(sandboxId: string): Promise<boolean> {
-  const container = dockerClient().getContainer(sandboxId);
+  const docker = await dockerClient();
+  const container = docker.getContainer(sandboxId);
   try {
     await container.remove({ force: true });
     sandboxes.delete(sandboxId);
