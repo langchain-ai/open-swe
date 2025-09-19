@@ -1,12 +1,12 @@
 import { v4 as uuidv4 } from "uuid";
 import * as crypto from "crypto";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getGitHubTokensFromConfig } from "../../utils/github-tokens.js";
 import {
   CustomRules,
   GraphConfig,
   TargetRepository,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { daytonaClient } from "../../utils/sandbox.js";
 import { cloneRepo, pullLatestChanges } from "../../utils/github/git.js";
@@ -14,11 +14,11 @@ import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
 } from "../../utils/tree.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import {
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
-} from "@open-swe/shared/open-swe/custom-node-events";
+} from "@openswe/shared/open-swe/custom-node-events";
 import { Sandbox } from "@daytonaio/sdk";
 import { AIMessage, BaseMessage } from "@langchain/core/messages";
 import { DEFAULT_SANDBOX_CREATE_PARAMS } from "../../constants.js";
@@ -27,7 +27,7 @@ import { withRetry } from "../../utils/retry.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
 

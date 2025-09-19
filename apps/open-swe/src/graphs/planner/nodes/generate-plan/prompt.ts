@@ -54,6 +54,8 @@ Create your plan following these guidelines:
    - If you have multiple simple steps that are related, and should be executed one after the other, combine them into a single step.
    - For example, if you have multiple steps to run a linter, formatter, etc., combine them into a single step. The same goes for passing arguments, or editing files.
 
+{ADDITIONAL_INSTRUCTIONS}
+
 ${GITHUB_WORKFLOWS_PERMISSIONS_PROMPT}
 </instructions>
 
@@ -72,3 +74,25 @@ Always format your plan items with proper markdown. Avoid large headers, but you
 {SCRATCHPAD}
 
 Remember: Your goal is to create a focused, executable plan that efficiently accomplishes the user's request using the context you've already gathered.`;
+
+export const CUSTOM_FRAMEWORK_PROMPT = `
+7. **LangGraph-specific planning:**
+  - When the user's request involves LangGraph code generation, editing, or bug fixing, ensure the execution agent will have access to up-to-date LangGraph documentation
+  - If the codebase contains any existing LangGraph files (such as graph.py, main.py, app.py) or any files that import/export graphs, do NOT plan new agent files unless asked. Always work with the existing file structure.
+  - Create agent.py when building a completely new LangGraph project from an empty directory with zero existing graph-related files.
+  - When LangGraph is involved, include a plan item to reference the langgraph-docs-mcp tools for current API information during implementation
+
+8. **LangGraph Documentation Access:**
+  - You have access to the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools. Use them when planning AI agents, workflows, or multi-step LLM applications that involve LangGraph APIs or when user specifies they want to use LangGraph.
+  - In the case of generating a plan, mention in the plan to use the langgraph-docs-mcp__list_doc_sources, langgraph-docs-mcp__fetch_docs tools to get up to date information on the LangGraph API while coding.
+  - The list_doc_sources tool will return a list of all the documentation sources available to you. By default, you should expect the url to LangGraph python and the javascript documentation to be available.
+  - The fetch_docs tool will fetch the documentation for the given source. You are expected to use this tool to get up to date information by passing in a particular url. It returns the documentation as a markdown string.
+  - [Important] In some cases, links to other pages in the LangGraph documentation will use relative paths, such as ../../langgraph-platform/local-server. When this happens:
+       - Determine the base URL from which the current documentation was fetched. It should be the url of the page you you read the relative path from.
+       - For ../, go one level up in the URL hierarchy.
+       - For ../../, go two levels up, then append the relative path.
+       - If the current page is: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/setup/ And you encounter a relative link: ../../langgraph-platform/local-server,
+           - Go up two levels: https://langchain-ai.github.io/langgraph/tutorials/get-started/
+           - Append the relative path to form the full URL: https://langchain-ai.github.io/langgraph/tutorials/get-started/langgraph-platform/local-server
+       - If you get a response like Encountered an HTTP error: Client error '404' for url, it probably means that the url you created with relative path is incorrect so you should try constructing it again.
+`;

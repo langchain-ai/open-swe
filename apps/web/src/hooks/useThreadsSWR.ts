@@ -2,10 +2,10 @@ import useSWR from "swr";
 import { Thread } from "@langchain/langgraph-sdk";
 import { createClient } from "@/providers/client";
 import { THREAD_SWR_CONFIG } from "@/lib/swr-config";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { ReviewerGraphState } from "@open-swe/shared/open-swe/reviewer/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import { ReviewerGraphState } from "@openswe/shared/open-swe/reviewer/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { useMemo, useState } from "react";
 import type { Installation } from "./useGitHubInstallations";
 

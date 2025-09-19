@@ -1,6 +1,6 @@
 import { END, START, StateGraph } from "@langchain/langgraph";
-import { GraphConfiguration } from "@open-swe/shared/open-swe/types";
-import { ManagerGraphStateObj } from "@open-swe/shared/open-swe/manager/types";
+import { GraphConfiguration } from "@openswe/shared/open-swe/types";
+import { ManagerGraphStateObj } from "@openswe/shared/open-swe/manager/types";
 import {
   initializeGithubIssue,
   classifyMessage,

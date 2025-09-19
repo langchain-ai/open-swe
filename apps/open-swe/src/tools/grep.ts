@@ -1,17 +1,17 @@
 import { tool } from "@langchain/core/tools";
-import { GraphState, GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import {
   createGrepToolFields,
   formatGrepCommand,
-} from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tools";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
 import { wrapScript } from "../utils/wrap-script.js";
 

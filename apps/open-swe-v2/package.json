@@ -1,5 +1,5 @@
 {
-  "name": "@open-swe/agent-v2",
+  "name": "@openswe/agent-v2",
   "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
     "type": "git",
@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@langchain/core": "^0.3.65",
-    "@open-swe/shared": "*",
+    "@openswe/shared": "*",
     "deepagents": "0.0.0-rc.2"
   },
   "devDependencies": {

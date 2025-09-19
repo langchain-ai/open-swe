@@ -17,8 +17,8 @@ import { Skeleton } from "../ui/skeleton";
 import { ThreadMetadata } from "./types";
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { cn } from "@/lib/utils";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 import { computeThreadTitle } from "@/lib/thread";
 

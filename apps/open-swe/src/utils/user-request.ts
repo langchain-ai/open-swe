@@ -3,10 +3,10 @@ import {
   isHumanMessage,
   HumanMessage,
 } from "@langchain/core/messages";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { extractContentWithoutDetailsFromIssueBody } from "./github/issue-messages.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { shouldCreateIssue } from "./should-create-issue.js";
 
 // TODO: Might want a better way of doing this.

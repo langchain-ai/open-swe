@@ -20,18 +20,19 @@ import { ApiKeyBanner } from "../api-key-banner";
 import { IssuesRequiredBanner } from "../github/forked-repository-banner";
 import { QuickActions } from "./quick-actions";
 import { DraftsSection } from "./drafts-section";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
 import { UserPopover } from "../user-popover";
 
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
-import { ManagerGraphState } from "@open-swe/shared/open-swe/manager/types";
+import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
-import { OpenSWELogoSVG } from "../icons/openswe";
+import { OpenSWELogo } from "../icons/openswe-logo";
+import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
 function OpenSettingsButton() {
@@ -101,6 +102,9 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const [shouldCreateIssue, setShouldCreateIssue] = useState(
     config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
   );
+  const [customFramework, setCustomFramework] = useState(
+    config?.customFramework != null ? !!config.customFramework : false,
+  );
 
   const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const displayThreads = threadsMetadata.slice(0, 4);
@@ -126,7 +130,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="border-border bg-card border-b px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <OpenSWELogoSVG
+            <OpenSWELogo
               width={120}
               height={18}
             />
@@ -180,6 +184,8 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   setAutoAcceptPlan={setAutoAccept}
                   shouldCreateIssue={shouldCreateIssue}
                   setShouldCreateIssue={setShouldCreateIssue}
+                  customFramework={customFramework}
+                  setCustomFramework={setCustomFramework}
                 />
                 <div className="flex items-center gap-2">
                   <TooltipIconButton
@@ -216,6 +222,24 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                       <Eye className="size-4" />
                     ) : (
                       <EyeOff className="size-4" />
+                    )}
+                  </TooltipIconButton>
+                  <TooltipIconButton
+                    variant={customFramework ? "default" : "ghost"}
+                    tooltip="Use LangGraph Engineer when writing LangGraph code for better results"
+                    className={cn(
+                      "transition-colors duration-200",
+                      customFramework
+                        ? "bg-primary hover:bg-primary/90"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setCustomFramework((prev) => !prev)}
+                    side="bottom"
+                  >
+                    {customFramework ? (
+                      <OpenSWEIcon className="size-5" />
+                    ) : (
+                      <OpenSWEIcon className="size-5" />
                     )}
                   </TooltipIconButton>
                 </div>

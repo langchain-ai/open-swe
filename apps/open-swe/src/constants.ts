@@ -1,4 +1,4 @@
-import { DAYTONA_SNAPSHOT_NAME } from "@open-swe/shared/constants";
+import { DAYTONA_SNAPSHOT_NAME } from "@openswe/shared/constants";
 import { CreateSandboxFromSnapshotParams } from "@daytonaio/sdk";
 
 export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromSnapshotParams = {

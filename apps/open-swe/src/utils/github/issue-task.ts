@@ -2,11 +2,11 @@ import {
   GraphConfig,
   TargetRepository,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { getIssue, updateIssue } from "./api.js";
 import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { createLogger, LogLevel } from "../logger.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 
 export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";

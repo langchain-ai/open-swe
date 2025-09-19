@@ -1,5 +1,5 @@
-import { encryptSecret } from "@open-swe/shared/crypto";
-import { getInstallationToken } from "@open-swe/shared/github/auth";
+import { encryptSecret } from "@openswe/shared/crypto";
+import { getInstallationToken } from "@openswe/shared/github/auth";
 
 export async function regenerateInstallationToken(
   installationId: string | undefined,

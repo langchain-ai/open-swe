@@ -1,5 +1,5 @@
 {
-  "name": "@open-swe/web",
+  "name": "@openswe/web",
   "readme": "https://github.com/langchain-ai/open-swe/blob/main/apps/web/README.md",
   "homepage": "https://github.com/langchain-ai/open-swe/blob/main/README.md",
   "repository": {
@@ -24,7 +24,7 @@
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
     "@octokit/app": "^16.0.1",
-    "@open-swe/shared": "*",
+    "@openswe/shared": "*",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-avatar": "^1.1.3",
     "@radix-ui/react-collapsible": "^1.1.11",

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getGitHubToken } from "@/lib/auth";
-import { verifyGithubUser } from "@open-swe/shared/github/verify-user";
+import { verifyGithubUser } from "@openswe/shared/github/verify-user";
 
 export async function GET(request: NextRequest) {
   try {

@@ -12,12 +12,12 @@ import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { InstallationSelector } from "@/components/github/installation-selector";
 import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { UserPopover } from "@/components/user-popover";
-import { OpenSWELogoSVG } from "@/components/icons/openswe";
+import { OpenSWELogo } from "@/components/icons/openswe-logo";
 
 type FilterStatus =
   | "all"
@@ -128,7 +128,7 @@ function AllThreadsPageContent() {
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
-            <OpenSWELogoSVG
+            <OpenSWELogo
               width={120}
               height={18}
             />

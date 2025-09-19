@@ -1,4 +1,4 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { getModelManager, Provider } from "./model-manager.js";
 import { FallbackRunnable } from "../runtime-fallback.js";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
@@ -6,7 +6,7 @@ import { BaseMessageLike } from "@langchain/core/messages";
 import {
   LLMTask,
   TASK_TO_CONFIG_DEFAULTS_MAP,
-} from "@open-swe/shared/open-swe/llm-task";
+} from "@openswe/shared/open-swe/llm-task";
 
 export async function loadModel(
   config: GraphConfig,

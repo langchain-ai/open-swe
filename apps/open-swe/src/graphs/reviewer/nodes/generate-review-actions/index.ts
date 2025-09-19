@@ -4,16 +4,21 @@ import {
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
-} from "@open-swe/shared/open-swe/reviewer/types";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/reviewer/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
-import { PREVIOUS_REVIEW_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getMessageContentString } from "@openswe/shared/messages";
+import {
+  PREVIOUS_REVIEW_PROMPT,
+  SYSTEM_PROMPT,
+  CUSTOM_FRAMEWORK_PROMPT,
+} from "./prompt.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import {
   createGrepTool,
   createShellTool,
@@ -21,7 +26,7 @@ import {
 } from "../../../../tools/index.js";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { formatPlanPromptWithSummaries } from "../../../../utils/plan-prompt.js";
 import {
   formatCodeReviewPrompt,
@@ -40,7 +45,10 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 
 const logger = createLogger(LogLevel.INFO, "GenerateReviewActionsNode");
 
-function formatSystemPrompt(state: ReviewerGraphState): string {
+function formatSystemPrompt(
+  state: ReviewerGraphState,
+  config: GraphConfig,
+): string {
   const activePlan = getActivePlanItems(state.taskPlan);
   const tasksString = formatPlanPromptWithSummaries(activePlan);
 
@@ -55,6 +63,10 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
     .replaceAll("{CHANGED_FILES}", state.changedFiles)
     .replaceAll("{BASE_BRANCH_NAME}", state.baseBranchName)
+    .replace(
+      "{CUSTOM_FRAMEWORK_PROMPT}",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+    )
     .replaceAll("{COMPLETED_TASKS_AND_SUMMARIES}", tasksString)
     .replaceAll(
       "{DEPENDENCIES_INSTALLED}",
@@ -68,6 +80,7 @@ function formatSystemPrompt(state: ReviewerGraphState): string {
 
 const formatCacheablePrompt = (
   state: ReviewerGraphState,
+  config: GraphConfig,
   args?: {
     excludeCacheControl?: boolean;
   },
@@ -77,7 +90,7 @@ const formatCacheablePrompt = (
   const segments: CacheablePromptSegment[] = [
     {
       type: "text",
-      text: formatSystemPrompt(state),
+      text: formatSystemPrompt(state, config),
       ...(!args?.excludeCacheControl
         ? { cache_control: { type: "ephemeral" } }
         : {}),
@@ -146,7 +159,9 @@ function createToolsAndPrompt(
   const anthropicMessages = [
     {
       role: "system",
-      content: formatCacheablePrompt(state, { excludeCacheControl: false }),
+      content: formatCacheablePrompt(state, config, {
+        excludeCacheControl: false,
+      }),
     },
     {
       role: "user",
@@ -159,7 +174,9 @@ function createToolsAndPrompt(
   const nonAnthropicMessages = [
     {
       role: "system",
-      content: formatCacheablePrompt(state, { excludeCacheControl: true }),
+      content: formatCacheablePrompt(state, config, {
+        excludeCacheControl: true,
+      }),
     },
     {
       role: "user",

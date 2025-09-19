@@ -4,7 +4,7 @@ import {
   isHumanMessage,
   isToolMessage,
 } from "@langchain/core/messages";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { traceable } from "langsmith/traceable";
 
 // After 80k tokens, summarize the conversation history.

@@ -35,6 +35,7 @@
               "setup/intro",
               "setup/development",
               "setup/authentication",
+              "setup/customization",
               "setup/monorepo",
               "setup/ci"
             ]

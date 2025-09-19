@@ -1,4 +1,4 @@
-import { AgentSession } from "@open-swe/shared/open-swe/types";
+import { AgentSession } from "@openswe/shared/open-swe/types";
 
 export interface RestartRunRequest {
   managerThreadId: string;

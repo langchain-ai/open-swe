@@ -1,14 +1,14 @@
-import { CustomRules } from "@open-swe/shared/open-swe/types";
+import { CustomRules } from "@openswe/shared/open-swe/types";
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "./logger.js";
 import { getSandboxErrorFields } from "./sandbox-error-fields.js";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { promises as fs } from "fs";
 import { join } from "path";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 
 const logger = createLogger(LogLevel.INFO, "CustomRules");

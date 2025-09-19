@@ -4,14 +4,14 @@ import {
   GraphConfig,
   GraphUpdate,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   getModelManager,
   loadModel,
   Provider,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   createShellTool,
   createApplyPatchTool,
@@ -25,8 +25,8 @@ import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
 import { stopSandbox } from "../../../../utils/sandbox.js";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { getCurrentPlanItem } from "../../../../utils/current-task.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getMessageContentString } from "@openswe/shared/messages";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import {
   CODE_REVIEW_PROMPT,
   DEPENDENCIES_INSTALLED_PROMPT,
@@ -34,8 +34,9 @@ import {
   DYNAMIC_SYSTEM_PROMPT,
   STATIC_ANTHROPIC_SYSTEM_INSTRUCTIONS,
   STATIC_SYSTEM_INSTRUCTIONS,
+  CUSTOM_FRAMEWORK_PROMPT,
 } from "./prompt.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
@@ -52,7 +53,7 @@ import {
   convertMessagesToCacheControlledMessages,
   trackCachePerformance,
 } from "../../../../utils/caching.js";
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   BaseMessage,
   BaseMessageLike,
@@ -66,6 +67,7 @@ import {
   shouldIncludeReviewCommentTool,
   createReplyToReviewTool,
 } from "../../../../tools/reply-to-review-comment.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
@@ -93,6 +95,7 @@ const formatDynamicContextPrompt = (state: GraphState) => {
 
 const formatStaticInstructionsPrompt = (
   state: GraphState,
+  config: GraphConfig,
   isAnthropicModel: boolean,
 ) => {
   return (
@@ -101,11 +104,17 @@ const formatStaticInstructionsPrompt = (
       : STATIC_SYSTEM_INSTRUCTIONS
   )
     .replaceAll("{REPO_DIRECTORY}", getRepoAbsolutePath(state.targetRepository))
-    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules));
+    .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
+    .replace(
+      "{CUSTOM_FRAMEWORK_PROMPT}",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+    )
+    .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 };
 
 const formatCacheablePrompt = (
   state: GraphState,
+  config: GraphConfig,
   args?: {
     isAnthropicModel?: boolean;
     excludeCacheControl?: boolean;
@@ -117,7 +126,11 @@ const formatCacheablePrompt = (
     // Cache Breakpoint 2: Static Instructions
     {
       type: "text",
-      text: formatStaticInstructionsPrompt(state, !!args?.isAnthropicModel),
+      text: formatStaticInstructionsPrompt(
+        state,
+        config,
+        !!args?.isAnthropicModel,
+      ),
       ...(!args?.excludeCacheControl
         ? { cache_control: { type: "ephemeral" } }
         : {}),
@@ -236,6 +249,7 @@ async function createToolsAndPrompt(
           ...state,
           taskPlan: options.latestTaskPlan ?? state.taskPlan,
         },
+        config,
         {
           isAnthropicModel: true,
           excludeCacheControl: false,
@@ -254,6 +268,7 @@ async function createToolsAndPrompt(
           ...state,
           taskPlan: options.latestTaskPlan ?? state.taskPlan,
         },
+        config,
         {
           isAnthropicModel: false,
           excludeCacheControl: true,

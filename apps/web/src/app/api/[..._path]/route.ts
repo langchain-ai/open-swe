@@ -5,13 +5,13 @@ import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import {
   getGitHubInstallationTokenOrThrow,
   getInstallationNameFromReq,
   getGitHubAccessTokenOrThrow,
 } from "./utils";
-import { encryptSecret } from "@open-swe/shared/crypto";
+import { encryptSecret } from "@openswe/shared/crypto";
 
 // This file acts as a proxy for requests to your LangGraph server.
 // Read the [Going to Production](https://github.com/langchain-ai/agent-chat-ui?tab=readme-ov-file#going-to-production) section for more information.
