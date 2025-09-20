@@ -8,5 +8,4 @@ Thank you for your interest in contributing to Open SWE! This guide will help yo
    ```bash
    git clone https://github.com/<your_username>/open-swe.git
    cd open-swe
-   git remote add upstream https://github.com/langchain-ai/open-swe.git
    ```
