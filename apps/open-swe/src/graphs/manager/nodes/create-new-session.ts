@@ -1,9 +1,9 @@
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/open-swe/manager/types";
 import { createIssueFieldsFromMessages } from "../utils/generate-issue-fields.js";
 import {
   GITHUB_INSTALLATION_ID,
@@ -12,7 +12,7 @@ import {
   LOCAL_MODE_HEADER,
   MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import { createIssue } from "../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
@@ -26,11 +26,12 @@ import {
 } from "../../../utils/github/issue-messages.js";
 import { getBranchName } from "../../../utils/github/git.js";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { StreamMode } from "@langchain/langgraph-sdk";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "CreateNewSession");
 
@@ -48,16 +49,21 @@ export async function createNewSession(
     state.messages,
     config.configurable,
   );
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
-  const newIssue = await createIssue({
-    owner: state.targetRepository.owner,
-    repo: state.targetRepository.repo,
-    title: titleAndContent.title,
-    body: formatContentForIssueBody(titleAndContent.body),
-    githubAccessToken,
-  });
-  if (!newIssue) {
-    throw new Error("Failed to create new issue");
+
+  let newIssueNumber: number | undefined;
+  if (shouldCreateIssue(config)) {
+    const { githubAccessToken } = getGitHubTokensFromConfig(config);
+    const newIssue = await createIssue({
+      owner: state.targetRepository.owner,
+      repo: state.targetRepository.repo,
+      title: titleAndContent.title,
+      body: formatContentForIssueBody(titleAndContent.body),
+      githubAccessToken,
+    });
+    if (!newIssue) {
+      throw new Error("Failed to create new issue");
+    }
+    newIssueNumber = newIssue.number;
   }
 
   const inputMessages: BaseMessage[] = [
@@ -71,7 +77,7 @@ ${ISSUE_CONTENT_OPEN_TAG}
   ${titleAndContent.body}
 ${ISSUE_CONTENT_CLOSE_TAG}`,
       additional_kwargs: {
-        githubIssueId: newIssue.number,
+        githubIssueId: newIssueNumber,
         isOriginalIssue: true,
       },
     }),
@@ -102,7 +108,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
 
   const newManagerThreadId = uuidv4();
   const commandUpdate: ManagerGraphUpdate = {
-    githubIssueId: newIssue.number,
+    githubIssueId: newIssueNumber,
     targetRepository: state.targetRepository,
     messages: inputMessages,
     branchName: state.branchName ?? getBranchName(config),

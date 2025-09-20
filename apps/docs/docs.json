@@ -23,6 +23,7 @@
               "usage/intro",
               "usage/ui",
               "usage/github",
+              "usage/pr-tagging",
               "usage/examples",
               "usage/best-practices",
               "usage/custom-rules"
@@ -34,6 +35,7 @@
               "setup/intro",
               "setup/development",
               "setup/authentication",
+              "setup/customization",
               "setup/monorepo",
               "setup/ci"
             ]
@@ -83,3 +85,4 @@
     }
   }
 }
+

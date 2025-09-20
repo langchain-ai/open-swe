@@ -1,9 +1,9 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { loadModel } from "../utils/llms/index.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../utils/logger.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 
 const logger = createLogger(LogLevel.INFO, "CommandSafetyEvaluator");
 

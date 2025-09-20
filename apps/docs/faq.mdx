@@ -16,10 +16,24 @@ description: Frequently Asked Questions
   Yes. When using Anthropic models, all input tokens are cached on Anthropic's servers.
 </Accordion>
 
-<Accordion title="My run failed midway through. What now?">
-  We're sorry you're experiencing this! Open SWE will automatically commit any changes it makes to a draft pull request. Please check the draft pull request and make any necessary changes.
+<Accordion title="Can I disable Open SWE from creating an issue when I submit a request?">
+  Yes. There's two ways to disable Open SWE from creating an issue when you submit a request:
 
-  If a run fails, you will need to start over.
+  1. Toggle the 'eye' icon in the main chat area when submitting a request.
+  2. In the configuration tab in settings, toggle the 'Should Create Issue' switch.
+
+  By default, it's set to `true`. By modifying this setting in the configuration tab, all runs will default to that setting. You may override this setting on a per-run basis by toggling the 'eye' icon in the main chat area.
+
+  ![Should Create Issue Toggle](/images/dont_create_issue_eye_screenshot.png)
+  ![Global Should Create Issue Toggle](/images/dont_create_issue_global_toggle_screenshot.png)
+</Accordion>
+
+<Accordion title="My run failed midway through. What now?">
+  We're sorry you're experiencing this! Open SWE will automatically commit any changes it makes to a draft pull request. This means all of your progress is saved, and you can restart the run from the last checkpoint.
+
+  To restart the run, click the `Restart from last checkpoint` button. This will create a new thread and will resume from where it left off.
+
+  ![Restart Run Screenshot](/images/restart_run_screenshot.png)
 </Accordion>
 
 <Accordion title="Can I use Open SWE in a production environment?">

@@ -6,7 +6,7 @@ import {
   GraphUpdate,
   PlanItem,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -22,7 +22,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { AIMessage, BaseMessage, ToolMessage } from "@langchain/core/messages";
@@ -34,8 +34,8 @@ import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import {
   getActivePlanItems,
   getPullRequestNumberFromActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
-import { createOpenPrToolFields } from "@open-swe/shared/open-swe/tools";
+} from "@openswe/shared/open-swe/tasks";
+import { createOpenPrToolFields } from "@openswe/shared/open-swe/tools";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import {
@@ -43,8 +43,9 @@ import {
   GitHubPullRequestList,
   GitHubPullRequestUpdate,
 } from "../../../utils/github/types.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
-import { GITHUB_USER_LOGIN_HEADER } from "@open-swe/shared/constants";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
+import { GITHUB_USER_LOGIN_HEADER } from "@openswe/shared/constants";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "Open PR");
 
@@ -112,10 +113,27 @@ export async function openPullRequest(
     );
   }
 
+  const repoPath = getRepoAbsolutePath(state.targetRepository);
+
+  // First, verify that there are changed files
+  const gitDiffRes = await sandbox.process.executeCommand(
+    `git diff --name-only ${state.targetRepository.branch ?? ""}`,
+    repoPath,
+  );
+  if (gitDiffRes.exitCode !== 0 || gitDiffRes.result.trim().length === 0) {
+    // no changed files
+    const sandboxDeleted = await deleteSandbox(sandboxSessionId);
+    return {
+      ...(sandboxDeleted && {
+        sandboxSessionId: undefined,
+        dependenciesInstalled: false,
+      }),
+    };
+  }
+
   let branchName = state.branchName;
   let updatedTaskPlan: TaskPlan | undefined;
 
-  const repoPath = getRepoAbsolutePath(state.targetRepository);
   const changedFiles = await getChangedFilesStatus(repoPath, sandbox, config);
 
   if (changedFiles.length > 0) {
@@ -191,6 +209,10 @@ export async function openPullRequest(
     | GitHubPullRequestList[number]
     | GitHubPullRequestUpdate
     | null = null;
+
+  const reviewPullNumber = config.configurable?.reviewPullNumber;
+  const prBody = `${shouldCreateIssue(config) ? `Fixes #${state.githubIssueId}` : ""}${reviewPullNumber ? `\n\nTriggered from pull request: #${reviewPullNumber}` : ""}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`;
+
   if (!prForTask) {
     // No PR created yet. Shouldn't be possible, but we have a condition here anyway
     pullRequest = await createPullRequest({
@@ -198,7 +220,7 @@ export async function openPullRequest(
       repo,
       headBranch: branchName,
       title,
-      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
+      body: prBody,
       githubInstallationToken,
       baseBranch: state.targetRepository.branch,
     });
@@ -208,7 +230,7 @@ export async function openPullRequest(
       owner,
       repo,
       title,
-      body: `Fixes #${state.githubIssueId}${userLogin ? `\n\nOwner: @${userLogin}` : ""}\n\n${body}`,
+      body: prBody,
       pullNumber: prForTask,
       githubInstallationToken,
     });

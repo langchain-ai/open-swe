@@ -12,8 +12,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 
 type PlanItem = {

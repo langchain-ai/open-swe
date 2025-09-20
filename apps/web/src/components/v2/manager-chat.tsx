@@ -1,6 +1,6 @@
 import { ScrollToBottom, StickyToBottomContent } from "@/utils/scroll-utils";
 import { Message } from "@langchain/langgraph-sdk";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { TooltipIconButton } from "../ui/tooltip-icon-button";
@@ -14,6 +14,7 @@ import { ErrorState } from "./types";
 import { CollapsibleAlert } from "./collapsible-alert";
 import { Loader2 } from "lucide-react";
 import { parsePartialJson } from "@langchain/core/output_parsers";
+import { RestartRun } from "./restart-run";
 
 function MessageCopyButton({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
@@ -70,6 +71,11 @@ interface ManagerChatProps {
   isLoading: boolean;
   cancelRun: () => void;
   errorState?: ErrorState | null;
+  // Restart-run controls
+  canRestartRun?: boolean;
+  managerThreadId?: string;
+  plannerThreadId?: string;
+  programmerThreadId?: string;
   githubUser?: {
     login: string;
     avatar_url: string;
@@ -77,6 +83,7 @@ interface ManagerChatProps {
     name: string | null;
     email: string | null;
   };
+  disableSubmit?: boolean;
 }
 
 function extractResponseFromMessage(message: Message): string {
@@ -161,7 +168,12 @@ export function ManagerChat({
   isLoading,
   cancelRun,
   errorState,
+  canRestartRun,
+  managerThreadId,
+  plannerThreadId,
+  programmerThreadId,
   githubUser,
+  disableSubmit,
 }: ManagerChatProps) {
   return (
     <div className="border-border bg-muted/30 flex h-full w-1/3 flex-col overflow-hidden border-r">
@@ -233,6 +245,13 @@ export function ManagerChat({
                     icon={<AlertCircle className="size-4" />}
                   />
                 ) : null}
+                {canRestartRun && managerThreadId && plannerThreadId ? (
+                  <RestartRun
+                    managerThreadId={managerThreadId}
+                    plannerThreadId={plannerThreadId}
+                    programmerThreadId={programmerThreadId}
+                  />
+                ) : null}
               </>
             }
             footer={
@@ -252,7 +271,13 @@ export function ManagerChat({
             placeholder="Type your message..."
             className="border-border bg-background text-foreground placeholder:text-muted-foreground min-h-[60px] flex-1 resize-none text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isLoading) {
+              if (
+                e.key === "Enter" &&
+                (e.metaKey || e.ctrlKey) &&
+                !isLoading &&
+                !disableSubmit &&
+                !!chatInput.trim()
+              ) {
                 e.preventDefault();
                 handleSendMessage();
               }
@@ -270,7 +295,7 @@ export function ManagerChat({
           ) : (
             <Button
               onClick={handleSendMessage}
-              disabled={!chatInput.trim()}
+              disabled={!chatInput.trim() || disableSubmit}
               size="icon"
               variant="brand"
               className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"

@@ -1,8 +1,8 @@
-import { PlanItem } from "@open-swe/shared/open-swe/types";
+import { PlanItem } from "@openswe/shared/open-swe/types";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,
   PLAN_INTERRUPT_DELIMITER,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { Interrupt } from "@langchain/langgraph-sdk";
 import { HumanInterrupt } from "@langchain/langgraph/prebuilt";
 

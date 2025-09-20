@@ -2,22 +2,23 @@ import { Command } from "@langchain/langgraph";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/planner/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { getMissingMessages } from "../../../utils/github/issue-messages.js";
 import { getMessageString } from "../../../utils/message/content.js";
 import { isHumanMessage } from "@langchain/core/messages";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -118,7 +119,7 @@ export async function determineNeedsContext(
   config: GraphConfig,
 ): Promise<Command> {
   const [missingMessages, model] = await Promise.all([
-    getMissingMessages(state, config),
+    shouldCreateIssue(config) ? getMissingMessages(state, config) : [],
     loadModel(config, LLMTask.ROUTER),
   ]);
   const modelManager = getModelManager();

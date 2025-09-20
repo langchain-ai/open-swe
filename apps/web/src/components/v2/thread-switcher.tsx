@@ -16,7 +16,7 @@ import { useRouter } from "next/navigation";
 import { ThreadMetadata } from "./types";
 import { ThreadCard } from "./thread-card";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
-import { MANAGER_GRAPH_ID } from "@open-swe/shared/constants";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { threadsToMetadata } from "@/lib/thread-utils";
 
 interface ThreadSwitcherProps {

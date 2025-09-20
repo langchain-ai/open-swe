@@ -1,14 +1,14 @@
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
-} from "@open-swe/shared/open-swe/reviewer/types";
+} from "@openswe/shared/open-swe/reviewer/types";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { v4 as uuidv4 } from "uuid";
-import { createReviewStartedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createReviewStartedToolFields } from "@openswe/shared/open-swe/tools";
 import { getSandboxErrorFields } from "../../../utils/sandbox-error-fields.js";
 import { Sandbox } from "@daytonaio/sdk";
 import { createShellExecutor } from "../../../utils/shell-executor/index.js";

@@ -1,8 +1,8 @@
-import { CacheMetrics, ModelTokenData } from "@open-swe/shared/open-swe/types";
+import { CacheMetrics, ModelTokenData } from "@openswe/shared/open-swe/types";
 import {
   calculateCostSavings,
   tokenDataReducer,
-} from "@open-swe/shared/caching";
+} from "@openswe/shared/caching";
 import { Badge } from "../ui/badge";
 import { Separator } from "../ui/separator";
 import {

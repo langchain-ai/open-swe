@@ -5,10 +5,10 @@ import { traceable } from "langsmith/traceable";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { promises as fs } from "fs";
 import { join, isAbsolute } from "path";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 import { v4 as uuidv4 } from "uuid";
 

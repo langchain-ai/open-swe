@@ -4,27 +4,28 @@ import {
   GraphConfig,
   GraphState,
   GraphUpdate,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import { Command } from "@langchain/langgraph";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import {
   completePlanItem,
   getActivePlanItems,
   getActiveTask,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import {
   getCurrentPlanItem,
   getRemainingPlanItems,
 } from "../../../utils/current-task.js";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
-import { createMarkTaskCompletedToolFields } from "@open-swe/shared/open-swe/tools";
+import { createMarkTaskCompletedToolFields } from "@openswe/shared/open-swe/tools";
 import {
   calculateConversationHistoryTokenCount,
   getMessagesSinceLastSummary,
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "HandleCompletedTask");
 
@@ -88,7 +89,7 @@ export async function handleCompletedTask(
     summary,
   );
   // Update the github issue to reflect this task as completed.
-  if (!isLocalMode(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,

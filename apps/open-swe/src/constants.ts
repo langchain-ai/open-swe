@@ -1,4 +1,4 @@
-import { DAYTONA_SNAPSHOT_NAME } from "@open-swe/shared/constants";
+import { DAYTONA_SNAPSHOT_NAME } from "@openswe/shared/constants";
 import { CreateSandboxFromSnapshotParams } from "@daytonaio/sdk";
 
 export const DEFAULT_SANDBOX_CREATE_PARAMS: CreateSandboxFromSnapshotParams = {
@@ -26,4 +26,5 @@ export const LANGGRAPH_USER_PERMISSIONS = [
 
 export enum RequestSource {
   GITHUB_ISSUE_WEBHOOK = "github_issue_webhook",
+  GITHUB_PULL_REQUEST_WEBHOOK = "github_pull_request_webhook",
 }

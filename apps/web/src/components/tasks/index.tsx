@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProgressBar } from "./progress-bar";
-import { PlanItem, TaskPlan } from "@open-swe/shared/open-swe/types";
+import { PlanItem, TaskPlan } from "@openswe/shared/open-swe/types";
 import { BasicMarkdownText } from "../thread/markdown-text";
 
 interface TasksSidebarProps {

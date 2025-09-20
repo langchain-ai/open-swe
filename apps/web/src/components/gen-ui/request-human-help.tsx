@@ -15,7 +15,7 @@ import { BasicMarkdownText } from "../thread/markdown-text";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Textarea } from "../ui/textarea";
-import { CustomNodeEvent } from "@open-swe/shared/open-swe/custom-node-events";
+import { CustomNodeEvent } from "@openswe/shared/open-swe/custom-node-events";
 
 type RequestHumanHelpProps = {
   status: "loading" | "generating" | "done";

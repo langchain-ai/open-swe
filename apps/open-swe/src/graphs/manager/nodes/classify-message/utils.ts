@@ -1,4 +1,4 @@
-import { TaskPlan } from "@open-swe/shared/open-swe/types";
+import { TaskPlan } from "@openswe/shared/open-swe/types";
 import {
   AIMessage,
   BaseMessage,
@@ -10,13 +10,13 @@ import {
 import { z } from "zod";
 import { removeLastHumanMessage } from "../../../../utils/message/modify-array.js";
 import { formatPlanPrompt } from "../../../../utils/plan-prompt.js";
-import { getActivePlanItems } from "@open-swe/shared/open-swe/tasks";
+import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import {
   getHumanMessageString,
   getToolMessageString,
   getUnknownMessageString,
 } from "../../../../utils/message/content.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { ThreadStatus } from "@langchain/langgraph-sdk";
 import {
   CLASSIFICATION_SYSTEM_PROMPT,

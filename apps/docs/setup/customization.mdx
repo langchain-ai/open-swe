@@ -1,0 +1,108 @@
+---
+title: "Custom Framework Configuration"
+description: "How to configure and customize OpenSWE for custom libraries"
+---
+
+Open SWE includes support for LangGraph development through the **LangGraph Engineer** toggle. This feature adds framework-specific prompts and MCP tools for building LangGraph agents and workflows.
+
+You can use a similar approach to build your own customization.
+
+## LangGraph Engineer Configuration
+
+### Setting Configuration in the UI
+
+Enabling the **LangGraph Engineer** toggle in the main input area adds specific LangGraph prompts and allows LangGraph documentation access.
+
+This sets the following configuration:
+
+```typescript
+const config = {
+  configurable: {
+    customFramework: true
+  }
+}
+```
+
+## How Custom Framework Configuration Works
+
+The configuration is passed to all agent nodes and used to conditionally include specialized prompts:
+
+```typescript
+// In prompt formatting functions
+.replace(
+  "{CUSTOM_FRAMEWORK_PROMPT}",
+  shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
+)
+```
+
+The `shouldUseCustomFramework(config)` function checks if `config.configurable?.customFramework === true`.
+
+## Custom Framework Files
+
+When `customFramework` is `true`, we inject a series of custom prompts and tools into the agent. The table below shows every place in the codebase that needs updating if you're customizing it for a framework other than LangGraph.
+
+### Prompt Files
+
+| Component | File | Prompt Constant | Description |
+|-----------|------|-----------------|-------------|
+| Planner | [prompt.ts](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/graphs/planner/nodes/generate-message/prompt.ts) | `EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT` | Adds framework documentation access instructions |
+| Planner | [prompt.ts](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/graphs/planner/nodes/generate-message/prompt.ts) | `EXTERNAL_FRAMEWORK_PLAN_PROMPT` | Provides framework-specific planning requirements |
+| Programmer | [prompt.ts](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/graphs/programmer/nodes/generate-message/prompt.ts) | `CUSTOM_FRAMEWORK_PROMPT` | Comprehensive framework implementation patterns and best practices |
+| Reviewer | [prompt.ts](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/graphs/reviewer/nodes/generate-review-actions/prompt.ts) | `CUSTOM_FRAMEWORK_PROMPT` | Framework validation and testing requirements |
+
+### Agent & UI Configuration Files
+
+| Component | File | Description |
+|-----------|------|-------------|
+| Toggle Button | [default-view.tsx](https://github.com/langchain-ai/open-swe/tree/main/apps/web/src/components/v2/default-view.tsx) | Contains the LangGraph Engineer toggle button - modify this to add your own button or change the existing one |
+| Framework Logic | [should-use-custom-framework.ts](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/utils/should-use-custom-framework.ts) | Logic function that determines when to enable custom framework features. Currently a boolean based on the UI toggle |
+| Documentation | [constants.ts](https://github.com/langchain-ai/open-swe/tree/main/packages/shared/src/constants.ts) | MCP server configuration for framework documentation access |
+
+
+## Customizing for Your Own Framework
+
+Follow these steps to adapt Open SWE for your own framework:
+
+### Modify Prompt Constants
+
+1. **Update prompt files** from the table above to replace LangGraph-specific content:
+   - Replace `CUSTOM_FRAMEWORK_PROMPT` with your framework's patterns
+   - Update `EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT` with your docs access instructions
+   - Modify `EXTERNAL_FRAMEWORK_PLAN_PROMPT` with your planning requirements
+
+### Update UI Configuration
+
+1. **Modify the toggle button** in [`default-view.tsx`](https://github.com/langchain-ai/open-swe/tree/main/apps/web/src/components/v2/default-view.tsx):
+   - Change button text from "LangGraph Engineer" to your framework name
+   - Update tooltip text and descriptions
+
+2. **Optional**: Create a new toggle button for your framework while keeping the LangGraph one
+
+### Configure Framework Logic
+
+You can either:
+
+- **Reuse the existing `customFramework: true` configuration** and modify the prompts to match your framework instead of LangGraph (no additional code changes needed)
+- **Create a separate config variable** by adding a new field in your graph configuration (e.g., `yourFramework: true`) and adding the detection logic similar to [`should-use-custom-framework.ts`](https://github.com/langchain-ai/open-swe/tree/main/apps/open-swe/src/utils/should-use-custom-framework.ts)
+
+### Add Documentation Access
+
+1. **Configure MCP servers** in [`constants.ts`](https://github.com/langchain-ai/open-swe/tree/main/packages/shared/src/constants.ts):
+   ```typescript
+   export const DEFAULT_MCP_SERVERS = {
+     "your-framework-docs-mcp": {
+       command: "uvx",
+       args: ["your-framework-docs-mcp"],
+     },
+   };
+   ```
+
+### Build and Test
+
+1. **Rebuild the application**:
+   ```bash
+   cd apps/open-swe
+   yarn build
+   ```
+
+2. **Test your customization** by enabling the toggle and verifying framework-specific prompts are used

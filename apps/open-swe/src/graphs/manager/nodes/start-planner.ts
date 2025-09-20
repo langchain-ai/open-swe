@@ -1,10 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../utils/langgraph-client.js";
 import {
   OPEN_SWE_STREAM_MODE,
@@ -13,15 +13,16 @@ import {
   GITHUB_INSTALLATION_ID,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_PAT,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { getBranchName } from "../../../utils/github/git.js";
-import { PlannerGraphUpdate } from "@open-swe/shared/open-swe/planner/types";
+import { PlannerGraphUpdate } from "@openswe/shared/open-swe/planner/types";
 import { getDefaultHeaders } from "../../../utils/default-headers.js";
-import { getCustomConfigurableFields } from "../../../utils/config.js";
+import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { getRecentUserRequest } from "../../../utils/user-request.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import { regenerateInstallationToken } from "../../../utils/github/regenerate-token.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
 
@@ -68,6 +69,9 @@ export async function startPlanner(
       branchName: state.branchName ?? getBranchName(config),
       autoAcceptPlan: state.autoAcceptPlan,
       ...(followupMessage || localMode ? { messages: [followupMessage] } : {}),
+      ...(!shouldCreateIssue(config) && followupMessage
+        ? { internalMessages: [followupMessage] }
+        : {}),
     };
 
     const run = await langGraphClient.runs.create(

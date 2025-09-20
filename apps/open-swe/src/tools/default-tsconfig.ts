@@ -1,9 +1,9 @@
 import path from "path";
 import { tool } from "@langchain/core/tools";
-import { createWriteDefaultTsConfigToolFields } from "@open-swe/shared/open-swe/tools";
-import { GraphConfig, GraphState } from "@open-swe/shared/open-swe/types";
+import { createWriteDefaultTsConfigToolFields } from "@openswe/shared/open-swe/tools";
+import { GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "../utils/shell-executor/index.js";
-import { TIMEOUT_SEC } from "@open-swe/shared/constants";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { getSandboxErrorFields } from "../utils/sandbox-error-fields.js";
 
 const DEFAULT_TS_CONFIG = {

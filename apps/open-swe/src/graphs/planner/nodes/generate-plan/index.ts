@@ -1,16 +1,16 @@
 import { v4 as uuidv4 } from "uuid";
 import { isAIMessage, ToolMessage } from "@langchain/core/messages";
 import { createSessionPlanToolFields } from "../../../../tools/index.js";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import { formatUserRequestPrompt } from "../../../../utils/user-request.js";
 import {
   formatFollowupMessagePrompt,
@@ -20,14 +20,22 @@ import { stopSandbox } from "../../../../utils/sandbox.js";
 import { z } from "zod";
 import { formatCustomRulesPrompt } from "../../../../utils/custom-rules.js";
 import { getScratchpad } from "../../utils/scratchpad-notes.js";
-import { SCRATCHPAD_PROMPT, SYSTEM_PROMPT } from "./prompt.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
+import {
+  SCRATCHPAD_PROMPT,
+  SYSTEM_PROMPT,
+  CUSTOM_FRAMEWORK_PROMPT,
+} from "./prompt.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { filterMessagesWithoutContent } from "../../../../utils/message/content.js";
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 
-function formatSystemPrompt(state: PlannerGraphState): string {
+function formatSystemPrompt(
+  state: PlannerGraphState,
+  config: GraphConfig,
+): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const scratchpad = getScratchpad(state.messages)
@@ -48,6 +56,10 @@ function formatSystemPrompt(state: PlannerGraphState): string {
       scratchpad.length
         ? SCRATCHPAD_PROMPT.replace("{SCRATCHPAD}", scratchpad)
         : "",
+    )
+    .replace(
+      "{ADDITIONAL_INSTRUCTIONS}",
+      shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
     );
 }
 
@@ -97,7 +109,7 @@ export async function generatePlan(
     .invoke([
       {
         role: "system",
-        content: formatSystemPrompt(state),
+        content: formatSystemPrompt(state, config),
       },
       ...inputMessages,
     ]);

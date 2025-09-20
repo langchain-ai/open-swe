@@ -2,9 +2,9 @@ import {
   GITHUB_TOKEN_COOKIE,
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_INSTALLATION_ID,
-} from "@open-swe/shared/constants";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { decryptSecret } from "@open-swe/shared/crypto";
+} from "@openswe/shared/constants";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { decryptSecret } from "@openswe/shared/crypto";
 import { getGitHubPatFromConfig } from "./github-pat.js";
 
 export function getGitHubTokensFromConfig(config: GraphConfig): {

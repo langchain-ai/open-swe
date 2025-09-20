@@ -1,5 +1,5 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { ModelManager, Provider } from "./llms/model-manager.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { Runnable, RunnableConfig } from "@langchain/core/runnables";
@@ -16,7 +16,7 @@ import {
 import { ChatResult, ChatGeneration } from "@langchain/core/outputs";
 import { BaseLanguageModelInput } from "@langchain/core/language_models/base";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import { getConfig } from "@langchain/langgraph";
 import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
 

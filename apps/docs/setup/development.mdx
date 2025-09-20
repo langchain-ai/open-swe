@@ -80,6 +80,11 @@ Before starting, ensure you have the following installed:
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
+
+    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # This is only used in production. In development every user is an "allowed user".
+    # Must be a valid JSON array of strings.
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
 
     ### Agent Environment Variables (`apps/open-swe/.env`)
@@ -120,7 +125,14 @@ Before starting, ensure you have the following installed:
 
     # CI/CD. See the /labs/swe/setup/ci for more information
     SKIP_CI_UNTIL_LAST_COMMIT="true"
+
+    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # This is only used in production. In development every user is an "allowed user".
+    # Must be a valid JSON array of strings.
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
     ```
+
+    If you don't set the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable, every user will be required to set their own LLM API keys to use the agent. Additionally, none of the webhook features (triggering new runs by adding labels to GitHub issues, tagging the agent in PR reviews, etc.) will work unless you include the username's of the GitHub users you want to allow access to in the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable (in both web and agent deployments).
 
     <Tip>
     Generate the `SECRETS_ENCRYPTION_KEY` using: `openssl rand -hex 32`. This key must be identical in both environment files.
@@ -157,7 +169,7 @@ Before starting, ensure you have the following installed:
        # Then expose your local LangGraph server
        ngrok http 2024
        ```
-       Use the ngrok URL + `/webhook/github` (e.g., `https://abc123.ngrok.io/webhook/github`)
+       Use the ngrok URL + `/webhooks/github` (e.g., `https://abc123.ngrok.io/webhooks/github`)
 
     3. **Webhook secret**: Generate and save this value:
        ```bash
@@ -180,7 +192,7 @@ Before starting, ensure you have the following installed:
     This gif shows how/where to enable the permissions on the GitHub App:
     <iframe
       className="w-full aspect-video rounded-xl"
-      src="https://www.youtube.com/embed/FP02bprNtrA"
+      src="https://www.youtube.com/embed/rw6ddYmiTMo"
       title="Permissions Walkthrough"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
       allowFullScreen
@@ -189,6 +201,9 @@ Before starting, ensure you have the following installed:
     ### Subscribe to Events
 
     - ✅ **Issues** - Required for webhook functionality
+    - ✅ **Pull request review** - Required for PR tagging functionality
+    - ✅ **Pull request review comment** - Required for PR tagging functionality
+    - ✅ **Issue comment** - Required for PR tagging functionality
 
     ### Installation Settings
 
@@ -287,3 +302,4 @@ Once both servers are running:
 - Learn about [Authentication](/labs/swe/setup/authentication) to understand how the GitHub App integration works
 - Explore [Usage](/labs/swe/usage/intro) to start using Open SWE for code changes
 - Review the [Monorepo Structure](/labs/swe/setup/monorepo) for development best practices
+

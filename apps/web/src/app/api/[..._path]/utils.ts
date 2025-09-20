@@ -1,7 +1,7 @@
-import { getInstallationToken } from "@open-swe/shared/github/auth";
+import { getInstallationToken } from "@openswe/shared/github/auth";
 import { App } from "@octokit/app";
-import { GITHUB_TOKEN_COOKIE } from "@open-swe/shared/constants";
-import { encryptSecret } from "@open-swe/shared/crypto";
+import { GITHUB_TOKEN_COOKIE } from "@openswe/shared/constants";
+import { encryptSecret } from "@openswe/shared/crypto";
 import { NextRequest } from "next/server";
 
 export function getGitHubAccessTokenOrThrow(
@@ -68,7 +68,8 @@ export async function getInstallationNameFromReq(
   installationId: string,
 ): Promise<string> {
   try {
-    const requestJson = await req.json();
+    const reqCopy = req.clone();
+    const requestJson = await reqCopy.json();
     const installationName = requestJson?.input?.targetRepository?.owner;
     if (installationName) {
       return installationName;
@@ -79,7 +80,8 @@ export async function getInstallationNameFromReq(
 
   try {
     return await getInstallationName(installationId);
-  } catch {
+  } catch (error) {
+    console.error("Failed to get installation name:", error);
     return "";
   }
 }

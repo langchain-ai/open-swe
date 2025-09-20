@@ -3,7 +3,7 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import {
   createGetURLContentTool,
   createShellTool,
@@ -12,20 +12,24 @@ import {
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/planner/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   formatFollowupMessagePrompt,
   isFollowupRequest,
 } from "../../utils/followup.js";
-import { SYSTEM_PROMPT } from "./prompt.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import {
+  SYSTEM_PROMPT,
+  EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT,
+  EXTERNAL_FRAMEWORK_PLAN_PROMPT,
+} from "./prompt.js";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
-} from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/local-mode";
 import { getMissingMessages } from "../../../../utils/github/issue-messages.js";
 import { getPlansFromIssue } from "../../../../utils/github/issue-task.js";
 import { createGrepTool } from "../../../../tools/grep.js";
@@ -40,6 +44,8 @@ import {
   trackCachePerformance,
 } from "../../../../utils/caching.js";
 import { createViewTool } from "../../../../tools/builtin-tools/view.js";
+import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
+import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
 
 const logger = createLogger(LogLevel.INFO, "GeneratePlanningMessageNode");
 
@@ -79,7 +85,18 @@ function formatSystemPrompt(
       state.codebaseTree || "No codebase tree generated yet.",
     )
     .replaceAll("{CUSTOM_RULES}", formatCustomRulesPrompt(state.customRules))
-    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages));
+    .replace("{USER_REQUEST_PROMPT}", formatUserRequestPrompt(state.messages))
+    .replace(
+      "{EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT}",
+      shouldUseCustomFramework(config)
+        ? EXTERNAL_FRAMEWORK_DOCUMENTATION_PROMPT
+        : "",
+    )
+    .replace(
+      "{EXTERNAL_FRAMEWORK_PLAN_PROMPT}",
+      shouldUseCustomFramework(config) ? EXTERNAL_FRAMEWORK_PLAN_PROMPT : "",
+    )
+    .replace("{DEV_SERVER_PROMPT}", ""); // Always empty until we add dev server tool
 }
 
 export async function generateAction(
@@ -124,10 +141,14 @@ export async function generateAction(
       : {}),
   });
 
-  const [missingMessages, { taskPlan: latestTaskPlan }] = await Promise.all([
-    getMissingMessages(state, config),
-    getPlansFromIssue(state, config),
-  ]);
+  const [missingMessages, { taskPlan: latestTaskPlan }] = shouldCreateIssue(
+    config,
+  )
+    ? await Promise.all([
+        getMissingMessages(state, config),
+        getPlansFromIssue(state, config),
+      ])
+    : [[], { taskPlan: null }];
 
   const inputMessages = filterMessagesWithoutContent([
     ...state.messages,

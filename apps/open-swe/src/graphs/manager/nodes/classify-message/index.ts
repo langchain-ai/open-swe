@@ -1,8 +1,8 @@
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@open-swe/shared/open-swe/manager/types";
+} from "@openswe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../../utils/langgraph-client.js";
 import {
   BaseMessage,
@@ -15,9 +15,9 @@ import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { Command, END } from "@langchain/langgraph";
-import { getMessageContentString } from "@open-swe/shared/messages";
+import { getMessageContentString } from "@openswe/shared/messages";
 import {
   createIssue,
   createIssueComment,
@@ -36,15 +36,16 @@ import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
-} from "@open-swe/shared/constants";
+} from "@openswe/shared/constants";
 import { createLogger, LogLevel } from "../../../../utils/logger.js";
 import { createClassificationPromptAndToolSchema } from "./utils.js";
 import { RequestSource } from "../../../../constants.js";
 import { StreamMode, Thread } from "@langchain/langgraph-sdk";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
-import { PlannerGraphState } from "@open-swe/shared/open-swe/planner/types";
-import { GraphState } from "@open-swe/shared/open-swe/types";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import { GraphState } from "@openswe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
+import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -183,6 +184,39 @@ export async function classifyMessage(
 
     throw new Error(
       `Unsupported route for local mode received: ${toolCallArgs.route}`,
+    );
+  }
+
+  if (!shouldCreateIssue(config)) {
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: [response],
+    };
+    if (
+      toolCallArgs.route === "start_planner" ||
+      toolCallArgs.route === "start_planner_for_followup"
+    ) {
+      return new Command({
+        update: commandUpdate,
+        goto: "start-planner",
+      });
+    }
+
+    if (toolCallArgs.route === "create_new_issue") {
+      return new Command({
+        update: commandUpdate,
+        goto: "create-new-session",
+      });
+    }
+
+    if (toolCallArgs.route === "no_op") {
+      return new Command({
+        update: commandUpdate,
+        goto: END,
+      });
+    }
+
+    throw new Error(
+      `Unsupported route received: ${toolCallArgs.route}\nUnable to route message there when not creating GitHub issues for request.`,
     );
   }
 

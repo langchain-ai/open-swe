@@ -1,11 +1,11 @@
 import { BaseMessage } from "@langchain/core/messages";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { getMessageString } from "../../../utils/message/content.js";
 
 export async function createIssueFieldsFromMessages(

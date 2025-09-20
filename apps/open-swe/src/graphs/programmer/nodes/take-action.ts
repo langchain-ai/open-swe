@@ -14,7 +14,7 @@ import {
   GraphConfig,
   GraphUpdate,
   TaskPlan,
-} from "@open-swe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/types";
 import {
   checkoutBranchAndCommit,
   getChangedFilesStatus,
@@ -31,16 +31,22 @@ import {
   getCodebaseTree,
 } from "../../../utils/tree.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
-import { getActiveTask } from "@open-swe/shared/open-swe/tasks";
+import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
-import { getRepoAbsolutePath } from "@open-swe/shared/git";
+import { getRepoAbsolutePath } from "@openswe/shared/git";
+import {
+  createReplyToCommentTool,
+  createReplyToReviewCommentTool,
+  createReplyToReviewTool,
+  shouldIncludeReviewCommentTool,
+} from "../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -83,6 +89,13 @@ export async function takeAction(
     getURLContentTool,
     searchDocumentForTool,
     writeDefaultTsConfigTool,
+    ...(shouldIncludeReviewCommentTool(state, config)
+      ? [
+          createReplyToReviewCommentTool(state, config),
+          createReplyToCommentTool(state, config),
+          createReplyToReviewTool(state, config),
+        ]
+      : []),
     ...mcpTools,
   ];
   const toolsMap = Object.fromEntries(

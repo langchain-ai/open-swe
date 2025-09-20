@@ -1,7 +1,7 @@
 import {
   PlannerGraphState,
   PlannerGraphUpdate,
-} from "@open-swe/shared/open-swe/planner/types";
+} from "@openswe/shared/open-swe/planner/types";
 import { Command } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
 import { getIssue, getIssueComments } from "../../../utils/github/api.js";
@@ -13,32 +13,35 @@ import {
   isHumanMessage,
   RemoveMessage,
 } from "@langchain/core/messages";
-import { GraphConfig } from "@open-swe/shared/open-swe/types";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   getMessageContentFromIssue,
   getUntrackedComments,
 } from "../../../utils/github/issue-messages.js";
 import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@open-swe/shared/constants";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  if (isLocalMode(config)) {
-    // In local mode, just proceed to initialize-sandbox with existing messages
+  if (isLocalMode(config) || !shouldCreateIssue(config)) {
     return new Command({
       update: {},
       goto: "initialize-sandbox",
     });
   }
+
   if (!state.githubIssueId) {
     throw new Error("No github issue id provided");
   }
+
   if (!state.targetRepository) {
     throw new Error("No target repository provided");
   }
+
   const { githubInstallationToken } = getGitHubTokensFromConfig(config);
   const baseGetIssueInputs = {
     owner: state.targetRepository.owner,
@@ -56,8 +59,6 @@ export async function prepareGraphState(
   if (!issue) {
     throw new Error(`Issue not found. Issue ID: ${state.githubIssueId}`);
   }
-
-  // Ensure the main issue & all comments are included in the state;
 
   // If the messages state is empty, we can just include all comments as human messages.
   if (!state.messages?.length) {

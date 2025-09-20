@@ -2,27 +2,27 @@ import { v4 as uuidv4 } from "uuid";
 import {
   ReviewerGraphState,
   ReviewerGraphUpdate,
-} from "@open-swe/shared/open-swe/reviewer/types";
+} from "@openswe/shared/open-swe/reviewer/types";
 import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { formatPlanPromptWithSummaries } from "../../../utils/plan-prompt.js";
 import {
   getActivePlanItems,
   getActiveTask,
   updateTaskPlanItems,
-} from "@open-swe/shared/open-swe/tasks";
+} from "@openswe/shared/open-swe/tasks";
 import {
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
-} from "@open-swe/shared/open-swe/tools";
-import { isLocalMode } from "@open-swe/shared/open-swe/local-mode";
+} from "@openswe/shared/open-swe/tools";
+import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 
 import {
   loadModel,
   supportsParallelToolCallsParam,
 } from "../../../utils/llms/index.js";
-import { LLMTask } from "@open-swe/shared/open-swe/llm-task";
-import { GraphConfig, PlanItem } from "@open-swe/shared/open-swe/types";
+import { LLMTask } from "@openswe/shared/open-swe/llm-task";
+import { GraphConfig, PlanItem } from "@openswe/shared/open-swe/types";
 import { z } from "zod";
 import { addTaskPlanToIssue } from "../../../utils/github/issue-task.js";
 import { getMessageString } from "../../../utils/message/content.js";
@@ -35,6 +35,7 @@ import {
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { createScratchpadTool } from "../../../tools/scratchpad.js";
+import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
 
 const logger = createLogger(LogLevel.INFO, "FinalReview");
 
@@ -192,7 +193,7 @@ export async function finalReview(
     "agent",
   );
 
-  if (!isLocalMode(config)) {
+  if (!isLocalMode(config) && shouldCreateIssue(config)) {
     await addTaskPlanToIssue(
       {
         githubIssueId: state.githubIssueId,

@@ -17,6 +17,7 @@ export const GITHUB_AUTH_STATE_COOKIE = "github_auth_state";
 export const GITHUB_INSTALLATION_ID_COOKIE = "github_installation_id";
 export const GITHUB_TOKEN_TYPE_COOKIE = "github_token_type";
 
+export const OPEN_SWE_V2_GRAPH_ID = "open-swe-v2";
 export const MANAGER_GRAPH_ID = "manager";
 export const PLANNER_GRAPH_ID = "planner";
 export const PROGRAMMER_GRAPH_ID = "programmer";
