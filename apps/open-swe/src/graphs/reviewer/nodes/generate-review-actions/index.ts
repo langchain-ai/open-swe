@@ -189,11 +189,13 @@ function createToolsAndPrompt(
 
   return {
     providerTools: {
+      openrouter: [],
       anthropic: anthropicTools,
       openai: nonAnthropicTools,
       "google-genai": nonAnthropicTools,
     },
     providerMessages: {
+      openrouter: [],
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,
