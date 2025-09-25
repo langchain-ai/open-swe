@@ -85,11 +85,6 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
-  // Ollama models (default)
-  {
-    label: "Qwen2.5 Coder 7B",
-    value: "ollama:qwen2.5-coder:7b",
-  },
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
