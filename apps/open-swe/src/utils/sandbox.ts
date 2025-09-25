@@ -116,7 +116,10 @@ function isMissingImageError(error: unknown): boolean {
   return message.toLowerCase().includes("no such image");
 }
 
-async function ensureImageAvailable(docker: Docker, image: string): Promise<void> {
+async function ensureImageAvailable(
+  docker: Docker,
+  image: string,
+): Promise<void> {
   try {
     await docker.getImage(image).inspect();
     return;
@@ -127,45 +130,61 @@ async function ensureImageAvailable(docker: Docker, image: string): Promise<void
   }
 
   await new Promise<void>((resolve, reject) => {
-    docker.pull(image, (pullError, stream) => {
-      if (pullError) {
-        const detail =
-          pullError instanceof Error
-            ? pullError.message
-            : typeof pullError === "string"
-              ? pullError
-              : "";
-        reject(
-          new Error(
-            `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
-              detail && detail !== "[object Object]" ? ` Details: ${detail}` : ""
-            }`,
-          ),
-        );
-        return;
-      }
-
-      docker.modem.followProgress(stream, (progressError) => {
-        if (progressError) {
+    docker.pull(
+      image,
+      (pullError: unknown, stream: NodeJS.ReadableStream | undefined) => {
+        if (pullError) {
           const detail =
-            progressError instanceof Error
-              ? progressError.message
-              : typeof progressError === "string"
-                ? progressError
+            pullError instanceof Error
+              ? pullError.message
+              : typeof pullError === "string"
+                ? pullError
                 : "";
           reject(
             new Error(
               `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
-                detail && detail !== "[object Object]" ? ` Details: ${detail}` : ""
+                detail && detail !== "[object Object]"
+                  ? ` Details: ${detail}`
+                  : ""
               }`,
             ),
           );
           return;
         }
 
-        resolve();
-      });
-    });
+        if (!stream) {
+          reject(
+            new Error(
+              `Failed to pull Docker image "${image}". Docker did not return a pull progress stream.`,
+            ),
+          );
+          return;
+        }
+
+        docker.modem.followProgress(stream, (progressError?: unknown) => {
+          if (progressError) {
+            const detail =
+              progressError instanceof Error
+                ? progressError.message
+                : typeof progressError === "string"
+                  ? progressError
+                  : "";
+            reject(
+              new Error(
+                `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
+                  detail && detail !== "[object Object]"
+                    ? ` Details: ${detail}`
+                    : ""
+                }`,
+              ),
+            );
+            return;
+          }
+
+          resolve();
+        });
+      },
+    );
   });
 }
 
@@ -185,9 +204,11 @@ export async function createDockerSandbox(
   };
 
   if (SANDBOX_NANO_CPUS > 0) {
-    (hostConfig as Docker.ContainerCreateOptions["HostConfig"] & {
-      NanoCPUs?: number;
-    }).NanoCPUs = SANDBOX_NANO_CPUS;
+    (
+      hostConfig as Docker.ContainerCreateOptions["HostConfig"] & {
+        NanoCPUs?: number;
+      }
+    ).NanoCPUs = SANDBOX_NANO_CPUS;
   }
 
   const container = await docker.createContainer({

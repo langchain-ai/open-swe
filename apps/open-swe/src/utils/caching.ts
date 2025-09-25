@@ -28,25 +28,25 @@ export function trackCachePerformance(
   const completionTokenDetails =
     response.usage_metadata &&
     "completion_tokens_details" in response.usage_metadata
-      ? (response.usage_metadata as typeof response.usage_metadata & {
-          completion_tokens_details?: { reasoning_tokens?: number };
-        }).completion_tokens_details
+      ? (
+          response.usage_metadata as typeof response.usage_metadata & {
+            completion_tokens_details?: { reasoning_tokens?: number };
+          }
+        ).completion_tokens_details
       : undefined;
 
-  const inputTokenDetails =
-    response.usage_metadata?.input_token_details as
-      | {
-          cache_creation?: number;
-          cache_read?: number;
-        }
-      | undefined;
+  const inputTokenDetails = response.usage_metadata?.input_token_details as
+    | {
+        cache_creation?: number;
+        cache_read?: number;
+      }
+    | undefined;
 
-  const outputTokenDetails =
-    response.usage_metadata?.output_token_details as
-      | {
-          reasoning_tokens?: number;
-        }
-      | undefined;
+  const outputTokenDetails = response.usage_metadata?.output_token_details as
+    | {
+        reasoning_tokens?: number;
+      }
+    | undefined;
 
   const metrics: CacheMetrics = {
     cacheCreationInputTokens: inputTokenDetails?.cache_creation || 0,
