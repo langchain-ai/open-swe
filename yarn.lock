@@ -3293,6 +3293,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@openswe/sandbox-core@workspace:packages/sandbox-core":
+  version: 0.0.0-use.local
+  resolution: "@openswe/sandbox-core@workspace:packages/sandbox-core"
+  languageName: unknown
+  linkType: soft
+
 "@openswe/shared@*, @openswe/shared@workspace:packages/shared":
   version: 0.0.0-use.local
   resolution: "@openswe/shared@workspace:packages/shared"
