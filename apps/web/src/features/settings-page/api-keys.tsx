@@ -29,7 +29,6 @@ interface ApiKeySection {
   keys: ApiKey[];
 }
 
-
 const API_KEY_SECTIONS: Record<string, Omit<ApiKeySection, "keys">> = {
   llms: {
     title: "LLMs",
@@ -75,7 +74,6 @@ export function APIKeysTab() {
     Record<string, boolean>
   >({});
 
-
   const toggleKeyVisibility = (keyId: string) => {
     setVisibilityState((prev) => ({
       ...prev,
@@ -90,7 +88,6 @@ export function APIKeysTab() {
       [keyId]: value,
     });
   };
-
 
   const deleteApiKey = (keyId: string) => {
     const currentApiKeys = config.apiKeys || {};
@@ -119,7 +116,6 @@ export function APIKeysTab() {
     return sections;
   };
 
-
   const apiKeySections = getApiKeySections();
 
   return (
@@ -134,7 +130,6 @@ export function APIKeysTab() {
           <p>Only an Anthropic API key is required to get started.</p>
         </AlertDescription>
       </Alert>
-
       {Object.entries(apiKeySections).map(([sectionKey, section]) => (
         <Card
           key={sectionKey}
@@ -198,7 +193,7 @@ export function APIKeysTab() {
                         <Input
                           id={`${apiKey.id}-key`}
                           type={apiKey.id === "ollamaBaseUrl" ? "url" : (apiKey.isVisible ? "text" : "password")}
-                          value={apiKey.value || (apiKey.id === "ollamaBaseUrl" ? "http://localhost:11434" : "")}
+                          value={apiKey.value}
                           onChange={(e) =>
                             updateApiKey(apiKey.id, e.target.value)
                           }
@@ -236,7 +231,6 @@ export function APIKeysTab() {
                       </div>
                     </div>
                   </div>
-
                 </div>
               </div>
             ))}
