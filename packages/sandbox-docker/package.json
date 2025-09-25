@@ -1,0 +1,36 @@
+{
+  "name": "@openswe/sandbox-docker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf ./dist .turbo || true",
+    "build": "yarn clean && tsc -p tsconfig.json"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js",
+      "require": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@openswe/sandbox-core": "workspace:*",
+    "dockerode": "^4.0.2"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.21"
+  }
+}
