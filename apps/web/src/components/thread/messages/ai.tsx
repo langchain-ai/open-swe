@@ -18,7 +18,6 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { Interrupt } from "./interrupt";
 import { ActionStep, ActionItemProps } from "@/components/gen-ui/action-step";
 import { TaskSummary } from "@/components/gen-ui/task-summary";
-import { PullRequestOpened } from "@/components/gen-ui/pull-request-opened";
 import {
   MarkTaskCompleted,
   MarkTaskIncomplete,
@@ -34,7 +33,6 @@ import {
   createMarkTaskCompletedToolFields,
   createMarkTaskNotCompletedToolFields,
   createGrepToolFields,
-  createOpenPrToolFields,
   createInstallDependenciesToolFields,
   createCodeReviewMarkTaskCompletedFields,
   createCodeReviewMarkTaskNotCompleteFields,
@@ -74,8 +72,6 @@ const reviewStartedTool = createReviewStartedToolFields();
 type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
 const grepTool = createGrepToolFields(dummyRepo);
 type GrepToolArgs = z.infer<typeof grepTool.schema>;
-const openPrTool = createOpenPrToolFields();
-type OpenPrToolArgs = z.infer<typeof openPrTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
 type InstallDependenciesToolArgs = z.infer<
   typeof installDependenciesTool.schema
@@ -133,7 +129,6 @@ function isMcpTool(toolName: string): boolean {
     installDependenciesTool.name,
     scratchpadTool.name,
     getURLContentTool.name,
-    openPrTool.name,
     diagnoseErrorTool.name,
     requestHumanHelpTool.name,
     textEditorTool.name,
@@ -442,10 +437,6 @@ export function AssistantMessage({
     ? aiToolCalls.find((tc) => tc.name === markTaskNotCompletedTool.name)
     : undefined;
 
-  const openPrToolCall = message
-    ? aiToolCalls.find((tc) => tc.name === openPrTool.name)
-    : undefined;
-
   const markFinalReviewTaskCompletedToolCall = message
     ? aiToolCalls.find(
         (tc) => tc.name === markFinalReviewTaskCompletedTool.name,
@@ -595,68 +586,6 @@ export function AssistantMessage({
           status={correspondingToolResult ? "done" : "generating"}
           notes={args.notes}
           reasoningText={reasoningText}
-        />
-      </div>
-    );
-  }
-
-  if (openPrToolCall) {
-    let branch: string | undefined;
-    let targetBranch: string | undefined = "main";
-
-    if (message && isAIMessageSDK(message)) {
-      branch = message.additional_kwargs?.branch as string | undefined;
-      targetBranch =
-        (message.additional_kwargs?.targetBranch as string | undefined) ||
-        "main";
-    }
-
-    const args = openPrToolCall.args as OpenPrToolArgs;
-    const correspondingToolResult = toolResults.find(
-      (tr) => tr && tr.tool_call_id === openPrToolCall.id,
-    );
-
-    const status = correspondingToolResult ? "done" : "generating";
-
-    const content = correspondingToolResult
-      ? getContentString(correspondingToolResult.content)
-      : "";
-
-    // Extract PR URL from the tool message content
-    // Format: "Created pull request: https://example.com/owner/repo/pull/123"
-    // or "Marked pull request as ready for review: https://example.com/owner/repo/pull/123"
-    let prUrl: string | undefined = undefined;
-    if (content) {
-      if (content.includes("pull request: ")) {
-        prUrl = content.split("pull request: ")[1].trim();
-      } else if (
-        content.includes("Marked pull request as ready for review: ")
-      ) {
-        prUrl = content
-          .split("Marked pull request as ready for review: ")[1]
-          .trim();
-      }
-    }
-
-    // Extract PR number from URL if available
-    let prNumber: number | undefined = undefined;
-    if (prUrl) {
-      const match = prUrl.match(/\/pull\/(\d+)/);
-      if (match && match[1]) {
-        prNumber = parseInt(match[1], 10);
-      }
-    }
-
-    return (
-      <div className="flex flex-col gap-4">
-        <PullRequestOpened
-          status={status}
-          title={args.title}
-          description={args.body}
-          prNumber={prNumber}
-          branch={branch}
-          targetBranch={targetBranch}
-          isDraft={content.includes("Opened draft")}
         />
       </div>
     );

@@ -78,7 +78,7 @@ function formatSystemPrompt(
     .replaceAll(
       "{LOCAL_MODE_NOTE}",
       isLocalMode(config)
-        ? "<local_mode_note>IMPORTANT: You are running in local mode. When specifying file paths, use relative paths from the current working directory or absolute paths that start with the current working directory. Do NOT use sandbox paths like '/home/daytona/project/'.</local_mode_note>"
+        ? "<local_mode_note>IMPORTANT: You are running in local mode. When specifying file paths, use relative paths from the current working directory or absolute paths that start with the current working directory. Do NOT use sandbox-specific absolute paths provided by hosted environments.</local_mode_note>"
         : "",
     )
     .replaceAll(

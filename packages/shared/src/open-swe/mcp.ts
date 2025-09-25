@@ -1,38 +1,4 @@
 import { z } from "zod";
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-
-export const oAuthClientProviderSchema = z.custom<OAuthClientProvider>(
-  (val) => {
-    if (!val || typeof val !== "object") return false;
-
-    // Check required properties and methods exist
-    const requiredMethods = [
-      "redirectUrl",
-      "clientMetadata",
-      "clientInformation",
-      "tokens",
-      "saveTokens",
-    ];
-
-    // redirectUrl can be a string, URL, or getter returning string/URL
-    if (!("redirectUrl" in val)) return false;
-
-    // clientMetadata can be an object or getter returning an object
-    if (!("clientMetadata" in val)) return false;
-
-    // Check that required methods exist (they can be functions or getters)
-    for (const method of requiredMethods) {
-      if (!(method in val)) return false;
-    }
-
-    return true;
-  },
-  {
-    message:
-      "Must be a valid OAuthClientProvider implementation with required properties: redirectUrl, clientMetadata, clientInformation, tokens, saveTokens",
-  },
-);
-
 /**
  * Stdio transport restart configuration
  */
@@ -177,13 +143,6 @@ export const streamableHttpConnectionSchema = z
      * Additional headers to send with the request, useful for authentication
      */
     headers: z.record(z.string()).optional(),
-    /**
-     * OAuth client provider for automatic authentication handling.
-     * When provided, the transport will automatically handle token refresh,
-     * 401 error retries, and OAuth 2.0 flows according to RFC 6750.
-     * This is the recommended approach for authentication instead of manual headers.
-     */
-    authProvider: oAuthClientProviderSchema.optional(),
     /**
      * Additional reconnection settings.
      */

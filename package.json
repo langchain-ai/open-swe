@@ -7,15 +7,25 @@
     "packages/*"
   ],
   "scripts": {
+    "guard:scan": "node ./scripts/run-guard.mjs",
+    "prebuild": "yarn guard:scan",
     "dev": "turbo dev",
+    "predev": "yarn guard:scan",
     "build": "turbo build",
+    "preformat": "yarn guard:scan",
     "turbo:command": "turbo",
+    "preturbo:command": "yarn guard:scan",
     "format": "turbo format",
+    "preformat:check": "yarn guard:scan",
     "clean": "rm -rf .turbo || true && turbo clean",
+    "preclean": "yarn guard:scan",
     "format:check": "turbo format:check",
     "lint": "turbo lint",
+    "prelint": "yarn guard:scan",
     "lint:fix": "turbo lint:fix",
-    "test": "turbo test"
+    "prelint:fix": "yarn guard:scan",
+    "test": "turbo test",
+    "pretest": "yarn guard:scan"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
