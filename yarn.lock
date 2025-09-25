@@ -3293,9 +3293,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@openswe/sandbox-core@workspace:packages/sandbox-core":
+"@openswe/sandbox-core@workspace:*, @openswe/sandbox-core@workspace:packages/sandbox-core":
   version: 0.0.0-use.local
   resolution: "@openswe/sandbox-core@workspace:packages/sandbox-core"
+  languageName: unknown
+  linkType: soft
+
+"@openswe/sandbox-docker@workspace:packages/sandbox-docker":
+  version: 0.0.0-use.local
+  resolution: "@openswe/sandbox-docker@workspace:packages/sandbox-docker"
+  dependencies:
+    "@openswe/sandbox-core": "workspace:*"
+    "@types/dockerode": ^3.3.21
+    dockerode: ^4.0.2
   languageName: unknown
   linkType: soft
 
@@ -5335,6 +5345,17 @@ __metadata:
     "@types/node": "*"
     "@types/ssh2": "*"
   checksum: cc58e8189f6ec5a2b8ca890207402178a97ddac8c80d125dc65d8ab29034b5db736de15e99b91b2d74e66d14e26e73b6b8b33216613dd15fd3aa6b82c11a83ed
+  languageName: node
+  linkType: hard
+
+"@types/dockerode@npm:^3.3.21":
+  version: 3.3.44
+  resolution: "@types/dockerode@npm:3.3.44"
+  dependencies:
+    "@types/docker-modem": "*"
+    "@types/node": "*"
+    "@types/ssh2": "*"
+  checksum: ec3638142112bc9e9743803b0b86ffef01996f82175b1fde571f1b6dba8582dfb7c62f4aec1d445a8136764e9f5858f3da5d7592dc357993f013217927059fc6
   languageName: node
   linkType: hard
 
