@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Key, Trash2, Info, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, Key, Trash2, Info } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -44,10 +44,10 @@ const API_KEY_DEFINITIONS = {
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
-    { 
-      id: "ollamaBaseUrl", 
-      name: "Ollama", 
-      description: "Local Ollama service URL (default: http://localhost:11434). No API key required for local usage." 
+    {
+      id: "ollamaBaseUrl",
+      name: "Ollama",
+      description: "Local Ollama service URL (default: http://localhost:11434). No API key required for local usage."
     },
   ],
   // infrastructure: [
@@ -74,11 +74,7 @@ export function APIKeysTab() {
   const [visibilityState, setVisibilityState] = useState<
     Record<string, boolean>
   >({});
-  
-  // Ollama connection state
-  const [isConnected, setIsConnected] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+
 
   const toggleKeyVisibility = (keyId: string) => {
     setVisibilityState((prev) => ({
@@ -95,24 +91,6 @@ export function APIKeysTab() {
     });
   };
 
-  const testOllamaConnection = useCallback(async () => {
-    const ollamaUrl = config.apiKeys?.ollamaBaseUrl || "http://localhost:11434";
-    setIsLoading(true);
-    setConnectionError(null);
-
-    try {
-      const response = await fetch(`${ollamaUrl}/api/tags`);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      setIsConnected(true);
-    } catch (error) {
-      setConnectionError(error instanceof Error ? error.message : "Connection failed");
-      setIsConnected(false);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [config.apiKeys?.ollamaBaseUrl]);
 
   const deleteApiKey = (keyId: string) => {
     const currentApiKeys = config.apiKeys || {};
@@ -141,19 +119,6 @@ export function APIKeysTab() {
     return sections;
   };
 
-  // Auto-test connection when Ollama URL changes
-  useEffect(() => {
-    const ollamaUrl = config.apiKeys?.ollamaBaseUrl;
-    if (ollamaUrl && ollamaUrl.trim()) {
-      testOllamaConnection();
-    }
-  }, [config.apiKeys?.ollamaBaseUrl, testOllamaConnection]);
-
-  // Initial load - try to connect on mount if default URL might work
-  useEffect(() => {
-    testOllamaConnection();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount
 
   const apiKeySections = getApiKeySections();
 
@@ -268,51 +233,10 @@ export function APIKeysTab() {
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         )}
-                        {apiKey.id === "ollamaBaseUrl" && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={testOllamaConnection}
-                            disabled={isLoading}
-                            className="px-2"
-                          >
-                            <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-                          </Button>
-                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Ollama-specific sections */}
-                  {apiKey.id === "ollamaBaseUrl" && (
-                    <div className="mt-4">
-                      {/* Simple Connection Status */}
-                      <div className="space-y-2">
-                        {isConnected ? (
-                          <div className="flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-500" />
-                            <span className="text-sm text-green-600 dark:text-green-400">
-                              Connected
-                            </span>
-                          </div>
-                        ) : connectionError ? (
-                          <div className="flex items-center gap-2">
-                            <XCircle className="h-4 w-4 text-red-500" />
-                            <span className="text-sm text-red-600 dark:text-red-400">
-                              {connectionError}
-                            </span>
-                          </div>
-                        ) : isLoading ? (
-                          <div className="flex items-center gap-2">
-                            <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
-                            <span className="text-sm text-blue-600 dark:text-blue-400">
-                              Connecting...
-                            </span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             ))}
