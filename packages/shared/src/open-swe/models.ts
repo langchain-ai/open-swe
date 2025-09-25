@@ -85,42 +85,10 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
-  // Ollama models
+  // Ollama models (default)
   {
     label: "Qwen2.5 Coder 7B",
     value: "ollama:qwen2.5-coder:7b",
-  },
-  {
-    label: "Qwen2.5 Coder 14B",
-    value: "ollama:qwen2.5-coder:14b",
-  },
-  {
-    label: "Qwen2.5 Coder 32B",
-    value: "ollama:qwen2.5-coder:32b",
-  },
-  {
-    label: "GPT-OSS 20B",
-    value: "ollama:gpt-oss:20b",
-  },
-  {
-    label: "GPT-OSS 120B",
-    value: "ollama:gpt-oss:120b",
-  },
-  {
-    label: "DeepSeek R1 8B",
-    value: "ollama:deepseek-r1:8b",
-  },
-  {
-    label: "DeepSeek R1 14B",
-    value: "ollama:deepseek-r1:14b",
-  },
-  {
-    label: "DeepSeek R1 32B",
-    value: "ollama:deepseek-r1:32b",
-  },
-  {
-    label: "DeepSeek R1 70B",
-    value: "ollama:deepseek-r1:70b",
   },
 ];
 

@@ -9,8 +9,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Eye, EyeOff, Key, Trash2, Info, CheckCircle, XCircle, RefreshCw, Check, ChevronDown, ChevronUp } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Eye, EyeOff, Key, Trash2, Info, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -30,25 +29,6 @@ interface ApiKeySection {
   keys: ApiKey[];
 }
 
-interface OllamaModel {
-  name: string;
-  model: string;
-  modified_at: string;
-  size: number;
-  digest: string;
-  details: {
-    parent_model: string;
-    format: string;
-    family: string;
-    families: string[];
-    parameter_size: string;
-    quantization_level: string;
-  };
-}
-
-interface OllamaModelsResponse {
-  models: OllamaModel[];
-}
 
 const API_KEY_SECTIONS: Record<string, Omit<ApiKeySection, "keys">> = {
   llms: {
@@ -95,13 +75,10 @@ export function APIKeysTab() {
     Record<string, boolean>
   >({});
   
-  // Ollama-specific state
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  // Ollama connection state
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [showModels, setShowModels] = useState(false);
 
   const toggleKeyVisibility = (keyId: string) => {
     setVisibilityState((prev) => ({
@@ -118,7 +95,7 @@ export function APIKeysTab() {
     });
   };
 
-  const fetchOllamaModels = useCallback(async () => {
+  const testOllamaConnection = useCallback(async () => {
     const ollamaUrl = config.apiKeys?.ollamaBaseUrl || "http://localhost:11434";
     setIsLoading(true);
     setConnectionError(null);
@@ -128,44 +105,14 @@ export function APIKeysTab() {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      
-      const data: OllamaModelsResponse = await response.json();
-      setOllamaModels(data.models);
       setIsConnected(true);
-      
-      // Initialize selected models if none are set
-      if (selectedModels.length === 0 && data.models.length > 0) {
-        setSelectedModels([data.models[0].name]);
-      }
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : "Connection failed");
       setIsConnected(false);
-      setOllamaModels([]);
     } finally {
       setIsLoading(false);
     }
-  }, [config.apiKeys?.ollamaBaseUrl, selectedModels.length]);
-
-  const toggleModelSelection = (modelName: string) => {
-    setSelectedModels(prev => {
-      const newSelection = prev.includes(modelName) 
-        ? prev.filter(name => name !== modelName)
-        : [...prev, modelName];
-      
-      // Save selected models to config
-      updateConfig(DEFAULT_CONFIG_KEY, "selectedOllamaModels", newSelection);
-      
-      return newSelection;
-    });
-  };
-
-  // Load selected models from config on mount
-  useEffect(() => {
-    const savedModels = config.selectedOllamaModels || [];
-    if (Array.isArray(savedModels)) {
-      setSelectedModels(savedModels);
-    }
-  }, [config.selectedOllamaModels]);
+  }, [config.apiKeys?.ollamaBaseUrl]);
 
   const deleteApiKey = (keyId: string) => {
     const currentApiKeys = config.apiKeys || {};
@@ -194,18 +141,17 @@ export function APIKeysTab() {
     return sections;
   };
 
-  // Auto-fetch models when Ollama URL changes
+  // Auto-test connection when Ollama URL changes
   useEffect(() => {
     const ollamaUrl = config.apiKeys?.ollamaBaseUrl;
     if (ollamaUrl && ollamaUrl.trim()) {
-      fetchOllamaModels();
+      testOllamaConnection();
     }
-  }, [config.apiKeys?.ollamaBaseUrl, fetchOllamaModels]);
+  }, [config.apiKeys?.ollamaBaseUrl, testOllamaConnection]);
 
   // Initial load - try to connect on mount if default URL might work
   useEffect(() => {
-    // Always try to connect on initial load
-    fetchOllamaModels();
+    testOllamaConnection();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
@@ -326,7 +272,7 @@ export function APIKeysTab() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={fetchOllamaModels}
+                            onClick={testOllamaConnection}
                             disabled={isLoading}
                             className="px-2"
                           >
@@ -339,82 +285,15 @@ export function APIKeysTab() {
 
                   {/* Ollama-specific sections */}
                   {apiKey.id === "ollamaBaseUrl" && (
-                    <div className="mt-4 space-y-3">
-                      {/* Connection Status */}
+                    <div className="mt-4">
+                      {/* Simple Connection Status */}
                       <div className="space-y-2">
                         {isConnected ? (
-                          <div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setShowModels(!showModels)}
-                              className="h-auto p-2 justify-start text-left w-full"
-                            >
-                              <CheckCircle className="h-4 w-4 text-green-500 mr-2 flex-shrink-0" />
-                              <span className="text-sm text-green-600 dark:text-green-400 flex-1">
-                                Connected ({ollamaModels.length} models available)
-                              </span>
-                              {showModels ? (
-                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </Button>
-                            
-                            {/* Collapsible Models List */}
-                            {showModels && (
-                              <div className="mt-2 border rounded-md bg-muted/20 p-3">
-                                <Label className="text-sm font-medium mb-3 block">
-                                  Select models to use in Open SWE:
-                                </Label>
-                                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                                  {ollamaModels.map((model) => (
-                                    <div key={model.name} className="flex items-start space-x-3 p-2 rounded-md hover:bg-background/50 transition-colors">
-                                      <Checkbox
-                                        id={`model-${model.name}`}
-                                        checked={selectedModels.includes(model.name)}
-                                        onCheckedChange={() => toggleModelSelection(model.name)}
-                                        className="mt-1"
-                                      />
-                                      <div className="flex-1 min-w-0">
-                                        <Label
-                                          htmlFor={`model-${model.name}`}
-                                          className="text-sm font-mono cursor-pointer block truncate"
-                                          title={model.name}
-                                        >
-                                          {model.name}
-                                        </Label>
-                                        <div className="text-xs text-muted-foreground mt-1 truncate">
-                                          {model.details.parameter_size} • {model.details.family} • {model.details.quantization_level}
-                                        </div>
-                                      </div>
-                                      <div className="text-right flex-shrink-0">
-                                        <span className="text-xs text-muted-foreground block">
-                                          {(model.size / (1024 * 1024 * 1024)).toFixed(1)}GB
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                          {new Date(model.modified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                                
-                                {selectedModels.length > 0 && (
-                                  <div className="mt-3 pt-3 border-t">
-                                    <div className="flex items-center gap-1 mb-1">
-                                      <Check className="h-3 w-3 text-green-500" />
-                                      <span className="text-xs font-medium text-muted-foreground">
-                                        Selected ({selectedModels.length}):
-                                      </span>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {selectedModels.join(", ")}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                            <span className="text-sm text-green-600 dark:text-green-400">
+                              Connected
+                            </span>
                           </div>
                         ) : connectionError ? (
                           <div className="flex items-center gap-2">
@@ -432,16 +311,6 @@ export function APIKeysTab() {
                           </div>
                         ) : null}
                       </div>
-
-                      {/* No models found */}
-                      {isConnected && ollamaModels.length === 0 && (
-                        <Alert className="border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
-                          <Info className="h-4 w-4" />
-                          <AlertDescription>
-                            No models found. Install models using: <code>ollama pull model-name</code>
-                          </AlertDescription>
-                        </Alert>
-                      )}
                     </div>
                   )}
                 </div>

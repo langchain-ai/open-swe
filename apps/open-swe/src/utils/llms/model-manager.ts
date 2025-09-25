@@ -403,11 +403,11 @@ export class ModelManager {
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
       },
       ollama: {
-        [LLMTask.PLANNER]: "phi3:3.8b",
-        [LLMTask.PROGRAMMER]: "phi3:3.8b",
-        [LLMTask.REVIEWER]: "phi3:3.8b",
-        [LLMTask.ROUTER]: "phi3:3.8b",
-        [LLMTask.SUMMARIZER]: "phi3:3.8b",
+        [LLMTask.PLANNER]: "qwen2.5-coder:7b",
+        [LLMTask.PROGRAMMER]: "qwen2.5-coder:7b",
+        [LLMTask.REVIEWER]: "qwen2.5-coder:7b",
+        [LLMTask.ROUTER]: "qwen2.5-coder:7b",
+        [LLMTask.SUMMARIZER]: "qwen2.5-coder:7b",
       },
     };
 
