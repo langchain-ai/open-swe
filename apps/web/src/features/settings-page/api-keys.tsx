@@ -43,11 +43,7 @@ const API_KEY_DEFINITIONS = {
     { id: "anthropicApiKey", name: "Anthropic" },
     { id: "openaiApiKey", name: "OpenAI" },
     { id: "googleApiKey", name: "Google Gen AI" },
-    {
-      id: "ollamaBaseUrl",
-      name: "Ollama",
-      description: "Local Ollama service URL (default: http://localhost:11434). No API key required for local usage."
-    },
+    { id: "ollamaBaseUrl", name: "Ollama" },
   ],
   // infrastructure: [
   //   {
