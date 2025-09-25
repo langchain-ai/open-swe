@@ -47,9 +47,8 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
-  "ollama",
 ] as const;
-export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
+export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number] | "ollama";
 
 export interface ModelManagerConfig {
   /*
