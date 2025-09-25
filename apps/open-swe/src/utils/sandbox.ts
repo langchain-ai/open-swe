@@ -98,6 +98,77 @@ export interface Sandbox {
   process: SandboxProcess;
 }
 
+function isMissingImageError(error: unknown): boolean {
+  if (!error) return false;
+
+  if (typeof error === "object" && error && "statusCode" in error) {
+    const statusCode = (error as { statusCode?: number }).statusCode;
+    if (statusCode === 404) return true;
+  }
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+
+  return message.toLowerCase().includes("no such image");
+}
+
+async function ensureImageAvailable(docker: Docker, image: string): Promise<void> {
+  try {
+    await docker.getImage(image).inspect();
+    return;
+  } catch (error) {
+    if (!isMissingImageError(error)) {
+      throw error;
+    }
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    docker.pull(image, (pullError, stream) => {
+      if (pullError) {
+        const detail =
+          pullError instanceof Error
+            ? pullError.message
+            : typeof pullError === "string"
+              ? pullError
+              : "";
+        reject(
+          new Error(
+            `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
+              detail && detail !== "[object Object]" ? ` Details: ${detail}` : ""
+            }`,
+          ),
+        );
+        return;
+      }
+
+      docker.modem.followProgress(stream, (progressError) => {
+        if (progressError) {
+          const detail =
+            progressError instanceof Error
+              ? progressError.message
+              : typeof progressError === "string"
+                ? progressError
+                : "";
+          reject(
+            new Error(
+              `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
+                detail && detail !== "[object Object]" ? ` Details: ${detail}` : ""
+              }`,
+            ),
+          );
+          return;
+        }
+
+        resolve();
+      });
+    });
+  });
+}
+
 const sandboxes = new Map<string, Sandbox>();
 export function getSandbox(id: string): Sandbox | undefined {
   return sandboxes.get(id);
@@ -108,6 +179,7 @@ export async function createDockerSandbox(
   mountPath = "/workspace",
 ): Promise<Sandbox> {
   const docker = await dockerClient();
+  await ensureImageAvailable(docker, image);
   const hostConfig: Docker.ContainerCreateOptions["HostConfig"] = {
     Memory: SANDBOX_MEMORY_LIMIT_BYTES,
   };
