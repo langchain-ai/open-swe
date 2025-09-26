@@ -91,6 +91,30 @@ commands include:
 Use the `WORKSPACES_ROOT` environment variable if your repository lives outside the project root;
 for example, `WORKSPACES_ROOT=$PWD/.. yarn stack:up` to mount a parent directory of workspaces.
 
+### End-to-end local workflow
+
+Once the stack is running the UI and agent coordinate a single task that spans the entire local
+development cycle:
+
+1. **Path selection:** The UI sends the repository path that the user selected from
+   `${WORKSPACES_ROOT}`. The agent records the request in the logs as soon as it arrives.
+2. **Path validation:** The manager graph verifies the path using the backend `/run` handler and
+   `resolveWorkspacePath`, which now logs both the beginning and completion of each validation pass
+   (with duration metrics) so misconfigurations stand out immediately.
+3. **Editing host files:** Programming tools operate against the shared host mount. Every patch or
+   write uses the new stage logs so you can trace when the agent starts modifying a file and when
+   it finishes committing the change.
+4. **Sandbox commands:** Dependency installs, tests, and other shell commands execute inside a
+   Docker sandbox that is automatically created for the repository. Command start and finish logs
+   now include exit codes and runtime so long-running operations are easy to audit.
+5. **Commit and teardown:** Successful commands trigger host commits (prefixed with OpenSWE
+   auto-commit) before the sandbox is stopped and deleted. Each phase reports its start,
+   completion, and duration.
+
+The detailed logging means you can follow every stage across repeated runs. Selecting a different
+repository in the UI produces a fresh set of stage logs covering validation, sandbox lifecycle, and
+commits.
+
 ## Environment Variables
 
 The Compose file passes several variables into the agent container. The most common ones are
@@ -165,6 +189,13 @@ workspaces:
   Sharing**.
 - When running commands from PowerShell or CMD, set `COMPOSE_CONVERT_WINDOWS_PATHS=1` so that the
   `/var/run/docker.sock` mount resolves correctly.
+
+### Additional prerequisites
+
+- Docker Desktop (or Docker Engine) must be configured to share the parent directory used for
+  `${WORKSPACES_ROOT}`; otherwise the UI will select paths that the container cannot mount.
+- The same directory must be readable and writable by the current user. The new logging shows
+  precisely when validation fails because the mount is inaccessible.
 
 ### Git safe.directory
 

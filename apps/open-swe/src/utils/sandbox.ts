@@ -163,9 +163,15 @@ async function runGitCommand(
 }
 
 async function commitHostChanges(repoPath: string): Promise<void> {
+  const startedAt = Date.now();
+  logger.info("Checking host repository for changes", { repoPath });
   try {
     const status = await runGitCommand(["status", "--porcelain"], repoPath);
     if (!status.stdout.trim()) {
+      logger.info("No host changes detected", {
+        repoPath,
+        durationMs: Date.now() - startedAt,
+      });
       return;
     }
 
@@ -183,11 +189,16 @@ async function commitHostChanges(repoPath: string): Promise<void> {
       });
     }
 
-    logger.info("Committed sandbox changes", { repoPath, message });
+    logger.info("Committed sandbox changes", {
+      repoPath,
+      message,
+      durationMs: Date.now() - startedAt,
+    });
   } catch (error) {
     logger.error("Failed to commit sandbox changes", {
       repoPath,
       error,
+      durationMs: Date.now() - startedAt,
     });
   }
 }
@@ -281,6 +292,7 @@ export async function createDockerSandbox(
   image: string,
   options: CreateSandboxOptions = {},
 ): Promise<Sandbox> {
+  const startedAt = Date.now();
   const resolvedHostRepoPath = options.hostRepoPath
     ? path.resolve(options.hostRepoPath)
     : undefined;
@@ -324,6 +336,13 @@ export async function createDockerSandbox(
   };
 
   const provider = sandboxProviderFactory(providerOptions);
+  logger.info("Creating sandbox", {
+    image,
+    containerName,
+    hostMountPath: mountSourcePath,
+    containerRepoPath,
+    commitOnChange,
+  });
   const handle = await provider.createSandbox(image, mountSourcePath);
 
   logger.info("Created sandbox container", {
@@ -340,6 +359,7 @@ export async function createDockerSandbox(
       pidsLimit: resources.pidsLimit,
     },
     writableMountTargets: writableMounts?.map((mount) => mount.target) ?? [],
+    durationMs: Date.now() - startedAt,
   });
 
   await configureContainerGit(handle, containerRepoPath);
@@ -348,12 +368,20 @@ export async function createDockerSandbox(
     async executeCommand(command, cwd, env, timeoutSec) {
       const effectiveCwd = cwd ?? containerRepoPath;
       const effectiveTimeout = timeoutSec ?? commandTimeoutSec;
+      const commandStartedAt = Date.now();
       const result = await handle.process.executeCommand(
         command,
         effectiveCwd,
         env,
         effectiveTimeout,
       );
+
+      logger.info("Sandbox command completed", {
+        sandboxId: handle.id,
+        command,
+        exitCode: result.exitCode ?? 0,
+        durationMs: Date.now() - commandStartedAt,
+      });
 
       if (commitOnChange && hostCommitPath && result.exitCode === 0) {
         await commitHostChanges(hostCommitPath);
@@ -380,6 +408,8 @@ export async function createDockerSandbox(
 }
 
 export async function stopSandbox(sandboxId: string): Promise<string> {
+  const startedAt = Date.now();
+  logger.info("Stopping sandbox", { sandboxId });
   const metadata = sandboxMetadata.get(sandboxId);
   if (metadata?.commitOnChange && metadata.hostRepoPath) {
     await commitHostChanges(metadata.hostRepoPath);
@@ -388,6 +418,10 @@ export async function stopSandbox(sandboxId: string): Promise<string> {
   if (metadata) {
     try {
       await metadata.provider.stopSandbox(sandboxId);
+      logger.info("Sandbox stopped", {
+        sandboxId,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
       logger.warn("Failed to stop sandbox", { sandboxId, error });
     }
@@ -397,6 +431,8 @@ export async function stopSandbox(sandboxId: string): Promise<string> {
 }
 
 export async function deleteSandbox(sandboxId: string): Promise<boolean> {
+  const startedAt = Date.now();
+  logger.info("Deleting sandbox", { sandboxId });
   const metadata = sandboxMetadata.get(sandboxId);
   if (metadata?.commitOnChange && metadata.hostRepoPath) {
     await commitHostChanges(metadata.hostRepoPath);
@@ -411,6 +447,10 @@ export async function deleteSandbox(sandboxId: string): Promise<boolean> {
     if (deleted) {
       sandboxes.delete(sandboxId);
       sandboxMetadata.delete(sandboxId);
+      logger.info("Sandbox deleted", {
+        sandboxId,
+        durationMs: Date.now() - startedAt,
+      });
     }
     return deleted;
   } catch (error) {
@@ -433,9 +473,17 @@ export async function getSandboxWithErrorHandling(
     throw new Error("Sandbox operations are only supported in local mode");
   }
 
+  logger.info("Resolving sandbox for local run", {
+    sandboxSessionId,
+    targetRepository,
+  });
+
   if (sandboxSessionId) {
     const existing = getSandbox(sandboxSessionId);
     if (existing) {
+      logger.info("Reusing existing sandbox", {
+        sandboxId: sandboxSessionId,
+      });
       return {
         sandbox: existing,
         codebaseTree: null,
@@ -451,6 +499,12 @@ export async function getSandboxWithErrorHandling(
     workspacePath,
     repoName: targetRepository.repo,
     commitOnChange: true,
+  });
+
+  logger.info("Created sandbox for local run", {
+    sandboxId: sandbox.id,
+    repoPath,
+    workspacePath,
   });
 
   return { sandbox, codebaseTree: null, dependenciesInstalled: null };

@@ -51,19 +51,40 @@ export class ShellExecutor {
       workdir,
       localMode: isLocalMode(this.config),
     });
+    const startedAt = Date.now();
 
     if (isLocalMode(this.config)) {
-      return this.executeLocal(commandString, workdir, environment, timeout);
-    } else {
-      return this.executeSandbox(
+      const result = await this.executeLocal(
         commandString,
         workdir,
         environment,
         timeout,
-        sandbox,
-        sandboxSessionId,
       );
+      logger.info("Local command completed", {
+        command: commandString,
+        exitCode: result.exitCode,
+        durationMs: Date.now() - startedAt,
+        workdir: workdir ?? getLocalWorkingDirectory(),
+      });
+      return result;
     }
+
+    const sandboxResult = await this.executeSandbox(
+      commandString,
+      workdir,
+      environment,
+      timeout,
+      sandbox,
+      sandboxSessionId,
+    );
+    logger.info("Sandbox command completed", {
+      command: commandString,
+      exitCode: sandboxResult.exitCode,
+      durationMs: Date.now() - startedAt,
+      workdir,
+      sandboxId: sandbox?.id ?? sandboxSessionId,
+    });
+    return sandboxResult;
   }
 
   /**
