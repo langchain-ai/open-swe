@@ -17,6 +17,15 @@ API key setup guides when configuring a new machine.
   create child sandboxes. Linux users should belong to the `docker` group or run the Compose
   stack with elevated privileges.
 
+### Docker Desktop file sharing (macOS & Windows)
+
+Docker Desktop restricts which host folders can be mounted into containers. Before starting the
+stack, open **Settings → Resources → File Sharing** and add the directory that contains your Open
+SWE checkout (for example, `C:\Users\<you>\code\open-swe` on Windows or `/Users/<you>/code/open-swe`
+on macOS). Ensure the parent directory of `${WORKSPACES_ROOT}` is shared—otherwise the agent cannot
+mount repositories selected in the UI. After applying the change, restart Docker Desktop so the
+newly shared path is available to Compose.
+
 ## Quickstart
 
 1. **Clone the repository and install dependencies.**

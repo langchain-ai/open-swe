@@ -51,6 +51,29 @@ describe("resolveInsideRoot", () => {
       `Resolved workspace path "${fs.realpathSync(outside)}" is outside of the configured root "${fs.realpathSync(root)}".`,
     );
   });
+
+  it("rejects symlinks that resolve outside of the root", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-root-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "open-swe-outside-"));
+    const symlink = path.join(root, "linked-workspace");
+    process.env.WORKSPACES_ROOT = root;
+
+    try {
+      fs.symlinkSync(outside, symlink, "dir");
+    } catch (error) {
+      if (
+        process.platform === "win32" &&
+        (error as NodeJS.ErrnoException)?.code === "EPERM"
+      ) {
+        return;
+      }
+      throw error;
+    }
+
+    expect(() => resolveInsideRoot(symlink)).toThrow(
+      `Resolved workspace path "${fs.realpathSync(outside)}" is outside of the configured root "${fs.realpathSync(root)}".`,
+    );
+  });
 });
 
 describe("registerRunRoute", () => {

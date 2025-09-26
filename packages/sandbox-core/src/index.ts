@@ -3,6 +3,8 @@ export type {
   SandboxExecOptions,
   SandboxHandle,
   SandboxProvider,
+  SandboxMetadata,
+  SandboxResourceLimits,
 } from "./types.js";
 export {
   execInSandbox,

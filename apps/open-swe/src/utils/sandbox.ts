@@ -257,6 +257,8 @@ interface SandboxMetadata {
   containerRepoPath: string;
   commitOnChange: boolean;
   commandTimeoutSec: number;
+  requestedResources?: LocalDockerSandboxResources;
+  appliedResources?: LocalDockerSandboxResources;
 }
 
 const sandboxes = new Map<string, Sandbox>();
@@ -344,19 +346,24 @@ export async function createDockerSandbox(
     commitOnChange,
   });
   const handle = await provider.createSandbox(image, mountSourcePath);
+  const appliedResources = handle.metadata?.appliedResources;
+  const requestedResources = handle.metadata?.requestedResources ?? resources;
 
   logger.info("Created sandbox container", {
     sandboxId: handle.id,
-    containerName,
+    containerName: handle.metadata?.containerName ?? containerName,
     image,
     hostMountPath: mountSourcePath,
     containerRepoPath,
     resources: {
-      cpuCount: resources.cpuCount,
-      memoryBytes: resources.memoryBytes,
+      requested: {
+        cpuCount: requestedResources?.cpuCount,
+        memoryBytes: requestedResources?.memoryBytes,
+        pidsLimit: requestedResources?.pidsLimit,
+      },
+      applied: appliedResources,
       networkMode: resources.networkMode,
       networkDisabled: resources.networkDisabled,
-      pidsLimit: resources.pidsLimit,
     },
     writableMountTargets: writableMounts?.map((mount) => mount.target) ?? [],
     durationMs: Date.now() - startedAt,
@@ -402,6 +409,8 @@ export async function createDockerSandbox(
     containerRepoPath,
     commitOnChange,
     commandTimeoutSec,
+    requestedResources,
+    appliedResources,
   });
 
   return sandbox;

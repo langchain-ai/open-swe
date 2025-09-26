@@ -15,8 +15,22 @@ export interface SandboxExecOptions {
   timeoutSec?: number;
 }
 
+export interface SandboxResourceLimits {
+  cpuCount?: number;
+  memoryBytes?: number;
+  pidsLimit?: number;
+}
+
+export interface SandboxMetadata {
+  containerId?: string;
+  containerName?: string;
+  requestedResources?: SandboxResourceLimits;
+  appliedResources?: SandboxResourceLimits;
+}
+
 export interface SandboxHandle {
   id: string;
+  metadata?: SandboxMetadata;
   process: {
     executeCommand(
       command: string,
