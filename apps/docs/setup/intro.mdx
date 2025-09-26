@@ -54,7 +54,7 @@ You can also build the image locally using the dedicated Dockerfile provided in 
 docker build -f Dockerfile.sandbox -t ghcr.io/langchain-ai/open-swe/sandbox:latest .
 ```
 
-The agent uses this image by default via the `OPEN_SWE_SANDBOX_IMAGE` environment variable, so keeping it up to date ensures consistent tooling when the sandbox is created.
+The agent uses this image by default via the `LOCAL_SANDBOX_IMAGE` environment variable, so keeping it up to date ensures consistent tooling when the sandbox is created.
 
 ### Web Application
 

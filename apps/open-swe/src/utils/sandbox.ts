@@ -59,48 +59,44 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 }
 
 const SANDBOX_MEMORY_LIMIT_BYTES = parsePositiveInt(
-  process.env.OPEN_SWE_SANDBOX_MEMORY_BYTES,
+  process.env.LOCAL_SANDBOX_MEMORY,
   DEFAULT_MEMORY_LIMIT_BYTES,
 );
 
-const SANDBOX_CPU_COUNT = (() => {
-  const explicitCpuCount = parsePositiveFloat(
-    process.env.OPEN_SWE_SANDBOX_CPUS,
-    undefined,
-  );
-  if (explicitCpuCount !== undefined) {
-    return explicitCpuCount;
-  }
-  const nanoCpus = parsePositiveInt(
-    process.env.OPEN_SWE_SANDBOX_NANO_CPUS,
-    0,
-  );
-  return nanoCpus > 0 ? nanoCpus / 1_000_000_000 : undefined;
-})();
-
-const SANDBOX_NETWORK_ENABLED = parseBoolean(
-  process.env.OPEN_SWE_SANDBOX_ENABLE_NETWORK,
-  false,
+const SANDBOX_CPU_COUNT = parsePositiveFloat(
+  process.env.LOCAL_SANDBOX_CPUS,
+  undefined,
 );
 
-const SANDBOX_NETWORK_MODE = process.env.OPEN_SWE_SANDBOX_NETWORK_MODE?.trim();
+const rawNetworkSetting = process.env.LOCAL_SANDBOX_NETWORK?.trim();
+const normalizedNetworkSetting = rawNetworkSetting?.toLowerCase();
+const SANDBOX_NETWORK_ENABLED = Boolean(
+  rawNetworkSetting &&
+    !["none", "false", "off", "disable", "disabled"].includes(
+      normalizedNetworkSetting ?? "",
+    ),
+);
+const SANDBOX_NETWORK_MODE = SANDBOX_NETWORK_ENABLED
+  ? rawNetworkSetting
+  : undefined;
 
 const SANDBOX_COMMAND_TIMEOUT_SEC = parsePositiveInt(
-  process.env.OPEN_SWE_SANDBOX_TIMEOUT_SEC,
+  process.env.LOCAL_SANDBOX_TIMEOUT_SEC,
   60,
 );
 
-const SANDBOX_USER = process.env.OPEN_SWE_SANDBOX_USER?.trim();
-
 const COMMIT_AUTHOR_NAME =
-  process.env.OPEN_SWE_GIT_AUTHOR_NAME?.trim() || DEFAULT_COMMIT_AUTHOR_NAME;
+  process.env.GIT_AUTHOR_NAME?.trim() || DEFAULT_COMMIT_AUTHOR_NAME;
 const COMMIT_AUTHOR_EMAIL =
-  process.env.OPEN_SWE_GIT_AUTHOR_EMAIL?.trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;
+  process.env.GIT_AUTHOR_EMAIL?.trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;
 
-const SANDBOX_GIT_USER_NAME =
-  process.env.OPEN_SWE_SANDBOX_GIT_USER_NAME?.trim() || COMMIT_AUTHOR_NAME;
-const SANDBOX_GIT_USER_EMAIL =
-  process.env.OPEN_SWE_SANDBOX_GIT_USER_EMAIL?.trim() || COMMIT_AUTHOR_EMAIL;
+const COMMIT_COMMITTER_NAME =
+  process.env.GIT_COMMITTER_NAME?.trim() || COMMIT_AUTHOR_NAME;
+const COMMIT_COMMITTER_EMAIL =
+  process.env.GIT_COMMITTER_EMAIL?.trim() || COMMIT_AUTHOR_EMAIL;
+
+const SANDBOX_GIT_USER_NAME = COMMIT_COMMITTER_NAME;
+const SANDBOX_GIT_USER_EMAIL = COMMIT_COMMITTER_EMAIL;
 
 const SKIP_CI_UNTIL_LAST_COMMIT = parseBoolean(
   process.env.SKIP_CI_UNTIL_LAST_COMMIT,
@@ -122,8 +118,8 @@ async function runGitCommand(
     ...process.env,
     GIT_AUTHOR_NAME: COMMIT_AUTHOR_NAME,
     GIT_AUTHOR_EMAIL: COMMIT_AUTHOR_EMAIL,
-    GIT_COMMITTER_NAME: COMMIT_AUTHOR_NAME,
-    GIT_COMMITTER_EMAIL: COMMIT_AUTHOR_EMAIL,
+    GIT_COMMITTER_NAME: COMMIT_COMMITTER_NAME,
+    GIT_COMMITTER_EMAIL: COMMIT_COMMITTER_EMAIL,
   };
 
   try {
@@ -280,10 +276,6 @@ export async function createDockerSandbox(
     workingDirectory: containerRepoPath,
     ensureMountsExist: true,
   };
-
-  if (SANDBOX_USER) {
-    providerOptions.user = SANDBOX_USER;
-  }
 
   const provider = sandboxProviderFactory(providerOptions);
   const handle = await provider.createSandbox(image, hostRepoPath);
