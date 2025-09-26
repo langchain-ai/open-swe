@@ -6,6 +6,7 @@
     "module": "NodeNext",
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
+    "baseUrl": ".",
     "noImplicitReturns": true,
     "declaration": true,
     "noFallthroughCasesInSwitch": true,
@@ -18,7 +19,11 @@
     "strictFunctionTypes": false,
     "outDir": "dist",
     "types": ["jest", "node"],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@openswe/sandbox-core": ["packages/sandbox-core/src/index.ts"],
+      "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"]
+    }
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]
