@@ -11,6 +11,7 @@ import {
   createDockerSandbox,
   getSandboxMetadata,
 } from "../../utils/sandbox.js";
+import { getWorkspacePathFromConfig } from "../../utils/workspace.js";
 import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 import { SANDBOX_DOCKER_IMAGE } from "../../constants.js";
@@ -237,9 +238,11 @@ async function initializeSandboxRemote(
 
   let sandbox;
   const repoPath = getLocalWorkingDirectory();
+  const workspacePath = getWorkspacePathFromConfig(config);
   try {
     sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
       hostRepoPath: repoPath,
+      workspacePath,
       repoName: targetRepository.repo,
       commitOnChange: true,
     });

@@ -51,6 +51,7 @@ export interface LocalDockerSandboxOptions {
   workingDirectory?: string;
   ensureMountsExist?: boolean;
   defaultTimeoutSec?: number;
+  containerName?: string;
 }
 
 type InternalSandboxRecord = {
@@ -121,6 +122,7 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
     };
 
     const container = await this.docker.createContainer({
+      name: this.options.containerName,
       Image: image,
       Cmd: ["/bin/sh", "-c", "tail -f /dev/null"],
       Tty: false,
