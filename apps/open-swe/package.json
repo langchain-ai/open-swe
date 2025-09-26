@@ -34,6 +34,8 @@
     "@langchain/openai": "^0.5.10",
     "@mendable/firecrawl-js": "^1.29.1",
     "@openswe/shared": "*",
+    "@openswe/sandbox-core": "*",
+    "@openswe/sandbox-docker": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.1",
     "dockerode": "^4.0.2",
