@@ -7,6 +7,7 @@ import {
   RuffIssue,
   MyPyResult,
 } from "./open-swe-types.js";
+import { execInSandbox } from "@openswe/sandbox-core/runners";
 
 const logger = createLogger(LogLevel.DEBUG, " Evaluation Tests");
 
@@ -20,12 +21,11 @@ export const runRuffLint = async (
   logger.info("Running ruff check...");
 
   try {
-    const execution = await sandbox.process.executeCommand(
-      args.command,
-      args.workingDir,
-      args.env,
-      args.timeoutSec,
-    );
+    const execution = await execInSandbox(sandbox, args.command, {
+      cwd: args.workingDir,
+      env: args.env,
+      timeoutSec: args.timeoutSec,
+    });
 
     if (execution.exitCode === 0) {
       logger.info("Ruff analysis passed. No issues found.");
@@ -85,12 +85,11 @@ export const runMyPyTypeCheck = async (
 ): Promise<MyPyResult> => {
   logger.info("Running mypy check...");
   try {
-    const execution = await sandbox.process.executeCommand(
-      args.command,
-      args.workingDir,
-      args.env,
-      args.timeoutSec,
-    );
+    const execution = await execInSandbox(sandbox, args.command, {
+      cwd: args.workingDir,
+      env: args.env,
+      timeoutSec: args.timeoutSec,
+    });
 
     if (execution.exitCode === 0) {
       logger.info("Mypy analysis passed. No issues found.");

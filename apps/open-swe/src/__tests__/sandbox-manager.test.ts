@@ -8,7 +8,7 @@ import type {
   LocalDockerSandboxOptions,
   WritableMount,
 } from "@openswe/sandbox-docker";
-import type { SandboxHandle } from "@openswe/sandbox-core";
+import type { SandboxExecOptions, SandboxHandle } from "@openswe/sandbox-core";
 import {
   createDockerSandbox,
   deleteSandbox,
@@ -31,7 +31,7 @@ class FakeProvider {
   readonly deleted: string[] = [];
   readonly repoMount?: WritableMount;
 
-  constructor(private readonly options: LocalDockerSandboxOptions) {
+  constructor(options: LocalDockerSandboxOptions) {
     this.repoMount = options.writableMounts?.[0];
   }
 
@@ -78,6 +78,26 @@ class FakeProvider {
     this.deleted.push(id);
     this.sandboxes.delete(id);
     return true;
+  }
+
+  async exec(
+    target: SandboxHandle | string,
+    command: string,
+    options: SandboxExecOptions = {},
+  ): Promise<ExecResult> {
+    const handle =
+      typeof target === "string" ? this.sandboxes.get(target) : target;
+
+    if (!handle) {
+      throw new Error(`Sandbox ${typeof target === "string" ? target : target.id} not found`);
+    }
+
+    return await handle.process.executeCommand(
+      command,
+      options.cwd,
+      options.env,
+      options.timeoutSec,
+    );
   }
 }
 

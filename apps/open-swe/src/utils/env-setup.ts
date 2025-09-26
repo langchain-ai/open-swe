@@ -1,6 +1,7 @@
 import type { Sandbox } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
+import { execInSandbox } from "@openswe/sandbox-core/runners";
 
 const logger = createLogger(LogLevel.INFO, "EnvSetup");
 
@@ -18,12 +19,10 @@ export async function setupEnv(
   logger.info("Setting up Python environment...");
 
   const createVenvCommand = "python -m venv .venv";
-  const createVenvRes = await sandbox.process.executeCommand(
-    createVenvCommand,
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
-  );
+  const createVenvRes = await execInSandbox(sandbox, createVenvCommand, {
+    cwd: absoluteRepoDir,
+    timeoutSec: TIMEOUT_SEC,
+  });
   if (createVenvRes.exitCode !== 0) {
     logger.error("Failed to create virtual environment", {
       createVenvCommand,
@@ -32,30 +31,36 @@ export async function setupEnv(
     return false;
   }
 
-  const upgradePipRes = await sandbox.process.executeCommand(
+  const upgradePipRes = await execInSandbox(
+    sandbox,
     `${RUN_PIP_IN_VENV} install --upgrade pip`,
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
+    {
+      cwd: absoluteRepoDir,
+      timeoutSec: TIMEOUT_SEC,
+    },
   );
   if (upgradePipRes.exitCode !== 0) {
     logger.warn("Failed to upgrade pip, continuing anyway", { upgradePipRes });
   }
 
-  const requirementsExistRes = await sandbox.process.executeCommand(
+  const requirementsExistRes = await execInSandbox(
+    sandbox,
     "test -f requirements.txt",
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
+    {
+      cwd: absoluteRepoDir,
+      timeoutSec: TIMEOUT_SEC,
+    },
   );
 
   if (requirementsExistRes.exitCode === 0) {
     logger.info("Found requirements.txt, installing...");
-    const installReqRes = await sandbox.process.executeCommand(
+    const installReqRes = await execInSandbox(
+      sandbox,
       `${RUN_PIP_IN_VENV} install -r requirements.txt`,
-      absoluteRepoDir,
-      undefined,
-      TIMEOUT_SEC * 3,
+      {
+        cwd: absoluteRepoDir,
+        timeoutSec: TIMEOUT_SEC * 3,
+      },
     );
     if (installReqRes.exitCode !== 0) {
       logger.warn("Failed to install requirements.txt, continuing anyway", {
@@ -66,11 +71,13 @@ export async function setupEnv(
     logger.info("No requirements.txt found, skipping repository dependencies");
   }
 
-  const installAnalysisToolsRes = await sandbox.process.executeCommand(
+  const installAnalysisToolsRes = await execInSandbox(
+    sandbox,
     `${RUN_PIP_IN_VENV} install ruff mypy`,
-    absoluteRepoDir,
-    undefined,
-    TIMEOUT_SEC,
+    {
+      cwd: absoluteRepoDir,
+      timeoutSec: TIMEOUT_SEC,
+    },
   );
   if (installAnalysisToolsRes.exitCode !== 0) {
     logger.error("Failed to install ruff and mypy", {
