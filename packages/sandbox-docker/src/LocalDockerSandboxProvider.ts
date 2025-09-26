@@ -14,6 +14,11 @@ import type {
 const DEFAULT_USER = "1000:1000";
 const DEFAULT_TMPFS_OPTS = "rw,nosuid,nodev,noexec,size=64m";
 const DEFAULT_WORKING_DIR = "/workspace/src";
+const DEFAULT_CPU_COUNT = 2;
+const DEFAULT_MEMORY_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+const DEFAULT_EXEC_TIMEOUT_SEC = 900;
+const DEFAULT_PIDS_LIMIT = 512;
+const SECURITY_VIOLATION_EXIT_CODE = 126;
 const TIMEOUT_EXIT_CODE = 124;
 
 class CommandTimeoutError extends Error {
@@ -33,6 +38,7 @@ export interface LocalDockerSandboxResources {
   memoryBytes?: number;
   networkDisabled?: boolean;
   networkMode?: string;
+  pidsLimit?: number;
 }
 
 export interface LocalDockerSandboxOptions {
@@ -44,6 +50,7 @@ export interface LocalDockerSandboxOptions {
   resources?: LocalDockerSandboxResources;
   workingDirectory?: string;
   ensureMountsExist?: boolean;
+  defaultTimeoutSec?: number;
 }
 
 type InternalSandboxRecord = {
@@ -78,7 +85,26 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
 
     const networkMode = this.options.resources?.networkDisabled
       ? "none"
-      : this.options.resources?.networkMode;
+      : this.options.resources?.networkMode ?? "bridge";
+
+    const requestedCpuCount = this.options.resources?.cpuCount;
+    const effectiveCpuCount =
+      requestedCpuCount && requestedCpuCount > 0
+        ? requestedCpuCount
+        : DEFAULT_CPU_COUNT;
+    const nanoCpus = Math.floor(effectiveCpuCount * 1_000_000_000);
+
+    const requestedMemory = this.options.resources?.memoryBytes;
+    const memoryBytes =
+      requestedMemory && requestedMemory > 0
+        ? requestedMemory
+        : DEFAULT_MEMORY_LIMIT_BYTES;
+
+    const requestedPidsLimit = this.options.resources?.pidsLimit;
+    const pidsLimit =
+      requestedPidsLimit && requestedPidsLimit > 0
+        ? requestedPidsLimit
+        : DEFAULT_PIDS_LIMIT;
 
     const hostConfig: Docker.ContainerCreateOptions["HostConfig"] = {
       Binds: binds,
@@ -88,11 +114,10 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       CapDrop: ["ALL"],
       SecurityOpt: ["no-new-privileges"],
       NetworkMode: networkMode,
-      NanoCpus: this.options.resources?.cpuCount
-        ? Math.max(0, Math.floor(this.options.resources.cpuCount * 1_000_000_000))
-        : undefined,
-      Memory: this.options.resources?.memoryBytes,
-      ReadonlyRootfs: false,
+      NanoCpus: nanoCpus,
+      Memory: memoryBytes,
+      ReadonlyRootfs: true,
+      PidsLimit: pidsLimit,
     };
 
     const container = await this.docker.createContainer({
@@ -194,13 +219,23 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       AttachStdin: false,
     });
 
-    const execPromise = this.collectExecResult(exec);
+    const execPromise = this.collectExecResult(exec).catch((error) => {
+      if (this.isSecurityViolationError(error)) {
+        return this.buildFailureResult(
+          SECURITY_VIOLATION_EXIT_CODE,
+          this.normalizeErrorMessage(error),
+        );
+      }
+      throw error instanceof Error ? error : new Error(String(error));
+    });
 
-    if (!timeoutSec || timeoutSec <= 0) {
+    const effectiveTimeout = this.resolveTimeout(timeoutSec);
+
+    if (!effectiveTimeout) {
       return execPromise;
     }
 
-    const timeoutMs = timeoutSec * 1000;
+    const timeoutMs = effectiveTimeout * 1000;
     let timeoutHandle: NodeJS.Timeout | undefined;
 
     const timeoutPromise = new Promise<ExecResult>((_, reject) => {
@@ -213,7 +248,7 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
             return;
           }
         }
-        reject(new CommandTimeoutError(timeoutSec));
+        reject(new CommandTimeoutError(effectiveTimeout));
       }, timeoutMs);
     });
 
@@ -232,16 +267,20 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
         void execPromise.catch(() => undefined);
         await this.safeWaitForContainer(container);
         await this.safeStart(container);
-        return {
-          exitCode: TIMEOUT_EXIT_CODE,
-          stdout: "",
-          stderr: error.message,
-          result: "",
-        };
+        return this.buildFailureResult(TIMEOUT_EXIT_CODE, error.message);
       }
 
       throw error;
     }
+  }
+
+  private resolveTimeout(timeoutSec?: number): number | undefined {
+    const defaultTimeout = this.options.defaultTimeoutSec ?? DEFAULT_EXEC_TIMEOUT_SEC;
+    const candidate = timeoutSec ?? defaultTimeout;
+    if (!candidate || candidate <= 0) {
+      return undefined;
+    }
+    return candidate;
   }
 
   private async collectExecResult(exec: Docker.Exec): Promise<ExecResult> {
@@ -279,6 +318,47 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       result: stdout.trim(),
       artifacts: {
         stdout,
+        stderr,
+      },
+    };
+  }
+
+  private isSecurityViolationError(error: unknown): boolean {
+    const message = this.normalizeErrorMessage(error).toLowerCase();
+    if (!message) {
+      return false;
+    }
+
+    return (
+      message.includes("operation not permitted") ||
+      message.includes("permission denied") ||
+      message.includes("read-only file system") ||
+      message.includes("apparmor") ||
+      message.includes("seccomp") ||
+      message.includes("security profile") ||
+      message.includes("no new privileges") ||
+      message.includes("capability")
+    );
+  }
+
+  private normalizeErrorMessage(error: unknown): string {
+    if (!error) {
+      return "";
+    }
+    if (error instanceof Error) {
+      return error.message || error.toString();
+    }
+    return String(error);
+  }
+
+  private buildFailureResult(exitCode: number, stderr: string): ExecResult {
+    return {
+      exitCode,
+      stdout: "",
+      stderr,
+      result: "",
+      artifacts: {
+        stdout: "",
         stderr,
       },
     };
