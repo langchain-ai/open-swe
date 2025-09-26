@@ -42,6 +42,60 @@ function simpleHash(str: string): number {
   return Math.abs(hash); // Ensure positive for modulo index
 }
 
+const SENSITIVE_KEY_PATTERNS = [
+  /token/i,
+  /secret/i,
+  /password/i,
+  /authorization/i,
+  /cookie/i,
+  /api[_-]?key/i,
+  /workspaces?root/i,
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function maskValue(value: unknown): unknown {
+  if (value instanceof Date) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(() => "[redacted]");
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.keys(value).map((key) => [key, "[redacted]"]));
+  }
+  return "[redacted]";
+}
+
+function sanitizeLogData(data: unknown): unknown {
+  if (data === undefined || data === null) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeLogData(item));
+  }
+
+  if (!isRecord(data)) {
+    return data;
+  }
+
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => {
+      const normalizedKey = key.toLowerCase();
+      if (normalizedKey === "env" || normalizedKey === "environment") {
+        return [key, maskValue(value)];
+      }
+      if (SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(normalizedKey))) {
+        return [key, maskValue(value)];
+      }
+      return [key, sanitizeLogData(value)];
+    }),
+  );
+}
+
 // Helper function to safely extract thread_id and run_id from LangGraph config
 function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
   try {
@@ -59,12 +113,13 @@ function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
 
 function logWithOptionalIds(styledPrefix: string, message: string, data?: any) {
   const ids = getThreadAndRunIds();
+  const sanitizedData = data !== undefined ? sanitizeLogData(data) : undefined;
   if (Object.keys(ids).length > 0) {
-    const logData = data !== undefined ? { ...data, ...ids } : ids;
+    const logData = sanitizedData !== undefined ? { ...sanitizedData, ...ids } : ids;
     console.log(`${styledPrefix} ${message}`, logData);
   } else {
-    if (data !== undefined) {
-      console.log(`${styledPrefix} ${message}`, data);
+    if (sanitizedData !== undefined) {
+      console.log(`${styledPrefix} ${message}`, sanitizedData);
     } else {
       console.log(`${styledPrefix} ${message}`);
     }

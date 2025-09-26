@@ -9,6 +9,7 @@ import type {
   SandboxExecOptions,
   SandboxHandle,
   SandboxProvider,
+  SandboxResourceLimits,
 } from "@openswe/sandbox-core";
 
 const DEFAULT_USER = "1000:1000";
@@ -139,9 +140,39 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
 
     await container.start();
 
+    const inspectData = await container.inspect();
     const id = container.id ?? randomUUID();
+    const requestedResources: SandboxResourceLimits = {
+      cpuCount: effectiveCpuCount,
+      memoryBytes,
+      pidsLimit,
+    };
+    const appliedResources: SandboxResourceLimits = {
+      cpuCount:
+        typeof inspectData.HostConfig?.NanoCpus === "number" &&
+        inspectData.HostConfig.NanoCpus > 0
+          ? inspectData.HostConfig.NanoCpus / 1_000_000_000
+          : undefined,
+      memoryBytes:
+        typeof inspectData.HostConfig?.Memory === "number" &&
+        inspectData.HostConfig.Memory > 0
+          ? inspectData.HostConfig.Memory
+          : undefined,
+      pidsLimit:
+        typeof inspectData.HostConfig?.PidsLimit === "number" &&
+        inspectData.HostConfig.PidsLimit > 0
+          ? inspectData.HostConfig.PidsLimit
+          : undefined,
+    };
     const handle: SandboxHandle = {
       id,
+      metadata: {
+        containerId: id,
+        containerName:
+          inspectData.Name?.replace(/^\//, "") ?? this.options.containerName,
+        requestedResources,
+        appliedResources,
+      },
       process: {
         executeCommand: async (
           command: string,

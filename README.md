@@ -45,6 +45,10 @@ Open SWE runs locally without any external repository-hosting dependencies or au
 
 When not in local mode, the sandbox environment clones repositories under `/workspace/project` inside the container.
 
+### Docker Desktop file sharing (macOS & Windows)
+
+If you are using Docker Desktop, ensure the directory that contains this repository is shared before starting the stack. Open **Settings → Resources → File Sharing** and add the parent directory of the paths you intend to expose through `${WORKSPACES_ROOT}`. Restart Docker Desktop after updating the shared folders so that the agent container can mount your repositories without permission errors.
+
 ### Sandbox image
 
 Open SWE executes tasks inside a sandbox Docker container. Before running local tasks, ensure you have the latest sandbox image available:
