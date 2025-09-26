@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "clean": "rm -rf ./dist .turbo || true",
-    "build": "yarn clean && tsc -p tsconfig.json"
+    "build": "yarn clean && tsc -b tsconfig.json"
   },
   "main": "dist/index.js",
   "module": "dist/index.mjs",
