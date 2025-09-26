@@ -102,7 +102,9 @@ describe("registerRunRoute", () => {
     });
 
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = (await response.json()) as {
+      resolvedWorkspaceAbsPath: string;
+    };
     expect(body).toEqual({
       resolvedWorkspaceAbsPath: fs.realpathSync(workspace),
     });
@@ -121,7 +123,7 @@ describe("registerRunRoute", () => {
     });
 
     expect(response.status).toBe(500);
-    const body = await response.json();
+    const body = (await response.json()) as { error: string };
     expect(body.error).toBe("WORKSPACES_ROOT environment variable is not set.");
   });
 
@@ -140,7 +142,7 @@ describe("registerRunRoute", () => {
     });
 
     expect(response.status).toBe(400);
-    const body = await response.json();
+    const body = (await response.json()) as { error: string };
     expect(body.error).toBe(
       `Resolved workspace path "${fs.realpathSync(outside)}" is outside of the configured root "${fs.realpathSync(root)}".`,
     );

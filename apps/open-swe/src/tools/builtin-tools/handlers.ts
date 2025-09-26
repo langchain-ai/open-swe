@@ -18,7 +18,7 @@ interface ViewCommandInputs {
 }
 
 export async function handleViewCommand(
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
   config: GraphConfig,
   inputs: ViewCommandInputs,
 ): Promise<string> {
@@ -55,6 +55,12 @@ export async function handleViewCommand(
       }
 
       return lines.map((line, index) => `${index + 1}: ${line}`).join("\n");
+    }
+
+    if (!sandbox) {
+      throw new Error(
+        "Sandbox session is required when workspace filesystem is unavailable.",
+      );
     }
 
     // Check if path is a directory
@@ -130,7 +136,7 @@ interface StrReplaceCommandInputs {
 }
 
 export async function handleStrReplaceCommand(
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
   config: GraphConfig,
   inputs: StrReplaceCommandInputs,
 ): Promise<string> {
@@ -164,6 +170,12 @@ export async function handleStrReplaceCommand(
     await fs.writeFile(targetPath, newContent, "utf-8");
     await stageAndCommitWorkspaceChanges(workspacePath);
     return `Successfully replaced text in ${inputs.path} at exactly one location.`;
+  }
+
+  if (!sandbox) {
+    throw new Error(
+      "Sandbox session is required when workspace filesystem is unavailable.",
+    );
   }
 
   const { path, workDir, oldStr, newStr } = inputs;
@@ -221,7 +233,7 @@ interface CreateCommandInputs {
 }
 
 export async function handleCreateCommand(
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
   config: GraphConfig,
   inputs: CreateCommandInputs,
 ): Promise<string> {
@@ -244,6 +256,12 @@ export async function handleCreateCommand(
     await fs.writeFile(targetPath, inputs.fileText, "utf-8");
     await stageAndCommitWorkspaceChanges(workspacePath);
     return `Successfully created file ${inputs.path}.`;
+  }
+
+  if (!sandbox) {
+    throw new Error(
+      "Sandbox session is required when workspace filesystem is unavailable.",
+    );
   }
 
   const { path, workDir, fileText } = inputs;
@@ -283,7 +301,7 @@ interface InsertCommandInputs {
 }
 
 export async function handleInsertCommand(
-  sandbox: Sandbox,
+  sandbox: Sandbox | null,
   config: GraphConfig,
   inputs: InsertCommandInputs,
 ): Promise<string> {
@@ -301,6 +319,12 @@ export async function handleInsertCommand(
     await fs.writeFile(targetPath, lines.join("\n"), "utf-8");
     await stageAndCommitWorkspaceChanges(workspacePath);
     return `Successfully inserted text in ${inputs.path} at line ${inputs.insertLine}.`;
+  }
+
+  if (!sandbox) {
+    throw new Error(
+      "Sandbox session is required when workspace filesystem is unavailable.",
+    );
   }
 
   const { path, workDir, insertLine, newStr } = inputs;
