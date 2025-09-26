@@ -1,7 +1,7 @@
 import type { Sandbox } from "./sandbox.js";
 import { createLogger, LogLevel } from "./logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
-import { execInSandbox } from "@openswe/sandbox-core/runners";
+import { execInSandbox } from "@openswe/sandbox-core";
 
 const logger = createLogger(LogLevel.INFO, "EnvSetup");
 

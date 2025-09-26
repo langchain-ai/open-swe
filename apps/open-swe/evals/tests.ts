@@ -7,7 +7,7 @@ import {
   RuffIssue,
   MyPyResult,
 } from "./open-swe-types.js";
-import { execInSandbox } from "@openswe/sandbox-core/runners";
+import { execInSandbox } from "@openswe/sandbox-core";
 
 const logger = createLogger(LogLevel.DEBUG, " Evaluation Tests");
 
