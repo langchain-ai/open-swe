@@ -2,7 +2,7 @@ import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { ENV_CONSTANTS } from "../src/utils/env-setup.js";
 import { TestResults, PytestJsonReport, RunPytestOptions } from "./types.js";
 import { readFile } from "../src/utils/read-write.js";
-import { execInSandbox, runPythonTests } from "@openswe/sandbox-core/runners";
+import { execInSandbox, runPythonTests } from "@openswe/sandbox-core";
 
 const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
 
