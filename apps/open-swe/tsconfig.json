@@ -23,7 +23,9 @@
     "isolatedModules": true,
     "paths": {
       "@openswe/sandbox-core": ["packages/sandbox-core/src/index.ts"],
-      "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"]
+      "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"],
+      "@openswe/sandbox-docker": ["packages/sandbox-docker/src/index.ts"],
+      "@openswe/sandbox-docker/*": ["packages/sandbox-docker/src/*"]
     }
   },
   "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
