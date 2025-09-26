@@ -18,7 +18,7 @@ const DEFAULT_SANDBOX_PATH =
 const DEFAULT_SANDBOX_IMAGE = "ghcr.io/langchain-ai/open-swe/sandbox:latest";
 
 export const SANDBOX_DOCKER_IMAGE =
-  process.env.OPEN_SWE_SANDBOX_IMAGE?.trim() || DEFAULT_SANDBOX_IMAGE;
+  process.env.LOCAL_SANDBOX_IMAGE?.trim() || DEFAULT_SANDBOX_IMAGE;
 
 export const DEFAULT_SANDBOX_CREATE_PARAMS = {
   user: "open-swe",

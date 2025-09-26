@@ -59,7 +59,7 @@ If you prefer to build the image yourself, use the dedicated sandbox Dockerfile:
 docker build -f Dockerfile.sandbox -t ghcr.io/langchain-ai/open-swe/sandbox:latest .
 ```
 
-The agent uses this image by default via the `OPEN_SWE_SANDBOX_IMAGE` environment variable, which now defaults to `ghcr.io/langchain-ai/open-swe/sandbox:latest`.
+The agent uses this image by default via the `LOCAL_SANDBOX_IMAGE` environment variable, which now defaults to `ghcr.io/langchain-ai/open-swe/sandbox:latest`.
 
 
 For the Azure OpenAI API version, set `AZURE_OPENAI_API_VERSION` (preferred) or `OPENAI_API_VERSION`. The agent will use `AZURE_OPENAI_API_VERSION` when available and fall back to `OPENAI_API_VERSION` otherwise.
