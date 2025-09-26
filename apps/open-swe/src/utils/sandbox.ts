@@ -16,6 +16,7 @@ import {
 } from "@openswe/shared/open-swe/local-mode";
 import { SANDBOX_DOCKER_IMAGE } from "../constants.js";
 import { createLogger, LogLevel } from "./logger.js";
+import { getWorkspacePathFromConfig } from "./workspace.js";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
@@ -24,6 +25,7 @@ type SandboxProviderFactory = (
 ) => SandboxProvider;
 
 const DEFAULT_REPO_ROOT = "/workspace";
+const SANDBOX_MOUNT_PATH = "/workspace/src";
 const DEFAULT_COMMIT_MESSAGE = "OpenSWE auto-commit";
 const DEFAULT_COMMIT_AUTHOR_NAME = "Open SWE";
 const DEFAULT_COMMIT_AUTHOR_EMAIL = "opensource@langchain.dev";
@@ -33,6 +35,23 @@ const DEFAULT_PIDS_LIMIT = 512;
 const DEFAULT_COMMAND_TIMEOUT_SEC = 900;
 
 const commitCounters = new Map<string, number>();
+
+function buildContainerName(repoName: string): string {
+  const normalizedBase = repoName
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "");
+
+  const base = normalizedBase || "sandbox";
+  const truncatedBase = base.length > 40 ? base.slice(0, 40) : base;
+  const suffix = randomUUID().split("-")[0];
+  const candidate = `openswe-${truncatedBase}-${suffix}`;
+  const trimmed = candidate.replace(/[^a-z0-9_.-]/g, "-");
+  const shortened = trimmed.length > 63 ? trimmed.slice(0, 63) : trimmed;
+  const sanitized = shortened.replace(/[-.]+$/g, "").replace(/^[-.]+/, "");
+  return sanitized || `openswe-sandbox-${suffix}`;
+}
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -221,6 +240,9 @@ export type Sandbox = SandboxHandle;
 interface SandboxMetadata {
   provider: SandboxProvider;
   hostRepoPath?: string;
+  hostMountPath?: string;
+  workspacePath?: string;
+  containerName?: string;
   containerRepoPath: string;
   commitOnChange: boolean;
   commandTimeoutSec: number;
@@ -248,6 +270,7 @@ function resolveRepoName(hostRepoPath?: string, provided?: string): string {
 
 export interface CreateSandboxOptions {
   hostRepoPath?: string;
+  workspacePath?: string;
   repoName?: string;
   containerRepoPath?: string;
   commitOnChange?: boolean;
@@ -258,16 +281,26 @@ export async function createDockerSandbox(
   image: string,
   options: CreateSandboxOptions = {},
 ): Promise<Sandbox> {
-  const hostRepoPath = options.hostRepoPath;
-  const repoName = resolveRepoName(hostRepoPath, options.repoName);
+  const resolvedHostRepoPath = options.hostRepoPath
+    ? path.resolve(options.hostRepoPath)
+    : undefined;
+  const resolvedWorkspacePath = options.workspacePath
+    ? path.resolve(options.workspacePath)
+    : undefined;
+
+  const mountSourcePath = resolvedWorkspacePath ?? resolvedHostRepoPath;
+  const repoName = resolveRepoName(mountSourcePath, options.repoName);
   const containerRepoPath =
-    options.containerRepoPath ?? path.join(DEFAULT_REPO_ROOT, repoName);
+    options.containerRepoPath ??
+    (resolvedWorkspacePath ? SANDBOX_MOUNT_PATH : path.join(DEFAULT_REPO_ROOT, repoName));
   const commitOnChange = options.commitOnChange ?? false;
   const commandTimeoutSec =
     options.commandTimeoutSec ?? SANDBOX_COMMAND_TIMEOUT_SEC;
 
-  const writableMounts: WritableMount[] | undefined = commitOnChange && hostRepoPath
-    ? [{ source: path.resolve(hostRepoPath), target: containerRepoPath }]
+  const hostCommitPath = commitOnChange ? mountSourcePath : undefined;
+
+  const writableMounts: WritableMount[] | undefined = hostCommitPath
+    ? [{ source: hostCommitPath, target: containerRepoPath }]
     : undefined;
 
   const resources: LocalDockerSandboxResources = {
@@ -278,17 +311,36 @@ export async function createDockerSandbox(
     pidsLimit: SANDBOX_PIDS_LIMIT,
   };
 
+  const containerName = buildContainerName(repoName);
+
   const providerOptions: LocalDockerSandboxOptions = {
-    defaultMountPath: hostRepoPath ? path.resolve(hostRepoPath) : process.cwd(),
+    defaultMountPath: mountSourcePath ?? process.cwd(),
     writableMounts,
     resources,
     workingDirectory: containerRepoPath,
     ensureMountsExist: true,
     defaultTimeoutSec: SANDBOX_COMMAND_TIMEOUT_SEC,
+    containerName,
   };
 
   const provider = sandboxProviderFactory(providerOptions);
-  const handle = await provider.createSandbox(image, hostRepoPath);
+  const handle = await provider.createSandbox(image, mountSourcePath);
+
+  logger.info("Created sandbox container", {
+    sandboxId: handle.id,
+    containerName,
+    image,
+    hostMountPath: mountSourcePath,
+    containerRepoPath,
+    resources: {
+      cpuCount: resources.cpuCount,
+      memoryBytes: resources.memoryBytes,
+      networkMode: resources.networkMode,
+      networkDisabled: resources.networkDisabled,
+      pidsLimit: resources.pidsLimit,
+    },
+    writableMountTargets: writableMounts?.map((mount) => mount.target) ?? [],
+  });
 
   await configureContainerGit(handle, containerRepoPath);
 
@@ -303,8 +355,8 @@ export async function createDockerSandbox(
         effectiveTimeout,
       );
 
-      if (commitOnChange && hostRepoPath && result.exitCode === 0) {
-        await commitHostChanges(hostRepoPath);
+      if (commitOnChange && hostCommitPath && result.exitCode === 0) {
+        await commitHostChanges(hostCommitPath);
       }
 
       return result;
@@ -315,7 +367,10 @@ export async function createDockerSandbox(
   sandboxes.set(sandbox.id, sandbox);
   sandboxMetadata.set(sandbox.id, {
     provider,
-    hostRepoPath: hostRepoPath ? path.resolve(hostRepoPath) : undefined,
+    hostRepoPath: hostCommitPath,
+    hostMountPath: mountSourcePath,
+    workspacePath: resolvedWorkspacePath,
+    containerName,
     containerRepoPath,
     commitOnChange,
     commandTimeoutSec,
@@ -390,8 +445,10 @@ export async function getSandboxWithErrorHandling(
   }
 
   const repoPath = getLocalWorkingDirectory();
+  const workspacePath = getWorkspacePathFromConfig(config);
   const sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
     hostRepoPath: repoPath,
+    workspacePath,
     repoName: targetRepository.repo,
     commitOnChange: true,
   });
