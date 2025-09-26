@@ -185,6 +185,7 @@ export function TerminalInput({
               configurable: {
                 ...defaultConfig,
                 customFramework,
+                workspacePath: workspaceAbsPath,
               },
             },
             ifNotExists: "create",

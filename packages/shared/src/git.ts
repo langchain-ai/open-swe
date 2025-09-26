@@ -10,6 +10,10 @@ export function getRepoAbsolutePath(
   targetRepository: TargetRepository,
   config?: GraphConfig,
 ): string {
+  const workspacePath = (config?.configurable as Record<string, unknown> | undefined)?.workspacePath;
+  if (typeof workspacePath === "string" && workspacePath.trim().length > 0) {
+    return workspacePath;
+  }
   // Check for local mode first
   if (config && isLocalMode(config)) {
     return getLocalWorkingDirectory();

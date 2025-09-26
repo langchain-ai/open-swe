@@ -91,6 +91,7 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     targetRepository: state.targetRepository,
     messages: inputMessages,
     branchName: state.branchName ?? "",
+    workspacePath: state.workspacePath,
   };
   await langGraphClient.runs.create(newManagerThreadId, MANAGER_GRAPH_ID, {
     input: {},
@@ -100,7 +101,10 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     },
     config: {
       recursion_limit: 400,
-      configurable: getCustomConfigurableFields(config),
+      configurable: {
+        ...getCustomConfigurableFields(config),
+        ...(state.workspacePath ? { workspacePath: state.workspacePath } : {}),
+      },
     },
     ifNotExists: "create",
     streamResumable: true,

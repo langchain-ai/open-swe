@@ -80,6 +80,7 @@ async function startProgrammerRun(input: {
 }) {
   const { runInput, state, config, newMessages } = input;
   const isLocal = isLocalMode(config);
+  const workspacePath = state.workspacePath;
   const defaultHeaders: Record<string, string> = isLocal
     ? { [LOCAL_MODE_HEADER]: "true" }
     : {};
@@ -89,20 +90,23 @@ async function startProgrammerRun(input: {
   });
 
   const programmerThreadId = uuidv4();
-  // Restart the sandbox.
-  const { sandbox, codebaseTree, dependenciesInstalled } =
-    await getSandboxWithErrorHandling(
+  if (!workspacePath) {
+    const sandboxResult = await getSandboxWithErrorHandling(
       state.sandboxSessionId,
       state.targetRepository,
       state.branchName,
       config,
     );
-  runInput.sandboxSessionId = sandbox.id;
-  runInput.codebaseTree = codebaseTree ?? runInput.codebaseTree;
-  runInput.dependenciesInstalled =
-    dependenciesInstalled !== null
-      ? dependenciesInstalled
-      : runInput.dependenciesInstalled;
+    const { sandbox, codebaseTree, dependenciesInstalled } = sandboxResult;
+    runInput.sandboxSessionId = sandbox.id;
+    runInput.codebaseTree = codebaseTree ?? runInput.codebaseTree;
+    runInput.dependenciesInstalled =
+      dependenciesInstalled !== null
+        ? dependenciesInstalled
+        : runInput.dependenciesInstalled;
+  } else {
+    runInput.workspacePath = workspacePath;
+  }
 
   const run = await langGraphClient.runs.create(
     programmerThreadId,
@@ -113,6 +117,7 @@ async function startProgrammerRun(input: {
         recursion_limit: 400,
         configurable: {
           ...getCustomConfigurableFields(config),
+          ...(workspacePath ? { workspacePath } : {}),
           ...(isLocalMode(config) && { [LOCAL_MODE_HEADER]: "true" }),
         },
       },
@@ -137,6 +142,7 @@ async function startProgrammerRun(input: {
       sandboxSessionId: runInput.sandboxSessionId,
       taskPlan: runInput.taskPlan,
       messages: newMessages,
+      ...(workspacePath ? { workspacePath } : {}),
     },
   });
 }
