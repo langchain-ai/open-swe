@@ -1,5 +1,8 @@
 import type { Hono } from "hono";
 import { resolveWorkspacePath } from "../../utils/workspace.js";
+import { createLogger, LogLevel } from "../../utils/logger.js";
+
+const logger = createLogger(LogLevel.INFO, "RunRoute");
 
 class RunConfigurationError extends Error {
   public readonly status: number;
@@ -29,11 +32,21 @@ export function resolveInsideRoot(
 
 export function registerRunRoute(app: Hono) {
   app.post("/run", async (ctx) => {
+    const requestStartedAt = Date.now();
+    logger.info("Received run request", {
+      pathProvided: ctx.req.header("content-type")?.includes("json"),
+    });
     let body: Record<string, unknown>;
 
     try {
       body = await ctx.req.json<Record<string, unknown>>();
+      logger.info("Parsed run request payload", {
+        workspaceAbsPath: body.workspaceAbsPath,
+      });
     } catch (error) {
+      logger.error("Invalid JSON payload", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return ctx.json(
         {
           error: `Invalid JSON payload: ${String(
@@ -51,12 +64,26 @@ export function registerRunRoute(app: Hono) {
           : undefined,
       );
 
+      logger.info("Workspace path resolved", {
+        resolvedWorkspaceAbsPath,
+        durationMs: Date.now() - requestStartedAt,
+      });
+
       return ctx.json({ resolvedWorkspaceAbsPath });
     } catch (error) {
       if (error instanceof RunConfigurationError) {
+        logger.error("Workspace path validation failed", {
+          status: error.status,
+          message: error.message,
+          durationMs: Date.now() - requestStartedAt,
+        });
         return ctx.json({ error: error.message }, error.status);
       }
 
+      logger.error("Unexpected error handling run request", {
+        error: error instanceof Error ? error.message : String(error),
+        durationMs: Date.now() - requestStartedAt,
+      });
       throw error;
     }
   });

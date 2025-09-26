@@ -11,6 +11,7 @@ function normalizeRoot(root: string): string {
 }
 
 export function resolveWorkspacePath(workspaceAbsPath: string | undefined): string {
+  const startedAt = Date.now();
   const workspacesRoot = process.env.WORKSPACES_ROOT;
   if (!workspacesRoot) {
     throw new Error("WORKSPACES_ROOT environment variable is not set.");
@@ -19,6 +20,11 @@ export function resolveWorkspacePath(workspaceAbsPath: string | undefined): stri
   if (!workspaceAbsPath || workspaceAbsPath.trim().length === 0) {
     throw new Error("workspaceAbsPath is required.");
   }
+
+  logger.info("Validating workspace path", {
+    workspaceAbsPath,
+    workspacesRoot,
+  });
 
   let resolvedRoot: string;
   let resolvedWorkspace: string;
@@ -51,6 +57,11 @@ export function resolveWorkspacePath(workspaceAbsPath: string | undefined): stri
       `Resolved workspace path "${resolvedWorkspace}" is outside of the configured root "${resolvedRoot}".`,
     );
   }
+
+  logger.info("Workspace path validation completed", {
+    resolvedWorkspace,
+    durationMs: Date.now() - startedAt,
+  });
 
   return resolvedWorkspace;
 }
