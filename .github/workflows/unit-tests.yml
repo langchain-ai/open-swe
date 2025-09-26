@@ -34,6 +34,8 @@ jobs:
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
+      - name: Run prohibited reference guard
+        run: yarn guard:no-daytona
       - name: Build project
         run: yarn build
       - name: Run tests
