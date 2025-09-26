@@ -17,6 +17,7 @@ import {
 } from "@openswe/shared/open-swe/local-mode";
 import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@openswe/shared/constants";
 import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
+import { getWorkspacePathFromConfig } from "../../utils/workspace.js";
 
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
 
@@ -39,13 +40,71 @@ export function createTextEditorTool(
 
         const localMode = isLocalMode(config);
         const localAbsolutePath = getLocalWorkingDirectory();
-        const sandboxAbsolutePath = getRepoAbsolutePath(state.targetRepository);
-        const workDir = localMode ? localAbsolutePath : sandboxAbsolutePath;
+        const workspacePath = getWorkspacePathFromConfig(config);
+        const sandboxAbsolutePath = getRepoAbsolutePath(
+          state.targetRepository,
+          config,
+        );
+        const workDir = workspacePath
+          ? workspacePath
+          : localMode
+            ? localAbsolutePath
+            : sandboxAbsolutePath;
+        const useWorkspaceFs = Boolean(workspacePath);
         const projectPrefix = `${SANDBOX_ROOT_DIR}/project/`;
         const localPrefix = `${SANDBOX_ROOT_DIR}/local/`;
         let result: string;
 
-        if (localMode) {
+        if (useWorkspaceFs) {
+          const sandbox = null;
+          switch (command) {
+            case "view":
+              result = await handleViewCommand(sandbox, config, {
+                path,
+                workDir,
+                viewRange: view_range,
+              });
+              break;
+            case "str_replace":
+              if (!old_str || new_str === undefined) {
+                throw new Error(
+                  "str_replace command requires both old_str and new_str parameters",
+                );
+              }
+              result = await handleStrReplaceCommand(sandbox, config, {
+                path,
+                workDir,
+                oldStr: old_str,
+                newStr: new_str,
+              });
+              break;
+            case "create":
+              if (!file_text) {
+                throw new Error("create command requires file_text parameter");
+              }
+              result = await handleCreateCommand(sandbox, config, {
+                path,
+                workDir,
+                fileText: file_text,
+              });
+              break;
+            case "insert":
+              if (insert_line === undefined || new_str === undefined) {
+                throw new Error(
+                  "insert command requires both insert_line and new_str parameters",
+                );
+              }
+              result = await handleInsertCommand(sandbox, config, {
+                path,
+                workDir,
+                insertLine: insert_line,
+                newStr: new_str,
+              });
+              break;
+            default:
+              throw new Error(`Unknown command: ${command}`);
+          }
+        } else if (localMode) {
           // Local mode: use LocalShellExecutor for file operations
           const executor = getLocalShellExecutor(localAbsolutePath);
 

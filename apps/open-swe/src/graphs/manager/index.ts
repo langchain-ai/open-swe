@@ -5,15 +5,20 @@ import {
   classifyMessage,
   startPlanner,
   createNewSession,
+  resolveWorkspace,
 } from "./nodes/index.js";
 
 const workflow = new StateGraph(ManagerGraphStateObj, GraphConfiguration)
+  .addNode("resolve-workspace", resolveWorkspace, {
+    ends: ["classify-message"],
+  })
   .addNode("classify-message", classifyMessage, {
     ends: [END, "start-planner", "create-new-session"],
   })
   .addNode("create-new-session", createNewSession)
   .addNode("start-planner", startPlanner)
-  .addEdge(START, "classify-message")
+  .addEdge(START, "resolve-workspace")
+  .addEdge("resolve-workspace", "classify-message")
   .addEdge("create-new-session", END)
   .addEdge("start-planner", END);
 

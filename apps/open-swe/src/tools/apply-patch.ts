@@ -15,6 +15,11 @@ import {
 import { createShellExecutor } from "../utils/shell-executor/shell-executor.js";
 import { join } from "path";
 import { v4 as uuidv4 } from "uuid";
+import { promises as fs } from "node:fs";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
+import { getWorkspacePathFromConfig } from "../utils/workspace.js";
+import { stageAndCommitWorkspaceChanges } from "../utils/git.js";
 
 type FileOperationResult = {
   success: boolean;
@@ -22,6 +27,7 @@ type FileOperationResult = {
 };
 
 const logger = createLogger(LogLevel.INFO, "ApplyPatchTool");
+const execFileAsync = promisify(execFile);
 
 /**
  * Attempts to apply a patch using Git CLI
@@ -36,13 +42,32 @@ async function applyPatchWithGit(
   workDir: string,
   diffContent: string,
   config: GraphConfig,
+  workspacePath?: string,
 ): Promise<FileOperationResult> {
   // Generate temp patch file path
-  const tempPatchFile = isLocalMode(config)
-    ? join(workDir, `patch_${uuidv4()}.diff`)
-    : `/tmp/patch_${uuidv4()}.diff`;
+  const tempPatchFile = workspacePath
+    ? join(workspacePath, `patch_${uuidv4()}.diff`)
+    : isLocalMode(config)
+      ? join(workDir, `patch_${uuidv4()}.diff`)
+      : `/tmp/patch_${uuidv4()}.diff`;
 
   try {
+    if (workspacePath) {
+      await fs.writeFile(tempPatchFile, diffContent, "utf-8");
+      const { stdout, stderr } = await execFileAsync("git", [
+        "apply",
+        "--verbose",
+        tempPatchFile,
+      ], {
+        cwd: workspacePath,
+      });
+      await stageAndCommitWorkspaceChanges(workspacePath);
+      return {
+        success: true,
+        output: stdout || stderr || "Patch applied successfully",
+      };
+    }
+
     // Create the patch file using unified shell executor
     const executor = createShellExecutor(config);
     const createFileResponse = await executor.executeCommand({
@@ -89,13 +114,17 @@ async function applyPatchWithGit(
   } finally {
     // Clean up temp file using unified shell executor
     try {
-      const executor = createShellExecutor(config);
-      await executor.executeCommand({
-        command: `rm -f "${tempPatchFile}"`,
-        workdir: workDir,
-        timeout: 5, // 5 seconds timeout for cleanup
-        sandbox: sandbox || undefined,
-      });
+      if (workspacePath) {
+        await fs.unlink(tempPatchFile);
+      } else {
+        const executor = createShellExecutor(config);
+        await executor.executeCommand({
+          command: `rm -f "${tempPatchFile}"`,
+          workdir: workDir,
+          timeout: 5, // 5 seconds timeout for cleanup
+          sandbox: sandbox || undefined,
+        });
+      }
     } catch (cleanupError) {
       logger.warn(`Failed to clean up temp patch file: ${tempPatchFile}`, {
         cleanupError,
@@ -111,9 +140,12 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
       const workDir = isLocalMode(config)
         ? getLocalWorkingDirectory()
         : getRepoAbsolutePath(state.targetRepository);
+      const workspacePath = getWorkspacePathFromConfig(config);
 
       // Get sandbox for sandbox mode (will be undefined for local mode)
-      const sandbox = isLocalMode(config)
+      const sandbox = workspacePath
+        ? null
+        : isLocalMode(config)
         ? null
         : await getSandboxSessionOrThrow(input);
 
@@ -131,7 +163,13 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
 
       // Apply the patch using Git CLI for better error messages
       logger.info(`Attempting to apply patch to ${file_path} using Git CLI`);
-      const gitResult = await applyPatchWithGit(sandbox, workDir, diff, config);
+      const gitResult = await applyPatchWithGit(
+        sandbox,
+        workDir,
+        diff,
+        config,
+        workspacePath,
+      );
 
       const readFileOutput = readFileResult.output;
 

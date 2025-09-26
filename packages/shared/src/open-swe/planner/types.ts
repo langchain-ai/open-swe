@@ -24,6 +24,12 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  workspacePath: withLangGraph(z.string().optional(), {
+    reducer: {
+      schema: z.string().optional(),
+      fn: (_state, update) => update,
+    },
+  }),
   issueId: withLangGraph(z.custom<number>().optional(), {
     reducer: {
       schema: z.custom<number>().optional(),

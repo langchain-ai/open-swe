@@ -137,6 +137,7 @@ export async function classifyMessage(
     // If it's a no_op, just add the message to the state and return.
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
+      workspacePath: state.workspacePath,
     };
     return new Command({
       update: commandUpdate,
@@ -148,6 +149,7 @@ export async function classifyMessage(
     // Route to node which kicks off new manager run, passing in the full conversation history.
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
+      workspacePath: state.workspacePath,
     };
     return new Command({
       update: commandUpdate,
@@ -160,6 +162,7 @@ export async function classifyMessage(
     const newMessages: BaseMessage[] = [response];
     const commandUpdate: ManagerGraphUpdate = {
       messages: newMessages,
+      workspacePath: state.workspacePath,
     };
 
     if (
@@ -180,6 +183,7 @@ export async function classifyMessage(
   if (!shouldCreateIssue(config)) {
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
+      workspacePath: state.workspacePath,
     };
     if (
       toolCallArgs.route === "start_planner" ||
@@ -316,6 +320,13 @@ export async function classifyMessage(
           command: {
             resume: plannerResume,
           },
+          config: {
+            configurable: {
+              ...(state.workspacePath
+                ? { workspacePath: state.workspacePath }
+                : {}),
+            },
+          },
           streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
         },
       );
@@ -333,6 +344,7 @@ export async function classifyMessage(
     // After creating the new comment, we can add the message to state and end.
     const commandUpdate: ManagerGraphUpdate = {
       messages: newMessages,
+      workspacePath: state.workspacePath,
       ...(newPlannerId && state.plannerSession?.threadId
         ? {
             plannerSession: {
@@ -353,6 +365,7 @@ export async function classifyMessage(
   const commandUpdate: ManagerGraphUpdate = {
     messages: newMessages,
     ...(issueId ? { issueId } : {}),
+    workspacePath: state.workspacePath,
   };
 
   if (

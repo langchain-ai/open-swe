@@ -3,6 +3,13 @@ import { readFile, writeFile } from "../../utils/read-write.js";
 import { getSandboxErrorFields } from "../../utils/sandbox-error-fields.js";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
+import { promises as fs } from "node:fs";
+import { dirname } from "node:path";
+import {
+  getWorkspacePathFromConfig,
+  resolvePathInsideWorkspace,
+} from "../../utils/workspace.js";
+import { stageAndCommitWorkspaceChanges } from "../../utils/git.js";
 
 interface ViewCommandInputs {
   path: string;
@@ -17,6 +24,39 @@ export async function handleViewCommand(
 ): Promise<string> {
   const { path, workDir, viewRange } = inputs;
   try {
+    const workspacePath = getWorkspacePathFromConfig(config);
+    if (workspacePath) {
+      const targetPath = resolvePathInsideWorkspace(
+        workspacePath,
+        path,
+        workDir,
+      );
+      const stats = await fs.stat(targetPath);
+      if (stats.isDirectory()) {
+        const entries = await fs.readdir(targetPath, { withFileTypes: true });
+        const listing = entries
+          .map((entry) =>
+            `${entry.isDirectory() ? "d" : "-"} ${entry.name}`,
+          )
+          .join("\n");
+        return `Directory listing for ${path}:\n${listing}`;
+      }
+
+      const content = await fs.readFile(targetPath, "utf-8");
+      const lines = content.split("\n");
+      if (viewRange) {
+        const [start, end] = viewRange;
+        const startIndex = Math.max(0, start - 1);
+        const endIndex = end === -1 ? lines.length : Math.min(lines.length, end);
+        return lines
+          .slice(startIndex, endIndex)
+          .map((line, index) => `${startIndex + index + 1}: ${line}`)
+          .join("\n");
+      }
+
+      return lines.map((line, index) => `${index + 1}: ${line}`).join("\n");
+    }
+
     // Check if path is a directory
     const executor = createShellExecutor(config);
     const statOutput = await executor.executeCommand({
@@ -94,6 +134,38 @@ export async function handleStrReplaceCommand(
   config: GraphConfig,
   inputs: StrReplaceCommandInputs,
 ): Promise<string> {
+  const workspacePath = getWorkspacePathFromConfig(config);
+  if (workspacePath) {
+    const targetPath = resolvePathInsideWorkspace(
+      workspacePath,
+      inputs.path,
+      inputs.workDir,
+    );
+    const fileContent = await fs.readFile(targetPath, "utf-8");
+    const occurrences = (
+      fileContent.match(
+        new RegExp(inputs.oldStr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+      ) || []
+    ).length;
+
+    if (occurrences === 0) {
+      throw new Error(
+        `No match found for replacement text in ${inputs.path}. Please check your text and try again.`,
+      );
+    }
+
+    if (occurrences > 1) {
+      throw new Error(
+        `Found ${occurrences} matches for replacement text in ${inputs.path}. Please provide more context to make a unique match.`,
+      );
+    }
+
+    const newContent = fileContent.replace(inputs.oldStr, inputs.newStr);
+    await fs.writeFile(targetPath, newContent, "utf-8");
+    await stageAndCommitWorkspaceChanges(workspacePath);
+    return `Successfully replaced text in ${inputs.path} at exactly one location.`;
+  }
+
   const { path, workDir, oldStr, newStr } = inputs;
   const { success: readSuccess, output: fileContent } = await readFile({
     sandbox,
@@ -153,6 +225,27 @@ export async function handleCreateCommand(
   config: GraphConfig,
   inputs: CreateCommandInputs,
 ): Promise<string> {
+  const workspacePath = getWorkspacePathFromConfig(config);
+  if (workspacePath) {
+    const targetPath = resolvePathInsideWorkspace(
+      workspacePath,
+      inputs.path,
+      inputs.workDir,
+    );
+    try {
+      await fs.access(targetPath);
+      throw new Error(
+        `File ${inputs.path} already exists. Use str_replace to modify existing files.`,
+      );
+    } catch {
+      // File does not exist
+    }
+    await fs.mkdir(dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, inputs.fileText, "utf-8");
+    await stageAndCommitWorkspaceChanges(workspacePath);
+    return `Successfully created file ${inputs.path}.`;
+  }
+
   const { path, workDir, fileText } = inputs;
   // Check if file already exists
   const { success: readSuccess } = await readFile({
@@ -194,6 +287,22 @@ export async function handleInsertCommand(
   config: GraphConfig,
   inputs: InsertCommandInputs,
 ): Promise<string> {
+  const workspacePath = getWorkspacePathFromConfig(config);
+  if (workspacePath) {
+    const targetPath = resolvePathInsideWorkspace(
+      workspacePath,
+      inputs.path,
+      inputs.workDir,
+    );
+    const fileContent = await fs.readFile(targetPath, "utf-8");
+    const lines = fileContent.split("\n");
+    const insertIndex = Math.max(0, Math.min(lines.length, inputs.insertLine));
+    lines.splice(insertIndex, 0, inputs.newStr);
+    await fs.writeFile(targetPath, lines.join("\n"), "utf-8");
+    await stageAndCommitWorkspaceChanges(workspacePath);
+    return `Successfully inserted text in ${inputs.path} at line ${inputs.insertLine}.`;
+  }
+
   const { path, workDir, insertLine, newStr } = inputs;
   const { success: readSuccess, output: fileContent } = await readFile({
     sandbox,

@@ -12,6 +12,10 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    * Absolute path to the user's selected workspace when running locally.
    */
   workspaceAbsPath: z.string().optional(),
+  /**
+   * Resolved workspace path inside the container after validation.
+   */
+  workspacePath: z.string().optional(),
   issueId: z.number().optional(),
   /**
    * The tasks generated for this request.

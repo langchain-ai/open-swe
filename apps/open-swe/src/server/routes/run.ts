@@ -1,6 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { Hono } from "hono";
+import { resolveWorkspacePath } from "../../utils/workspace.js";
 
 class RunConfigurationError extends Error {
   public readonly status: number;
@@ -14,60 +13,18 @@ class RunConfigurationError extends Error {
 export function resolveInsideRoot(
   workspaceAbsPath: string | undefined,
 ): string {
-  const workspacesRoot = process.env.WORKSPACES_ROOT;
-  if (!workspacesRoot) {
-    throw new RunConfigurationError(
-      "WORKSPACES_ROOT environment variable is not set.",
-      500,
-    );
-  }
-
-  if (!workspaceAbsPath || workspaceAbsPath.trim().length === 0) {
-    throw new RunConfigurationError(
-      "workspaceAbsPath is required.",
-      400,
-    );
-  }
-
-  let resolvedRoot: string;
-  let resolvedPath: string;
   try {
-    resolvedRoot = fs.realpathSync(workspacesRoot);
+    return resolveWorkspacePath(workspaceAbsPath);
   } catch (error) {
-    throw new RunConfigurationError(
-      `Unable to resolve workspaces root: ${String(
-        error instanceof Error ? error.message : error,
-      )}.`,
-      500,
-    );
+    if (error instanceof Error) {
+      const message = error.message;
+      if (message.includes("WORKSPACES_ROOT")) {
+        throw new RunConfigurationError(message, 500);
+      }
+      throw new RunConfigurationError(message, 400);
+    }
+    throw error;
   }
-
-  try {
-    resolvedPath = fs.realpathSync(workspaceAbsPath);
-  } catch (error) {
-    throw new RunConfigurationError(
-      `Unable to resolve workspace path: ${String(
-        error instanceof Error ? error.message : error,
-      )}.`,
-      400,
-    );
-  }
-
-  const normalizedRoot = resolvedRoot.endsWith(path.sep)
-    ? resolvedRoot
-    : `${resolvedRoot}${path.sep}`;
-
-  if (
-    resolvedPath !== resolvedRoot &&
-    !resolvedPath.startsWith(normalizedRoot)
-  ) {
-    throw new RunConfigurationError(
-      `Resolved workspace path "${resolvedPath}" is outside of the configured root "${resolvedRoot}".`,
-      400,
-    );
-  }
-
-  return resolvedPath;
 }
 
 export function registerRunRoute(app: Hono) {

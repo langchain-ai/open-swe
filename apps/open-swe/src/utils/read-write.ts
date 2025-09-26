@@ -7,10 +7,15 @@ import {
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
 import { promises as fs } from "fs";
-import { join, isAbsolute } from "path";
+import { dirname } from "path";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import { createShellExecutor } from "./shell-executor/shell-executor.js";
 import { v4 as uuidv4 } from "uuid";
+import {
+  getWorkspacePathFromConfig,
+  resolvePathInsideWorkspace,
+} from "./workspace.js";
+import { stageAndCommitWorkspaceChanges } from "./git.js";
 
 const logger = createLogger(LogLevel.INFO, "ReadWriteUtil");
 
@@ -22,6 +27,11 @@ async function handleCreateFile(
     workDir?: string;
   },
 ) {
+  const workspacePath = getWorkspacePathFromConfig(config);
+  if (workspacePath) {
+    return handleCreateFileWorkspace(filePath, workspacePath, args?.workDir);
+  }
+
   if (isLocalMode(config)) {
     return handleCreateFileLocal(filePath, args?.workDir);
   }
@@ -58,6 +68,11 @@ async function readFileFunc(inputs: {
   output: string;
 }> {
   const { sandbox, filePath, workDir, config } = inputs;
+
+  const workspacePath = getWorkspacePathFromConfig(config);
+  if (workspacePath) {
+    return readFileWorkspace(filePath, workspacePath, workDir);
+  }
 
   if (isLocalMode(config)) {
     return readFileLocal(filePath, workDir);
@@ -156,6 +171,13 @@ async function writeFileFunc(inputs: {
 }> {
   const { sandbox, filePath, content, workDir, config } = inputs;
 
+  const workspacePath = config
+    ? getWorkspacePathFromConfig(config)
+    : process.env.OPEN_SWE_WORKSPACE_PATH;
+  if (workspacePath) {
+    return writeFileWorkspace(filePath, content, workspacePath, workDir);
+  }
+
   // Check if we're in local mode
   if (config && isLocalMode(config)) {
     return writeFileLocal(filePath, content, workDir);
@@ -234,9 +256,11 @@ async function readFileLocal(
 }> {
   try {
     const workingDirectory = workDir || getLocalWorkingDirectory();
-    const fullPath = isAbsolute(filePath)
-      ? filePath
-      : join(workingDirectory, filePath);
+    const fullPath = resolvePathInsideWorkspace(
+      workingDirectory,
+      filePath,
+      workDir,
+    );
     const content = await fs.readFile(fullPath, "utf-8");
     return {
       success: true,
@@ -247,10 +271,13 @@ async function readFileLocal(
       // File doesn't exist, create it
       try {
         const workingDirectory = workDir || getLocalWorkingDirectory();
-        const fullPath = isAbsolute(filePath)
-          ? filePath
-          : join(workingDirectory, filePath);
+        const fullPath = resolvePathInsideWorkspace(
+          workingDirectory,
+          filePath,
+          workDir,
+        );
         await fs.writeFile(fullPath, "", "utf-8");
+        await stageAndCommitWorkspaceChanges(workingDirectory);
         return {
           success: true,
           output: "",
@@ -282,10 +309,13 @@ async function writeFileLocal(
 }> {
   try {
     const workingDirectory = workDir || getLocalWorkingDirectory();
-    const fullPath = isAbsolute(filePath)
-      ? filePath
-      : join(workingDirectory, filePath);
+    const fullPath = resolvePathInsideWorkspace(
+      workingDirectory,
+      filePath,
+      workDir,
+    );
     await fs.writeFile(fullPath, content, "utf-8");
+    await stageAndCommitWorkspaceChanges(workingDirectory);
     return {
       success: true,
       output: `Successfully wrote file '${filePath}' to local filesystem.`,
@@ -312,10 +342,13 @@ async function handleCreateFileLocal(
 }> {
   try {
     const workingDirectory = workDir || getLocalWorkingDirectory();
-    const fullPath = isAbsolute(filePath)
-      ? filePath
-      : join(workingDirectory, filePath);
+    const fullPath = resolvePathInsideWorkspace(
+      workingDirectory,
+      filePath,
+      workDir,
+    );
     await fs.writeFile(fullPath, "", "utf-8");
+    await stageAndCommitWorkspaceChanges(workingDirectory);
     return {
       exitCode: 0,
       stdout: `Created file '${filePath}'`,
@@ -327,6 +360,100 @@ async function handleCreateFileLocal(
       error: error.message,
       stdout: "",
       stderr: error.message,
+    };
+  }
+}
+
+async function readFileWorkspace(
+  filePath: string,
+  workspacePath: string,
+  workDir?: string,
+): Promise<{ success: boolean; output: string }> {
+  try {
+    const fullPath = resolvePathInsideWorkspace(
+      workspacePath,
+      filePath,
+      workDir,
+    );
+    const content = await fs.readFile(fullPath, "utf-8");
+    return { success: true, output: content };
+  } catch (error: any) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      const creation = await writeFileWorkspace(
+        filePath,
+        "",
+        workspacePath,
+        workDir,
+      );
+      if (creation.success) {
+        return { success: true, output: "" };
+      }
+      return creation;
+    }
+
+    return {
+      success: false,
+      output: `FAILED TO READ FILE '${filePath}'. Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
+async function writeFileWorkspace(
+  filePath: string,
+  content: string,
+  workspacePath: string,
+  workDir?: string,
+): Promise<{ success: boolean; output: string }> {
+  try {
+    const fullPath = resolvePathInsideWorkspace(
+      workspacePath,
+      filePath,
+      workDir,
+    );
+    await fs.mkdir(dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, content, "utf-8");
+    await stageAndCommitWorkspaceChanges(workspacePath);
+    return {
+      success: true,
+      output: `Successfully wrote file '${filePath}' to workspace.`,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      output: `FAILED TO WRITE FILE '${filePath}'. Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
+async function handleCreateFileWorkspace(
+  filePath: string,
+  workspacePath: string,
+  workDir?: string,
+) {
+  try {
+    const fullPath = resolvePathInsideWorkspace(
+      workspacePath,
+      filePath,
+      workDir,
+    );
+    await fs.mkdir(dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, "", "utf-8");
+    await stageAndCommitWorkspaceChanges(workspacePath);
+    return {
+      exitCode: 0,
+      stdout: `Created file '${filePath}'`,
+      stderr: "",
+    };
+  } catch (error: any) {
+    return {
+      exitCode: 1,
+      error: error instanceof Error ? error.message : String(error),
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
     };
   }
 }
