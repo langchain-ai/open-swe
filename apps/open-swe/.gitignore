@@ -30,3 +30,5 @@ dist-ssr
 evals/dataset/scripts/*
 langbench/scripts/*
 scripts/
+!scripts/
+!scripts/smoke.ts
