@@ -7,7 +7,10 @@ import {
 } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { getCodebaseTree } from "../../utils/tree.js";
-import { createDockerSandbox } from "../../utils/sandbox.js";
+import {
+  createDockerSandbox,
+  getSandboxMetadata,
+} from "../../utils/sandbox.js";
 import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
 import { createShellExecutor } from "../../utils/shell-executor/index.js";
 import { SANDBOX_DOCKER_IMAGE } from "../../constants.js";
@@ -235,7 +238,11 @@ async function initializeSandboxRemote(
   let sandbox;
   const repoPath = getLocalWorkingDirectory();
   try {
-    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
+    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
+      hostRepoPath: repoPath,
+      repoName: targetRepository.repo,
+      commitOnChange: true,
+    });
     emitStepEvent(
       {
         ...createSandboxAction,
@@ -262,17 +269,26 @@ async function initializeSandboxRemote(
     },
   };
   emitStepEvent(cloneRepoAction, "pending");
-  try {
-    await uploadRepoToContainer({
-      containerId: sandbox.id,
-      localRepoPath: repoPath,
-    });
+  const metadata = getSandboxMetadata(sandbox.id);
+  const shouldCloneRepo = !(
+    metadata?.commitOnChange && metadata.hostRepoPath
+  );
+
+  if (shouldCloneRepo) {
+    try {
+      await uploadRepoToContainer({
+        containerId: sandbox.id,
+        localRepoPath: repoPath,
+      });
+      emitStepEvent(cloneRepoAction, "success");
+    } catch (_) {
+      emitStepEvent(cloneRepoAction, "error", "Failed to clone repository.");
+    }
+  } else {
     emitStepEvent(cloneRepoAction, "success");
-  } catch (_) {
-    emitStepEvent(cloneRepoAction, "error", "Failed to clone repository.");
   }
 
-  const repoDir = `/workspace/${targetRepository.repo}`;
+  const repoDir = metadata?.containerRepoPath ?? `/workspace/${targetRepository.repo}`;
 
   // Step 3: Checkout branch
   const checkoutAction: CustomNodeEvent = {

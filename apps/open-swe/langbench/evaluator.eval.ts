@@ -3,8 +3,9 @@ import dotenv from "dotenv";
 import type { Sandbox } from "../src/utils/sandbox.js";
 import {
   createDockerSandbox,
-  stopSandbox,
   deleteSandbox,
+  getSandboxMetadata,
+  stopSandbox,
 } from "../src/utils/sandbox.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { readFileSync } from "fs";
@@ -50,11 +51,6 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
     // Use test files from PR data (already fetched and stored)
     const testFiles = prData.testFiles || [];
     result.testFiles = testFiles;
-    // Create sandbox
-    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
-    result.workspaceId = sandbox.id;
-    logger.info(`Created sandbox: ${sandbox.id}`);
-
     // Use the hardcoded pre-merge commit SHA from the dataset
     const preMergeCommit = prData.preMergeCommitSha;
     logger.info(`Using pre-merge commit: ${preMergeCommit}`);
@@ -67,16 +63,26 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       baseCommit: preMergeCommit,
     };
     const localRepoDir = getRepoAbsolutePath(targetRepository);
+    // Create sandbox
+    sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
+      hostRepoPath: localRepoDir,
+      repoName: prData.repoName,
+      commitOnChange: false,
+    });
+    result.workspaceId = sandbox.id;
+    logger.info(`Created sandbox: ${sandbox.id}`);
     await uploadRepoToContainer({
       containerId: sandbox.id,
       localRepoPath: localRepoDir,
     });
     const repoDir = `/workspace/${prData.repoName}`;
+    const metadata = getSandboxMetadata(sandbox.id);
+    const containerRepoDir = metadata?.containerRepoPath ?? repoDir;
 
     // Assume repository is already available locally
     // Setup Python environment
     logger.info("Setting up Python environment...");
-    const envSetupSuccess = await setupEnv(sandbox, repoDir);
+    const envSetupSuccess = await setupEnv(sandbox, containerRepoDir);
     if (!envSetupSuccess) {
       logger.warn("Failed to setup Python environment, continuing anyway");
     }
@@ -97,7 +103,7 @@ async function processPR(prData: PRData): Promise<PRProcessResult> {
       const testResults = await runPytestOnFiles({
         sandbox,
         testFiles,
-        repoDir,
+        repoDir: containerRepoDir,
         timeoutSec: 300,
       });
       result.testResults = testResults;

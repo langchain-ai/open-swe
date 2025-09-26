@@ -3,8 +3,9 @@ import { OpenSWEInput, CodeTestDetails } from "./open-swe-types.js";
 import type { Sandbox } from "../src/utils/sandbox.js";
 import {
   createDockerSandbox,
-  stopSandbox,
   deleteSandbox,
+  getSandboxMetadata,
+  stopSandbox,
 } from "../src/utils/sandbox.js";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { TIMEOUT_SEC } from "@openswe/shared/constants";
@@ -109,10 +110,14 @@ export async function evaluator(inputs: {
     user_input: openSWEInputs.user_input.substring(0, 100) + "...",
   });
 
-  const sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE);
+  const localRepoDir = getRepoAbsolutePath(output.targetRepository);
+  const sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
+    hostRepoPath: localRepoDir,
+    repoName: output.targetRepository.repo,
+    commitOnChange: false,
+  });
 
   try {
-    const localRepoDir = getRepoAbsolutePath(output.targetRepository);
     await uploadRepoToContainer({
       containerId: sandbox.id,
       localRepoPath: localRepoDir,
@@ -120,7 +125,9 @@ export async function evaluator(inputs: {
     logger.info("Repository uploaded to sandbox", {
       repo: output.targetRepository.repo,
     });
-    const containerRepoDir = `/workspace/${output.targetRepository.repo}`;
+    const metadata = getSandboxMetadata(sandbox.id);
+    const containerRepoDir =
+      metadata?.containerRepoPath ?? `/workspace/${output.targetRepository.repo}`;
 
     const envSetupSuccess = await setupEnv(sandbox, containerRepoDir);
     if (!envSetupSuccess) {

@@ -1,298 +1,361 @@
-import Docker from "dockerode";
-import Stream from "node:stream";
-import { createLogger, LogLevel } from "./logger.js";
-import { SANDBOX_DOCKER_IMAGE } from "../constants.js";
+import path from "node:path";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+import { LocalDockerSandboxProvider } from "@openswe/sandbox-docker";
+import type {
+  LocalDockerSandboxOptions,
+  LocalDockerSandboxResources,
+  WritableMount,
+} from "@openswe/sandbox-docker";
+import type { SandboxHandle } from "@openswe/sandbox-core";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
 import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { uploadRepoToContainer } from "@openswe/shared/upload-repo-to-container";
+import { SANDBOX_DOCKER_IMAGE } from "../constants.js";
+import { createLogger, LogLevel } from "./logger.js";
 
 const logger = createLogger(LogLevel.INFO, "Sandbox");
 
-function parsePositiveInt(
-  envValue: string | undefined,
-  fallback: number,
-): number {
-  if (!envValue) return fallback;
-  const parsed = Number.parseInt(envValue, 10);
+type SandboxProviderFactory = (
+  options: LocalDockerSandboxOptions,
+) => LocalDockerSandboxProvider;
+
+const DEFAULT_REPO_ROOT = "/workspace";
+const DEFAULT_COMMIT_MESSAGE = "OpenSWE auto-commit";
+const DEFAULT_COMMIT_AUTHOR_NAME = "Open SWE";
+const DEFAULT_COMMIT_AUTHOR_EMAIL = "opensource@langchain.dev";
+const DEFAULT_MEMORY_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+
+const commitCounters = new Map<string, number>();
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
 }
 
-/**
- * Defaults favor isolation: cap resources, drop root, and block networking. Operators can relax
- * limits via OPEN_SWE_SANDBOX_MEMORY_BYTES, OPEN_SWE_SANDBOX_NANO_CPUS,
- * OPEN_SWE_SANDBOX_USER, and OPEN_SWE_SANDBOX_ENABLE_NETWORK when needed.
- */
+function parsePositiveFloat(
+  value: string | undefined,
+  fallback: number | undefined,
+): number | undefined {
+  if (!value) return fallback;
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
 const SANDBOX_MEMORY_LIMIT_BYTES = parsePositiveInt(
   process.env.OPEN_SWE_SANDBOX_MEMORY_BYTES,
-  2 * 1024 * 1024 * 1024,
+  DEFAULT_MEMORY_LIMIT_BYTES,
 );
-const SANDBOX_NANO_CPUS = parsePositiveInt(
-  process.env.OPEN_SWE_SANDBOX_NANO_CPUS,
-  1_000_000_000,
-);
-const SANDBOX_USER = process.env.OPEN_SWE_SANDBOX_USER?.trim() || "node";
-const SANDBOX_NETWORK_DISABLED =
-  process.env.OPEN_SWE_SANDBOX_ENABLE_NETWORK?.trim().toLowerCase() === "true"
-    ? false
-    : true;
 
-let docker: Docker | null = null;
-let dockerInitializationPromise: Promise<Docker> | null = null;
-
-async function dockerClient(): Promise<Docker> {
-  if (docker) return docker;
-
-  if (!dockerInitializationPromise) {
-    dockerInitializationPromise = (async () => {
-      const client = new Docker();
-      try {
-        await client.ping();
-      } catch (error) {
-        const detail =
-          error instanceof Error
-            ? error.message
-            : typeof error === "string"
-              ? error
-              : "";
-        const suffix =
-          detail && detail !== "[object Object]" ? ` Details: ${detail}` : "";
-        throw new Error(
-          `Docker daemon not running or unreachable. Please start Docker and try again.${suffix}`,
-        );
-      }
-      docker = client;
-      return client;
-    })();
+const SANDBOX_CPU_COUNT = (() => {
+  const explicitCpuCount = parsePositiveFloat(
+    process.env.OPEN_SWE_SANDBOX_CPUS,
+    undefined,
+  );
+  if (explicitCpuCount !== undefined) {
+    return explicitCpuCount;
   }
+  const nanoCpus = parsePositiveInt(
+    process.env.OPEN_SWE_SANDBOX_NANO_CPUS,
+    0,
+  );
+  return nanoCpus > 0 ? nanoCpus / 1_000_000_000 : undefined;
+})();
+
+const SANDBOX_NETWORK_ENABLED = parseBoolean(
+  process.env.OPEN_SWE_SANDBOX_ENABLE_NETWORK,
+  false,
+);
+
+const SANDBOX_NETWORK_MODE = process.env.OPEN_SWE_SANDBOX_NETWORK_MODE?.trim();
+
+const SANDBOX_COMMAND_TIMEOUT_SEC = parsePositiveInt(
+  process.env.OPEN_SWE_SANDBOX_TIMEOUT_SEC,
+  60,
+);
+
+const SANDBOX_USER = process.env.OPEN_SWE_SANDBOX_USER?.trim();
+
+const COMMIT_AUTHOR_NAME =
+  process.env.OPEN_SWE_GIT_AUTHOR_NAME?.trim() || DEFAULT_COMMIT_AUTHOR_NAME;
+const COMMIT_AUTHOR_EMAIL =
+  process.env.OPEN_SWE_GIT_AUTHOR_EMAIL?.trim() || DEFAULT_COMMIT_AUTHOR_EMAIL;
+
+const SANDBOX_GIT_USER_NAME =
+  process.env.OPEN_SWE_SANDBOX_GIT_USER_NAME?.trim() || COMMIT_AUTHOR_NAME;
+const SANDBOX_GIT_USER_EMAIL =
+  process.env.OPEN_SWE_SANDBOX_GIT_USER_EMAIL?.trim() || COMMIT_AUTHOR_EMAIL;
+
+const SKIP_CI_UNTIL_LAST_COMMIT = parseBoolean(
+  process.env.SKIP_CI_UNTIL_LAST_COMMIT,
+  true,
+);
+
+function buildCommitMessage(repoPath: string): string {
+  const count = (commitCounters.get(repoPath) ?? 0) + 1;
+  commitCounters.set(repoPath, count);
+  const suffix = SKIP_CI_UNTIL_LAST_COMMIT ? " [skip ci]" : "";
+  return `${DEFAULT_COMMIT_MESSAGE} #${count}${suffix}`;
+}
+
+async function runGitCommand(
+  args: string[],
+  cwd: string,
+): Promise<{ stdout: string; stderr: string }> {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: COMMIT_AUTHOR_NAME,
+    GIT_AUTHOR_EMAIL: COMMIT_AUTHOR_EMAIL,
+    GIT_COMMITTER_NAME: COMMIT_AUTHOR_NAME,
+    GIT_COMMITTER_EMAIL: COMMIT_AUTHOR_EMAIL,
+  };
 
   try {
-    const client = await dockerInitializationPromise;
-    dockerInitializationPromise = null;
-    return client;
+    const { stdout, stderr } = await execFile("git", args, { cwd, env });
+    return { stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (error) {
-    dockerInitializationPromise = null;
+    if (error && typeof error === "object" && "stdout" in error) {
+      const stdout = String((error as { stdout?: string }).stdout ?? "");
+      const stderr = String((error as { stderr?: string }).stderr ?? "");
+      return { stdout, stderr };
+    }
     throw error;
   }
 }
 
-export interface SandboxProcess {
-  executeCommand(
-    command: string,
-    cwd?: string,
-    env?: Record<string, string>,
-    timeoutSec?: number,
-  ): Promise<{
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-    result: string;
-    artifacts?: { stdout: string; stderr: string };
-  }>;
-}
+async function commitHostChanges(repoPath: string): Promise<void> {
+  try {
+    const status = await runGitCommand(["status", "--porcelain"], repoPath);
+    if (!status.stdout.trim()) {
+      return;
+    }
 
-export interface Sandbox {
-  id: string;
-  process: SandboxProcess;
-}
+    await runGitCommand(["add", "--all"], repoPath);
+    const message = buildCommitMessage(repoPath);
+    const commitResult = await runGitCommand(
+      ["commit", "-m", message],
+      repoPath,
+    );
 
-function isMissingImageError(error: unknown): boolean {
-  if (!error) return false;
+    if (commitResult.stderr.trim()) {
+      logger.info("Git commit completed with messages", {
+        repoPath,
+        stderr: commitResult.stderr,
+      });
+    }
 
-  if (typeof error === "object" && error && "statusCode" in error) {
-    const statusCode = (error as { statusCode?: number }).statusCode;
-    if (statusCode === 404) return true;
+    logger.info("Committed sandbox changes", { repoPath, message });
+  } catch (error) {
+    logger.error("Failed to commit sandbox changes", {
+      repoPath,
+      error,
+    });
   }
-
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "";
-
-  return message.toLowerCase().includes("no such image");
 }
 
-async function ensureImageAvailable(
-  docker: Docker,
-  image: string,
+async function configureContainerGit(
+  handle: SandboxHandle,
+  repoPath: string,
 ): Promise<void> {
   try {
-    await docker.getImage(image).inspect();
-    return;
-  } catch (error) {
-    if (!isMissingImageError(error)) {
-      throw error;
-    }
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    docker.pull(
-      image,
-      (pullError: unknown, stream: NodeJS.ReadableStream | undefined) => {
-        if (pullError) {
-          const detail =
-            pullError instanceof Error
-              ? pullError.message
-              : typeof pullError === "string"
-                ? pullError
-                : "";
-          reject(
-            new Error(
-              `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
-                detail && detail !== "[object Object]"
-                  ? ` Details: ${detail}`
-                  : ""
-              }`,
-            ),
-          );
-          return;
-        }
-
-        if (!stream) {
-          reject(
-            new Error(
-              `Failed to pull Docker image "${image}". Docker did not return a pull progress stream.`,
-            ),
-          );
-          return;
-        }
-
-        docker.modem.followProgress(stream, (progressError?: unknown) => {
-          if (progressError) {
-            const detail =
-              progressError instanceof Error
-                ? progressError.message
-                : typeof progressError === "string"
-                  ? progressError
-                  : "";
-            reject(
-              new Error(
-                `Failed to pull Docker image "${image}". Please ensure the image exists and is accessible.${
-                  detail && detail !== "[object Object]"
-                    ? ` Details: ${detail}`
-                    : ""
-                }`,
-              ),
-            );
-            return;
-          }
-
-          resolve();
-        });
-      },
+    await handle.process.executeCommand(
+      `git config --global --add safe.directory ${repoPath}`,
+      repoPath,
     );
-  });
+    if (SANDBOX_GIT_USER_NAME) {
+      await handle.process.executeCommand(
+        `git config --global user.name "${SANDBOX_GIT_USER_NAME}"`,
+        repoPath,
+      );
+    }
+    if (SANDBOX_GIT_USER_EMAIL) {
+      await handle.process.executeCommand(
+        `git config --global user.email "${SANDBOX_GIT_USER_EMAIL}"`,
+        repoPath,
+      );
+    }
+  } catch (error) {
+    logger.warn("Failed to configure git inside sandbox", {
+      repoPath,
+      error,
+    });
+  }
+}
+
+let sandboxProviderFactory: SandboxProviderFactory = (options) =>
+  new LocalDockerSandboxProvider(options);
+
+export function setSandboxProviderFactory(
+  factory: SandboxProviderFactory,
+): void {
+  sandboxProviderFactory = factory;
+}
+
+export function resetSandboxProviderFactory(): void {
+  sandboxProviderFactory = (options) => new LocalDockerSandboxProvider(options);
+}
+
+export type SandboxProcess = SandboxHandle["process"];
+export type Sandbox = SandboxHandle;
+
+interface SandboxMetadata {
+  provider: LocalDockerSandboxProvider;
+  hostRepoPath?: string;
+  containerRepoPath: string;
+  commitOnChange: boolean;
+  commandTimeoutSec: number;
 }
 
 const sandboxes = new Map<string, Sandbox>();
+const sandboxMetadata = new Map<string, SandboxMetadata>();
+
 export function getSandbox(id: string): Sandbox | undefined {
   return sandboxes.get(id);
 }
 
+export function getSandboxMetadata(id: string): SandboxMetadata | undefined {
+  return sandboxMetadata.get(id);
+}
+
+function resolveRepoName(hostRepoPath?: string, provided?: string): string {
+  if (provided) return provided;
+  if (hostRepoPath) {
+    const normalized = path.resolve(hostRepoPath);
+    return path.basename(normalized) || `sandbox-${randomUUID()}`;
+  }
+  return `sandbox-${randomUUID()}`;
+}
+
+export interface CreateSandboxOptions {
+  hostRepoPath?: string;
+  repoName?: string;
+  containerRepoPath?: string;
+  commitOnChange?: boolean;
+  commandTimeoutSec?: number;
+}
+
 export async function createDockerSandbox(
   image: string,
-  mountPath = "/workspace",
+  options: CreateSandboxOptions = {},
 ): Promise<Sandbox> {
-  const docker = await dockerClient();
-  await ensureImageAvailable(docker, image);
-  const hostConfig: Docker.ContainerCreateOptions["HostConfig"] = {
-    Memory: SANDBOX_MEMORY_LIMIT_BYTES,
+  const hostRepoPath = options.hostRepoPath;
+  const repoName = resolveRepoName(hostRepoPath, options.repoName);
+  const containerRepoPath =
+    options.containerRepoPath ?? path.join(DEFAULT_REPO_ROOT, repoName);
+  const commitOnChange = options.commitOnChange ?? false;
+  const commandTimeoutSec =
+    options.commandTimeoutSec ?? SANDBOX_COMMAND_TIMEOUT_SEC;
+
+  const writableMounts: WritableMount[] | undefined = commitOnChange && hostRepoPath
+    ? [{ source: path.resolve(hostRepoPath), target: containerRepoPath }]
+    : undefined;
+
+  const resources: LocalDockerSandboxResources = {
+    cpuCount: SANDBOX_CPU_COUNT,
+    memoryBytes: SANDBOX_MEMORY_LIMIT_BYTES,
+    networkDisabled: !SANDBOX_NETWORK_ENABLED,
+    networkMode: SANDBOX_NETWORK_MODE,
   };
 
-  if (SANDBOX_NANO_CPUS > 0) {
-    (
-      hostConfig as Docker.ContainerCreateOptions["HostConfig"] & {
-        NanoCPUs?: number;
-      }
-    ).NanoCPUs = SANDBOX_NANO_CPUS;
+  const providerOptions: LocalDockerSandboxOptions = {
+    defaultMountPath: hostRepoPath ? path.resolve(hostRepoPath) : process.cwd(),
+    writableMounts,
+    resources,
+    workingDirectory: containerRepoPath,
+    ensureMountsExist: true,
+  };
+
+  if (SANDBOX_USER) {
+    providerOptions.user = SANDBOX_USER;
   }
 
-  const container = await docker.createContainer({
-    Image: image,
-    Tty: true,
-    Cmd: ["/bin/sh", "-c", "while true; do sleep 3600; done"],
-    Env: [`SANDBOX_ROOT_DIR=${mountPath}`],
-    HostConfig: hostConfig,
-    NetworkDisabled: SANDBOX_NETWORK_DISABLED,
-    User: SANDBOX_USER,
-  });
-  await container.start();
+  const provider = sandboxProviderFactory(providerOptions);
+  const handle = await provider.createSandbox(image, hostRepoPath);
 
-  const process: SandboxProcess = {
-    async executeCommand(command, cwd = mountPath, env, timeoutSec) {
-      const exec = await container.exec({
-        Cmd: ["bash", "-lc", command],
-        AttachStdout: true,
-        AttachStderr: true,
-        WorkingDir: cwd,
-        Env: env ? Object.entries(env).map(([k, v]) => `${k}=${v}`) : undefined,
-      });
-      const stream = await exec.start({});
-      let stdout = "";
-      let stderr = "";
-      const stdoutStream = new Stream.PassThrough();
-      const stderrStream = new Stream.PassThrough();
-      docker.modem.demuxStream(stream, stdoutStream, stderrStream);
-      stdoutStream.on("data", (d) => {
-        stdout += d.toString();
-      });
-      stderrStream.on("data", (d) => {
-        stderr += d.toString();
-      });
-      await new Promise<void>((resolve, reject) => {
-        const timer =
-          timeoutSec !== undefined
-            ? setTimeout(() => {
-                stream.destroy(new Error("Command timed out"));
-              }, timeoutSec * 1000)
-            : null;
-        stream.on("end", () => {
-          if (timer) clearTimeout(timer);
-          resolve();
-        });
-        stream.on("error", (err) => {
-          if (timer) clearTimeout(timer);
-          reject(err);
-        });
-      });
-      const inspect = await exec.inspect();
-      return {
-        exitCode: inspect.ExitCode ?? -1,
-        stdout,
-        stderr,
-        result: stdout,
-        artifacts: { stdout, stderr },
-      };
+  await configureContainerGit(handle, containerRepoPath);
+
+  const sandboxProcess: SandboxProcess = {
+    async executeCommand(command, cwd, env, timeoutSec) {
+      const effectiveCwd = cwd ?? containerRepoPath;
+      const effectiveTimeout = timeoutSec ?? commandTimeoutSec;
+      const result = await handle.process.executeCommand(
+        command,
+        effectiveCwd,
+        env,
+        effectiveTimeout,
+      );
+
+      if (commitOnChange && hostRepoPath && result.exitCode === 0) {
+        await commitHostChanges(hostRepoPath);
+      }
+
+      return result;
     },
   };
 
-  const sandbox: Sandbox = { id: container.id, process };
+  const sandbox: Sandbox = { id: handle.id, process: sandboxProcess };
   sandboxes.set(sandbox.id, sandbox);
+  sandboxMetadata.set(sandbox.id, {
+    provider,
+    hostRepoPath: hostRepoPath ? path.resolve(hostRepoPath) : undefined,
+    containerRepoPath,
+    commitOnChange,
+    commandTimeoutSec,
+  });
+
   return sandbox;
 }
 
 export async function stopSandbox(sandboxId: string): Promise<string> {
-  const docker = await dockerClient();
-  const container = docker.getContainer(sandboxId);
-  try {
-    await container.stop();
-  } catch {
-    /* ignore */
+  const metadata = sandboxMetadata.get(sandboxId);
+  if (metadata?.commitOnChange && metadata.hostRepoPath) {
+    await commitHostChanges(metadata.hostRepoPath);
   }
+
+  if (metadata) {
+    try {
+      await metadata.provider.stopSandbox(sandboxId);
+    } catch (error) {
+      logger.warn("Failed to stop sandbox", { sandboxId, error });
+    }
+  }
+
   return sandboxId;
 }
 
 export async function deleteSandbox(sandboxId: string): Promise<boolean> {
-  const docker = await dockerClient();
-  const container = docker.getContainer(sandboxId);
+  const metadata = sandboxMetadata.get(sandboxId);
+  if (metadata?.commitOnChange && metadata.hostRepoPath) {
+    await commitHostChanges(metadata.hostRepoPath);
+  }
+
+  if (!metadata) {
+    return false;
+  }
+
   try {
-    await container.remove({ force: true });
-    sandboxes.delete(sandboxId);
-    return true;
+    const deleted = await metadata.provider.deleteSandbox(sandboxId);
+    if (deleted) {
+      sandboxes.delete(sandboxId);
+      sandboxMetadata.delete(sandboxId);
+    }
+    return deleted;
   } catch (error) {
     logger.error("Failed to delete sandbox", { sandboxId, error });
     return false;
@@ -301,7 +364,7 @@ export async function deleteSandbox(sandboxId: string): Promise<boolean> {
 
 export async function getSandboxWithErrorHandling(
   sandboxSessionId: string | undefined,
-  _targetRepository: TargetRepository,
+  targetRepository: TargetRepository,
   _branchName: string,
   config: GraphConfig,
 ): Promise<{
@@ -312,6 +375,7 @@ export async function getSandboxWithErrorHandling(
   if (!isLocalMode(config)) {
     throw new Error("Sandbox operations are only supported in local mode");
   }
+
   if (sandboxSessionId) {
     const existing = getSandbox(sandboxSessionId);
     if (existing) {
@@ -322,12 +386,15 @@ export async function getSandboxWithErrorHandling(
       };
     }
   }
-  const image = SANDBOX_DOCKER_IMAGE;
+
   const repoPath = getLocalWorkingDirectory();
-  const sandbox = await createDockerSandbox(image);
-  await uploadRepoToContainer({
-    containerId: sandbox.id,
-    localRepoPath: repoPath,
+  const sandbox = await createDockerSandbox(SANDBOX_DOCKER_IMAGE, {
+    hostRepoPath: repoPath,
+    repoName: targetRepository.repo,
+    commitOnChange: true,
   });
+
   return { sandbox, codebaseTree: null, dependenciesInstalled: null };
 }
+
+const execFile = promisify(execFileCallback);
