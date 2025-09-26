@@ -1,13 +1,14 @@
 import type { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { resolveWorkspacePath } from "../../utils/workspace.js";
 import { createLogger, LogLevel } from "../../utils/logger.js";
 
 const logger = createLogger(LogLevel.INFO, "RunRoute");
 
 class RunConfigurationError extends Error {
-  public readonly status: number;
+  public readonly status: ContentfulStatusCode;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: ContentfulStatusCode) {
     super(message);
     this.status = status;
   }
@@ -53,7 +54,7 @@ export function registerRunRoute(app: Hono) {
             error instanceof Error ? error.message : error,
           )}.`,
         },
-        400,
+        400 as ContentfulStatusCode,
       );
     }
 
