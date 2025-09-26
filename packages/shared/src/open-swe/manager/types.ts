@@ -8,6 +8,10 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    * The target repository the request should be executed in.
    */
   targetRepository: z.custom<TargetRepository>(),
+  /**
+   * Absolute path to the user's selected workspace when running locally.
+   */
+  workspaceAbsPath: z.string().optional(),
   issueId: z.number().optional(),
   /**
    * The tasks generated for this request.

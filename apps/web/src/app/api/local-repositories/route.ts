@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const repoPath = path.join(baseDir, entry.name);
+      const repoPath = path.resolve(baseDir, entry.name);
       try {
         await stat(path.join(repoPath, ".git"));
         if (!search || entry.name.toLowerCase().includes(search)) {
