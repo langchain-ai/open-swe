@@ -3,7 +3,7 @@ import {
   isLocalModeFromEnv,
 } from "./open-swe/local-mode.js";
 
-export const TIMEOUT_SEC = 60; // 1 minute
+export const TIMEOUT_SEC = 900; // 15 minutes
 const CONTAINER_PROJECT_ROOT = "/workspace/project";
 
 export const SANDBOX_ROOT_DIR =

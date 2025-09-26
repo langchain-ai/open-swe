@@ -28,6 +28,9 @@ const DEFAULT_COMMIT_MESSAGE = "OpenSWE auto-commit";
 const DEFAULT_COMMIT_AUTHOR_NAME = "Open SWE";
 const DEFAULT_COMMIT_AUTHOR_EMAIL = "opensource@langchain.dev";
 const DEFAULT_MEMORY_LIMIT_BYTES = 2 * 1024 * 1024 * 1024;
+const DEFAULT_CPU_COUNT = 2;
+const DEFAULT_PIDS_LIMIT = 512;
+const DEFAULT_COMMAND_TIMEOUT_SEC = 900;
 
 const commitCounters = new Map<string, number>();
 
@@ -65,7 +68,12 @@ const SANDBOX_MEMORY_LIMIT_BYTES = parsePositiveInt(
 
 const SANDBOX_CPU_COUNT = parsePositiveFloat(
   process.env.LOCAL_SANDBOX_CPUS,
-  undefined,
+  DEFAULT_CPU_COUNT,
+);
+
+const SANDBOX_PIDS_LIMIT = parsePositiveInt(
+  process.env.LOCAL_SANDBOX_PIDS,
+  DEFAULT_PIDS_LIMIT,
 );
 
 const rawNetworkSetting = process.env.LOCAL_SANDBOX_NETWORK?.trim();
@@ -82,7 +90,7 @@ const SANDBOX_NETWORK_MODE = SANDBOX_NETWORK_ENABLED
 
 const SANDBOX_COMMAND_TIMEOUT_SEC = parsePositiveInt(
   process.env.LOCAL_SANDBOX_TIMEOUT_SEC,
-  60,
+  DEFAULT_COMMAND_TIMEOUT_SEC,
 );
 
 const COMMIT_AUTHOR_NAME =
@@ -267,6 +275,7 @@ export async function createDockerSandbox(
     memoryBytes: SANDBOX_MEMORY_LIMIT_BYTES,
     networkDisabled: !SANDBOX_NETWORK_ENABLED,
     networkMode: SANDBOX_NETWORK_MODE,
+    pidsLimit: SANDBOX_PIDS_LIMIT,
   };
 
   const providerOptions: LocalDockerSandboxOptions = {
@@ -275,6 +284,7 @@ export async function createDockerSandbox(
     resources,
     workingDirectory: containerRepoPath,
     ensureMountsExist: true,
+    defaultTimeoutSec: SANDBOX_COMMAND_TIMEOUT_SEC,
   };
 
   const provider = sandboxProviderFactory(providerOptions);
