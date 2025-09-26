@@ -8,7 +8,7 @@ import type {
   LocalDockerSandboxResources,
   WritableMount,
 } from "@openswe/sandbox-docker";
-import type { SandboxHandle } from "@openswe/sandbox-core";
+import type { SandboxHandle, SandboxProvider } from "@openswe/sandbox-core";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
 import {
   isLocalMode,
@@ -21,7 +21,7 @@ const logger = createLogger(LogLevel.INFO, "Sandbox");
 
 type SandboxProviderFactory = (
   options: LocalDockerSandboxOptions,
-) => LocalDockerSandboxProvider;
+) => SandboxProvider;
 
 const DEFAULT_REPO_ROOT = "/workspace";
 const DEFAULT_COMMIT_MESSAGE = "OpenSWE auto-commit";
@@ -215,7 +215,7 @@ export type SandboxProcess = SandboxHandle["process"];
 export type Sandbox = SandboxHandle;
 
 interface SandboxMetadata {
-  provider: LocalDockerSandboxProvider;
+  provider: SandboxProvider;
   hostRepoPath?: string;
   containerRepoPath: string;
   commitOnChange: boolean;

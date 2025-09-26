@@ -2,6 +2,7 @@ import { createLogger, LogLevel } from "../src/utils/logger.js";
 import { ENV_CONSTANTS } from "../src/utils/env-setup.js";
 import { TestResults, PytestJsonReport, RunPytestOptions } from "./types.js";
 import { readFile } from "../src/utils/read-write.js";
+import { execInSandbox, runPythonTests } from "@openswe/sandbox-core/runners";
 
 const logger = createLogger(LogLevel.DEBUG, "Langbench Utils");
 
@@ -78,9 +79,20 @@ export async function runPytestOnFiles(
     testFiles,
   });
 
-  // Join test files for pytest command
-  const testFilesArg = testFiles.join(" ");
-  const command = `${RUN_PYTHON_IN_VENV} -m pytest ${testFilesArg} -v --tb=short --json-report --json-report-file=/tmp/pytest_report.json`;
+  const pytestArgs = [
+    "-v",
+    "--tb=short",
+    "--json-report",
+    "--json-report-file=/tmp/pytest_report.json",
+  ];
+  const commandParts = [
+    RUN_PYTHON_IN_VENV,
+    "-m",
+    "pytest",
+    ...pytestArgs,
+    ...testFiles,
+  ];
+  const command = commandParts.join(" ");
   logger.info("Running pytest command", { command });
 
   logger.info(
@@ -89,12 +101,10 @@ export async function runPytestOnFiles(
 
   // Execute pip install command
   logger.info(`Running pip install command: ${PIP_INSTALL_COMMAND}`);
-  const pipInstallResult = await sandbox.process.executeCommand(
-    PIP_INSTALL_COMMAND,
-    repoDir,
-    undefined,
-    timeoutSec * 2,
-  );
+  const pipInstallResult = await execInSandbox(sandbox, PIP_INSTALL_COMMAND, {
+    cwd: repoDir,
+    timeoutSec: timeoutSec * 2,
+  });
 
   logger.info(`Pip install command completed`, {
     exitCode: pipInstallResult.exitCode,
@@ -113,11 +123,13 @@ export async function runPytestOnFiles(
   logger.info(
     `Running langgraph install command: ${LANGGRAPH_INSTALL_COMMAND}`,
   );
-  const langgraphInstallResult = await sandbox.process.executeCommand(
+  const langgraphInstallResult = await execInSandbox(
+    sandbox,
     LANGGRAPH_INSTALL_COMMAND,
-    repoDir,
-    undefined,
-    timeoutSec * 2,
+    {
+      cwd: repoDir,
+      timeoutSec: timeoutSec * 2,
+    },
   );
 
   logger.info(`Langgraph install command completed`, {
@@ -134,12 +146,13 @@ export async function runPytestOnFiles(
   }
 
   try {
-    const execution = await sandbox.process.executeCommand(
-      command,
-      repoDir,
-      undefined,
+    const execution = await runPythonTests(sandbox, {
+      pythonPath: RUN_PYTHON_IN_VENV,
+      files: testFiles,
+      args: pytestArgs,
+      cwd: repoDir,
       timeoutSec,
-    );
+    });
 
     // Read the JSON report file
     let parsed: Omit<TestResults, "success" | "error">;

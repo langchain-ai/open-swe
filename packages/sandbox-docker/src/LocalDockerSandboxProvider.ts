@@ -4,7 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { Container } from "dockerode";
-import type { ExecResult, SandboxHandle, SandboxProvider } from "@openswe/sandbox-core";
+import type {
+  ExecResult,
+  SandboxExecOptions,
+  SandboxHandle,
+  SandboxProvider,
+} from "@openswe/sandbox-core";
 
 const DEFAULT_USER = "1000:1000";
 const DEFAULT_TMPFS_OPTS = "rw,nosuid,nodev,noexec,size=64m";
@@ -148,6 +153,26 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
     await this.safeRemove(record.container);
     this.sandboxes.delete(id);
     return true;
+  }
+
+  async exec(
+    target: SandboxHandle | string,
+    command: string,
+    options: SandboxExecOptions = {},
+  ): Promise<ExecResult> {
+    const id = typeof target === "string" ? target : target.id;
+    const record = this.sandboxes.get(id);
+    if (!record) {
+      throw new Error(`Sandbox ${id} not found`);
+    }
+
+    return await this.executeCommand(
+      record.container,
+      command,
+      options.cwd,
+      options.env,
+      options.timeoutSec,
+    );
   }
 
   private async executeCommand(
