@@ -2,7 +2,13 @@
 
 import type React from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Dispatch, SetStateAction, useEffect, useState } from "react";
+import {
+  Dispatch,
+  SetStateAction,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
@@ -22,6 +28,7 @@ import { useDraftStorage } from "@/hooks/useDraftStorage";
 import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser, DEFAULT_USER } from "@/hooks/useUser";
 import { isAllowedUser } from "@/lib/is-allowed-user";
+import { useLocalRepositories } from "@/hooks/useLocalRepositories";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -81,6 +88,19 @@ export function TerminalInput({
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
   const isLocalMode = process.env.NEXT_PUBLIC_OPEN_SWE_LOCAL_MODE === "true";
+  const { repositories } = useLocalRepositories("");
+
+  const workspaceAbsPath = useMemo(() => {
+    if (!selectedRepository) {
+      return undefined;
+    }
+
+    const repository = repositories.find(
+      (repo) => repo.name === selectedRepository,
+    );
+
+    return repository?.path;
+  }, [repositories, selectedRepository]);
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -123,6 +143,14 @@ export function TerminalInput({
       return;
     }
 
+    if (!workspaceAbsPath) {
+      toast.error("Unable to resolve workspace path. Please re-select a repository.", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+
     setLoading(true);
 
     const trimmedMessage = message.trim();
@@ -143,6 +171,7 @@ export function TerminalInput({
         const runInput: ManagerGraphUpdate = {
           messages: [newHumanMessage],
           targetRepository: { owner: "", repo: selectedRepository },
+          workspaceAbsPath,
           autoAcceptPlan,
         };
 
