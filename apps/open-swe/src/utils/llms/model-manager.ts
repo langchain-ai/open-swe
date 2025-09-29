@@ -379,11 +379,11 @@ export class ModelManager {
   ): ModelLoadConfig | null {
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
       anthropic: {
-        [LLMTask.PLANNER]: "claude-sonnet-4-0",
-        [LLMTask.PROGRAMMER]: "claude-sonnet-4-0",
-        [LLMTask.REVIEWER]: "claude-sonnet-4-0",
+        [LLMTask.PLANNER]: "claude-sonnet-4-5",
+        [LLMTask.PROGRAMMER]: "claude-sonnet-4-5",
+        [LLMTask.REVIEWER]: "claude-sonnet-4-5",
         [LLMTask.ROUTER]: "claude-3-5-haiku-latest",
-        [LLMTask.SUMMARIZER]: "claude-sonnet-4-0",
+        [LLMTask.SUMMARIZER]: "claude-sonnet-4-5",
       },
       "google-genai": {
         [LLMTask.PLANNER]: "gemini-2.5-flash",
@@ -517,3 +517,4 @@ export function resetModelManager(): void {
     globalModelManager = null;
   }
 }
+
