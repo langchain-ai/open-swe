@@ -423,4 +423,3 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
     </HoverCard>
   );
 }
-

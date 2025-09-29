@@ -96,7 +96,3 @@ Always respond with proper markdown formatting. Avoid large headings, and instea
 You do not need to explain why you're taking that route to the user.
 Your response will not exceed two sentences. You will be rewarded for being concise.
 `;
-
-
-
-
