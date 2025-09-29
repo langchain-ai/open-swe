@@ -597,7 +597,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for summarizing the conversation history, or extracting key context from large inputs.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-sonnet-4-5"
    */
   summarizerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.summarizerModelName,
@@ -713,6 +713,7 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
+
 
 
 
