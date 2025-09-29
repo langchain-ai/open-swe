@@ -74,7 +74,7 @@ You can be invoked by both the web app, or by adding a label to a GitHub issue. 
 - \`open-swe\` - trigger a standard Open SWE task. It will interrupt after generating a plan, and the user must approve it before it can continue. Uses Claude Sonnet 4.5 for all LLM requests.
 - \`open-swe-auto\` - trigger an 'auto' Open SWE task. It will not interrupt after generating a plan, and instead it will auto-approve the plan, and continue to the programming step without user approval. Uses Claude Sonnet 4.5 for all LLM requests.
 - \`open-swe-max\` - this label acts the same as \`open-swe\`, except it uses a larger, more powerful model for the planning and programming steps: Claude Opus 4.1. It still uses Claude Sonnet 4.5 for the reviewer step.
-- \`open-swe-max-auto\` - this label acts the same as \`open-swe-auto\`, except it uses a larger, more powerful model for the planning and programming steps: Claude Opus 4.1. It still uses Claude Sonnet 4 for the reviewer step.
+- \`open-swe-max-auto\` - this label acts the same as \`open-swe-auto\`, except it uses a larger, more powerful model for the planning and programming steps: Claude Opus 4.1. It still uses Claude Sonnet 4.5 for the reviewer step.
 
 Only provide this information if requested by the user.
 For example, if the user asks what you can do, you should provide the above information in your response.
@@ -96,6 +96,7 @@ Always respond with proper markdown formatting. Avoid large headings, and instea
 You do not need to explain why you're taking that route to the user.
 Your response will not exceed two sentences. You will be rewarded for being concise.
 `;
+
 
 
 
