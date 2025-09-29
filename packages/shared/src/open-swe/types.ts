@@ -552,7 +552,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-sonnet-4-5"
    */
   programmerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.programmerModelName,
@@ -713,6 +713,7 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
+
 
 
 
