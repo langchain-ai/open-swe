@@ -82,7 +82,7 @@ describe("tokenDataReducer", () => {
   it("should return update array when state is undefined", () => {
     const update: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -151,6 +151,7 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
 
 
