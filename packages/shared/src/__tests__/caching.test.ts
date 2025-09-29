@@ -44,10 +44,10 @@ describe("tokenDataReducer", () => {
 
     // Find the merged anthropic model
     const mergedAnthropic = result.find(
-      (data) => data.model === "anthropic:claude-sonnet-4-0",
+      (data) => data.model === "anthropic:claude-sonnet-4-5",
     );
     expect(mergedAnthropic).toEqual({
-      model: "anthropic:claude-sonnet-4-0",
+      model: "anthropic:claude-sonnet-4-5",
       cacheCreationInputTokens: 125, // 100 + 25
       cacheReadInputTokens: 65, // 50 + 15
       inputTokens: 275, // 200 + 75
@@ -151,5 +151,6 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
 
