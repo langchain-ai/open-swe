@@ -29,15 +29,15 @@ export enum LLMTask {
 
 export const TASK_TO_CONFIG_DEFAULTS_MAP = {
   [LLMTask.PLANNER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
+    modelName: "anthropic:claude-sonnet-4-5",
     temperature: 0,
   },
   [LLMTask.PROGRAMMER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
+    modelName: "anthropic:claude-sonnet-4-5",
     temperature: 0,
   },
   [LLMTask.REVIEWER]: {
-    modelName: "anthropic:claude-sonnet-4-0",
+    modelName: "anthropic:claude-sonnet-4-5",
     temperature: 0,
   },
   [LLMTask.ROUTER]: {
