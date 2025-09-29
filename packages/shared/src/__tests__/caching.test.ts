@@ -22,7 +22,7 @@ describe("tokenDataReducer", () => {
 
     const update: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 25,
         cacheReadInputTokens: 15,
         inputTokens: 75,
@@ -151,4 +151,5 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
