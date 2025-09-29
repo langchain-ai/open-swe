@@ -399,7 +399,7 @@ export const GraphConfigurationMetadata: {
   summarizerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
+      default: "anthropic:claude-sonnet-4-5",
       description:
         "The model to use for summarizing the conversation history, or extracting key context from large inputs. This model should have strong context retention/understanding capabilities, and should be good at tool calling/structured output.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -713,6 +713,7 @@ export interface AgentSession {
   threadId: string;
   runId: string;
 }
+
 
 
 
