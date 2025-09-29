@@ -85,6 +85,11 @@ function getModelPricingPlaceholder(model: string): {
       outputPrice: 15.0,
       cachePrice: 0.3,
     },
+    "anthropic:claude-sonnet-4-5": {
+      inputPrice: 3.0,
+      outputPrice: 15.0,
+      cachePrice: 0.3,
+    },
 
     // Claude 3.7 models
     "anthropic:claude-3-7-sonnet": {
@@ -418,3 +423,4 @@ export function TokenUsage({ tokenData }: TokenUsageProps) {
     </HoverCard>
   );
 }
+
