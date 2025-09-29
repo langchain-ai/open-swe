@@ -131,7 +131,7 @@ describe("tokenDataReducer", () => {
         outputTokens: 60,
       },
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 10,
         cacheReadInputTokens: 5,
         inputTokens: 30,
@@ -151,6 +151,7 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
 
 
