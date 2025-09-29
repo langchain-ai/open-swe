@@ -114,7 +114,7 @@ describe("tokenDataReducer", () => {
   it("should handle multiple updates for the same model", () => {
     const state: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -151,6 +151,7 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
 
 
