@@ -143,7 +143,7 @@ describe("tokenDataReducer", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
-      model: "anthropic:claude-sonnet-4-0",
+      model: "anthropic:claude-sonnet-4-5",
       cacheCreationInputTokens: 135, // 100 + 25 + 10
       cacheReadInputTokens: 70, // 50 + 15 + 5
       inputTokens: 305, // 200 + 75 + 30
@@ -151,6 +151,7 @@ describe("tokenDataReducer", () => {
     });
   });
 });
+
 
 
 
