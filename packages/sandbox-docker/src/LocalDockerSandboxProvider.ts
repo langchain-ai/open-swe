@@ -122,7 +122,7 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       PidsLimit: pidsLimit,
     };
 
-    const container = await this.docker.createContainer({
+    const createOpts: Docker.ContainerCreateOptions = {
       name: this.options.containerName,
       Image: image,
       Cmd: ["/bin/sh", "-c", "tail -f /dev/null"],
@@ -136,7 +136,12 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       Labels: {
         "openswe.sandbox": "local-docker",
       },
-    });
+    };
+
+    // eslint-disable-next-line no-console
+    console.log("[Sandbox] Docker HostConfig.Binds =", createOpts?.HostConfig?.Binds);
+
+    const container = await this.docker.createContainer(createOpts);
 
     await container.start();
 
