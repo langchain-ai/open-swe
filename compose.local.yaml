@@ -55,7 +55,7 @@ services:
       - ${WORKSPACES_ROOT:-.}:/workspaces:delegated
       - /var/run/docker.sock:/var/run/docker.sock
 
-  ui:
+  web:
     build: *openswe-build
     image: open-swe:local
     command: ["yarn", "workspace", "@openswe/web", "dev"]
