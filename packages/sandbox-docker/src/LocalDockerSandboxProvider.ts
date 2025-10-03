@@ -68,7 +68,7 @@ export const dedupeBindsPreferRW = (binds: string[]): string[] => {
       rawContainer === "" || rawContainer === "/"
         ? rawContainer
         : rawContainer.replace(/\/+$/, "");
-    const effectiveMode = mode ?? RW_MODE;
+    const effectiveMode: BindMode = mode ?? RW_MODE;
     const normalizedBind = container === "" ? bind : (() => {
       const bindParts: string[] = [];
       if (host !== "" || bind.startsWith(":")) {
