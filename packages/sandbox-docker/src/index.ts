@@ -1,4 +1,7 @@
-export { LocalDockerSandboxProvider } from "./LocalDockerSandboxProvider.js";
+export {
+  LocalDockerSandboxProvider,
+  dedupeBindsPreferRW,
+} from "./LocalDockerSandboxProvider.js";
 export type {
   LocalDockerSandboxOptions,
   LocalDockerSandboxResources,

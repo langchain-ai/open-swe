@@ -22,6 +22,97 @@ const DEFAULT_PIDS_LIMIT = 512;
 const SECURITY_VIOLATION_EXIT_CODE = 126;
 const TIMEOUT_EXIT_CODE = 124;
 
+type BindMode = "rw" | "ro";
+
+const RW_MODE: BindMode = "rw";
+
+type BindEntry = {
+  bind: string;
+  mode: BindMode;
+  index: number;
+};
+
+const parseBind = (bind: string): {
+  host: string;
+  container: string;
+  mode?: BindMode;
+} => {
+  const segments = bind.split(":");
+  if (segments.length < 2) {
+    return { host: bind, container: "" };
+  }
+
+  const potentialMode = segments[segments.length - 1];
+  const hasExplicitMode = potentialMode === "rw" || potentialMode === "ro";
+
+  const mode = hasExplicitMode ? (potentialMode as BindMode) : undefined;
+  const container = hasExplicitMode
+    ? segments[segments.length - 2]
+    : segments[segments.length - 1];
+  const hostSegments = hasExplicitMode
+    ? segments.slice(0, -2)
+    : segments.slice(0, -1);
+  const host = hostSegments.join(":");
+
+  return { host, container, mode };
+};
+
+export const dedupeBindsPreferRW = (binds: string[]): string[] => {
+  const containerToIndex = new Map<string, number>();
+  const entries: BindEntry[] = [];
+
+  for (const bind of binds) {
+    const { host, container, mode } = parseBind(bind);
+    const rawContainer = container === "" ? "" : path.posix.normalize(container);
+    const normalizedContainer =
+      rawContainer === "" || rawContainer === "/"
+        ? rawContainer
+        : rawContainer.replace(/\/+$/, "");
+    const effectiveMode = mode ?? RW_MODE;
+    const normalizedBind = container === "" ? bind : (() => {
+      const bindParts: string[] = [];
+      if (host !== "" || bind.startsWith(":")) {
+        bindParts.push(host);
+      }
+      bindParts.push(normalizedContainer);
+      if (mode) {
+        bindParts.push(mode);
+      }
+      return bindParts.join(":");
+    })();
+
+    const existingIndex = containerToIndex.get(normalizedContainer);
+
+    if (existingIndex === undefined) {
+      const entry: BindEntry = {
+        bind: normalizedBind,
+        mode: effectiveMode,
+        index: entries.length,
+      };
+      entries.push(entry);
+      containerToIndex.set(normalizedContainer, entry.index);
+      continue;
+    }
+
+    const existing = entries[existingIndex];
+    if (existing.mode === RW_MODE) {
+      continue;
+    }
+
+    if (effectiveMode === RW_MODE) {
+      entries[existingIndex] = {
+        bind: normalizedBind,
+        mode: effectiveMode,
+        index: existing.index,
+      };
+    }
+  }
+
+  return entries
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.bind);
+};
+
 class CommandTimeoutError extends Error {
   constructor(readonly seconds: number) {
     super(`Command timed out after ${seconds} seconds`);
@@ -80,10 +171,10 @@ export class LocalDockerSandboxProvider implements SandboxProvider {
       writableMounts.map((mount) => this.ensurePathExists(mount.source, ensureWritable)),
     );
 
-    const binds = [
+    const binds = dedupeBindsPreferRW([
       `${repositoryPath}:/workspace/src:ro`,
       ...writableMounts.map((mount) => `${mount.source}:${mount.target}:rw`),
-    ];
+    ]);
 
     const networkMode = this.options.resources?.networkDisabled
       ? "none"
