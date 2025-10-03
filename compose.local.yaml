@@ -1,30 +1,78 @@
+# compose.local.yaml — LOCAL-ONLY override (Option 2B), self-sufficient
+
+# Repeat the build anchor locally so this file can stand alone.
+x-open-swe-build: &openswe-build
+  context: .
+  dockerfile: Dockerfile
+
 services:
+  # Build-only target to produce your local sandbox image tag (no GHCR).
+  # Build it with:
+  #   docker compose -f docker-compose.yml -f compose.local.yaml build sandbox-image
   sandbox-image:
-    image: ${LOCAL_SANDBOX_IMAGE}
+    image: ${LOCAL_SANDBOX_IMAGE:-open-swe-sandbox:local}
     build:
       context: .
       dockerfile: Dockerfile.sandbox
     profiles: ["dontstart"]
+    pull_policy: never
 
+  # AGENT = orchestrator (NOT the sandbox itself).
   agent:
+    build: *openswe-build
+    image: open-swe:local
+    command: ["yarn", "workspace", "@openswe/agent", "dev"]
+    ports:
+      - "2024:2024"
     pull_policy: never
     environment:
-      - LOCAL_SANDBOX_IMAGE=${LOCAL_SANDBOX_IMAGE}
-      - WORKSPACES_ROOT=${WORKSPACES_ROOT}
-    user: "${SANDBOX_UID}:${SANDBOX_GID}"
+      # keep your original envs + force local sandbox tag
+      OPEN_SWE_LOCAL_MODE: ${OPEN_SWE_LOCAL_MODE:-true}
+      OPEN_SWE_LOCAL_PROJECT_PATH: ${OPEN_SWE_LOCAL_PROJECT_PATH:-/workspaces}
+      OPEN_SWE_PROJECT_PATH: ${OPEN_SWE_PROJECT_PATH:-}
+      LOCAL_SANDBOX_IMAGE: ${LOCAL_SANDBOX_IMAGE:-open-swe-sandbox:local}
+      LOCAL_SANDBOX_MEMORY: ${LOCAL_SANDBOX_MEMORY:-}
+      LOCAL_SANDBOX_CPUS: ${LOCAL_SANDBOX_CPUS:-}
+      LOCAL_SANDBOX_NETWORK: ${LOCAL_SANDBOX_NETWORK:-}
+      LOCAL_SANDBOX_TIMEOUT_SEC: ${LOCAL_SANDBOX_TIMEOUT_SEC:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-}
+      GIT_COMMITTER_NAME: ${GIT_COMMITTER_NAME:-}
+      GIT_COMMITTER_EMAIL: ${GIT_COMMITTER_EMAIL:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SANDBOX_ROOT_DIR: ${SANDBOX_ROOT_DIR:-}
+      WORKSPACES_ROOT: ${WORKSPACES_ROOT:-.}
+      SANDBOX_UID: ${SANDBOX_UID:-1000}
+      SANDBOX_GID: ${SANDBOX_GID:-1000}
+    user: "${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000}"
     volumes:
-      - ${WORKSPACES_ROOT}:/workspaces:rw
-
-  backend:
-    pull_policy: never
-    environment:
-      - WORKSPACES_ROOT=${WORKSPACES_ROOT}
-    volumes:
-      - ${WORKSPACES_ROOT}:/workspaces:rw
+      # lists are replaced → repeat both mounts so we don't lose the socket
+      - ${WORKSPACES_ROOT:-.}:/workspaces:delegated
+      - /var/run/docker.sock:/var/run/docker.sock
 
   ui:
+    build: *openswe-build
+    image: open-swe:local
+    command: ["yarn", "workspace", "@openswe/web", "dev"]
+    ports:
+      - "3000:3000"
     pull_policy: never
     environment:
-      - WORKSPACES_ROOT=${WORKSPACES_ROOT}
+      NODE_ENV: ${NODE_ENV:-development}
+      OPEN_SWE_AGENT_BASE_URL: ${OPEN_SWE_AGENT_BASE_URL:-http://agent:2024}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      WORKSPACES_ROOT: ${WORKSPACES_ROOT:-.}
+    depends_on:
+      - agent
     volumes:
-      - ${WORKSPACES_ROOT}:/workspaces:rw
+      - ${WORKSPACES_ROOT:-.}:/workspaces:delegated
