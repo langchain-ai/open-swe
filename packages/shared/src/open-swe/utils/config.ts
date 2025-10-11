@@ -24,5 +24,12 @@ export function getCustomConfigurableFields(
     }
   }
 
+  for (const key of Object.keys(config.configurable)) {
+    if (key.startsWith("langgraph_")) {
+      result[key as keyof GraphConfig["configurable"]] =
+        config.configurable[key as keyof GraphConfig["configurable"]];
+    }
+  }
+
   return result;
 }
