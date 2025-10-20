@@ -1,4 +1,4 @@
-import { join } from "path";
+import { promises as fs } from "node:fs";
 import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -15,9 +15,10 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@openswe/shared/constants";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import { getLocalShellExecutor } from "../../utils/shell-executor/index.js";
 import { getWorkspacePathFromConfig } from "../../utils/workspace.js";
+import { resolveLocalModePath } from "../utils/normalize-local-mode-path.js";
 
 const logger = createLogger(LogLevel.INFO, "TextEditorTool");
 
@@ -51,8 +52,6 @@ export function createTextEditorTool(
             ? localAbsolutePath
             : sandboxAbsolutePath;
         const useWorkspaceFs = Boolean(workspacePath);
-        const projectPrefix = `${SANDBOX_ROOT_DIR}/project/`;
-        const localPrefix = `${SANDBOX_ROOT_DIR}/local/`;
         let result: string;
 
         if (useWorkspaceFs) {
@@ -105,35 +104,39 @@ export function createTextEditorTool(
               throw new Error(`Unknown command: ${command}`);
           }
         } else if (localMode) {
-          // Local mode: use LocalShellExecutor for file operations
+          const { absolutePath } = resolveLocalModePath(config, path);
           const executor = getLocalShellExecutor(localAbsolutePath);
-
-          // Convert sandbox path to local path
-          let localPath = path;
-          if (path.startsWith(projectPrefix)) {
-            // Remove the sandbox prefix to get the relative path
-            localPath = path.replace(projectPrefix, "");
-          } else if (path.startsWith(localPrefix)) {
-            // Remove the local sandbox prefix to get the relative path
-            localPath = path.replace(localPrefix, "");
-          }
-          const filePath = join(workDir, localPath);
 
           switch (command) {
             case "view": {
-              // Use cat command to view file content
-              const viewResponse = await executor.executeCommand(
-                `cat "${filePath}"`,
-                {
-                  workdir: workDir,
-                  timeout: TIMEOUT_SEC,
-                  localMode: true,
-                },
-              );
-              if (viewResponse.exitCode !== 0) {
-                throw new Error(`Failed to read file: ${viewResponse.result}`);
+              const stats = await fs.stat(absolutePath);
+              if (stats.isDirectory()) {
+                const entries = await fs.readdir(absolutePath, {
+                  withFileTypes: true,
+                });
+                const listing = entries
+                  .map((entry) => `${entry.isDirectory() ? "d" : "-"} ${entry.name}`)
+                  .join("\n");
+                result = `Directory listing for ${path}:\n${listing}`;
+                break;
               }
-              result = viewResponse.result;
+
+              const content = await fs.readFile(absolutePath, "utf-8");
+              const lines = content.split("\n");
+              if (view_range) {
+                const [start, end] = view_range;
+                const startIndex = Math.max(0, start - 1);
+                const endIndex =
+                  end === -1 ? lines.length : Math.min(lines.length, end);
+                result = lines
+                  .slice(startIndex, endIndex)
+                  .map((line, index) => `${startIndex + index + 1}: ${line}`)
+                  .join("\n");
+              } else {
+                result = lines
+                  .map((line, index) => `${index + 1}: ${line}`)
+                  .join("\n");
+              }
               break;
             }
             case "str_replace": {
@@ -142,7 +145,6 @@ export function createTextEditorTool(
                   "str_replace command requires both old_str and new_str parameters",
                 );
               }
-              // Use sed command for string replacement with proper escaping
               const escapedOldStr = old_str
                 .replace(/\\/g, "\\\\")
                 .replace(/\//g, "\\/")
@@ -153,7 +155,7 @@ export function createTextEditorTool(
                 .replace(/'/g, "'\"'\"'");
 
               const sedResponse = await executor.executeCommand(
-                `sed -i 's/${escapedOldStr}/${escapedNewStr}/g' "${filePath}"`,
+                `sed -i 's/${escapedOldStr}/${escapedNewStr}/g' "${absolutePath}"`,
                 {
                   workdir: workDir,
                   timeout: TIMEOUT_SEC,
@@ -172,13 +174,12 @@ export function createTextEditorTool(
               if (!file_text) {
                 throw new Error("create command requires file_text parameter");
               }
-              // Create file with content using proper escaping
               const escapedFileText = file_text
                 .replace(/\\/g, "\\\\")
                 .replace(/'/g, "'\"'\"'");
 
               const createResponse = await executor.executeCommand(
-                `echo '${escapedFileText}' > "${filePath}"`,
+                `echo '${escapedFileText}' > "${absolutePath}"`,
                 {
                   workdir: workDir,
                   timeout: TIMEOUT_SEC,
@@ -199,14 +200,13 @@ export function createTextEditorTool(
                   "insert command requires both insert_line and new_str parameters",
                 );
               }
-              // Insert line at specific position with proper escaping
               const escapedNewStr = new_str
                 .replace(/\\/g, "\\\\")
                 .replace(/\//g, "\\/")
                 .replace(/'/g, "'\"'\"'");
 
               const insertResponse = await executor.executeCommand(
-                `sed -i '${insert_line}i\\${escapedNewStr}' "${filePath}"`,
+                `sed -i '${insert_line}i\\${escapedNewStr}' "${absolutePath}"`,
                 {
                   workdir: workDir,
                   timeout: TIMEOUT_SEC,

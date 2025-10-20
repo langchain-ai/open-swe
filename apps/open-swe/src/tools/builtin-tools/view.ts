@@ -1,4 +1,4 @@
-import { join } from "path";
+import { promises as fs } from "node:fs";
 import { tool } from "@langchain/core/tools";
 import { GraphState, GraphConfig } from "@openswe/shared/open-swe/types";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -10,8 +10,7 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
-import { TIMEOUT_SEC, SANDBOX_ROOT_DIR } from "@openswe/shared/constants";
-import { createShellExecutor } from "../../utils/shell-executor/index.js";
+import { resolveLocalModePath } from "../utils/normalize-local-mode-path.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
@@ -33,30 +32,33 @@ export function createViewTool(
 
         let result: string;
         if (isLocalMode(config)) {
-          // Local mode: use ShellExecutor for file viewing
-          const executor = createShellExecutor(config);
+          const { absolutePath } = resolveLocalModePath(config, path);
+          const stats = await fs.stat(absolutePath);
 
-          // Convert sandbox path to local path
-          let localPath = path;
-          const projectPrefix = `${SANDBOX_ROOT_DIR}/project/`;
-          if (path.startsWith(projectPrefix)) {
-            // Remove the sandbox prefix to get the relative path
-            localPath = path.replace(projectPrefix, "");
+          if (stats.isDirectory()) {
+            const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+            const listing = entries
+              .map((entry) => `${entry.isDirectory() ? "d" : "-"} ${entry.name}`)
+              .join("\n");
+            result = `Directory listing for ${path}:\n${listing}`;
+          } else {
+            const content = await fs.readFile(absolutePath, "utf-8");
+            const lines = content.split("\n");
+            const viewRange = view_range as [number, number] | undefined;
+            if (viewRange) {
+              const [start, end] = viewRange;
+              const startIndex = Math.max(0, start - 1);
+              const endIndex = end === -1 ? lines.length : Math.min(lines.length, end);
+              result = lines
+                .slice(startIndex, endIndex)
+                .map((line, index) => `${startIndex + index + 1}: ${line}`)
+                .join("\n");
+            } else {
+              result = lines
+                .map((line, index) => `${index + 1}: ${line}`)
+                .join("\n");
+            }
           }
-          const filePath = join(workDir, localPath);
-
-          // Use cat command to view file content
-          const response = await executor.executeCommand({
-            command: `cat "${filePath}"`,
-            workdir: workDir,
-            timeout: TIMEOUT_SEC,
-          });
-
-          if (response.exitCode !== 0) {
-            throw new Error(`Failed to read file: ${response.result}`);
-          }
-
-          result = response.result;
         } else {
           // Sandbox mode: use existing handler
           const sandbox = await getSandboxSessionOrThrow(input);
