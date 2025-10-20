@@ -236,10 +236,58 @@ function isKnownSafeCommand(toolCall: ToolCall): boolean {
     return false;
   }
 
+  const commandString = formatShellCommand(args.command, args.workdir);
+
+  if (isSafeReadCommand(commandString)) {
+    return true;
+  }
+
+  const sudoStrippedCommand = commandString.startsWith("sudo ")
+    ? commandString.slice(5)
+    : commandString;
+  if (isSafeReadCommand(sudoStrippedCommand)) {
+    return true;
+  }
+
   const normalizedArgs = args.command.map((arg) => arg.toLowerCase());
 
   const sudoOffset = normalizedArgs[0] === "sudo" ? 1 : 0;
   const command = normalizedArgs[sudoOffset];
+
+  if (!command) {
+    return false;
+  }
+
+  if (command === "git") {
+    const gitArgs = normalizedArgs.slice(sudoOffset + 1);
+    if (gitArgs.some((arg) => arg === "status")) {
+      return true;
+    }
+  }
+
+  const originalCommand = args.command[sudoOffset];
+  if (
+    typeof originalCommand === "string" &&
+    originalCommand.startsWith("./") &&
+    originalCommand.toLowerCase().endsWith(".py")
+  ) {
+    return true;
+  }
+
+  if (command === "sed") {
+    const sedArgs = normalizedArgs.slice(sudoOffset + 1);
+    const hasInPlaceFlag = sedArgs.some(
+      (arg) =>
+        arg === "-i" ||
+        arg.startsWith("-i") ||
+        arg === "--in-place" ||
+        arg.startsWith("--in-place"),
+    );
+
+    if (!hasInPlaceFlag) {
+      return true;
+    }
+  }
 
   if (command !== "chmod") {
     return false;
