@@ -70,6 +70,9 @@ export function filterMessagesWithoutContent(
     }
     const messageContentStr = getMessageContentString(m.content);
     if (!isAIMessage(m)) {
+      if (isToolMessage(m)) {
+        return !!messageContentStr || !!m.tool_call_id;
+      }
       return !!messageContentStr;
     }
     const toolCallsCount = m.tool_calls?.length || 0;
