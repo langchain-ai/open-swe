@@ -226,6 +226,47 @@ export async function evaluateCommands(
   };
 }
 
+function isKnownSafeCommand(toolCall: ToolCall): boolean {
+  if (toolCall.name !== "shell") {
+    return false;
+  }
+
+  const args = toolCall.args as ShellToolArgs;
+  if (!Array.isArray(args?.command) || args.command.length === 0) {
+    return false;
+  }
+
+  const normalizedArgs = args.command.map((arg) => arg.toLowerCase());
+
+  const sudoOffset = normalizedArgs[0] === "sudo" ? 1 : 0;
+  const command = normalizedArgs[sudoOffset];
+
+  if (command !== "chmod") {
+    return false;
+  }
+
+  const remainingArgs = normalizedArgs.slice(sudoOffset + 1);
+  if (remainingArgs.length === 0) {
+    return false;
+  }
+
+  const nonFlagArgs = remainingArgs.filter((arg) => !arg.startsWith("-"));
+  if (nonFlagArgs.length < 2) {
+    // Expect at least a mode and one path argument
+    return false;
+  }
+
+  const modeArg = nonFlagArgs[0];
+  const symbolicModePattern = /^[ugoa]*[+-=][rwxstugo]+$/;
+  const octalModePattern = /^[0-7]{3,4}$/;
+
+  if (!symbolicModePattern.test(modeArg) && !octalModePattern.test(modeArg)) {
+    return false;
+  }
+
+  return true;
+}
+
 export async function filterUnsafeCommands(
   allToolCalls: ToolCall[],
   config: GraphConfig,
@@ -246,7 +287,26 @@ export async function filterUnsafeCommands(
     return { filteredToolCalls: allToolCalls, wasFiltered: false };
   }
 
-  const evaluationResult = await evaluateCommands(commandToolCalls, config);
+  const otherToolCalls = allToolCalls.filter(
+    (toolCall) => !commandExecutingTools.includes(toolCall.name),
+  );
+
+  const knownSafeCommands = commandToolCalls.filter(isKnownSafeCommand);
+  const commandsNeedingEvaluation = commandToolCalls.filter(
+    (toolCall) => !isKnownSafeCommand(toolCall),
+  );
+
+  let evaluationResult: CommandEvaluationResult = {
+    safeCommands: [],
+    unsafeCommands: [],
+    allCommands: [],
+    filteredToolCalls: [],
+    wasFiltered: false,
+  };
+
+  if (commandsNeedingEvaluation.length > 0) {
+    evaluationResult = await evaluateCommands(commandsNeedingEvaluation, config);
+  }
 
   // Log unsafe commands that are being filtered out
   if (evaluationResult.unsafeCommands.length > 0) {
@@ -259,14 +319,24 @@ export async function filterUnsafeCommands(
     });
   }
 
-  if (evaluationResult.wasFiltered) {
+  const safeToolCalls = [
+    ...knownSafeCommands,
+    ...evaluationResult.safeCommands.map((evaluation) => evaluation.toolCall),
+  ];
+
+  const filteredToolCalls = [...safeToolCalls, ...otherToolCalls];
+  const wasFiltered = safeToolCalls.length !== commandToolCalls.length;
+
+  if (evaluationResult.wasFiltered || wasFiltered) {
     logger.info(
-      `Filtered out ${allToolCalls.length - evaluationResult.filteredToolCalls.length} unsafe commands`,
+      `Filtered out ${commandToolCalls.length - safeToolCalls.length} unsafe commands`,
     );
   }
 
   return {
-    filteredToolCalls: evaluationResult.filteredToolCalls,
-    wasFiltered: evaluationResult.wasFiltered,
+    filteredToolCalls,
+    wasFiltered,
   };
 }
+
+export { isKnownSafeCommand };
