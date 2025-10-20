@@ -137,10 +137,12 @@ export function createApplyPatchTool(state: GraphState, config: GraphConfig) {
   const applyPatchTool = tool(
     async (input): Promise<{ result: string; status: "success" | "error" }> => {
       const { diff, file_path } = input;
-      const workDir = isLocalMode(config)
-        ? getLocalWorkingDirectory()
-        : getRepoAbsolutePath(state.targetRepository);
       const workspacePath = getWorkspacePathFromConfig(config);
+      const workDir =
+        workspacePath ??
+        (isLocalMode(config)
+          ? getLocalWorkingDirectory()
+          : getRepoAbsolutePath(state.targetRepository, config));
 
       // Get sandbox for sandbox mode (will be undefined for local mode)
       const sandbox = workspacePath
