@@ -592,8 +592,18 @@ export function createViewToolFields(
   targetRepository: TargetRepository,
   config?: GraphConfig,
 ) {
-  const repoRoot =
-    config && isLocalMode(config)
+  const configurable = config?.configurable as
+    | (Record<string, unknown> & { workspacePath?: string })
+    | undefined;
+  const configuredWorkspace =
+    typeof configurable?.workspacePath === "string" &&
+    configurable.workspacePath.trim().length > 0
+      ? configurable.workspacePath
+      : undefined;
+
+  const repoRoot = configuredWorkspace
+    ? configuredWorkspace
+    : config && isLocalMode(config)
       ? getLocalWorkingDirectory()
       : getRepoAbsolutePath(targetRepository);
   const viewSchema = z.object({
