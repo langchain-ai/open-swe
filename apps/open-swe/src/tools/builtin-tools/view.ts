@@ -11,6 +11,7 @@ import {
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
 import { resolveLocalModePath } from "../utils/normalize-local-mode-path.js";
+import { getWorkspacePathFromConfig } from "../../utils/workspace.js";
 
 const logger = createLogger(LogLevel.INFO, "ViewTool");
 
@@ -32,31 +33,41 @@ export function createViewTool(
 
         let result: string;
         if (isLocalMode(config)) {
-          const { absolutePath } = resolveLocalModePath(config, path);
-          const stats = await fs.stat(absolutePath);
-
-          if (stats.isDirectory()) {
-            const entries = await fs.readdir(absolutePath, { withFileTypes: true });
-            const listing = entries
-              .map((entry) => `${entry.isDirectory() ? "d" : "-"} ${entry.name}`)
-              .join("\n");
-            result = `Directory listing for ${path}:\n${listing}`;
+          const workspacePath = getWorkspacePathFromConfig(config);
+          if (workspacePath) {
+            result = await handleViewCommand(null, config, {
+              path,
+              workDir: workspacePath,
+              viewRange: view_range as [number, number] | undefined,
+            });
           } else {
-            const content = await fs.readFile(absolutePath, "utf-8");
-            const lines = content.split("\n");
-            const viewRange = view_range as [number, number] | undefined;
-            if (viewRange) {
-              const [start, end] = viewRange;
-              const startIndex = Math.max(0, start - 1);
-              const endIndex = end === -1 ? lines.length : Math.min(lines.length, end);
-              result = lines
-                .slice(startIndex, endIndex)
-                .map((line, index) => `${startIndex + index + 1}: ${line}`)
+            const { absolutePath } = resolveLocalModePath(config, path);
+            const stats = await fs.stat(absolutePath);
+
+            if (stats.isDirectory()) {
+              const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+              const listing = entries
+                .map((entry) => `${entry.isDirectory() ? "d" : "-"} ${entry.name}`)
                 .join("\n");
+              result = `Directory listing for ${path}:\n${listing}`;
             } else {
-              result = lines
-                .map((line, index) => `${index + 1}: ${line}`)
-                .join("\n");
+              const content = await fs.readFile(absolutePath, "utf-8");
+              const lines = content.split("\n");
+              const viewRange = view_range as [number, number] | undefined;
+              if (viewRange) {
+                const [start, end] = viewRange;
+                const startIndex = Math.max(0, start - 1);
+                const endIndex =
+                  end === -1 ? lines.length : Math.min(lines.length, end);
+                result = lines
+                  .slice(startIndex, endIndex)
+                  .map((line, index) => `${startIndex + index + 1}: ${line}`)
+                  .join("\n");
+              } else {
+                result = lines
+                  .map((line, index) => `${index + 1}: ${line}`)
+                  .join("\n");
+              }
             }
           }
         } else {
@@ -81,7 +92,7 @@ export function createViewTool(
         };
       }
     },
-    createViewToolFields(state.targetRepository),
+    createViewToolFields(state.targetRepository, config),
   );
 
   return viewTool;

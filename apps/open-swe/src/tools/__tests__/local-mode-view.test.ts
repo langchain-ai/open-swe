@@ -78,4 +78,36 @@ describe("local mode path normalization for view operations", () => {
     );
     expect(response.result).toContain("- notes.txt");
   });
+
+  it("prefers the configured workspace path when available", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "open-swe-workspace-"),
+    );
+
+    try {
+      const workspaceDocs = path.join(workspaceRoot, "project", "docs");
+      await mkdir(workspaceDocs, { recursive: true });
+      await writeFile(
+        path.join(workspaceDocs, "notes.txt"),
+        "workspace specific line",
+        "utf-8",
+      );
+
+      Object.assign(config.configurable as Record<string, unknown>, {
+        workspacePath: workspaceRoot,
+      });
+
+      const viewTool = createViewTool(state, config);
+      const response = await viewTool.invoke({
+        command: "view",
+        path: "project/docs/notes.txt",
+      });
+
+      expect(response.status).toBe("success");
+      expect(response.result).toContain("workspace specific line");
+      expect(response.result).not.toContain("first line");
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
