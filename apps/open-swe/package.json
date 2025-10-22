@@ -41,7 +41,7 @@
     "@openswe/shared": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.1",
-    "hono": "^4.8.3",
+    "hono": "^4.10.2",
     "jsonwebtoken": "^9.0.2",
     "langchain": "^0.3.26",
     "langsmith": "^0.3.29",
