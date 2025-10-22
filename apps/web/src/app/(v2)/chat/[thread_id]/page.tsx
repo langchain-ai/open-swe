@@ -81,6 +81,16 @@ export default function ThreadPage({
   };
 
   const initialThreadFetched = useRef(false);
+  const lastThreadId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (lastThreadId.current !== thread_id) {
+      lastThreadId.current = thread_id;
+      initialThreadFetched.current = false;
+      setInitialFetchedThread(null);
+    }
+  }, [thread_id]);
+
   useEffect(() => {
     if (!thread && !initialFetchedThread && !initialThreadFetched.current) {
       fetchInitialThread(stream.client as Client<ManagerGraphState>, thread_id)
@@ -91,7 +101,7 @@ export default function ThreadPage({
     if (initialThreadFetched.current && initialFetchedThread && thread) {
       setInitialFetchedThread(null);
     }
-  }, [thread_id, thread]);
+  }, [thread_id, thread, initialFetchedThread, stream.client]);
 
   if (statusError && "message" in statusError && "type" in statusError) {
     return (
