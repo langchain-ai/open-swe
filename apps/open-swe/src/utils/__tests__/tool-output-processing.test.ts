@@ -6,9 +6,7 @@ jest.unstable_mockModule("../mcp-output/index.js", () => ({
 }));
 
 const toolOutputModule = await import("../tool-output-processing.js");
-const mcpOutputModule = (await import("../mcp-output/index.js")) as {
-  handleMcpDocumentationOutput: jest.Mock;
-};
+const mcpOutputModule = await import("../mcp-output/index.js");
 
 const {
   DOCUMENT_CACHE_CHARACTER_BUDGET,
@@ -16,7 +14,9 @@ const {
   processToolCallContent,
   toolOutputProcessingLogger,
 } = toolOutputModule;
-const { handleMcpDocumentationOutput } = mcpOutputModule;
+const handleMcpDocumentationOutput = jest.mocked(
+  mcpOutputModule.handleMcpDocumentationOutput,
+);
 
 describe("enforceDocumentCacheBudget", () => {
   afterEach(() => {
