@@ -5,14 +5,14 @@ import {
   ToolMessage,
 } from "@langchain/langgraph-sdk";
 
-export function isAIMessageSDK(m: Message): m is AIMessage {
-  return m.type === "ai";
+export function isAIMessageSDK(m: Message | null | undefined): m is AIMessage {
+  return m?.type === "ai";
 }
 
-export function isToolMessageSDK(m: Message): m is ToolMessage {
-  return m.type === "tool";
+export function isToolMessageSDK(m: Message | null | undefined): m is ToolMessage {
+  return m?.type === "tool";
 }
 
-export function isHumanMessageSDK(m: Message): m is HumanMessage {
-  return m.type === "human";
+export function isHumanMessageSDK(m: Message | null | undefined): m is HumanMessage {
+  return m?.type === "human";
 }

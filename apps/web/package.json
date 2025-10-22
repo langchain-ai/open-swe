@@ -15,6 +15,7 @@
     "lint:fix": "next lint --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "test": "../../node_modules/.bin/vitest run",
     "clean": "rm -rf .turbo .next || true && rm next-env.d.ts || true"
   },
   "dependencies": {
@@ -93,7 +94,8 @@
     "tailwind-scrollbar": "^4.0.1",
     "tailwindcss": "^4.0.13",
     "typescript": "~5.7.2",
-    "typescript-eslint": "^8.22.0"
+    "typescript-eslint": "^8.22.0",
+    "vitest": "^3.2.3"
   },
   "overrides": {
     "react-is": "^19.0.0-rc-69d4b800-20241021"
