@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { START } from "@langchain/langgraph/web";
 import type { Client, ThreadState } from "@langchain/langgraph-sdk";
 import type { GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
-import { createNewSession } from "./route";
+import { createNewSession } from "./create-new-session";
 
 describe("createNewSession", () => {
   it("uses START entry point when thread state has no next nodes", async () => {
