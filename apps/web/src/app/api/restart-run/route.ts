@@ -16,10 +16,10 @@ import {
   GraphConfig,
   GraphState,
 } from "@openswe/shared/open-swe/types";
-import { END } from "@langchain/langgraph/web";
+import { START } from "@langchain/langgraph/web";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 
-async function createNewSession(
+export async function createNewSession(
   client: Client,
   inputs: {
     graphId: string;
@@ -30,12 +30,12 @@ async function createNewSession(
   },
 ): Promise<AgentSession> {
   const newThreadId = uuidv4();
-  const hasNext = inputs.threadState.next.length > 0;
+  const nextNode = inputs.threadState.next[0] ?? START;
 
   const run = await client.runs.create(newThreadId, inputs.graphId, {
     command: {
       update: inputs.threadState.values,
-      ...(hasNext ? { goto: inputs.threadState.next[0] } : { goto: END }),
+      goto: nextNode,
     },
     ifNotExists: "create",
     streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
