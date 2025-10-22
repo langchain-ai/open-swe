@@ -113,7 +113,12 @@ describe("takeReviewerActions", () => {
 
     const config = {
       configurable: { "x-local-mode": "true" },
-    } as GraphConfig;
+      thread_id: "thread-id",
+      assistant_id: "assistant-id",
+      callbacks: [],
+      metadata: {},
+      tags: [],
+    } as unknown as GraphConfig;
 
     const command = await takeReviewerActions(state, config);
     const update = command.update;
