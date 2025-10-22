@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 import { AIMessage, isAIMessage } from "@langchain/core/messages";
-import type { GraphConfig } from "@openswe/shared/open-swe/types";
+import type { ToolCall } from "@langchain/core/messages/tool";
+import type { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
 import type {
   ReviewerGraphState,
   ReviewerGraphUpdate,
 } from "@openswe/shared/open-swe/reviewer/types";
+import type { Sandbox } from "../../../../utils/sandbox.js";
 
 type ToolInvokeResult = {
   result: string;
@@ -12,14 +14,14 @@ type ToolInvokeResult = {
 };
 
 type FilterUnsafeCommandsResult = {
-  filteredToolCalls: unknown[];
+  filteredToolCalls: ToolCall[];
   wasFiltered: boolean;
 };
 
 type SandboxResult = {
-  sandbox: { id: string };
-  codebaseTree: unknown;
-  dependenciesInstalled: unknown;
+  sandbox: Sandbox;
+  codebaseTree: string | null;
+  dependenciesInstalled: boolean | null;
 };
 
 const shellInvokeMock =
@@ -32,15 +34,15 @@ const scratchpadInvokeMock =
   jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
 const filterUnsafeCommandsMock =
   jest.fn<
-    (toolCalls: unknown, config: GraphConfig) =>
+    (toolCalls: ToolCall[], config: GraphConfig) =>
       Promise<FilterUnsafeCommandsResult>
   >();
 const getSandboxWithErrorHandlingMock =
   jest.fn<
     (
-      sandboxSessionId: unknown,
-      repository: unknown,
-      branch: unknown,
+      sandboxSessionId: string | undefined,
+      repository: TargetRepository,
+      branch: string,
       config: GraphConfig,
     ) => Promise<SandboxResult>
   >();
@@ -115,7 +117,7 @@ describe("takeReviewerActions", () => {
       wasFiltered: true,
     });
     getSandboxWithErrorHandlingMock.mockReset().mockResolvedValue({
-      sandbox: { id: "sandbox-id" },
+      sandbox: { id: "sandbox-id" } as unknown as Sandbox,
       codebaseTree: null,
       dependenciesInstalled: null,
     });
