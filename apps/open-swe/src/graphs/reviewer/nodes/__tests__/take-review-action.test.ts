@@ -1,15 +1,49 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 import { AIMessage, isAIMessage } from "@langchain/core/messages";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
-import type { ReviewerGraphState } from "@openswe/shared/open-swe/reviewer/types";
+import type {
+  ReviewerGraphState,
+  ReviewerGraphUpdate,
+} from "@openswe/shared/open-swe/reviewer/types";
 
-const shellInvokeMock = jest.fn();
-const installDependenciesInvokeMock = jest.fn();
-const grepInvokeMock = jest.fn();
-const viewInvokeMock = jest.fn();
-const scratchpadInvokeMock = jest.fn();
-const filterUnsafeCommandsMock = jest.fn();
-const getSandboxWithErrorHandlingMock = jest.fn();
+type ToolInvokeResult = {
+  result: string;
+  status: "success" | "error";
+};
+
+type FilterUnsafeCommandsResult = {
+  filteredToolCalls: unknown[];
+  wasFiltered: boolean;
+};
+
+type SandboxResult = {
+  sandbox: { id: string };
+  codebaseTree: unknown;
+  dependenciesInstalled: unknown;
+};
+
+const shellInvokeMock =
+  jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
+const installDependenciesInvokeMock =
+  jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
+const grepInvokeMock = jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
+const viewInvokeMock = jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
+const scratchpadInvokeMock =
+  jest.fn<(args: unknown) => Promise<ToolInvokeResult>>();
+const filterUnsafeCommandsMock =
+  jest.fn<
+    (toolCalls: unknown, config: GraphConfig) =>
+      Promise<FilterUnsafeCommandsResult>
+  >();
+const getSandboxWithErrorHandlingMock =
+  jest.fn<
+    (
+      sandboxSessionId: unknown,
+      repository: unknown,
+      branch: unknown,
+      config: GraphConfig,
+    ) => Promise<SandboxResult>
+  >();
 
 await jest.unstable_mockModule("../../../../tools/index.js", () => ({
   createShellTool: () => ({
@@ -121,7 +155,7 @@ describe("takeReviewerActions", () => {
     } as unknown as GraphConfig;
 
     const command = await takeReviewerActions(state, config);
-    const update = command.update;
+    const update = command.update as ReviewerGraphUpdate;
 
     expect(filterUnsafeCommandsMock).toHaveBeenCalledTimes(1);
 
