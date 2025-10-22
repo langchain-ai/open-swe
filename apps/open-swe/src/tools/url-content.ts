@@ -4,6 +4,7 @@ import { createGetURLContentToolFields } from "@openswe/shared/open-swe/tools";
 import { FireCrawlLoader } from "@langchain/community/document_loaders/web/firecrawl";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { parseUrl } from "../utils/url-parser.js";
+import { enforceDocumentCacheBudget } from "../utils/tool-output-processing.js";
 
 const logger = createLogger(LogLevel.INFO, "GetURLContentTool");
 
@@ -45,13 +46,20 @@ export function createGetURLContentTool(
           documentContent = docs.map((doc) => doc.pageContent).join("\n\n");
 
           if (state.documentCache) {
+            const { content: budgetedContent } = enforceDocumentCacheBudget(
+              documentContent,
+            );
             const stateUpdates = {
               documentCache: {
                 ...state.documentCache,
-                [parsedUrl]: documentContent,
+                [parsedUrl]: budgetedContent,
               },
             };
-            return { result: documentContent, status: "success", stateUpdates };
+            return {
+              result: documentContent,
+              status: "success",
+              stateUpdates,
+            };
           }
         } else {
           logger.info("Using cached document content", {
