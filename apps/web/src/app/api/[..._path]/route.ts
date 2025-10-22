@@ -7,7 +7,7 @@ import { encryptSecret } from "@openswe/shared/crypto";
 export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
   initApiPassthrough({
     apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
-    runtime: "edge", // default
+    runtime: "nodejs",
     disableWarningLog: true,
     bodyParameters: (req, body) => {
       if (body.config?.configurable && "apiKeys" in body.config.configurable) {
