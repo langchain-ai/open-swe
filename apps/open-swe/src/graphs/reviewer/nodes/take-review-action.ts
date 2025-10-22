@@ -64,12 +64,21 @@ export async function takeReviewerActions(
 
   // Filter out unsafe commands only in local mode
   let modifiedMessage: AIMessage | undefined;
+  let hiddenLastMessage: AIMessage | undefined;
   let wasFiltered = false;
   if (isLocalMode(config)) {
     const filterResult = await filterUnsafeCommands(toolCalls, config);
 
     if (filterResult.wasFiltered) {
       wasFiltered = true;
+      hiddenLastMessage = new AIMessage({
+        ...lastMessage,
+        id: lastMessage.id,
+        additional_kwargs: {
+          ...lastMessage.additional_kwargs,
+          hidden: true,
+        },
+      });
       modifiedMessage = new AIMessage({
         ...lastMessage,
         tool_calls: filterResult.filteredToolCalls,
@@ -189,7 +198,11 @@ export async function takeReviewerActions(
   // Include the modified message if it was filtered
   const reviewerMessagesUpdate =
     wasFiltered && modifiedMessage
-      ? [modifiedMessage, ...toolCallResults]
+      ? [
+          ...(hiddenLastMessage ? [hiddenLastMessage] : []),
+          modifiedMessage,
+          ...toolCallResults,
+        ]
       : toolCallResults;
 
   const commandUpdate: ReviewerGraphUpdate = {
