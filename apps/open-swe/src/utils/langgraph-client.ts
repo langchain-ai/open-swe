@@ -5,8 +5,18 @@ export function createLangGraphClient(options?: {
   includeApiKey?: boolean;
 }) {
   // TODO: Remove the need for this after issues with port are resolved.
-  const productionUrl = process.env.LANGGRAPH_PROD_URL;
-  const port = process.env.PORT ?? "2024";
+  const envApiUrl = [
+    process.env.LANGGRAPH_API_URL,
+    process.env.LANGGRAPH_URL,
+    process.env.LANGGRAPH_PROD_URL,
+  ]
+    .map((value) => value?.trim())
+    .find((value): value is string => Boolean(value && value.length > 0));
+
+  const port = process.env.PORT?.trim();
+  const fallbackPort = port && port.length > 0 ? port : "2024";
+
+  const apiUrl = envApiUrl ?? `http://localhost:${fallbackPort}`;
   if (options?.includeApiKey && !process.env.LANGGRAPH_API_KEY) {
     throw new Error("LANGGRAPH_API_KEY not found");
   }
@@ -14,7 +24,7 @@ export function createLangGraphClient(options?: {
     ...(options?.includeApiKey && {
       apiKey: process.env.LANGGRAPH_API_KEY,
     }),
-    apiUrl: productionUrl ?? `http://localhost:${port}`,
+    apiUrl,
     defaultHeaders: options?.defaultHeaders,
   });
 }
