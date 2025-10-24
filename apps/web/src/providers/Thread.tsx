@@ -1,21 +1,14 @@
 "use client";
 
-import { validate } from "uuid";
 import { Thread } from "@langchain/langgraph-sdk";
 import { ReactNode, useCallback, useState, useEffect } from "react";
 import { createClient } from "./client";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { ThreadContext, ThreadContextType } from "./thread-context";
-
-function getThreadSearchMetadata(
-  assistantId: string,
-): { graph_id: string } | { assistant_id: string } {
-  if (validate(assistantId)) {
-    return { assistant_id: assistantId };
-  } else {
-    return { graph_id: assistantId };
-  }
-}
+import {
+  getAlternateThreadSearchMetadata,
+  getThreadSearchMetadata,
+} from "@/lib/thread";
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -60,12 +53,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         await client.threads.search<GraphState>(searchParams);
 
       if (threadsResponse.length === 0) {
-        const altMetadata = assistantId.includes("-")
-          ? { assistant_id: assistantId }
-          : { graph_id: assistantId };
         threadsResponse = await client.threads.search<GraphState>({
           limit: 100,
-          metadata: altMetadata,
+          metadata: getAlternateThreadSearchMetadata(assistantId),
         });
       }
 
