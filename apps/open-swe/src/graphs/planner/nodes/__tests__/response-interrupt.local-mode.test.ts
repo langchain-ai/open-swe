@@ -1,19 +1,96 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
+import type { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import type {
   PlannerGraphState,
   PlannerGraphUpdate,
 } from "@openswe/shared/open-swe/planner/types";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import type { LangGraphModule } from "../../../../types/langgraph.js";
+import type {
+  loadModel,
+  supportsParallelToolCallsParam,
+} from "../../../../utils/llms/index.js";
+import type { trackCachePerformance } from "../../../../utils/caching.js";
+import type {
+  ModelManager,
+  getModelManager,
+} from "../../../../utils/llms/model-manager.js";
 
-const interruptMock = jest.fn();
-const loadModelMock = jest.fn();
-const supportsParallelToolCallsParamMock = jest.fn();
-const trackCachePerformanceMock = jest.fn();
-const getModelManagerMock = jest.fn();
-const bindToolsMock = jest.fn();
-const invokeMock = jest.fn();
+type PlannerToolCallResult = {
+  tool_calls: Array<{
+    args: {
+      reasoning: string;
+      decision: string;
+    };
+  }>;
+};
+
+type InvokeFn = (
+  input: unknown,
+  options?: Record<string, unknown>,
+) => Promise<PlannerToolCallResult>;
+
+type BindToolsFn = (
+  tools: BindToolsInput[],
+  kwargs?: Record<string, unknown>,
+) => {
+  invoke: InvokeFn;
+};
+
+type LoadModelMockFn = (
+  ...args: Parameters<typeof loadModel>
+) => Promise<{ bindTools: BindToolsFn }>;
+
+type SupportsParallelToolCallsParamFn = typeof supportsParallelToolCallsParam;
+
+type TrackCachePerformanceFn = typeof trackCachePerformance;
+
+type GetModelManagerFn = typeof getModelManager;
+
+const invokeMock: jest.MockedFunction<InvokeFn> = jest.fn<
+  ReturnType<InvokeFn>,
+  Parameters<InvokeFn>
+>();
+const bindToolsMock: jest.MockedFunction<BindToolsFn> = jest.fn<
+  ReturnType<BindToolsFn>,
+  Parameters<BindToolsFn>
+>();
+const loadModelMock: jest.MockedFunction<LoadModelMockFn> = jest.fn<
+  ReturnType<LoadModelMockFn>,
+  Parameters<LoadModelMockFn>
+>();
+const supportsParallelToolCallsParamMock: jest.MockedFunction<
+  SupportsParallelToolCallsParamFn
+> = jest.fn<
+  ReturnType<SupportsParallelToolCallsParamFn>,
+  Parameters<SupportsParallelToolCallsParamFn>
+>();
+const trackCachePerformanceMock: jest.MockedFunction<TrackCachePerformanceFn> =
+  jest.fn<
+    ReturnType<TrackCachePerformanceFn>,
+    Parameters<TrackCachePerformanceFn>
+  >();
+const getModelManagerMock: jest.MockedFunction<GetModelManagerFn> = jest.fn<
+  ReturnType<GetModelManagerFn>,
+  Parameters<GetModelManagerFn>
+>();
+const interruptMock: jest.MockedFunction<LangGraphModule["interrupt"]> =
+  jest.fn<
+    ReturnType<LangGraphModule["interrupt"]>,
+    Parameters<LangGraphModule["interrupt"]>
+  >();
+
+const getModelNameForTaskMock: jest.MockedFunction<
+  ModelManager["getModelNameForTask"]
+> = jest.fn<
+  ReturnType<ModelManager["getModelNameForTask"]>,
+  Parameters<ModelManager["getModelNameForTask"]>
+>();
+
+const modelManagerStub = {
+  getModelNameForTask: getModelNameForTaskMock,
+} as unknown as ModelManager;
 
 await jest.unstable_mockModule("@langchain/langgraph", () => {
   const actual = jest.requireActual<LangGraphModule>("@langchain/langgraph");
@@ -73,9 +150,8 @@ describe("planner interrupt flow", () => {
       .mockReset()
       .mockReturnValue(false);
     trackCachePerformanceMock.mockReset().mockReturnValue([]);
-    getModelManagerMock.mockReset().mockReturnValue({
-      getModelNameForTask: () => "test-model",
-    });
+    getModelNameForTaskMock.mockReset().mockReturnValue("test-model");
+    getModelManagerMock.mockReset().mockReturnValue(modelManagerStub);
   });
 
   test("continues planning after response interrupt without missing messages", async () => {
