@@ -48,45 +48,17 @@ type TrackCachePerformanceFn = typeof trackCachePerformance;
 
 type GetModelManagerFn = typeof getModelManager;
 
-const invokeMock: jest.MockedFunction<InvokeFn> = jest.fn<
-  ReturnType<InvokeFn>,
-  Parameters<InvokeFn>
->();
-const bindToolsMock: jest.MockedFunction<BindToolsFn> = jest.fn<
-  ReturnType<BindToolsFn>,
-  Parameters<BindToolsFn>
->();
-const loadModelMock: jest.MockedFunction<LoadModelMockFn> = jest.fn<
-  ReturnType<LoadModelMockFn>,
-  Parameters<LoadModelMockFn>
->();
-const supportsParallelToolCallsParamMock: jest.MockedFunction<
+const invokeMock = jest.fn<InvokeFn>();
+const bindToolsMock = jest.fn<BindToolsFn>();
+const loadModelMock = jest.fn<LoadModelMockFn>();
+const supportsParallelToolCallsParamMock = jest.fn<
   SupportsParallelToolCallsParamFn
-> = jest.fn<
-  ReturnType<SupportsParallelToolCallsParamFn>,
-  Parameters<SupportsParallelToolCallsParamFn>
 >();
-const trackCachePerformanceMock: jest.MockedFunction<TrackCachePerformanceFn> =
-  jest.fn<
-    ReturnType<TrackCachePerformanceFn>,
-    Parameters<TrackCachePerformanceFn>
-  >();
-const getModelManagerMock: jest.MockedFunction<GetModelManagerFn> = jest.fn<
-  ReturnType<GetModelManagerFn>,
-  Parameters<GetModelManagerFn>
->();
-const interruptMock: jest.MockedFunction<LangGraphModule["interrupt"]> =
-  jest.fn<
-    ReturnType<LangGraphModule["interrupt"]>,
-    Parameters<LangGraphModule["interrupt"]>
-  >();
+const trackCachePerformanceMock = jest.fn<TrackCachePerformanceFn>();
+const getModelManagerMock = jest.fn<GetModelManagerFn>();
+const interruptMock = jest.fn<LangGraphModule["interrupt"]>();
 
-const getModelNameForTaskMock: jest.MockedFunction<
-  ModelManager["getModelNameForTask"]
-> = jest.fn<
-  ReturnType<ModelManager["getModelNameForTask"]>,
-  Parameters<ModelManager["getModelNameForTask"]>
->();
+const getModelNameForTaskMock = jest.fn<ModelManager["getModelNameForTask"]>();
 
 const modelManagerStub = {
   getModelNameForTask: getModelNameForTaskMock,
