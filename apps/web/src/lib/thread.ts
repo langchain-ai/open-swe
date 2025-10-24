@@ -1,7 +1,32 @@
 import { Thread } from "@langchain/langgraph-sdk";
+import { validate } from "uuid";
 import { getMessageContentString } from "./get-message-content-string";
 import { GraphState, TaskPlan } from "@openswe/shared/open-swe/types";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
+
+export type ThreadSearchMetadata =
+  | { assistant_id: string }
+  | { graph_id: string };
+
+export function getThreadSearchMetadata(
+  assistantId: string,
+): ThreadSearchMetadata {
+  if (validate(assistantId)) {
+    return { assistant_id: assistantId };
+  }
+
+  return { graph_id: assistantId };
+}
+
+export function getAlternateThreadSearchMetadata(
+  assistantId: string,
+): ThreadSearchMetadata {
+  if (validate(assistantId)) {
+    return { graph_id: assistantId };
+  }
+
+  return { assistant_id: assistantId };
+}
 
 export function computeThreadTitle(
   taskPlan: TaskPlan | undefined,

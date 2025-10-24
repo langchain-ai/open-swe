@@ -2,6 +2,11 @@ import useSWR from "swr";
 import { Thread } from "@langchain/langgraph-sdk";
 import { createClient } from "@/providers/client";
 import { THREAD_SWR_CONFIG } from "@/lib/swr-config";
+import {
+  getAlternateThreadSearchMetadata,
+  getThreadSearchMetadata,
+  ThreadSearchMetadata,
+} from "@/lib/thread";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { ReviewerGraphState } from "@openswe/shared/open-swe/reviewer/types";
@@ -105,48 +110,65 @@ export function useThreadsSWR<
     }
 
     const client = createClient(apiUrl);
-    const searchArgs = assistantId
-      ? {
-          metadata: {
-            graph_id: assistantId,
+
+    const runSearchWithTimeout = async (
+      metadata?: ThreadSearchMetadata,
+    ): Promise<Thread<TGraphState>[]> => {
+      const searchArgs = {
+        ...paginationWithDefaults,
+        ...(metadata ? { metadata } : {}),
+      };
+
+      const start = Date.now();
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+      try {
+        const searchPromise = client.threads.search<TGraphState>(searchArgs);
+        const timeoutPromise = new Promise<Thread<TGraphState>[]>(
+          (_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error("Thread search timed out")),
+              THREAD_SEARCH_TIMEOUT_MS,
+            );
           },
-          ...(paginationWithDefaults ? paginationWithDefaults : {}),
-        }
-      : paginationWithDefaults
-        ? paginationWithDefaults
-        : undefined;
-
-    const start = Date.now();
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const searchPromise = client.threads.search<TGraphState>(searchArgs);
-      const timeoutPromise = new Promise<Thread<TGraphState>[]>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error("Thread search timed out")),
-          THREAD_SEARCH_TIMEOUT_MS,
         );
-      });
-      return await Promise.race([searchPromise, timeoutPromise]);
-    } catch (error) {
-      const duration = Date.now() - start;
-      if ((error as Error)?.message === "Thread search timed out") {
-        console.error(`Thread search timed out after ${duration}ms`, {
-          assistantId,
-          searchArgs,
-        });
-      } else {
-        console.error("Failed to search threads", error, {
-          assistantId,
-          searchArgs,
-        });
+        return await Promise.race([searchPromise, timeoutPromise]);
+      } catch (error) {
+        const duration = Date.now() - start;
+        if ((error as Error)?.message === "Thread search timed out") {
+          console.error(`Thread search timed out after ${duration}ms`, {
+            assistantId,
+            searchArgs,
+          });
+        } else {
+          console.error("Failed to search threads", error, {
+            assistantId,
+            searchArgs,
+          });
+        }
+        throw error;
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
       }
-      throw error;
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+    };
+
+    if (!assistantId) {
+      return runSearchWithTimeout();
     }
+
+    let threads = await runSearchWithTimeout(
+      getThreadSearchMetadata(assistantId),
+    );
+
+    if (threads.length === 0) {
+      threads = await runSearchWithTimeout(
+        getAlternateThreadSearchMetadata(assistantId),
+      );
+    }
+
+    return threads;
   };
 
   const { data, error, isLoading, mutate, isValidating } = useSWR(
