@@ -5,6 +5,7 @@ import type {
   PlannerGraphUpdate,
 } from "@openswe/shared/open-swe/planner/types";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
+import type { LangGraphModule } from "../../../../types/langgraph.js";
 
 const interruptMock = jest.fn();
 const loadModelMock = jest.fn();
@@ -15,7 +16,7 @@ const bindToolsMock = jest.fn();
 const invokeMock = jest.fn();
 
 await jest.unstable_mockModule("@langchain/langgraph", () => {
-  const actual = jest.requireActual("@langchain/langgraph");
+  const actual = jest.requireActual<LangGraphModule>("@langchain/langgraph");
   return {
     ...actual,
     interrupt: interruptMock,
