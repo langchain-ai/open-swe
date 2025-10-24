@@ -1,0 +1,141 @@
+import { beforeEach, describe, expect, test, jest } from "@jest/globals";
+import { HumanMessage, isHumanMessage } from "@langchain/core/messages";
+import type {
+  PlannerGraphState,
+  PlannerGraphUpdate,
+} from "@openswe/shared/open-swe/planner/types";
+import type { GraphConfig } from "@openswe/shared/open-swe/types";
+
+const interruptMock = jest.fn();
+const loadModelMock = jest.fn();
+const supportsParallelToolCallsParamMock = jest.fn();
+const trackCachePerformanceMock = jest.fn();
+const getModelManagerMock = jest.fn();
+const bindToolsMock = jest.fn();
+const invokeMock = jest.fn();
+
+await jest.unstable_mockModule("@langchain/langgraph", () => {
+  const actual = jest.requireActual("@langchain/langgraph");
+  return {
+    ...actual,
+    interrupt: interruptMock,
+  };
+});
+
+await jest.unstable_mockModule("../../../../utils/llms/index.js", () => ({
+  loadModel: loadModelMock,
+  supportsParallelToolCallsParam: supportsParallelToolCallsParamMock,
+}));
+
+await jest.unstable_mockModule("../../../../utils/caching.js", () => ({
+  trackCachePerformance: trackCachePerformanceMock,
+}));
+
+await jest.unstable_mockModule(
+  "../../../../utils/llms/model-manager.js",
+  () => ({
+    getModelManager: getModelManagerMock,
+  }),
+);
+
+const { Command } = await import("@langchain/langgraph");
+const { interruptProposedPlan } = await import("../proposed-plan.js");
+const { determineNeedsContext } = await import("../determine-needs-context.js");
+
+describe("planner interrupt flow", () => {
+  beforeEach(() => {
+    interruptMock.mockReset().mockReturnValue({
+      type: "response",
+      args: "Please add more detail to step 2.",
+    });
+
+    invokeMock.mockReset().mockResolvedValue({
+      tool_calls: [
+        {
+          args: {
+            reasoning: "The existing context is sufficient.",
+            decision: "have_context",
+          },
+        },
+      ],
+    });
+
+    bindToolsMock.mockReset().mockReturnValue({
+      invoke: invokeMock,
+    });
+
+    loadModelMock.mockReset().mockResolvedValue({
+      bindTools: bindToolsMock,
+    });
+
+    supportsParallelToolCallsParamMock
+      .mockReset()
+      .mockReturnValue(false);
+    trackCachePerformanceMock.mockReset().mockReturnValue([]);
+    getModelManagerMock.mockReset().mockReturnValue({
+      getModelNameForTask: () => "test-model",
+    });
+  });
+
+  test("continues planning after response interrupt without missing messages", async () => {
+    const initialMessage = new HumanMessage({
+      content: "Initial request details",
+      additional_kwargs: { isOriginalIssue: true },
+    });
+
+    const state = {
+      messages: [initialMessage],
+      internalMessages: [],
+      sandboxSessionId: "sandbox-id",
+      targetRepository: { owner: "owner", repo: "repo" },
+      workspacePath: undefined,
+      issueId: undefined,
+      codebaseTree: "",
+      documentCache: {},
+      taskPlan: { tasks: [], activeTaskIndex: 0 },
+      proposedPlan: ["Do something"],
+      contextGatheringNotes: "",
+      branchName: "main",
+      planChangeRequest: "",
+      programmerSession: { threadId: "", runId: "" },
+      proposedPlanTitle: "Plan title",
+      autoAcceptPlan: false,
+    } as unknown as PlannerGraphState;
+
+    const config = {
+      configurable: { shouldCreateIssue: false },
+      thread_id: "thread-id",
+      assistant_id: "assistant-id",
+      callbacks: [],
+      metadata: {},
+      tags: [],
+    } as unknown as GraphConfig;
+
+    const interruptCommand = await interruptProposedPlan(state, config);
+    expect(interruptCommand).toBeInstanceOf(Command);
+
+    const update = interruptCommand.update as PlannerGraphUpdate;
+    expect(update.planChangeRequest).toBe(
+      "Please add more detail to step 2.",
+    );
+    expect(update.messages).toHaveLength(1);
+    expect(isHumanMessage(update.messages?.[0])).toBe(true);
+
+    const updatedState: PlannerGraphState = {
+      ...state,
+      planChangeRequest: update.planChangeRequest ?? state.planChangeRequest,
+      messages: [...state.messages, ...(update.messages ?? [])],
+    };
+
+    const determineCommand = await determineNeedsContext(
+      updatedState,
+      config,
+    );
+
+    expect(determineCommand).toBeInstanceOf(Command);
+    expect(loadModelMock).toHaveBeenCalledTimes(1);
+    expect(bindToolsMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(trackCachePerformanceMock).toHaveBeenCalledTimes(1);
+  });
+});
