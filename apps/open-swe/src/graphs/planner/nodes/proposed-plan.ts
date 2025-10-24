@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { AIMessage, BaseMessage } from "@langchain/core/messages";
+import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { Command, END, interrupt } from "@langchain/langgraph";
 import { StreamMode } from "@langchain/langgraph-sdk";
 import {
@@ -247,8 +247,21 @@ export async function interruptProposedPlan(
   if (humanResponse.type === "response") {
     // Plan was responded to, route to the needs-context node which will determine
     // if we need more context, or can go right to the planning step.
+    const responseText =
+      typeof humanResponse.args === "string" ? humanResponse.args : "";
+    const humanResponseMessage = new HumanMessage({
+      id: uuidv4(),
+      content: responseText,
+      additional_kwargs: {
+        isFollowup: true,
+      },
+    });
     return new Command({
       goto: "determine-needs-context",
+      update: {
+        planChangeRequest: responseText,
+        messages: [humanResponseMessage],
+      },
     });
   }
 
