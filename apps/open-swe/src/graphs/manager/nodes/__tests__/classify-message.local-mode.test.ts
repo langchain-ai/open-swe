@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test, jest } from "@jest/globals";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import type { BaseLanguageModelInput } from "@langchain/core/language_models/base";
+import type {
+  ConfigurableChatModelCallOptions,
+  ConfigurableModel,
+} from "langchain/chat_models/universal";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import type {
   ManagerGraphState,
@@ -7,14 +12,34 @@ import type {
 } from "@openswe/shared/open-swe/manager/types";
 import { END } from "@langchain/langgraph";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
+import type { Client, Thread } from "@langchain/langgraph-sdk";
+import type { loadModel } from "../../../../utils/llms/index.js";
+import type { FallbackRunnable } from "../../../../utils/runtime-fallback.js";
 
-const threadsGetMock = jest.fn();
-const runsCreateMock = jest.fn();
+type ConfigurableModelInstance = ConfigurableModel<
+  BaseLanguageModelInput,
+  ConfigurableChatModelCallOptions
+>;
+
+type FallbackRunnableInstance = FallbackRunnable<
+  BaseLanguageModelInput,
+  ConfigurableChatModelCallOptions
+>;
+
+type ThreadGet = (
+  threadId: string,
+) => Promise<Thread<Record<string, unknown>>>;
+const threadsGetMock: jest.MockedFunction<ThreadGet> = jest.fn();
+
+type RunsCreate = (
+  ...args: Parameters<Client["runs"]["create"]>
+) => ReturnType<Client["runs"]["create"]>;
+const runsCreateMock: jest.MockedFunction<RunsCreate> = jest.fn();
 const createLangGraphClientMock = jest.fn();
-const loadModelMock = jest.fn();
+const loadModelMock: jest.MockedFunction<typeof loadModel> = jest.fn();
 const supportsParallelToolCallsParamMock = jest.fn();
 
-let modelInvokeMock: jest.Mock;
+let modelInvokeMock: jest.MockedFunction<ConfigurableModelInstance["invoke"]>;
 
 await jest.unstable_mockModule(
   "../../../../utils/langgraph-client.js",
@@ -40,16 +65,28 @@ describe("classifyMessage local mode", () => {
     });
     supportsParallelToolCallsParamMock.mockReset().mockReturnValue(false);
 
-    modelInvokeMock = jest.fn();
-    const modelWithTools = {
+    modelInvokeMock = jest.fn() as jest.MockedFunction<
+      ConfigurableModelInstance["invoke"]
+    >;
+
+    const modelWithTools: Pick<ConfigurableModelInstance, "invoke"> = {
       invoke: modelInvokeMock,
     };
 
+    const bindToolsMock = jest.fn() as jest.MockedFunction<
+      FallbackRunnableInstance["bindTools"]
+    >;
+    bindToolsMock.mockReturnValue(
+      modelWithTools as unknown as ConfigurableModelInstance,
+    );
+
     loadModelMock
       .mockReset()
-      .mockResolvedValue({
-        bindTools: jest.fn().mockReturnValue(modelWithTools),
-      });
+      .mockResolvedValue(
+        {
+          bindTools: bindToolsMock,
+        } as unknown as FallbackRunnableInstance,
+      );
   });
 
   test("routes update_programmer when planner and programmer threads are active in local mode", async () => {
@@ -65,16 +102,38 @@ describe("classifyMessage local mode", () => {
         },
       ],
     });
-    modelInvokeMock.mockResolvedValue(responseMessage);
+    modelInvokeMock.mockResolvedValue(
+      responseMessage as Awaited<
+        ReturnType<ConfigurableModelInstance["invoke"]>
+      >,
+    );
 
+    const timestamp = new Date().toISOString();
     threadsGetMock
-      .mockResolvedValueOnce({
-        status: "in_progress",
-        values: {
-          programmerSession: { threadId: "programmer-thread" },
-        },
-      })
-      .mockResolvedValueOnce({ status: "in_progress" });
+      .mockResolvedValueOnce(
+        {
+          thread_id: "planner-thread",
+          created_at: timestamp,
+          updated_at: timestamp,
+          metadata: {},
+          status: "busy",
+          values: {
+            programmerSession: { threadId: "programmer-thread" },
+          },
+          interrupts: {},
+        } satisfies Thread<Record<string, unknown>>,
+      )
+      .mockResolvedValueOnce(
+        {
+          thread_id: "programmer-thread",
+          created_at: timestamp,
+          updated_at: timestamp,
+          metadata: {},
+          status: "busy",
+          values: {},
+          interrupts: {},
+        } satisfies Thread<Record<string, unknown>>,
+      );
 
     const userMessage = new HumanMessage({
       id: "human-1",
