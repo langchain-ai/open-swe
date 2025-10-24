@@ -80,12 +80,12 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     .map((p, index) => `  ${index + 1}. ${p}`)
     .join("\n");
   const userFollowupRequestMsg = state.messages.findLast(isHumanMessage);
-  const userFollowupRequestStr = userFollowupRequestMsg
-    ? getMessageContentString(userFollowupRequestMsg.content)
-    : state.planChangeRequest;
-  if (!userFollowupRequestStr) {
+  if (!userFollowupRequestMsg) {
     throw new Error("User followup request not found.");
   }
+  const userFollowupRequestStr = getMessageContentString(
+    userFollowupRequestMsg.content,
+  );
 
   return SYSTEM_PROMPT.replace(
     "{CONVERSATION_HISTORY}",
@@ -133,9 +133,11 @@ export async function determineNeedsContext(
   ]);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.ROUTER);
-  const formattedMessages = missingMessages.length
-    ? [...filterHiddenMessages(state.messages), ...missingMessages]
-    : filterHiddenMessages(state.messages);
+  if (!missingMessages.length) {
+    throw new Error(
+      "Can not determine if more context is needed if there are no missing messages.",
+    );
+  }
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
     config,
     LLMTask.ROUTER,
@@ -154,7 +156,7 @@ export async function determineNeedsContext(
       role: "user",
       content: formatSystemPrompt({
         ...state,
-        messages: formattedMessages,
+        messages: [...filterHiddenMessages(state.messages), ...missingMessages],
       }),
     },
   ]);
@@ -165,8 +167,8 @@ export async function determineNeedsContext(
   }
 
   const commandUpdate: PlannerGraphUpdate = {
+    messages: missingMessages,
     tokenData: trackCachePerformance(response, modelName),
-    ...(missingMessages.length ? { messages: missingMessages } : {}),
   };
 
   const shouldGatherContext =
