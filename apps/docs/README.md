@@ -2,7 +2,7 @@
 
 The documentation site for Open SWE, built with Mintlify to provide comprehensive guides and API references.
 
-## Documentation
+## Documentation was 
 
 For the complete documentation, visit [docs.langchain.com/labs/swe/](https://docs.langchain.com/labs/swe/).
 
