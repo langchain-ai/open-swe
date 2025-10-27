@@ -31,7 +31,7 @@ import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
-import { OpenSWELogo } from "../icons/openswe-logo";
+import { NVIDIALogo } from "../icons/nvidia-logo";
 import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
 
@@ -126,19 +126,20 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
 
   return (
     <div className="flex flex-1 flex-col">
-      {/* Header */}
-      <div className="border-border bg-card border-b px-4 py-2">
+      {/* Header - NVIDIA Style */}
+      <div className="border-border bg-black border-b px-6 py-3 shadow-md">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <OpenSWELogo
-              width={120}
-              height={18}
+            <NVIDIALogo
+              height={32}
+              showSubtitle={true}
+              useImage={true}
             />
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground text-xs">ready</span>
-              <div className="h-1 w-1 rounded-full bg-green-500 dark:bg-green-600"></div>
+              <div className="h-1.5 w-1.5 rounded-full nvidia-bg nvidia-glow"></div>
             </div>
             <OpenDocumentationButton />
             <OpenSettingsButton />

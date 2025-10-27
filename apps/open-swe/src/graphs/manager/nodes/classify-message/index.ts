@@ -46,6 +46,7 @@ import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
+import { fixNvidiaToolCall } from "../../../../utils/nvidia-nim-json-fix.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 /**
@@ -135,10 +136,29 @@ export async function classifyMessage(
     },
   ]);
 
-  const toolCall = response.tool_calls?.[0];
+  // NVIDIA NIM FIX: Apply robust JSON parsing and tool call extraction
+  logger.debug("Router Response (before fix)", {
+    hasToolCalls: !!response.tool_calls,
+    toolCallsLength: response.tool_calls?.length,
+    hasAdditionalKwargs: !!(response as any).additional_kwargs?.tool_calls,
+    additionalToolCallsLength: (response as any).additional_kwargs?.tool_calls?.length,
+    responseContent: response.content?.toString().substring(0, 200),
+  });
+
+  // Apply NVIDIA NIM JSON fix - handles malformed JSON and moves tool_calls to standard location
+  const fixedResponse = fixNvidiaToolCall(response);
+  
+  const toolCall = fixedResponse.tool_calls?.[0];
+  
   if (!toolCall) {
-    throw new Error("No tool call found.");
+    throw new Error("No tool call found after NVIDIA NIM fixes. Response might not have tools bound properly.");
   }
+  
+  logger.info("Tool call extracted successfully", {
+    toolName: toolCall.name,
+    hasArgs: !!toolCall.args,
+    argsKeys: toolCall.args ? Object.keys(toolCall.args) : [],
+  });
   const toolCallArgs = toolCall.args as z.infer<
     typeof BASE_CLASSIFICATION_SCHEMA
   >;

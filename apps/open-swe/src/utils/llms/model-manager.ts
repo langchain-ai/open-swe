@@ -11,6 +11,9 @@ import {
 import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { API_KEY_REQUIRED_MESSAGE } from "@openswe/shared/constants";
+import { createNvidiaNimChat } from "../nvidia-nim-chat-wrapper.js";
+import { starfleetAuth } from "../starfleet-auth.js";
+import { ChatOpenAI } from "@langchain/openai";
 
 const logger = createLogger(LogLevel.INFO, "ModelManager");
 
@@ -44,6 +47,8 @@ export enum CircuitState {
 }
 
 export const PROVIDER_FALLBACK_ORDER = [
+  "nvidia-gateway", // NVIDIA LLM Gateway → Azure OpenAI (reliable, no tool calling bugs)
+  "nvidia-nim", // NVIDIA NIM fallback (cost savings when it works)
   "openai",
   "anthropic",
   "google-genai",
@@ -76,6 +81,12 @@ const providerToApiKey = (
   apiKeys: Record<string, string>,
 ): string => {
   switch (providerName) {
+    case "nvidia-nim":
+      return apiKeys.nvidiaNimApiKey || process.env.NVIDIA_NIM_API_KEY || "";
+    case "nvidia-gateway":
+      // nvidia-gateway uses Starfleet auth, not a static API key
+      // Return empty string - token will be fetched dynamically
+      return "";
     case "openai":
       return apiKeys.openaiApiKey;
     case "anthropic":
@@ -124,6 +135,35 @@ export class ModelManager {
     }
     if (!userLogin) {
       throw new Error("User login not found in config");
+    }
+
+    // NVIDIA NIM: Always use environment variable (bypass user API key requirement)
+    if (provider === "nvidia-nim") {
+      const nimKey = process.env.NVIDIA_NIM_API_KEY;
+      if (!nimKey) {
+        logger.warn("NVIDIA_NIM_API_KEY not found in environment, will skip this provider");
+      }
+      return nimKey || null;
+    }
+
+    // NVIDIA Gateway: Uses Starfleet auth (handled separately in initializeModel)
+    if (provider === "nvidia-gateway") {
+      // Check if LLM Gateway is enabled and credentials are available
+      const isEnabled = process.env.NVIDIA_LLM_GATEWAY_ENABLED === "true";
+      const hasCredentials = process.env.STARFLEET_ID && process.env.STARFLEET_SECRET;
+      
+      if (!isEnabled) {
+        logger.info("NVIDIA LLM Gateway disabled in environment");
+        return null;
+      }
+      
+      if (!hasCredentials) {
+        logger.warn("NVIDIA LLM Gateway enabled but Starfleet credentials not configured");
+        return null;
+      }
+      
+      // Return a placeholder - actual token will be fetched in initializeModel
+      return "starfleet-token-placeholder";
     }
 
     // If the user is allowed, we can return early
@@ -176,12 +216,49 @@ export class ModelManager {
       finalMaxTokens = finalMaxTokens > 8_192 ? 8_192 : finalMaxTokens;
     }
 
-    const apiKey = this.getUserApiKey(graphConfig, provider);
-
+    // NVIDIA NIM: Use OpenAI-compatible wrapper with custom endpoint
+    const isNvidiaNim = provider === "nvidia-nim";
+    const isNvidiaGateway = provider === "nvidia-gateway";
+    const actualProvider = isNvidiaNim || isNvidiaGateway ? "openai" : provider;
+    
+    // Get API key - for NVIDIA providers, handle specially
+    let apiKey: string | null;
+    if (isNvidiaNim) {
+      apiKey = process.env.NVIDIA_NIM_API_KEY || null;
+      logger.info("Using NVIDIA NIM API key from environment", {
+        hasKey: !!apiKey,
+        keyPrefix: apiKey ? apiKey.substring(0, 10) + "..." : "none",
+      });
+    } else if (isNvidiaGateway) {
+      // For LLM Gateway, fetch Starfleet token
+      try {
+        apiKey = await starfleetAuth.getAccessToken();
+        logger.info("Using NVIDIA LLM Gateway with Starfleet token", {
+          hasToken: !!apiKey,
+          tokenInfo: starfleetAuth.getTokenInfo(),
+        });
+      } catch (error) {
+        logger.error("Failed to get Starfleet token for LLM Gateway", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    } else {
+      apiKey = this.getUserApiKey(graphConfig, provider);
+    }
+    
     const modelOptions: InitChatModelArgs = {
-      modelProvider: provider,
+      modelProvider: actualProvider,
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
+      // NVIDIA NIM: Override baseURL to point to NVIDIA's endpoint
+      ...(isNvidiaNim ? { 
+        baseUrl: process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1" 
+      } : {}),
+      // NVIDIA Gateway: Override baseURL to point to LLM Gateway
+      ...(isNvidiaGateway ? {
+        baseUrl: process.env.LLM_GATEWAY_BASE_URL || "https://prod.api.nvidia.com/llm/v1/azure",
+      } : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -198,10 +275,102 @@ export class ModelManager {
             }),
     };
 
-    logger.debug("Initializing model", {
-      provider,
+    logger.info("Initializing model", {
+      originalProvider: provider,
+      actualProvider: actualProvider,
       modelName,
+      isNvidiaNim,
+      isNvidiaGateway,
+      baseURL: isNvidiaNim 
+        ? (process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1")
+        : isNvidiaGateway
+        ? (process.env.LLM_GATEWAY_BASE_URL || "https://prod.api.nvidia.com/llm/v1/azure")
+        : "default",
+      hasApiKey: !!apiKey,
     });
+
+    // NVIDIA NIM: Use our custom wrapper that handles JSON parsing errors
+    if (isNvidiaNim && apiKey) {
+      logger.info("Creating NVIDIA NIM ChatOpenAI instance with error handling wrapper", {
+        modelName,
+        baseURL: process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1",
+      });
+      
+      return createNvidiaNimChat({
+        modelName: modelName,
+        apiKey: apiKey,
+        baseURL: process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1",
+        maxRetries: MAX_RETRIES,
+        maxTokens: finalMaxTokens,
+        temperature: thinkingModel ? undefined : temperature,
+      });
+    }
+
+    // NVIDIA LLM Gateway: Use ChatOpenAI with Azure OpenAI endpoint via NVIDIA gateway
+    if (isNvidiaGateway && apiKey) {
+      const gatewayModel = process.env.LLM_GATEWAY_MODEL || "gpt-4o-mini";
+      const baseURL = process.env.LLM_GATEWAY_BASE_URL || "https://prod.api.nvidia.com/llm/v1/azure";
+      const apiVersion = process.env.LLM_GATEWAY_API_VERSION || "2024-12-01-preview";
+      
+      // Generate correlation ID for tracking (UUID v4 format)
+      const correlationId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      logger.info("Creating NVIDIA LLM Gateway ChatOpenAI instance", {
+        model: gatewayModel,
+        baseURL,
+        apiVersion,
+        correlationId,
+      });
+
+      const chatModel = new ChatOpenAI({
+        modelName: gatewayModel,
+        openAIApiKey: apiKey, // This is the Starfleet token
+        configuration: {
+          baseURL: baseURL,
+          defaultQuery: {
+            "api-version": apiVersion,
+          },
+          defaultHeaders: {
+            "correlationId": correlationId,
+          },
+          // Increase timeouts for long-running requests (reviews, complex planning)
+          fetch: async (url: string, init?: RequestInit) => {
+            return fetch(url, {
+              ...init,
+              // @ts-expect-error - undici specific timeout options
+              bodyTimeout: 300000, // 5 minutes for body
+              headersTimeout: 60000, // 1 minute for headers
+            });
+          },
+        },
+        maxRetries: 1, // Reduce retries for faster failure to fallback
+        maxTokens: finalMaxTokens,
+        temperature: thinkingModel ? undefined : temperature,
+        streaming: true, // Enable streaming for faster perceived performance
+        timeout: 180000, // 3 minute timeout for LLM response (complex tasks need time)
+      });
+
+      // Azure OpenAI has a 40-character limit on tool_call IDs
+      // LangChain generates longer IDs, so we need to intercept and truncate them
+      const originalInvoke = chatModel.invoke.bind(chatModel);
+      chatModel.invoke = async function(input: any, options?: any) {
+        // Truncate tool_call IDs in messages if they exist
+        if (Array.isArray(input)) {
+          input = input.map((msg: any) => {
+            if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+              msg.tool_calls = msg.tool_calls.map((tc: any) => ({
+                ...tc,
+                id: tc.id ? tc.id.substring(0, 40) : tc.id,
+              }));
+            }
+            return msg;
+          });
+        }
+        return originalInvoke(input, options);
+      };
+
+      return chatModel;
+    }
 
     return await initChatModel(modelName, modelOptions);
   }
@@ -378,6 +547,22 @@ export class ModelManager {
     task: LLMTask,
   ): ModelLoadConfig | null {
     const defaultModels: Record<Provider, Record<LLMTask, string>> = {
+      "nvidia-nim": {
+        // NVIDIA NIM models - Llama 4 Scout (Testing for tool calling)
+        [LLMTask.PLANNER]: "meta/llama-4-scout-17b-16e-instruct",
+        [LLMTask.PROGRAMMER]: "meta/llama-4-scout-17b-16e-instruct",
+        [LLMTask.REVIEWER]: "meta/llama-4-scout-17b-16e-instruct",
+        [LLMTask.ROUTER]: "meta/llama-4-scout-17b-16e-instruct",
+        [LLMTask.SUMMARIZER]: "meta/llama-4-scout-17b-16e-instruct",
+      },
+      "nvidia-gateway": {
+        // NVIDIA LLM Gateway → Azure OpenAI models (via Starfleet)
+        [LLMTask.PLANNER]: "gpt-4o",
+        [LLMTask.PROGRAMMER]: "gpt-4o",
+        [LLMTask.REVIEWER]: "gpt-4o-mini",
+        [LLMTask.ROUTER]: "gpt-4o-mini",
+        [LLMTask.SUMMARIZER]: "gpt-4o-mini",
+      },
       anthropic: {
         [LLMTask.PLANNER]: "claude-sonnet-4-0",
         [LLMTask.PROGRAMMER]: "claude-sonnet-4-0",

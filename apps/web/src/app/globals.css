@@ -5,74 +5,76 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* NVIDIA Light Theme */
+  --background: oklch(1 0 0);  /* White */
+  --foreground: oklch(0.1 0 0);  /* Black */
+  --card: oklch(0.98 0 0);  /* Off-white */
+  --card-foreground: oklch(0.1 0 0);  /* Black */
+  --popover: oklch(1 0 0);  /* White */
+  --popover-foreground: oklch(0.1 0 0);  /* Black */
+  --primary: oklch(0.62 0.18 130);  /* NVIDIA Green #76B900 */
+  --primary-foreground: oklch(1 0 0);  /* White text on green */
+  --secondary: oklch(0.15 0 0);  /* Dark gray */
+  --secondary-foreground: oklch(0.95 0 0);  /* Light text */
+  --muted: oklch(0.95 0 0);  /* Light gray */
+  --muted-foreground: oklch(0.45 0 0);  /* Medium gray text */
+  --accent: oklch(0.75 0.18 130);  /* Bright green accent */
+  --accent-foreground: oklch(0.1 0 0);  /* Dark text */
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.87 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.87 0 0);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.9 0 0);  /* Light border */
+  --input: oklch(0.95 0 0);  /* Input background */
+  --ring: oklch(0.62 0.18 130);  /* NVIDIA green focus ring */
+  --chart-1: oklch(0.62 0.18 130);  /* NVIDIA Green */
+  --chart-2: oklch(0.5 0.15 130);  /* Dark green */
+  --chart-3: oklch(0.75 0.18 130);  /* Bright green */
+  --chart-4: oklch(0.4 0 0);  /* Gray */
+  --chart-5: oklch(0.6 0 0);  /* Light gray */
+  --radius: 0.5rem;  /* Slightly rounded */
+  --sidebar: oklch(0.985 0 0);  /* Off-white sidebar */
+  --sidebar-foreground: oklch(0.1 0 0);  /* Black text */
+  --sidebar-primary: oklch(0.62 0.18 130);  /* NVIDIA Green */
+  --sidebar-primary-foreground: oklch(1 0 0);  /* White text */
+  --sidebar-accent: oklch(0.95 0 0);  /* Light accent */
+  --sidebar-accent-foreground: oklch(0.1 0 0);  /* Dark text */
+  --sidebar-border: oklch(0.9 0 0);  /* Light border */
+  --sidebar-ring: oklch(0.62 0.18 130);  /* NVIDIA green ring */
 }
 
 .dark {
-  --background: oklch(0.29 0.005 280);
-  --foreground: oklch(0.92 0.01 280);
-  --card: oklch(0.32 0.005 280);
-  --card-foreground: oklch(0.92 0.01 280);
-  --popover: oklch(0.32 0.005 280);
-  --popover-foreground: oklch(0.92 0.01 280);
-  --primary: oklch(0.92 0.01 280);
-  --primary-foreground: oklch(0.24 0.005 280);
-  --secondary: oklch(0.38 0.005 280);
-  --secondary-foreground: oklch(0.92 0.01 280);
-  --muted: oklch(0.35 0.005 280);
-  --muted-foreground: oklch(0.65 0.01 280);
-  --accent: oklch(0.38 0.005 280);
-  --accent-foreground: oklch(0.92 0.01 280);
+  /* NVIDIA Dark Theme - Based on nvidia.com */
+  --background: oklch(0.05 0 0);  /* Pure black like NVIDIA.com */
+  --foreground: oklch(0.95 0 0);  /* White text */
+  --card: oklch(0.08 0 0);  /* Very dark card */
+  --card-foreground: oklch(0.95 0 0);  /* Light text */
+  --popover: oklch(0.08 0 0);  /* Very dark popover */
+  --popover-foreground: oklch(0.95 0 0);  /* Light text */
+  --primary: oklch(0.62 0.18 130);  /* NVIDIA Green #76B900 */
+  --primary-foreground: oklch(0.05 0 0);  /* Black text on green */
+  --secondary: oklch(0.15 0 0);  /* Dark gray */
+  --secondary-foreground: oklch(0.95 0 0);  /* Light text */
+  --muted: oklch(0.2 0 0);  /* Medium dark */
+  --muted-foreground: oklch(0.6 0 0);  /* Gray text */
+  --accent: oklch(0.75 0.18 130);  /* Bright green */
+  --accent-foreground: oklch(0.05 0 0);  /* Black text */
   --destructive: oklch(0.55 0.15 20);
-  --destructive-foreground: oklch(0.95 0.01 280);
-  --border: oklch(0.42 0.005 280);
-  --input: oklch(0.42 0.005 280);
-  --ring: oklch(0.5 0.01 280);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.3 0.005 280);
-  --sidebar-foreground: oklch(0.92 0.01 280);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.92 0.01 280);
-  --sidebar-accent: oklch(0.38 0.005 280);
-  --sidebar-accent-foreground: oklch(0.92 0.01 280);
-  --sidebar-border: oklch(0.42 0.005 280);
-  --sidebar-ring: oklch(0.5 0.01 280);
+  --destructive-foreground: oklch(0.95 0 0);
+  --border: oklch(0.2 0 0);  /* Subtle dark border */
+  --input: oklch(0.12 0 0);  /* Dark input */
+  --ring: oklch(0.62 0.18 130);  /* NVIDIA green focus */
+  --chart-1: oklch(0.62 0.18 130);  /* NVIDIA Green */
+  --chart-2: oklch(0.5 0.15 130);  /* Dark green */
+  --chart-3: oklch(0.75 0.18 130);  /* Bright green */
+  --chart-4: oklch(0.4 0 0);  /* Gray */
+  --chart-5: oklch(0.6 0 0);  /* Light gray */
+  --sidebar: oklch(0.05 0 0);  /* Pure black sidebar like NVIDIA.com */
+  --sidebar-foreground: oklch(0.95 0 0);  /* Light text */
+  --sidebar-primary: oklch(0.62 0.18 130);  /* NVIDIA Green */
+  --sidebar-primary-foreground: oklch(0.95 0 0);  /* Light text */
+  --sidebar-accent: oklch(0.15 0 0);  /* Dark accent */
+  --sidebar-accent-foreground: oklch(0.95 0 0);  /* Light text */
+  --sidebar-border: oklch(0.2 0 0);  /* Subtle border */
+  --sidebar-ring: oklch(0.62 0.18 130);  /* NVIDIA green ring */
 }
 
 @theme inline {
@@ -168,5 +170,95 @@
 
   .dark .scrollbar-pretty-auto::-webkit-scrollbar-thumb {
     background-color: rgb(95 105 119);
+  }
+
+  /* NVIDIA-specific utility classes */
+  .nvidia-gradient {
+    background: linear-gradient(135deg, #76B900 0%, #5A8F00 100%);
+  }
+
+  .nvidia-gradient-hover:hover {
+    background: linear-gradient(135deg, #76B900 0%, #5A8F00 100%);
+  }
+
+  .nvidia-glow {
+    box-shadow: 0 0 20px rgba(118, 185, 0, 0.3);
+  }
+
+  .nvidia-glow-strong {
+    box-shadow: 0 0 30px rgba(118, 185, 0, 0.5);
+  }
+
+  .nvidia-border {
+    border-color: #76B900;
+  }
+
+  .nvidia-text {
+    color: #76B900;
+  }
+
+  .nvidia-bg {
+    background-color: #76B900;
+  }
+
+  /* NVIDIA Shimmer Animation - inspired by NVIDIA.com */
+  .nvidia-shimmer {
+    background: linear-gradient(
+      90deg,
+      #76B900 0%,
+      #76B900 40%,
+      rgba(118, 185, 0, 0.6) 50%,
+      rgba(144, 238, 144, 0.8) 55%,
+      #76B900 65%,
+      #76B900 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: nvidia-shine 4s ease-in-out infinite;
+  }
+
+  .nvidia-shimmer-secondary {
+    background: linear-gradient(
+      90deg,
+      #fff 0%,
+      #fff 40%,
+      rgba(118, 185, 0, 0.4) 50%,
+      rgba(144, 238, 144, 0.6) 55%,
+      #fff 65%,
+      #fff 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: nvidia-shine 4s ease-in-out infinite 0.5s;
+  }
+
+  .dark .nvidia-shimmer-secondary {
+    background: linear-gradient(
+      90deg,
+      #e5e5e5 0%,
+      #e5e5e5 40%,
+      rgba(118, 185, 0, 0.5) 50%,
+      rgba(144, 238, 144, 0.7) 55%,
+      #e5e5e5 65%,
+      #e5e5e5 100%
+    );
+    background-size: 200% auto;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: nvidia-shine 4s ease-in-out infinite 0.5s;
+  }
+
+  @keyframes nvidia-shine {
+    0% {
+      background-position: 200% center;
+    }
+    100% {
+      background-position: -200% center;
+    }
   }
 }

@@ -211,8 +211,8 @@ export function ManagerChat({
                             </div>
                           )
                         ) : (
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-950/50">
-                            <Bot className="size-4.5 text-blue-700 dark:text-blue-300" />
+                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[#76B900]/20 dark:bg-[#76B900]/30">
+                            <Bot className="size-4.5 text-[#76B900] dark:text-[#76B900]" />
                           </div>
                         )}
                       </div>
@@ -221,7 +221,7 @@ export function ManagerChat({
                           <span className="text-muted-foreground text-xs font-medium">
                             {message.type === "human"
                               ? githubUser?.login || "You"
-                              : "Open SWE"}
+                              : "David"}
                           </span>
                           <div className="opacity-0 transition-opacity group-hover:opacity-100">
                             <MessageCopyButton content={messageContentString} />

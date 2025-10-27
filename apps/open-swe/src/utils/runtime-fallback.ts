@@ -163,6 +163,12 @@ export class FallbackRunnable<
           runnableToUse = runnableToUse.withConfig(config);
         }
 
+        logger.debug(`Invoking model ${modelKey}`, {
+          hasTools: !!toolsToUse,
+          toolCount: toolsToUse?.tools?.length,
+          providerHasSpecificTools: !!this.providerTools?.[modelConfig.provider],
+        });
+
         const result = await runnableToUse.invoke(
           useProviderMessages(
             input,
@@ -171,11 +177,29 @@ export class FallbackRunnable<
           ),
           options,
         );
+        
+        logger.debug(`Model ${modelKey} returned successfully`, {
+          hasToolCalls: !!result.tool_calls,
+          toolCallsLength: result.tool_calls?.length,
+          hasAdditionalKwargs: !!(result as any).additional_kwargs,
+          hasContent: !!result.content,
+        });
+        
         this.modelManager.recordSuccess(modelKey);
         return result;
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        
+        logger.error(`❌ ${modelKey} FAILED with error`, {
+          error: errorMessage,
+          errorType: error instanceof Error ? error.constructor.name : typeof error,
+          errorStack: errorStack?.substring(0, 500),
+          isJsonParseError: errorMessage.includes('Expecting'),
+        });
+        
         logger.warn(
-          `${modelKey} failed: ${error instanceof Error ? error.message : String(error)}`,
+          `${modelKey} failed: ${errorMessage}`,
         );
         lastError = error instanceof Error ? error : new Error(String(error));
         this.modelManager.recordFailure(modelKey);

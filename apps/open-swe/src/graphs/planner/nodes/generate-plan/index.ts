@@ -31,6 +31,7 @@ import { filterMessagesWithoutContent } from "../../../../utils/message/content.
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { fixNvidiaToolCall } from "../../../../utils/nvidia-nim-json-fix.js";
 
 function formatSystemPrompt(
   state: PlannerGraphState,
@@ -104,7 +105,7 @@ export async function generatePlan(
     throw new Error("No messages to process.");
   }
 
-  const response = await modelWithTools
+  const rawResponse = await modelWithTools
     .withConfig({ tags: ["nostream"] })
     .invoke([
       {
@@ -114,15 +115,18 @@ export async function generatePlan(
       ...inputMessages,
     ]);
 
+  // NVIDIA NIM FIX: Apply robust JSON parsing and tool call extraction
+  const response = fixNvidiaToolCall(rawResponse);
+
   // Filter out empty plans
-  response.tool_calls = response.tool_calls?.map((tc) => {
+  response.tool_calls = response.tool_calls?.map((tc: any) => {
     if (tc.id === sessionPlanTool.name) {
       return {
         ...tc,
         args: {
           ...tc.args,
           plan: (tc.args as z.infer<typeof sessionPlanTool.schema>).plan.filter(
-            (p) => p.length > 0,
+            (p: string) => p.length > 0,
           ),
         },
       };
@@ -132,7 +136,7 @@ export async function generatePlan(
 
   const toolCall = response.tool_calls?.[0];
   if (!toolCall) {
-    throw new Error("Failed to generate plan");
+    throw new Error("Failed to generate plan after NVIDIA NIM fixes");
   }
 
   let newSessionId: string | undefined;

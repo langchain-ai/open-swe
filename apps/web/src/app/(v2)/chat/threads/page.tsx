@@ -17,7 +17,7 @@ import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { cn } from "@/lib/utils";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { UserPopover } from "@/components/user-popover";
-import { OpenSWELogo } from "@/components/icons/openswe-logo";
+import { NVIDIALogo } from "@/components/icons/nvidia-logo";
 
 type FilterStatus =
   | "all"
@@ -116,8 +116,8 @@ function AllThreadsPageContent() {
 
   return (
     <div className="bg-background flex h-screen flex-col">
-      {/* Header */}
-      <div className="border-border bg-card border-b px-4 py-3">
+      {/* Header - NVIDIA Style */}
+      <div className="border-border bg-black border-b px-6 py-3 shadow-md">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -128,9 +128,9 @@ function AllThreadsPageContent() {
             <ArrowLeft className="h-3 w-3" />
           </Button>
           <div className="flex items-center gap-2">
-            <OpenSWELogo
-              width={120}
-              height={18}
+            <NVIDIALogo
+              height={32}
+              useImage={true}
             />
           </div>
           <div className="ml-auto flex items-center gap-4">

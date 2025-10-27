@@ -12,8 +12,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Open SWE",
-  description: "Open SWE UX by LangChain",
+  title: "NVIDIA NVCRM Agent Swarm",
+  description: "NVIDIA NVCRM Agent Swarm - AI-powered coding assistant",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

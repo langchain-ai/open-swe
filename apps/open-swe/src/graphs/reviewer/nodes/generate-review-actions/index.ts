@@ -189,11 +189,15 @@ function createToolsAndPrompt(
 
   return {
     providerTools: {
+      "nvidia-nim": nonAnthropicTools, // NVIDIA NIM uses OpenAI-compatible format
+      "nvidia-gateway": nonAnthropicTools, // NVIDIA LLM Gateway uses OpenAI-compatible format
       anthropic: anthropicTools,
       openai: nonAnthropicTools,
       "google-genai": nonAnthropicTools,
     },
     providerMessages: {
+      "nvidia-nim": nonAnthropicMessages, // NVIDIA NIM uses OpenAI-compatible format
+      "nvidia-gateway": nonAnthropicMessages, // NVIDIA LLM Gateway uses OpenAI-compatible format
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,
