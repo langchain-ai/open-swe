@@ -11,7 +11,6 @@ import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { ReviewerGraphState } from "@openswe/shared/open-swe/reviewer/types";
 import { GraphState } from "@openswe/shared/open-swe/types";
-import { createLogger, LogLevel } from "@openswe/shared/logger";
 import { useMemo, useState } from "react";
 
 type ThreadSortBy = "thread_id" | "status" | "created_at" | "updated_at";
@@ -69,10 +68,6 @@ interface UseThreadsSWROptions {
 export function useThreadsSWR<
   TGraphState extends AnyGraphState = AnyGraphState,
 >(options: UseThreadsSWROptions = {}) {
-  const logger = useMemo(
-    () => createLogger(LogLevel.DEBUG, "ThreadsSWR"),
-    [],
-  );
   const {
     assistantId,
     refreshInterval = THREAD_SWR_CONFIG.refreshInterval,
@@ -127,16 +122,6 @@ export function useThreadsSWR<
       const start = Date.now();
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-      logger.info("Starting thread search", {
-        assistantId,
-        apiUrl,
-        searchArgs,
-      });
-      logger.debug("Thread search metadata", {
-        assistantId,
-        metadata,
-      });
-
       try {
         const searchPromise = client.threads.search<TGraphState>(searchArgs);
         const timeoutPromise = new Promise<Thread<TGraphState>[]>(
@@ -147,42 +132,18 @@ export function useThreadsSWR<
             );
           },
         );
-        const result = await Promise.race([searchPromise, timeoutPromise]);
-        const duration = Date.now() - start;
-
-        logger.debug("Thread search completed", {
-          assistantId,
-          duration,
-          resultCount: result.length,
-          searchArgs,
-          apiUrl,
-        });
-
-        logger.info("Completed thread search", {
-          assistantId,
-          duration,
-          resultCount: result.length,
-          searchArgs,
-          apiUrl,
-        });
-
-        return result;
+        return await Promise.race([searchPromise, timeoutPromise]);
       } catch (error) {
         const duration = Date.now() - start;
         if ((error as Error)?.message === "Thread search timed out") {
-          logger.error(`Thread search timed out after ${duration}ms`, {
+          console.error(`Thread search timed out after ${duration}ms`, {
             assistantId,
-            metadata,
             searchArgs,
-            apiUrl,
           });
         } else {
-          logger.error("Failed to search threads", {
+          console.error("Failed to search threads", error, {
             assistantId,
-            error,
-            metadata,
             searchArgs,
-            apiUrl,
           });
         }
         throw error;
