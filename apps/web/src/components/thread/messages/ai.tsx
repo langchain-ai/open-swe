@@ -137,6 +137,50 @@ function isMcpTool(toolName: string): boolean {
   return !knownToolNames.some((t) => t === toolName);
 }
 
+function normalizeReasoningText(reasoning: unknown): string | undefined {
+  if (typeof reasoning === "string") {
+    return reasoning;
+  }
+
+  if (Array.isArray(reasoning)) {
+    const parts = reasoning.filter((part): part is string => typeof part === "string");
+    if (parts.length > 0) {
+      return parts.join("\n\n");
+    }
+  }
+
+  return undefined;
+}
+
+function getReasoningTextFromMessage(
+  message?: Message | null,
+  fallbackContent?: Message["content"] | string,
+): string {
+  const aiReasoning = normalizeReasoningText(
+    (message as AIMessage | undefined)?.additional_kwargs?.reasoning,
+  );
+  if (aiReasoning) {
+    return aiReasoning;
+  }
+
+  const messageReasoning = normalizeReasoningText(
+    (message as { reasoning?: unknown } | undefined)?.reasoning,
+  );
+  if (messageReasoning) {
+    return messageReasoning;
+  }
+
+  if (fallbackContent !== undefined) {
+    return getContentString(fallbackContent);
+  }
+
+  if (message) {
+    return getContentString(message.content ?? []);
+  }
+
+  return "";
+}
+
 function CustomComponent({
   message,
   thread,
@@ -204,7 +248,7 @@ export function mapToolMessageToActionStepProps(
     .filter(isAIMessageSDK)
     .find((m) => m.tool_calls?.some((tc) => tc.id === message.tool_call_id));
   const reasoningText = aiMessage
-    ? getContentString(aiMessage.content)
+    ? getReasoningTextFromMessage(aiMessage)
     : undefined;
 
   const status: ActionItemProps["status"] = "done";
@@ -380,6 +424,7 @@ export function AssistantMessage({
   };
 
   const contentString = getContentString(content);
+  const reasoningText = getReasoningTextFromMessage(message, content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
@@ -507,7 +552,6 @@ export function AssistantMessage({
     );
 
     const args = requestHumanHelpToolCall.args as RequestHumanHelpToolArgs;
-    const reasoningText = getContentString(content);
 
     return (
       <div className="flex flex-col gap-4">
@@ -558,7 +602,6 @@ export function AssistantMessage({
     );
 
     const args = diagnoseErrorToolCall.args as DiagnoseErrorToolArgs;
-    const reasoningText = getContentString(content);
 
     return (
       <div className="flex flex-col gap-4">
@@ -578,7 +621,6 @@ export function AssistantMessage({
 
     const args =
       writeTechnicalNotesToolCall.args as WriteTechnicalNotesToolArgs;
-    const reasoningText = getContentString(content);
 
     return (
       <div className="flex flex-col gap-4">
@@ -606,7 +648,7 @@ export function AssistantMessage({
         <MarkTaskCompleted
           status={status}
           review={args.review}
-          reasoningText={contentString}
+          reasoningText={reasoningText}
         />
       </div>
     );
@@ -629,7 +671,7 @@ export function AssistantMessage({
           status={status}
           review={args.review}
           additionalActions={args.additional_actions}
-          reasoningText={contentString}
+          reasoningText={reasoningText}
         />
       </div>
     );
@@ -763,7 +805,7 @@ export function AssistantMessage({
           actions={actionItems.filter(
             (item): item is ActionItemProps => item !== undefined,
           )}
-          reasoningText={contentString}
+          reasoningText={reasoningText}
         />
       </div>
     );
