@@ -1,39 +1,5 @@
 /* eslint-disable no-console */
-
-type GetConfigFn = () => {
-  configurable?: {
-    thread_id?: string;
-    run_id?: string;
-  };
-};
-
-let cachedGetConfig: GetConfigFn | null | undefined;
-
-function loadGetConfig(): GetConfigFn | null {
-  if (cachedGetConfig !== undefined) {
-    return cachedGetConfig;
-  }
-
-  const isBrowser =
-    typeof globalThis !== "undefined" &&
-    typeof (globalThis as { window?: unknown }).window !== "undefined";
-
-  if (isBrowser) {
-    cachedGetConfig = null;
-    return cachedGetConfig;
-  }
-
-  try {
-    const requireFn = eval("require") as (id: string) => { getConfig?: GetConfigFn };
-    const langGraph = requireFn("@langchain/langgraph");
-    cachedGetConfig =
-      typeof langGraph.getConfig === "function" ? langGraph.getConfig.bind(langGraph) : null;
-  } catch {
-    cachedGetConfig = null;
-  }
-
-  return cachedGetConfig;
-}
+import { getConfig } from "@langchain/langgraph";
 
 export enum LogLevel {
   DEBUG = "debug",
@@ -78,11 +44,6 @@ function simpleHash(str: string): number {
 
 // Helper function to safely extract thread_id and run_id from LangGraph config
 function getThreadAndRunIds(): { thread_id?: string; run_id?: string } {
-  const getConfig = loadGetConfig();
-  if (!getConfig) {
-    return {};
-  }
-
   try {
     const config = getConfig();
     return {
