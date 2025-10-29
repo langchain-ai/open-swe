@@ -76,7 +76,6 @@ export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
 
 const MAX_RETRIES = 3;
 const THINKING_BUDGET_TOKENS = 5000;
-const GPT5_MAX_REASONING_TOKENS = 65_536;
 
 const providerToApiKey = (
   providerName: string,
@@ -185,14 +184,8 @@ export class ModelManager {
       ? thinkingBudgetTokens * 4
       : undefined;
     const isGpt5 = modelName.includes("gpt-5");
-    const isAzureGpt5 = provider === "azure-openai" && isGpt5;
     const reasoningPayload = isGpt5
-      ? {
-          effort: isAzureGpt5 ? "high" : reasoningEffort,
-          max_tokens: isAzureGpt5
-            ? GPT5_MAX_REASONING_TOKENS
-            : reasoningTokens,
-        }
+      ? { effort: reasoningEffort, max_tokens: reasoningTokens }
       : undefined;
     let finalMaxTokens = max_completion_tokens ?? maxTokens ?? 10_000;
     if (modelName.includes("claude-3-5-haiku")) {
@@ -495,12 +488,9 @@ export class ModelManager {
 
     const thinkingBudgetTokens = THINKING_BUDGET_TOKENS;
 
-    const provider = modelProvider as Provider;
-    const isAzureGpt5 = provider === "azure-openai" && modelName.includes("gpt-5");
-
     return {
       modelName,
-      provider,
+      provider: modelProvider as Provider,
       ...(modelName.includes("gpt-5")
         ? {
             max_completion_tokens:
@@ -512,10 +502,8 @@ export class ModelManager {
               (config.configurable?.maxTokens as number | undefined) ?? 10_000,
             temperature: taskConfig.temperature as number,
           }),
-      reasoningEffort: isAzureGpt5 ? "high" : taskConfig.reasoningEffort,
-      reasoningTokens: isAzureGpt5
-        ? GPT5_MAX_REASONING_TOKENS
-        : taskConfig.reasoningTokens,
+      reasoningEffort: taskConfig.reasoningEffort,
+      reasoningTokens: taskConfig.reasoningTokens,
       thinkingModel,
       thinkingBudgetTokens,
     } as ModelLoadConfig;
@@ -563,17 +551,11 @@ export class ModelManager {
     if (!modelName) {
       return null;
     }
-    const isAzureGpt5 = provider === "azure-openai" && modelName.includes("gpt-5");
-
     return {
       provider,
       modelName,
-      reasoningEffort: isAzureGpt5
-        ? "high"
-        : TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
-      reasoningTokens: isAzureGpt5
-        ? GPT5_MAX_REASONING_TOKENS
-        : TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
+      reasoningEffort: TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningEffort,
+      reasoningTokens: TASK_TO_CONFIG_DEFAULTS_MAP[task].reasoningTokens,
     };
   }
 
