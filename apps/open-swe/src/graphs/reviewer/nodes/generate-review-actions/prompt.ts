@@ -153,7 +153,7 @@ By reviewing these actions, and comparing them to the plan and original user req
     <dependencies_installed>{DEPENDENCIES_INSTALLED}</dependencies_installed>
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`:
+        Generated via: \`git ls-files | tree --fromfile -L 5\` (tree goes 5 levels deep):
         {CODEBASE_TREE}
     </codebase_tree>
 

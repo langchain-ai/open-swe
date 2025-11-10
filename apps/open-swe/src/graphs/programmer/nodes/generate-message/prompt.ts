@@ -272,7 +272,7 @@ These are notes you took while gathering context for the plan:
     <are_dependencies_installed>{DEPENDENCIES_INSTALLED_PROMPT}</are_dependencies_installed>
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`
+        Generated via: \`git ls-files | tree --fromfile -L 5\` (tree goes 5 levels deep)
         {CODEBASE_TREE}
     </codebase_tree>
 </codebase_structure>
