@@ -14,7 +14,7 @@ import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
   getCodebaseTree,
 } from "../../utils/tree.js";
-import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
+import { DO_NOT_RENDER_ID_PREFIX, GITLAB_TOKEN_COOKIE, GITLAB_BASE_URL, GIT_PROVIDER_TYPE } from "@openswe/shared/constants";
 import {
   CustomNodeEvent,
   INITIALIZE_NODE_ID,
@@ -28,8 +28,46 @@ import {
   isLocalMode,
   getLocalWorkingDirectory,
 } from "@openswe/shared/open-swe/local-mode";
+import { decryptSecret } from "@openswe/shared/crypto";
 
 const logger = createLogger(LogLevel.INFO, "InitializeSandbox");
+
+/**
+ * Get the git authentication token based on provider type
+ */
+function getGitToken(config: GraphConfig): string {
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+
+  if (providerType === "gitlab") {
+    const encryptedGitlabToken = (config.configurable as any)?.[GITLAB_TOKEN_COOKIE];
+    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
+    }
+    if (!encryptedGitlabToken) {
+      throw new Error("Missing GitLab token in configuration");
+    }
+    return decryptSecret(encryptedGitlabToken, encryptionKey);
+  }
+
+  // Default to GitHub
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  return githubInstallationToken;
+}
+
+/**
+ * Get the git base URL based on provider type
+ */
+function getGitBaseUrl(config: GraphConfig): string | undefined {
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+
+  if (providerType === "gitlab") {
+    return (config.configurable as any)?.[GITLAB_BASE_URL] || "https://gitlab.com";
+  }
+
+  // GitHub is the default, no need to specify base URL
+  return undefined;
+}
 
 type InitializeSandboxState = {
   targetRepository: TargetRepository;
@@ -83,7 +121,7 @@ export async function initializeSandbox(
     }),
   ];
 
-  // Check if we're in local mode before trying to get GitHub tokens
+  // Check if we're in local mode before trying to get git tokens
   if (isLocalMode(config)) {
     return initializeSandboxLocal(
       state,
@@ -93,7 +131,8 @@ export async function initializeSandbox(
     );
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const gitToken = getGitToken(config);
+  const gitBaseUrl = getGitBaseUrl(config);
 
   if (!sandboxSessionId) {
     emitStepEvent(
@@ -165,7 +204,7 @@ export async function initializeSandbox(
         absoluteRepoDir,
         existingSandbox,
         {
-          githubInstallationToken,
+          githubInstallationToken: gitToken,
         },
       );
       if (!pullChangesRes) {
@@ -286,8 +325,9 @@ export async function initializeSandbox(
   const cloneRepoRes = await withRetry(
     async () => {
       return await cloneRepo(sandbox, targetRepository, {
-        githubInstallationToken,
+        githubInstallationToken: gitToken,
         stateBranchName: branchName,
+        gitBaseUrl,
       });
     },
     { retries: 0, delay: 0 },

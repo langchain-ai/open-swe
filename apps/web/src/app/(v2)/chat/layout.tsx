@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "../../globals.css";
 import React, { Suspense } from "react";
+import { GitHubAppProvider } from "@/providers/GitHubApp";
+import { GitLabProvider } from "@/providers/GitLab";
 
 export const metadata: Metadata = {
   title: "Open SWE - Chat",
@@ -17,5 +19,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>;
+  return (
+    <GitHubAppProvider>
+      <GitLabProvider>
+        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+      </GitLabProvider>
+    </GitHubAppProvider>
+  );
 }

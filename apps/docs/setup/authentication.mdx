@@ -3,23 +3,31 @@ title: "Authentication"
 description: "How authentication works in Open SWE"
 ---
 
-Open SWE implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow involves GitHub OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
+Open SWE implements a comprehensive authentication system that secures both client-side interactions and server-side operations. The authentication flow supports both GitHub and GitLab OAuth for user authentication, encrypted token handling, and multi-layered security for LangGraph server requests.
 
-## GitHub OAuth Authentication
+## Git Provider OAuth Authentication
 
-Open SWE uses GitHub OAuth for client-side authentication, providing secure access to user accounts and repository permissions.
+Open SWE supports OAuth authentication for both GitHub and GitLab, providing secure access to user accounts and repository permissions.
 
 ### Authentication Flow
 
-- **Unauthenticated users** are automatically redirected to GitHub OAuth login
+- **Unauthenticated users** can choose to authenticate with GitHub or GitLab OAuth
 - **Authenticated users** are redirected directly to the chat interface
-- **Settings management** is available at `/settings` for updating GitHub authentication
+- **Settings management** is available at `/settings` for managing authentication
+- **Multiple providers** - Open SWE supports both GitHub and GitLab simultaneously
 
 <Note>
-  GitHub OAuth provides the foundation for all user interactions, enabling Open
-  SWE to access repositories and perform actions on behalf of authenticated
-  users.
+  OAuth authentication provides the foundation for all user interactions,
+  enabling Open SWE to access repositories and perform actions on behalf of
+  authenticated users. Users can authenticate with either GitHub or GitLab
+  depending on which provider they configured during setup.
 </Note>
+
+### Provider Setup
+
+For detailed instructions on configuring OAuth authentication:
+- **[GitLab Setup Guide](/labs/swe/setup/gitlab)** - Complete GitLab OAuth configuration
+- **[Development Setup](/labs/swe/setup/development)** - GitHub App creation and OAuth setup
 
 ## LangGraph Server Authentication
 
@@ -78,18 +86,30 @@ const client = new Client({
 
 ### Header Injection System
 
-The proxy route automatically injects the following encrypted headers into each request:
+The proxy route automatically injects encrypted headers into each request based on the authenticated provider:
 
-#### Authentication Headers
+#### GitHub Authentication Headers
 
 - **`x-github-access-token`** - User's GitHub access token for user-specific actions (creating issues, comments)
 - **`x-github-installation-token`** - GitHub App installation token for app-level actions (commits, pull requests)
 - **`x-github-installation-name`** - Installation name (username or organization name)
+- **`x-github-installation-id`** - GitHub App installation ID
+
+#### GitLab Authentication Headers
+
+- **`x-gitlab-access-token`** - User's GitLab access token for API operations
+- **`x-gitlab-base-url`** - GitLab instance URL (e.g., `https://gitlab.com` or self-hosted URL)
+- **`x-git-provider-type`** - Set to `"gitlab"` to indicate GitLab provider
+
+#### Shared Headers
+
+- **`x-git-provider-type`** - Either `"github"` or `"gitlab"` to indicate the authenticated provider
 
 <Note>
   All headers are prefixed with `x-` to ensure they're included in LangGraph run
   configurations, making them accessible during execution while maintaining
-  security through encryption.
+  security through encryption. The provider-specific headers are only injected
+  when the corresponding provider is authenticated.
 </Note>
 
 ### Token Encryption
@@ -117,42 +137,62 @@ The LangGraph server implements comprehensive authentication middleware (`apps/o
 
 ### Webhook Authentication
 
-The middleware first checks for GitHub webhook requests by detecting the `X-Hub-Signature-256` header:
+The middleware supports webhook authentication for both GitHub and GitLab:
 
-1. **Signature verification** using the configured webhook secret
+#### GitHub Webhooks
+
+Detected by the `X-Hub-Signature-256` header:
+
+1. **HMAC signature verification** using the configured webhook secret (`GITHUB_WEBHOOK_SECRET`)
 2. **Automatic authorization** for valid webhook signatures
+3. **Separate user verification** in subsequent run creation requests
+
+#### GitLab Webhooks
+
+Detected by the `X-Gitlab-Token` header:
+
+1. **Token-based verification** using the configured webhook token (`GITLAB_WEBHOOK_TOKEN`)
+2. **Automatic authorization** for matching tokens
 3. **Separate user verification** in subsequent run creation requests
 
 <Note>
   Webhook authentication is handled separately from user authentication to
-  enable automated GitHub issue processing while maintaining security.
+  enable automated issue/MR processing while maintaining security. Both
+  providers use different verification mechanisms to ensure webhook authenticity.
 </Note>
 
 ### Standard Request Authentication
 
-For non-webhook requests, the middleware validates:
+For non-webhook requests, the middleware validates provider-specific headers:
 
-#### Required Headers
+#### GitHub Required Headers
 
 - **Installation name** (`x-github-installation-name`)
 - **Installation token** (`x-github-installation-token`)
+- **Installation ID** (`x-github-installation-id`)
 
-Missing either header results in a 401 Unauthorized error.
+#### GitLab Required Headers
+
+- **Access token** (`x-gitlab-access-token`)
+- **Base URL** (`x-gitlab-base-url`)
+- **Provider type** (`x-git-provider-type` set to `"gitlab"`)
+
+Missing required headers for the authenticated provider results in a 401 Unauthorized error.
 
 #### User Verification Process
 
-The middleware supports two authentication paths:
+The middleware supports two authentication paths for both providers:
 
 **Web Application Requests:**
 
-- Uses encrypted GitHub access token (`x-github-access-token`)
-- Verifies user identity through GitHub API
+- Uses encrypted access tokens (`x-github-access-token` or `x-gitlab-access-token`)
+- Verifies user identity through the provider's API
 - Extracts user ID and login from token
 
 **Webhook-Generated Requests:**
 
-- Uses explicit user headers (`x-github-user-id`, `x-github-user-login`)
-- Validates user ID and login against installation token
+- Uses explicit user headers from webhook payload
+- Validates user ID and login against provider tokens
 - Ensures webhook-created runs are properly attributed
 
 ### Identity and Permissions
@@ -160,13 +200,14 @@ The middleware supports two authentication paths:
 Upon successful authentication, the middleware returns an identity object containing:
 
 - **User ID** for resource ownership verification
-- **Display name** (GitHub login)
-- **Installation name** for repository context
+- **Display name** (provider username/login)
+- **Provider context** (installation name for GitHub, base URL for GitLab)
 - **Comprehensive permissions** for LangGraph operations
 
 <Tip>
   The user ID serves as the primary identifier for resource access control,
-  ensuring users can only access their own threads, runs, and assistants.
+  ensuring users can only access their own threads, runs, and assistants
+  regardless of which Git provider they're using.
 </Tip>
 
 ## Resource Access Control
@@ -185,14 +226,19 @@ During LangGraph run execution, encrypted tokens are accessible through the run'
 
 1. **Token extraction** from run configuration
 2. **Decryption** using the shared encryption key
-3. **Action execution** (creating issues, making commits, etc.)
+3. **Provider-specific action execution**:
+   - **GitHub**: Creating issues/PRs, commits, comments via GitHub App token
+   - **GitLab**: Creating issues/MRs, commits, notes via Personal Access Token
 
 <Note>
   This design ensures tokens remain encrypted in storage and traces while being
-  available for necessary GitHub operations during run execution.
+  available for necessary Git provider operations during run execution. The
+  provider abstraction layer handles the differences between GitHub and GitLab
+  automatically.
 </Note>
 
 <Tip>
   Always ensure the `SECRETS_ENCRYPTION_KEY` environment variable is identical
-  between your web application and LangGraph agent deployments.
+  between your web application and LangGraph agent deployments, regardless of
+  which Git provider(s) you're using.
 </Tip>

@@ -35,10 +35,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const clientId = process.env.NEXT_PUBLIC_GITLAB_APPLICATION_ID;
-    const clientSecret = process.env.GITLAB_APPLICATION_SECRET;
+    const clientId = process.env.NEXT_PUBLIC_GITLAB_APP_CLIENT_ID;
+    const clientSecret = process.env.GITLAB_APP_CLIENT_SECRET;
     const redirectUri = process.env.GITLAB_REDIRECT_URI;
-    const baseUrl = process.env.NEXT_PUBLIC_GITLAB_BASE_URL || "https://gitlab.com";
+    const baseUrl = process.env.GITLAB_BASE_URL || "https://gitlab.com";
 
     if (!clientId || !clientSecret || !redirectUri) {
       return NextResponse.redirect(
@@ -70,10 +70,26 @@ export async function GET(request: NextRequest) {
 
     const tokenData = await tokenResponse.json();
 
+    console.log("[GitLab OAuth Callback] ===== TOKEN DATA RECEIVED =====");
+    console.log("Access Token:", tokenData.access_token);
+    console.log("Token Type:", tokenData.token_type);
+    console.log("Expires In:", tokenData.expires_in);
+    console.log("Refresh Token:", tokenData.refresh_token ? "present" : "none");
+    console.log("Token Length:", tokenData.access_token?.length);
+    console.log("========================================");
+
     if (tokenData.error) {
       return NextResponse.redirect(
         new URL(`/?error=${encodeURIComponent(tokenData.error)}`, request.url),
       );
+    }
+
+    // TEMPORARY WORKAROUND: Use Personal Access Token from env
+    // OAuth is returning an invalid 64-char hex token instead of a proper OAuth token
+    const usePersonalToken = process.env.GITLAB_PERSONAL_ACCESS_TOKEN;
+    if (usePersonalToken) {
+      console.log("[GitLab OAuth Callback] ⚠️  Using Personal Access Token from env as workaround");
+      tokenData.access_token = usePersonalToken;
     }
 
     // Fetch user information

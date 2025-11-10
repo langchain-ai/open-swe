@@ -23,6 +23,7 @@
               "usage/intro",
               "usage/ui",
               "usage/github",
+              "usage/gitlab",
               "usage/pr-tagging",
               "usage/examples",
               "usage/best-practices",
@@ -35,6 +36,7 @@
               "setup/intro",
               "setup/development",
               "setup/authentication",
+              "setup/gitlab",
               "setup/customization",
               "setup/monorepo",
               "setup/ci"

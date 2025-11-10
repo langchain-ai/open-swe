@@ -5,63 +5,68 @@ import { Button } from "@/components/ui/button";
 import { GitHubSVG } from "@/components/icons/github";
 import { ArrowRight } from "lucide-react";
 import { LangGraphLogoSVG } from "../icons/langgraph";
-import { useGitHubToken } from "@/hooks/useGitHubToken";
-import { useGitHubAppProvider } from "@/providers/GitHubApp";
-import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { useRouter } from "next/navigation";
-import { useGitLabAuth } from "@/hooks/useGitLabAuth";
 
 function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<"github" | "gitlab">("github");
-
-  const {
-    token: githubToken,
-    fetchToken: fetchGitHubToken,
-    isLoading: isTokenLoading,
-  } = useGitHubToken();
-
-  const {
-    isInstalled: hasGitHubAppInstalled,
-    isLoading: isCheckingAppInstallation,
-  } = useGitHubAppProvider();
-
-  const { isAuthenticated: isGitLabAuth, loading: isGitLabLoading } = useGitLabAuth();
+  const [authenticatedProvider, setAuthenticatedProvider] = useState<"github" | "gitlab" | null>(null);
+  const [githubToken, setGithubToken] = useState<string | null>(null);
+  const [hasGitHubAppInstalled, setHasGitHubAppInstalled] = useState(false);
+  const [isCheckingAppInstallation, setIsCheckingAppInstallation] = useState(false);
+  const [isGitLabAuth, setIsGitLabAuth] = useState(false);
 
   useEffect(() => {
     checkAuthStatus();
   }, []);
 
   useEffect(() => {
-    if (isAuth && hasGitHubAppInstalled && !githubToken && !isTokenLoading) {
-      // Fetch token when app is installed but we don't have a token yet
-      fetchGitHubToken();
-    }
-  }, [
-    isAuth,
-    hasGitHubAppInstalled,
-    githubToken,
-    isTokenLoading,
-    fetchGitHubToken,
-  ]);
-
-  useEffect(() => {
-    if (githubToken || isGitLabAuth) {
-      console.log("redirecting to chat");
+    // Check if we should redirect to chat
+    if (authenticatedProvider === "gitlab" && isGitLabAuth) {
+      console.log("redirecting to chat - gitlab authenticated");
+      router.push("/chat");
+    } else if (authenticatedProvider === "github" && githubToken) {
+      console.log("redirecting to chat - github authenticated");
       router.push("/chat");
     }
-  }, [githubToken, isGitLabAuth]);
+  }, [authenticatedProvider, githubToken, isGitLabAuth, router]);
 
   const checkAuthStatus = async () => {
     try {
       const response = await fetch("/api/auth/status");
       const data = await response.json();
       setIsAuth(data.authenticated);
+      setAuthenticatedProvider(data.provider);
+
+      // Check for GitLab auth
+      if (data.provider === "gitlab") {
+        setIsGitLabAuth(data.authenticated);
+      }
+
+      // Check for GitHub auth
+      if (data.provider === "github") {
+        // Check if GitHub app is installed
+        setIsCheckingAppInstallation(true);
+        const installationsResponse = await fetch("/api/github/installations");
+        if (installationsResponse.ok) {
+          setHasGitHubAppInstalled(true);
+          // Get token
+          const tokenResponse = await fetch("/api/github/token");
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            setGithubToken(tokenData.token);
+          }
+        } else {
+          setHasGitHubAppInstalled(false);
+        }
+        setIsCheckingAppInstallation(false);
+      }
     } catch (error) {
       console.error("Error checking auth status:", error);
       setIsAuth(false);
+      setAuthenticatedProvider(null);
     }
   };
 
@@ -81,8 +86,15 @@ function AuthStatusContent() {
 
   const showGetStarted = !isAuth && !isGitLabAuth;
   const showInstallApp =
-    !showGetStarted && selectedProvider === "github" && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !showGetStarted && !showInstallApp && !githubToken && !isGitLabAuth;
+    !showGetStarted &&
+    authenticatedProvider === "github" &&
+    !hasGitHubAppInstalled &&
+    !isCheckingAppInstallation;
+  const showLoading =
+    !showGetStarted &&
+    !showInstallApp &&
+    authenticatedProvider === "github" &&
+    !githubToken;
 
   useEffect(() => {
     if (!showGetStarted && !showInstallApp && !showLoading) {
@@ -229,9 +241,7 @@ function AuthStatusContent() {
 }
 
 export default function AuthStatus() {
-  return (
-    <GitHubAppProvider>
-      <AuthStatusContent />
-    </GitHubAppProvider>
-  );
+  // Don't wrap with GitHubAppProvider here - it causes unnecessary API calls
+  // The provider will be used in the chat page where it's actually needed
+  return <AuthStatusContent />;
 }

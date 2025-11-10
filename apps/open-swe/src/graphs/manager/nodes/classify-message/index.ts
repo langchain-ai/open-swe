@@ -20,9 +20,8 @@ import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@openswe/shared/messages";
 import {
   createIssueComment,
+  createIssue,
 } from "../../../../utils/git-provider-utils.js";
-import { createIssue } from "../../../../utils/github/api.js";
-import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
 import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
 import {
   extractContentWithoutDetailsFromIssueBody,
@@ -220,12 +219,11 @@ export async function classifyMessage(
     );
   }
 
-  const { githubAccessToken } = getGitHubTokensFromConfig(config);
   let githubIssueId = state.githubIssueId;
 
   const newMessages: BaseMessage[] = [response];
 
-  // If it's not a no_op, ensure there is a GitHub issue with the user's request.
+  // If it's not a no_op, ensure there is a GitHub/GitLab issue with the user's request.
   if (!githubIssueId) {
     const { title } = await createIssueFieldsFromMessages(
       state.messages,
@@ -240,8 +238,7 @@ export async function classifyMessage(
       repo: state.targetRepository.repo,
       title,
       body: formatContentForIssueBody(body),
-      githubAccessToken,
-    });
+    }, config);
     if (!newIssue) {
       throw new Error("Failed to create issue.");
     }

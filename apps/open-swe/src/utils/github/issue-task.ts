@@ -3,10 +3,9 @@ import {
   TargetRepository,
   TaskPlan,
 } from "@openswe/shared/open-swe/types";
-import { getIssue, updateIssue } from "./api.js";
-import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { getIssue as getIssueProviderAgnostic, updateIssue as updateIssueProviderAgnostic } from "../git-provider-utils.js";
 const logger = createLogger(LogLevel.INFO, "IssueTaskString");
 
 export const TASK_OPEN_TAG = "<open-swe-do-not-edit-task-plan>";
@@ -101,13 +100,13 @@ export async function getPlansFromIssue(
       proposedPlan: null,
     };
   }
-  const issue = await getIssue({
-    owner: input.targetRepository.owner,
-    repo: input.targetRepository.repo,
-    issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
-  });
+  // Use provider-agnostic function
+  const issue = await getIssueProviderAgnostic(
+    input.targetRepository.owner,
+    input.targetRepository.repo,
+    input.githubIssueId,
+    config,
+  );
   if (!issue || !issue.body) {
     throw new Error(
       "No issue found when attempting to get task plan from issue",
@@ -187,13 +186,13 @@ export async function addProposedPlanToIssue(
   config: GraphConfig,
   proposedPlan: string[],
 ) {
-  const issue = await getIssue({
-    owner: input.targetRepository.owner,
-    repo: input.targetRepository.repo,
-    issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
-  });
+  // Use provider-agnostic function
+  const issue = await getIssueProviderAgnostic(
+    input.targetRepository.owner,
+    input.targetRepository.repo,
+    input.githubIssueId,
+    config,
+  );
   if (!issue || !issue.body) {
     throw new Error(
       "No issue found when attempting to get task plan from issue",
@@ -207,14 +206,13 @@ export async function addProposedPlanToIssue(
     "proposedPlan",
   );
 
-  await updateIssue({
+  // Use provider-agnostic function
+  await updateIssueProviderAgnostic({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
     body: newBody,
-  });
+  }, config);
 }
 
 export async function addTaskPlanToIssue(
@@ -222,13 +220,13 @@ export async function addTaskPlanToIssue(
   config: GraphConfig,
   taskPlan: TaskPlan,
 ): Promise<void> {
-  const issue = await getIssue({
-    owner: input.targetRepository.owner,
-    repo: input.targetRepository.repo,
-    issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
-  });
+  // Use provider-agnostic function
+  const issue = await getIssueProviderAgnostic(
+    input.targetRepository.owner,
+    input.targetRepository.repo,
+    input.githubIssueId,
+    config,
+  );
 
   if (!issue || !issue.body) {
     throw new Error("No issue found when attempting to add task plan to issue");
@@ -237,12 +235,11 @@ export async function addTaskPlanToIssue(
   const taskPlanString = JSON.stringify(taskPlan, null, 2);
   const newBody = insertPlanToIssueBody(issue.body, taskPlanString, "taskPlan");
 
-  await updateIssue({
+  // Use provider-agnostic function
+  await updateIssueProviderAgnostic({
     owner: input.targetRepository.owner,
     repo: input.targetRepository.repo,
     issueNumber: input.githubIssueId,
-    githubInstallationToken:
-      getGitHubTokensFromConfig(config).githubInstallationToken,
     body: newBody,
-  });
+  }, config);
 }

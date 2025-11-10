@@ -202,6 +202,18 @@ export function useGitHubApp(): UseGitHubAppReturn {
     setError(null);
 
     try {
+      // Check if user is authenticated with GitHub
+      const authResponse = await fetch("/api/auth/status");
+      const authData = await authResponse.json();
+
+      // If authenticated with GitLab instead of GitHub, don't try to fetch GitHub data
+      if (authData.provider === "gitlab") {
+        setIsInstalled(false);
+        setIsLoading(false);
+        setRepositoriesLoadingMore(false);
+        return;
+      }
+
       const response = await fetch(`/api/github/repositories?page=${page}`);
 
       if (response.ok) {

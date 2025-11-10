@@ -28,6 +28,10 @@ interface UseThreadsSWROptions {
   currentInstallation?: Installation | null;
   disableOrgFiltering?: boolean;
   /**
+   * Provider type - used to determine if installation filtering should apply
+   */
+  provider?: "github" | "gitlab" | null;
+  /**
    * Pagination options
    */
   pagination?: {
@@ -73,6 +77,7 @@ export function useThreadsSWR<
     revalidateOnReconnect = THREAD_SWR_CONFIG.revalidateOnReconnect,
     currentInstallation,
     disableOrgFiltering,
+    provider,
     pagination,
   } = options;
   const [hasMoreState, setHasMoreState] = useState(true);
@@ -146,19 +151,29 @@ export function useThreadsSWR<
       setHasMoreState(false);
     }
 
+    // For GitLab, don't filter by installation (installation is GitHub-specific)
+    if (provider === "gitlab") {
+      console.log("[useThreadsSWR] GitLab provider detected, returning all threads:", allThreads.length);
+      return allThreads;
+    }
+
+    // For GitHub, filter by installation
     if (!currentInstallation) {
+      console.log("[useThreadsSWR] No current installation for GitHub, returning empty array");
       setHasMoreState(false);
       return [];
     }
 
-    return allThreads.filter((thread) => {
+    const filtered = allThreads.filter((thread) => {
       const threadInstallationName = thread.metadata?.installation_name;
       return (
         typeof threadInstallationName === "string" &&
         threadInstallationName === currentInstallation.accountName
       );
     });
-  }, [data, currentInstallation, disableOrgFiltering]);
+    console.log("[useThreadsSWR] Filtered threads by installation:", filtered.length);
+    return filtered;
+  }, [data, currentInstallation, disableOrgFiltering, provider]);
 
   const hasMore = useMemo(() => {
     return hasMoreState && !!threads.length;

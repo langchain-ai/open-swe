@@ -86,6 +86,17 @@ export function useGitHubInstallations(): UseGitHubInstallationsReturn {
       setIsLoading(true);
       setError(null);
 
+      // Check if user is authenticated with GitHub
+      const authResponse = await fetch("/api/auth/status");
+      const authData = await authResponse.json();
+
+      // If authenticated with GitLab instead of GitHub, don't try to fetch GitHub data
+      if (authData.provider === "gitlab") {
+        setInstallations([]);
+        setIsLoading(false);
+        return;
+      }
+
       const response = await fetch("/api/github/installations");
 
       if (!response.ok) {

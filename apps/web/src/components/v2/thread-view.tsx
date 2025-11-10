@@ -331,6 +331,9 @@ export function ThreadView({
       stream.submit(
         {
           messages: [newHumanMessage],
+          // Include targetRepository from the existing state
+          // This is required for follow-up messages in GitLab threads
+          targetRepository: stream.values?.targetRepository,
         },
         {
           streamResumable: true,

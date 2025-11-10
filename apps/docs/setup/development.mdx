@@ -3,11 +3,11 @@ title: "Development Setup"
 description: "How to set up Open SWE for development"
 ---
 
-This guide will walk you through setting up Open SWE for local development. You'll need to clone the repository, install dependencies, configure environment variables, create a GitHub App, and start the development servers.
+This guide will walk you through setting up Open SWE for local development. You'll need to clone the repository, install dependencies, configure environment variables, set up at least one Git provider (GitHub and/or GitLab), and start the development servers.
 
 <Note>
   This setup is for development purposes. For production deployment, you'll need
-  to adjust URLs and create separate GitHub Apps for production use.
+  to adjust URLs and create separate provider applications for production use. You must configure at least one provider (GitHub or GitLab) to use Open SWE.
 </Note>
 
 ## Prerequisites
@@ -58,7 +58,7 @@ Before starting, ensure you have the following installed:
 
     ### Web App Environment Variables (`apps/web/.env`)
 
-    Fill in the following variables (GitHub App values will be added in the next step):
+    Fill in the following variables. Configure at least one provider (GitHub or GitLab):
 
     ```bash Environment Variables [expandable]
     # API URLs for development
@@ -68,23 +68,29 @@ Before starting, ensure you have the following installed:
     # Encryption key for secrets (generate with: openssl rand -hex 32)
     SECRETS_ENCRYPTION_KEY=""
 
-    # GitHub App OAuth settings (will be filled after creating GitHub App)
+    # ===== GITHUB CONFIGURATION (Optional - only if using GitHub) =====
+    # GitHub App OAuth settings
     NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=""
     GITHUB_APP_CLIENT_SECRET=""
     GITHUB_APP_REDIRECT_URI="http://localhost:3000/api/auth/github/callback"
 
-    # GitHub App details (will be filled after creating GitHub App)
-    GITHUB_APP_NAME="open-swe-dev" # this must match the name of your GitHub app, excluding spaces
+    # GitHub App details
+    GITHUB_APP_NAME="open-swe-dev" # must match the name of your GitHub app, excluding spaces
     GITHUB_APP_ID=""
     GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
 
-    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # ===== GITLAB CONFIGURATION (Optional - only if using GitLab) =====
+    # See the GitLab Setup Guide for complete configuration:
+    # /labs/swe/setup/gitlab
+
+    # ===== SHARED CONFIGURATION =====
+    # List of usernames that are allowed to use Open SWE without providing API keys
     # This is only used in production. In development every user is an "allowed user".
     # Must be a valid JSON array of strings.
-    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-username", "teammate-username"]'
     ```
 
     ### Agent Environment Variables (`apps/open-swe/.env`)
@@ -109,15 +115,20 @@ Before starting, ensure you have the following installed:
     # Tools
     FIRECRAWL_API_KEY=""  # For URL content extraction
 
-    # GitHub App settings (same as web app)
-    GITHUB_APP_NAME="open-swe-dev" # this must match the name of your GitHub app, excluding spaces
+    # ===== GITHUB CONFIGURATION (Optional - only if using GitHub) =====
+    GITHUB_APP_NAME="open-swe-dev" # must match the name of your GitHub app, excluding spaces
     GITHUB_APP_ID=""
     GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
     ...add your private key here...
     -----END RSA PRIVATE KEY-----
     "
-    GITHUB_WEBHOOK_SECRET=""  # Will be generated in next step
+    GITHUB_WEBHOOK_SECRET=""
 
+    # ===== GITLAB CONFIGURATION (Optional - only if using GitLab) =====
+    # See the GitLab Setup Guide for complete configuration:
+    # /labs/swe/setup/gitlab
+
+    # ===== SHARED CONFIGURATION =====
     # Server configuration
     PORT="2024"
     OPEN_SWE_APP_URL="http://localhost:3000"
@@ -126,13 +137,13 @@ Before starting, ensure you have the following installed:
     # CI/CD. See the /labs/swe/setup/ci for more information
     SKIP_CI_UNTIL_LAST_COMMIT="true"
 
-    # List of GitHub usernames that are allowed to use Open SWE without providing API keys
+    # List of usernames that are allowed to use Open SWE without providing API keys
     # This is only used in production. In development every user is an "allowed user".
     # Must be a valid JSON array of strings.
-    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-github-username", "teammate-username"]'
+    NEXT_PUBLIC_ALLOWED_USERS_LIST='["your-username", "teammate-username"]'
     ```
 
-    If you don't set the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable, every user will be required to set their own LLM API keys to use the agent. Additionally, none of the webhook features (triggering new runs by adding labels to GitHub issues, tagging the agent in PR reviews, etc.) will work unless you include the username's of the GitHub users you want to allow access to in the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable (in both web and agent deployments).
+    If you don't set the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable, every user will be required to set their own LLM API keys to use the agent. Additionally, none of the webhook features (triggering new runs by adding labels to issues, tagging the agent in PR/MR reviews, etc.) will work unless you include the usernames you want to allow access to in the `NEXT_PUBLIC_ALLOWED_USERS_LIST` environment variable (in both web and agent deployments).
 
     <Tip>
     Generate the `SECRETS_ENCRYPTION_KEY` using: `openssl rand -hex 32`. This key must be identical in both environment files.
@@ -140,9 +151,9 @@ Before starting, ensure you have the following installed:
 
   </Step>
 
-  <Step title="Create GitHub App">
+  <Step title="Create GitHub App (Optional)">
     <Note>
-    You'll need to create a **GitHub App** (not a GitHub OAuth App). These are different types of applications with different capabilities. Consider creating separate GitHub apps for development and production environments.
+    GitHub integration is optional. If you only want to use GitLab, skip this step. To use GitHub, you'll need to create a **GitHub App** (not a GitHub OAuth App). These are different types of applications with different capabilities. Consider creating separate GitHub apps for development and production environments.
     </Note>
 
     ### Create the GitHub App
@@ -260,6 +271,23 @@ Before starting, ensure you have the following installed:
 
   </Step>
 
+  <Step title="Set Up GitLab (Optional)">
+    <Note>
+    GitLab integration is optional. If you only want to use GitHub, skip this step. To support both providers, complete both GitHub and GitLab setup.
+    </Note>
+
+    For complete GitLab setup instructions including:
+    - Creating GitLab OAuth applications
+    - Generating Personal Access Tokens
+    - Configuring webhooks with ngrok
+    - Self-hosted GitLab configuration
+
+    **See the dedicated [GitLab Setup Guide](/labs/swe/setup/gitlab)**
+
+    The GitLab setup guide covers all environment variables, security best practices, and troubleshooting steps.
+
+  </Step>
+
   <Step title="Start Development Servers">
     With all environment variables configured, start both development servers:
 
@@ -289,17 +317,23 @@ Before starting, ensure you have the following installed:
 Once both servers are running:
 
 1. **Visit the web app**: Navigate to `http://localhost:3000`
-2. **Test GitHub authentication**: Try logging in with your GitHub account
+2. **Test authentication**:
+   - If you configured GitHub: Try logging in with your GitHub account
+   - If you configured GitLab: Select GitLab from the provider toggle and log in with your GitLab account
+   - You can use one or both providers depending on your setup
 
 <Tip>
   If you encounter issues, check the console logs in both terminal windows for
-  error messages. Common issues include missing environment variables or
-  incorrect GitHub App configuration.
+  error messages. Common issues include missing environment variables, incorrect
+  GitHub App or GitLab OAuth configuration, or webhook connectivity problems.
 </Tip>
 
 ## Next Steps
 
-- Learn about [Authentication](/labs/swe/setup/authentication) to understand how the GitHub App integration works
-- Explore [Usage](/labs/swe/usage/intro) to start using Open SWE for code changes
-- Review the [Monorepo Structure](/labs/swe/setup/monorepo) for development best practices
+- **[GitLab Setup Guide](/labs/swe/setup/gitlab)** - Complete GitLab configuration (if using GitLab)
+- **[Authentication](/labs/swe/setup/authentication)** - Understand how provider authentication works
+- **[Usage](/labs/swe/usage/intro)** - Start using Open SWE for code changes
+- **[GitHub Usage Guide](/labs/swe/usage/github)** - Learn GitHub-specific features
+- **[GitLab Usage Guide](/labs/swe/usage/gitlab)** - Learn GitLab-specific features
+- **[Monorepo Structure](/labs/swe/setup/monorepo)** - Development best practices
 

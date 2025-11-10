@@ -1,0 +1,447 @@
+---
+title: "GitLab Setup"
+description: "Complete guide to setting up GitLab integration with Open SWE"
+---
+
+Open SWE supports full integration with both GitLab.com and self-hosted GitLab instances. This guide walks you through the complete setup process, from creating OAuth applications to configuring webhooks.
+
+## Prerequisites
+
+Before setting up GitLab integration, ensure you have:
+
+- A GitLab account (GitLab.com or self-hosted instance)
+- Admin access to your GitLab instance (for OAuth apps)
+- Developer permissions on projects where you want to use Open SWE
+- Open SWE deployed and running (see [Development Setup](/labs/swe/setup/development))
+
+<Note>
+  GitLab support works alongside GitHub - you can configure both providers and
+  users can choose which one to authenticate with.
+</Note>
+
+## Step 1: Create a GitLab OAuth Application
+
+GitLab OAuth applications enable users to authenticate with Open SWE using their GitLab accounts.
+
+### For GitLab.com
+
+1. Navigate to **GitLab.com → User Settings → Applications**
+2. Click **Add new application**
+3. Fill in the application details:
+   - **Name**: `Open SWE` (or your preferred name)
+   - **Redirect URI**: `http://localhost:3000/api/auth/gitlab/callback` (development) or your production URL
+   - **Scopes**: Select the following:
+     - `api` - Full API access
+     - `read_user` - Read user information
+     - `read_repository` - Read repository data
+     - `write_repository` - Write to repositories
+
+4. Click **Save application**
+5. Copy the **Application ID** and **Secret** - you'll need these for environment variables
+
+### For Self-Hosted GitLab
+
+1. Navigate to **Your GitLab Instance → Admin Area → Applications**
+2. Click **New application**
+3. Follow the same steps as GitLab.com above
+4. Use your self-hosted instance URL for the redirect URI: `https://your-instance.com/api/auth/gitlab/callback`
+
+<Tip>
+  For production deployments, update the redirect URI to match your production
+  domain. The redirect URI must exactly match what's configured in your OAuth
+  application.
+</Tip>
+
+## Step 2: Create a GitLab Personal Access Token
+
+Open SWE requires a Personal Access Token (PAT) to perform git operations and API calls on behalf of the application.
+
+### Creating the Token
+
+1. Navigate to **GitLab → User Settings → Access Tokens**
+2. Click **Add new token**
+3. Configure the token:
+   - **Token name**: `Open SWE Agent`
+   - **Expiration date**: Set based on your security policy (or leave blank for no expiration)
+   - **Scopes**: Select:
+     - `api` - Full API access
+     - `read_api` - Read API access
+     - `read_repository` - Read repositories
+     - `write_repository` - Write to repositories
+
+4. Click **Create personal access token**
+5. **Important**: Copy the token immediately - it won't be shown again
+
+<Warning>
+  Treat your Personal Access Token like a password. Never commit it to version
+  control or share it publicly. Always store it in environment variables.
+</Warning>
+
+### Token Security
+
+The Personal Access Token is used by the Open SWE agent to:
+- Clone repositories in sandboxed environments
+- Create merge requests
+- Post comments on issues
+- Update issue metadata
+
+<Note>
+  Open SWE encrypts the token using AES-256-GCM before passing it to the
+  LangGraph server, ensuring it remains secure in traces and run configurations.
+</Note>
+
+## Step 3: Configure Environment Variables
+
+Open SWE requires environment variables in two locations: the web application (`apps/web`) and the LangGraph agent (`apps/open-swe`).
+
+### Web Application (`apps/web/.env`)
+
+Add the following GitLab-specific variables:
+
+```bash
+# ------------------GitLab OAuth Secrets---------------
+# GitLab OAuth application credentials. Used for the GitLab OAuth login flow.
+NEXT_PUBLIC_GITLAB_APP_CLIENT_ID="your-application-id-from-step-1"
+GITLAB_APP_CLIENT_SECRET="your-secret-from-step-1"
+
+# Should be updated to your production URL when deployed.
+# This value should match the redirect URL you have configured in
+# your GitLab OAuth application settings.
+GITLAB_REDIRECT_URI="http://localhost:3000/api/auth/gitlab/callback"
+
+# Base URL for GitLab instance (use https://gitlab.com for GitLab.com, or your self-hosted URL)
+GITLAB_BASE_URL="https://gitlab.com"
+
+# Personal Access Token (from Step 2)
+GITLAB_PERSONAL_ACCESS_TOKEN="glpat-your-token-here"
+```
+
+### LangGraph Agent (`apps/open-swe/.env`)
+
+Add the same GitLab configuration plus webhook settings:
+
+```bash
+# ------------------GitLab OAuth Secrets---------------
+# GitLab Application ID (from your GitLab OAuth application)
+NEXT_PUBLIC_GITLAB_APP_CLIENT_ID="your-application-id-from-step-1"
+
+# GitLab Application Secret
+GITLAB_APP_CLIENT_SECRET="your-secret-from-step-1"
+
+# Base URL for GitLab instance (use https://gitlab.com for GitLab.com)
+GITLAB_BASE_URL="https://gitlab.com"
+
+# Personal Access Token (from Step 2)
+GITLAB_PERSONAL_ACCESS_TOKEN="glpat-your-token-here"
+
+# Token for verifying GitLab webhook events (generate a random token)
+GITLAB_WEBHOOK_TOKEN="generate-a-random-token-here"
+
+# GitLab username to tag for triggering runs from MR comments (without the @ symbol)
+GITLAB_TRIGGER_USERNAME="open-swe"
+```
+
+### Generating Webhook Token
+
+Generate a secure random token for webhook verification:
+
+```bash
+# Using OpenSSL
+openssl rand -hex 32
+
+# Or using Node.js
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+<Tip>
+  Keep the webhook token secure and use the same value when configuring
+  webhooks in your GitLab projects.
+</Tip>
+
+### Secrets Encryption Key
+
+Ensure both applications use the **same** encryption key for token encryption/decryption:
+
+```bash
+# Both apps/web/.env and apps/open-swe/.env should have:
+SECRETS_ENCRYPTION_KEY="your-32-byte-hex-string"
+
+# Generate a new key if needed:
+openssl rand -hex 32
+```
+
+<Warning>
+  The `SECRETS_ENCRYPTION_KEY` must be identical in both the web app and agent
+  for proper token encryption/decryption. Keep this key secure and never commit
+  it to version control.
+</Warning>
+
+## Step 4: Configure GitLab Webhooks
+
+Webhooks enable automatic triggering of Open SWE runs when labels are added to issues or when merge request comments mention the agent.
+
+### Development Setup with ngrok
+
+For local development, you'll need to expose your local LangGraph server to the internet so GitLab can send webhooks:
+
+1. **Install ngrok** (if not already installed):
+   ```bash
+   # macOS
+   brew install ngrok
+
+   # Or download from https://ngrok.com/download
+   ```
+
+2. **Expose your local server**:
+   ```bash
+   ngrok http 2024
+   ```
+
+   This will give you a public URL like `https://abc123.ngrok.io`
+
+3. **Use the ngrok URL** for your webhook configuration below
+
+<Warning>
+  ngrok URLs change each time you restart ngrok. You'll need to update your
+  webhook URLs if you restart ngrok. Consider using a paid ngrok account for
+  stable URLs during development.
+</Warning>
+
+### Setting Up Project Webhooks
+
+For each GitLab project where you want to use Open SWE:
+
+1. Navigate to **Your Project → Settings → Webhooks**
+2. Click **Add new webhook**
+3. Configure the webhook:
+   - **URL**:
+     - Development: `https://your-ngrok-url.ngrok.io/webhooks/gitlab`
+     - Production: `https://your-domain.com/webhooks/gitlab`
+   - **Secret Token**: Use the `GITLAB_WEBHOOK_TOKEN` from Step 3
+   - **Trigger**: Select the following events:
+     - ✅ **Push events**
+     - ✅ **Issues events**
+     - ✅ **Merge request events**
+     - ✅ **Note events** (for comments)
+   - **SSL verification**:
+     - Enable for production (recommended)
+     - Can disable for development with self-signed certificates
+
+4. Click **Add webhook**
+
+<Note>
+  The webhook URL should point to your LangGraph agent server (port 2024), not
+  the Next.js web application (port 3000).
+</Note>
+
+### Testing Webhooks
+
+After configuration, GitLab provides a test feature:
+
+1. In your project's **Settings → Webhooks**
+2. Find your webhook and click **Test → Issues events**
+3. Check the Open SWE logs for webhook receipt confirmation
+
+<Tip>
+  Webhook events are processed asynchronously. Check your Open SWE agent logs
+  to verify webhooks are being received and processed correctly.
+</Tip>
+
+## Step 5: Verify Installation
+
+Test your GitLab integration by following these steps:
+
+### Test Authentication
+
+1. Navigate to your Open SWE web interface (`http://localhost:3000`)
+2. Click **Connect GitLab** on the login page
+3. You should be redirected to GitLab OAuth
+4. Authorize the application
+5. You should be redirected back to Open SWE and see the chat interface
+
+### Test Issue Integration
+
+1. Create a test issue in your GitLab project
+2. Add the label `open-swe-dev` (or `open-swe` in production)
+3. Check that Open SWE:
+   - Posts a comment with the run link
+   - Creates a new thread in the web interface
+   - Processes the issue content
+
+### Test Personal Access Token
+
+Verify the PAT has correct permissions:
+
+```bash
+# Test API access
+curl --header "PRIVATE-TOKEN: your-token-here" \
+  "https://gitlab.com/api/v4/projects?membership=true"
+
+# Should return a list of your projects
+```
+
+<Warning>
+  If you encounter authentication errors, verify that:
+  - The PAT has all required scopes
+  - The encryption key matches in both apps
+  - The GitLab base URL is correct for your instance
+</Warning>
+
+## Self-Hosted GitLab Configuration
+
+For self-hosted GitLab instances, additional configuration may be required.
+
+### Network Access
+
+Ensure your Open SWE instance can reach your GitLab server:
+
+- **Firewall rules**: Allow outbound HTTPS (443) to your GitLab instance
+- **DNS resolution**: Verify your GitLab domain resolves correctly
+- **SSL certificates**: For self-signed certificates, you may need to configure Node.js to trust them
+
+### GitLab Version Compatibility
+
+Open SWE is tested with:
+- **GitLab CE/EE**: Version 13.0 and higher
+- **API version**: v4
+
+Older versions may work but are not officially supported.
+
+### Custom API Endpoints
+
+If your GitLab instance uses non-standard API endpoints, you may need to adjust the provider configuration. Contact support if you encounter issues.
+
+<Tip>
+  Self-hosted GitLab instances work identically to GitLab.com once properly
+  configured. The main difference is ensuring network connectivity and OAuth
+  redirect URIs.
+</Tip>
+
+## Common Issues and Troubleshooting
+
+### OAuth Redirect Mismatch
+
+**Error**: `redirect_uri_mismatch`
+
+**Solution**: Ensure the `GITLAB_REDIRECT_URI` environment variable exactly matches the redirect URI configured in your GitLab OAuth application.
+
+### Personal Access Token Insufficient Permissions
+
+**Error**: `403 Forbidden` when cloning repos or creating merge requests
+
+**Solution**: Verify your PAT has the required scopes:
+- `api`
+- `read_repository`
+- `write_repository`
+
+### Webhook Not Triggering
+
+**Error**: No response when adding labels to issues
+
+**Solution**:
+- Verify webhook URL is correct and accessible
+- Check webhook token matches `GITLAB_WEBHOOK_TOKEN`
+- Review GitLab webhook delivery logs in **Settings → Webhooks → Recent Deliveries**
+- Check Open SWE agent logs for errors
+
+### Encryption/Decryption Errors
+
+**Error**: `Failed to decrypt token` or similar
+
+**Solution**: Ensure `SECRETS_ENCRYPTION_KEY` is:
+- Exactly the same in both `apps/web/.env` and `apps/open-swe/.env`
+- A valid 64-character hex string (32 bytes)
+- Not modified or corrupted
+
+## Environment Variables Reference
+
+### Complete GitLab Configuration
+
+Here's a complete reference of all GitLab-related environment variables:
+
+#### Web App (`apps/web/.env`)
+
+```bash
+# OAuth Configuration
+NEXT_PUBLIC_GITLAB_APP_CLIENT_ID=""          # GitLab OAuth Application ID
+GITLAB_APP_CLIENT_SECRET=""                   # GitLab OAuth Application Secret
+GITLAB_REDIRECT_URI=""                        # OAuth redirect URI
+GITLAB_BASE_URL="https://gitlab.com"         # GitLab instance URL
+
+# Personal Access Token
+GITLAB_PERSONAL_ACCESS_TOKEN=""               # GitLab PAT with api, read/write repo scopes
+
+# Shared Configuration
+SECRETS_ENCRYPTION_KEY=""                     # Must match agent's key
+```
+
+#### Agent (`apps/open-swe/.env`)
+
+```bash
+# OAuth Configuration
+NEXT_PUBLIC_GITLAB_APP_CLIENT_ID=""          # Same as web app
+GITLAB_APP_CLIENT_SECRET=""                   # Same as web app
+GITLAB_BASE_URL="https://gitlab.com"         # Same as web app
+
+# Personal Access Token
+GITLAB_PERSONAL_ACCESS_TOKEN=""               # Same as web app
+
+# Webhook Configuration
+GITLAB_WEBHOOK_TOKEN=""                       # Random token for webhook verification
+GITLAB_TRIGGER_USERNAME="open-swe"           # Username to mention in MR comments
+
+# Shared Configuration
+SECRETS_ENCRYPTION_KEY=""                     # Must match web app's key
+```
+
+## GitLab vs GitHub Differences
+
+While Open SWE provides a unified experience across both platforms, there are some key differences to be aware of:
+
+<Accordion title="Key Platform Differences">
+
+### Authentication
+- **GitLab**: Uses OAuth2 with Personal Access Tokens for API access
+- **GitHub**: Uses GitHub App installation tokens
+
+### Webhooks
+- **GitLab**: Token-based authentication via `X-Gitlab-Token` header
+- **GitHub**: HMAC signature verification via `X-Hub-Signature-256`
+
+### Terminology
+- **GitLab**: Merge Requests (MRs), Projects, Notes
+- **GitHub**: Pull Requests (PRs), Repositories, Comments
+
+### Label Names
+For triggering automated runs:
+
+**Development Environment:**
+- `open-swe-dev` - Manual approval mode
+- `open-swe-auto-dev` - Automatic execution mode
+- `open-swe-max-dev` - Premium model with manual approval
+- `open-swe-max-auto-dev` - Premium model with automatic execution
+
+**Production Environment:**
+- `open-swe` - Manual approval mode
+- `open-swe-auto` - Automatic execution mode
+- `open-swe-max` - Premium model with manual approval
+- `open-swe-max-auto` - Premium model with automatic execution
+
+### API Endpoints
+- **GitLab**: `/api/v4/` prefix for all API calls
+- **GitHub**: `/api/` or root-level endpoints
+
+</Accordion>
+
+## Next Steps
+
+Once GitLab is configured:
+
+- **[Usage Guide](/labs/swe/usage/gitlab)** - Learn how to use GitLab webhooks and triggers
+- **[Best Practices](/labs/swe/usage/best-practices)** - Tips for effective agent usage
+- **[Custom Rules](/labs/swe/usage/custom-rules)** - Configure project-specific guidelines
+
+<Tip>
+  Join the Open SWE community on GitHub for support, questions, and to share
+  your GitLab integration experiences!
+</Tip>

@@ -485,10 +485,13 @@ export async function cloneRepo(
   args: {
     githubInstallationToken: string;
     stateBranchName?: string;
+    gitBaseUrl?: string; // Optional: e.g., "https://gitlab.com" for GitLab
   },
 ): Promise<string> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
-  const cloneUrl = `https://github.com/${targetRepository.owner}/${targetRepository.repo}.git`;
+  // Build clone URL based on git provider (defaults to GitHub)
+  const baseUrl = args.gitBaseUrl || "https://github.com";
+  const cloneUrl = `${baseUrl}/${targetRepository.owner}/${targetRepository.repo}.git`;
   const branchName = args.stateBranchName || targetRepository.branch;
 
   try {

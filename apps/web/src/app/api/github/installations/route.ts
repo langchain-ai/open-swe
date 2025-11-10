@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getGitHubToken } from "@/lib/auth";
+import { getGitHubToken, getInstallationCookieOptions } from "@/lib/auth";
 import { Endpoints } from "@octokit/types";
+import { GITHUB_INSTALLATION_ID_COOKIE } from "@openswe/shared/constants";
 
 type GitHubInstallationsResponse =
   Endpoints["GET /user/installations"]["response"]["data"];
@@ -8,6 +9,7 @@ type GitHubInstallationsResponse =
 /**
  * Fetches all GitHub App installations accessible to the current user
  * Uses the user's access token from GITHUB_TOKEN_COOKIE to call GET /user/installations
+ * Also automatically sets the installation ID cookie if it's missing
  */
 export async function GET(request: NextRequest) {
   try {
@@ -44,7 +46,24 @@ export async function GET(request: NextRequest) {
 
     const data: GitHubInstallationsResponse = await response.json();
 
-    return NextResponse.json(data);
+    // If there's at least one installation and the installation ID cookie is missing,
+    // automatically set it to the first installation
+    const existingInstallationId = request.cookies.get(
+      GITHUB_INSTALLATION_ID_COOKIE,
+    )?.value;
+
+    const responseWithCookie = NextResponse.json(data);
+
+    if (!existingInstallationId && data.installations && data.installations.length > 0) {
+      const firstInstallationId = data.installations[0].id.toString();
+      responseWithCookie.cookies.set(
+        GITHUB_INSTALLATION_ID_COOKIE,
+        firstInstallationId,
+        getInstallationCookieOptions(),
+      );
+    }
+
+    return responseWithCookie;
   } catch (error) {
     console.error("Error fetching GitHub installations:", error);
     return NextResponse.json(

@@ -3,9 +3,7 @@ import {
   PlannerGraphUpdate,
 } from "@openswe/shared/open-swe/planner/types";
 import { Command } from "@langchain/langgraph";
-import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { getIssue } from "../../../utils/git-provider-utils.js";
-import { getIssueComments } from "../../../utils/github/api.js";
+import { getIssue, listIssueComments } from "../../../utils/git-provider-utils.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   AIMessage,
@@ -43,25 +41,27 @@ export async function prepareGraphState(
     throw new Error("No target repository provided");
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
-  const baseGetIssueInputs = {
-    owner: state.targetRepository.owner,
-    repo: state.targetRepository.repo,
-    issueNumber: state.githubIssueId,
-    githubInstallationToken,
-  };
-  const [issue, comments] = await Promise.all([
+  const [issue, allComments] = await Promise.all([
     getIssue(
       state.targetRepository.owner,
       state.targetRepository.repo,
       state.githubIssueId,
       config,
     ),
-    getIssueComments({
-      ...baseGetIssueInputs,
-      filterBotComments: true,
-    }),
+    listIssueComments(
+      state.targetRepository.owner,
+      state.targetRepository.repo,
+      state.githubIssueId,
+      config,
+    ),
   ]);
+
+  // Filter out bot comments (comments from the bot user)
+  const comments = allComments.filter(() => {
+    // You can add logic here to filter bot comments based on username
+    // For now, include all comments
+    return true;
+  });
   if (!issue) {
     throw new Error(`Issue not found. Issue ID: ${state.githubIssueId}`);
   }

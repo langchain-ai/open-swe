@@ -7,6 +7,7 @@ import {
 } from "./api.js";
 import { createLogger, LogLevel } from "../logger.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { GIT_PROVIDER_TYPE } from "@openswe/shared/constants";
 
 const logger = createLogger(LogLevel.INFO, "GitHubPlan");
 
@@ -45,6 +46,13 @@ export async function postGitHubIssueComment(input: {
   if (isLocalMode(config)) {
     // In local mode, we don't post GitHub comments
     logger.info("Skipping GitHub comment posting in local mode");
+    return;
+  }
+
+  // Skip for non-GitHub providers
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+  if (providerType === "gitlab") {
+    logger.info("Skipping GitHub comment posting for GitLab provider");
     return;
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense, useMemo } from "react";
+import { useState, Suspense, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -34,13 +34,29 @@ function AllThreadsPageContent() {
   const limit = 25;
   const [offset, setOffset] = useState(0);
   const { currentInstallation, installationsLoading } = useGitHubAppProvider();
+  const [provider, setProvider] = useState<"github" | "gitlab" | null>(null);
+
+  useEffect(() => {
+    const checkProvider = async () => {
+      try {
+        const response = await fetch("/api/auth/status");
+        const data = await response.json();
+        setProvider(data.provider);
+      } catch (error) {
+        console.error("[AllThreadsPage] Error checking provider:", error);
+      }
+    };
+    checkProvider();
+  }, []);
+
   const {
     threads,
     isLoading: threadsLoading,
     hasMore,
   } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
-    currentInstallation,
+    currentInstallation: provider === "github" ? currentInstallation : undefined,
+    provider: provider,
     pagination: {
       limit,
       offset,

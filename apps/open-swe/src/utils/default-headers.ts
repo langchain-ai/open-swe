@@ -7,9 +7,38 @@ import {
   GITHUB_INSTALLATION_NAME,
   GITHUB_PAT,
   GITHUB_INSTALLATION_ID,
+  GITLAB_TOKEN_COOKIE,
+  GITLAB_BASE_URL,
+  GITLAB_USER_ID_HEADER,
+  GITLAB_USER_LOGIN_HEADER,
+  GIT_PROVIDER_TYPE,
 } from "@openswe/shared/constants";
 
 export function getDefaultHeaders(config: GraphConfig): Record<string, string> {
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+
+  // GitLab authentication mode
+  if (providerType === "gitlab") {
+    const gitlabToken = (config.configurable as any)?.[GITLAB_TOKEN_COOKIE];
+    const gitlabBaseUrl = (config.configurable as any)?.[GITLAB_BASE_URL] || "https://gitlab.com";
+
+    if (!gitlabToken) {
+      throw new Error("Missing required GitLab headers");
+    }
+
+    const gitlabUserIdHeader = (config.configurable as any)?.[GITLAB_USER_ID_HEADER] ?? "";
+    const gitlabUserLoginHeader = (config.configurable as any)?.[GITLAB_USER_LOGIN_HEADER] ?? "";
+
+    return {
+      [GITLAB_TOKEN_COOKIE]: gitlabToken as string,
+      [GITLAB_BASE_URL]: gitlabBaseUrl,
+      [GIT_PROVIDER_TYPE]: "gitlab",
+      [GITLAB_USER_ID_HEADER]: gitlabUserIdHeader,
+      [GITLAB_USER_LOGIN_HEADER]: gitlabUserLoginHeader,
+    };
+  }
+
+  // GitHub authentication mode
   const githubPat = config.configurable?.[GITHUB_PAT];
   const isProd = process.env.NODE_ENV === "production";
   if (githubPat && !isProd) {

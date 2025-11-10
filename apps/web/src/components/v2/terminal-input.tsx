@@ -6,10 +6,12 @@ import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, Loader2 } from "lucide-react";
 import { RepositoryBranchSelectors } from "../github/repo-branch-selectors";
+import { GitLabProjectSelector } from "../gitlab/project-selector";
 import { Button } from "../ui/button";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { useRouter } from "next/navigation";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
+import { useGitLabProvider } from "@/providers/GitLab";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { Base64ContentBlock, HumanMessage } from "@langchain/core/messages";
 import { toast } from "sonner";
@@ -25,6 +27,17 @@ import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser } from "@/hooks/useUser";
 import { isAllowedUser } from "@openswe/shared/github/allowed-users";
 import { repoHasIssuesEnabled } from "@/lib/repo-has-issues";
+
+async function getAuthProvider(): Promise<"github" | "gitlab" | null> {
+  try {
+    const response = await fetch("/api/auth/status");
+    const data = await response.json();
+    return data.provider;
+  } catch (error) {
+    console.error("Error fetching auth provider:", error);
+    return null;
+  }
+}
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -87,6 +100,20 @@ export function TerminalInput({
   const { selectedRepository, repositories } = useGitHubAppProvider();
   const [loading, setLoading] = useState(false);
   const { user, isLoading: isUserLoading } = useUser();
+  const [provider, setProvider] = useState<"github" | "gitlab" | null>(null);
+
+  // Try to get GitLab provider (may not be available if not in GitLabProvider)
+  let gitlabSelectedProject = null;
+  try {
+    const gitlabProvider = useGitLabProvider();
+    gitlabSelectedProject = gitlabProvider.selectedProject;
+  } catch {
+    // Not in GitLabProvider, ignore
+  }
+
+  useEffect(() => {
+    getAuthProvider().then(setProvider);
+  }, []);
 
   const stream = useStream<GraphState>({
     apiUrl,
@@ -96,8 +123,18 @@ export function TerminalInput({
   });
 
   const handleSend = async () => {
-    if (!selectedRepository) {
+    // For GitHub, require repository selection
+    if (provider === "github" && !selectedRepository) {
       toast.error("Please select a repository first", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+
+    // For GitLab, require project selection
+    if (provider === "gitlab" && !gitlabSelectedProject) {
+      toast.error("Please select a GitLab project first", {
         richColors: true,
         closeButton: true,
       });
@@ -122,22 +159,25 @@ export function TerminalInput({
       return;
     }
 
-    const selectedRepo = repositories.find(
-      (repo) =>
-        repo.full_name ===
-        `${selectedRepository.owner}/${selectedRepository.repo}`,
-    );
-    const issuesDisabled = selectedRepo && !repoHasIssuesEnabled(selectedRepo);
-    if (issuesDisabled) {
-      toast.error(
-        "Open SWE requires issues to be enabled on the repository. Please enable issues on the repository to use Open SWE.",
-        {
-          richColors: true,
-          closeButton: true,
-          duration: 30_000,
-        },
+    // Check for issues enabled only for GitHub
+    if (provider === "github" && selectedRepository) {
+      const selectedRepo = repositories.find(
+        (repo) =>
+          repo.full_name ===
+          `${selectedRepository.owner}/${selectedRepository.repo}`,
       );
-      return;
+      const issuesDisabled = selectedRepo && !repoHasIssuesEnabled(selectedRepo);
+      if (issuesDisabled) {
+        toast.error(
+          "Open SWE requires issues to be enabled on the repository. Please enable issues on the repository to use Open SWE.",
+          {
+            richColors: true,
+            closeButton: true,
+            duration: 30_000,
+          },
+        );
+        return;
+      }
     }
 
     setLoading(true);
@@ -157,9 +197,16 @@ export function TerminalInput({
 
       try {
         const newThreadId = uuidv4();
+
+        // Get the appropriate repository based on provider
+        let targetRepo = selectedRepository;
+        if (provider === "gitlab") {
+          targetRepo = gitlabSelectedProject;
+        }
+
         const runInput: ManagerGraphUpdate = {
           messages: [newHumanMessage],
-          targetRepository: selectedRepository,
+          targetRepository: targetRepo!,
           autoAcceptPlan,
         };
 
@@ -266,12 +313,19 @@ export function TerminalInput({
       <div className="text-foreground flex items-center gap-1">
         <div className="border-border bg-background/50 flex items-center gap-1 rounded-md border p-1 transition-colors duration-200">
           <span className="text-muted-foreground">open-swe</span>
-          <span className="text-muted-foreground/70">@</span>
-          <span className="text-muted-foreground">github</span>
+          {provider && (
+            <>
+              <span className="text-muted-foreground/70">@</span>
+              <span className="text-muted-foreground">{provider}</span>
+            </>
+          )}
         </div>
 
-        {/* Repository & Branch Selectors */}
-        <RepositoryBranchSelectors />
+        {/* Repository & Branch Selectors - GitHub only */}
+        {provider === "github" && <RepositoryBranchSelectors />}
+
+        {/* GitLab Project Selector */}
+        {provider === "gitlab" && <GitLabProjectSelector />}
 
         {/* Prompt */}
         <span className="text-muted-foreground">$</span>
@@ -279,7 +333,11 @@ export function TerminalInput({
         <Button
           onClick={handleSend}
           disabled={
-            disabled || !message.trim() || !selectedRepository || isUserLoading
+            disabled ||
+            !message.trim() ||
+            (provider === "github" && !selectedRepository) ||
+            (provider === "gitlab" && !gitlabSelectedProject) ||
+            isUserLoading
           }
           size="icon"
           variant="brand"

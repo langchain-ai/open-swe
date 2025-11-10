@@ -5,6 +5,9 @@ import {
   GITHUB_INSTALLATION_TOKEN_COOKIE,
   GITHUB_INSTALLATION_NAME,
   GITHUB_INSTALLATION_ID,
+  GITLAB_TOKEN_COOKIE,
+  GITLAB_BASE_URL,
+  GIT_PROVIDER_TYPE,
 } from "@openswe/shared/constants";
 import {
   getGitHubInstallationTokenOrThrow,
@@ -55,25 +58,42 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
           "SECRETS_ENCRYPTION_KEY environment variable is required",
         );
       }
+
+      // Check which provider the user is authenticated with
+      const gitlabToken = req.cookies.get(GITLAB_TOKEN_COOKIE)?.value;
       const installationIdCookie = req.cookies.get(
         GITHUB_INSTALLATION_ID_COOKIE,
       )?.value;
 
-      if (!installationIdCookie) {
-        throw new Error(
-          "No GitHub installation ID found. GitHub App must be installed first.",
-        );
-      }
-      const [installationToken, installationName] = await Promise.all([
-        getGitHubInstallationTokenOrThrow(installationIdCookie, encryptionKey),
-        getInstallationNameFromReq(req.clone(), installationIdCookie),
-      ]);
+      // GitLab authentication
+      if (gitlabToken) {
+        const gitlabBaseUrl = req.cookies.get(GITLAB_BASE_URL)?.value || "https://gitlab.com";
 
-      return {
-        [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
-        [GITHUB_INSTALLATION_TOKEN_COOKIE]: installationToken,
-        [GITHUB_INSTALLATION_NAME]: installationName,
-        [GITHUB_INSTALLATION_ID]: installationIdCookie,
-      };
+        return {
+          [GITLAB_TOKEN_COOKIE]: encryptSecret(gitlabToken, encryptionKey),
+          [GITLAB_BASE_URL]: gitlabBaseUrl,
+          [GIT_PROVIDER_TYPE]: "gitlab",
+        } as Record<string, string>;
+      }
+
+      // GitHub authentication
+      if (installationIdCookie) {
+        const [installationToken, installationName] = await Promise.all([
+          getGitHubInstallationTokenOrThrow(installationIdCookie, encryptionKey),
+          getInstallationNameFromReq(req.clone(), installationIdCookie),
+        ]);
+
+        return {
+          [GITHUB_TOKEN_COOKIE]: getGitHubAccessTokenOrThrow(req, encryptionKey),
+          [GITHUB_INSTALLATION_TOKEN_COOKIE]: installationToken,
+          [GITHUB_INSTALLATION_NAME]: installationName,
+          [GITHUB_INSTALLATION_ID]: installationIdCookie,
+          [GIT_PROVIDER_TYPE]: "github",
+        } as Record<string, string>;
+      }
+
+      throw new Error(
+        "No authentication found. User must authenticate with GitHub or GitLab first.",
+      );
     },
   });

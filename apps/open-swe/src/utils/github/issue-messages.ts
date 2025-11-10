@@ -5,11 +5,10 @@ import {
   isHumanMessage,
 } from "@langchain/core/messages";
 import { GitHubIssue, GitHubIssueComment } from "./types.js";
-import { getIssue, getIssueComments } from "./api.js";
 import { GraphConfig, TargetRepository } from "@openswe/shared/open-swe/types";
-import { getGitHubTokensFromConfig } from "../github-tokens.js";
 import { DETAILS_CLOSE_TAG, DETAILS_OPEN_TAG } from "./issue-task.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import { getIssue as getIssueProviderAgnostic, listIssueComments } from "../git-provider-utils.js";
 
 export function getUntrackedComments(
   existingMessages: BaseMessage[],
@@ -58,21 +57,20 @@ export async function getMissingMessages(
     return [];
   }
 
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  // Use provider-agnostic functions
   const [issue, comments] = await Promise.all([
-    getIssue({
-      owner: input.targetRepository.owner,
-      repo: input.targetRepository.repo,
-      issueNumber: input.githubIssueId,
-      githubInstallationToken,
-    }),
-    getIssueComments({
-      owner: input.targetRepository.owner,
-      repo: input.targetRepository.repo,
-      issueNumber: input.githubIssueId,
-      githubInstallationToken,
-      filterBotComments: true,
-    }),
+    getIssueProviderAgnostic(
+      input.targetRepository.owner,
+      input.targetRepository.repo,
+      input.githubIssueId,
+      config,
+    ),
+    listIssueComments(
+      input.targetRepository.owner,
+      input.targetRepository.repo,
+      input.githubIssueId,
+      config,
+    ),
   ]);
   if (!issue && !comments?.length) {
     return [];
@@ -170,13 +168,13 @@ export function extractContentWithoutDetailsFromIssueBody(
 }
 
 export function getMessageContentFromIssue(
-  issue: GitHubIssue | GitHubIssueComment,
+  issue: GitHubIssue | GitHubIssueComment | { title?: string; body: string | null },
 ): string {
-  if ("title" in issue) {
+  if ("title" in issue && issue.title) {
     const formattedBody = extractContentWithoutDetailsFromIssueBody(
       issue.body ?? "",
     );
     return `[original issue]\n**${issue.title}**\n${formattedBody}`;
   }
-  return `[issue comment]\n${issue.body}`;
+  return `[issue comment]\n${issue.body ?? ""}`;
 }

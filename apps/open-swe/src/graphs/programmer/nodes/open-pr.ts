@@ -31,6 +31,8 @@ import {
   getSandboxWithErrorHandling,
 } from "../../../utils/sandbox.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { GIT_PROVIDER_TYPE, GITLAB_TOKEN_COOKIE } from "@openswe/shared/constants";
+import { decryptSecret } from "@openswe/shared/crypto";
 import {
   getActivePlanItems,
   getPullRequestNumberFromActiveTask,
@@ -90,11 +92,34 @@ const formatPrompt = (
     .replace("{CUSTOM_RULES}", customPrFormattingRules);
 };
 
+/**
+ * Get the git authentication token based on provider type
+ */
+function getGitToken(config: GraphConfig): string {
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+
+  if (providerType === "gitlab") {
+    const encryptedGitlabToken = (config.configurable as any)?.[GITLAB_TOKEN_COOKIE];
+    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
+    }
+    if (!encryptedGitlabToken) {
+      throw new Error("Missing GitLab token in configuration");
+    }
+    return decryptSecret(encryptedGitlabToken, encryptionKey);
+  }
+
+  // Default to GitHub
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  return githubInstallationToken;
+}
+
 export async function openPullRequest(
   state: GraphState,
   config: GraphConfig,
 ): Promise<GraphUpdate> {
-  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  const githubInstallationToken = getGitToken(config);
 
   const { sandbox, codebaseTree, dependenciesInstalled } =
     await getSandboxWithErrorHandling(

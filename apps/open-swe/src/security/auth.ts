@@ -12,6 +12,9 @@ import {
   GITHUB_USER_ID_HEADER,
   GITHUB_USER_LOGIN_HEADER,
   LOCAL_MODE_HEADER,
+  GITLAB_TOKEN_COOKIE,
+  GITLAB_BASE_URL,
+  GIT_PROVIDER_TYPE,
 } from "@openswe/shared/constants";
 import { decryptSecret } from "@openswe/shared/crypto";
 import { verifyGitHubWebhookOrThrow } from "./github.js";
@@ -110,6 +113,48 @@ export const auth = new Auth()
         display_name: user.login,
         metadata: {
           installation_name: "pat-auth",
+        },
+        permissions: LANGGRAPH_USER_PERMISSIONS,
+      };
+    }
+
+    // Check which provider is being used
+    const providerType = request.headers.get(GIT_PROVIDER_TYPE);
+
+    // GitLab authentication mode
+    if (providerType === "gitlab") {
+      const encryptedGitLabToken = request.headers.get(GITLAB_TOKEN_COOKIE);
+      const gitlabBaseUrl = request.headers.get(GITLAB_BASE_URL) || "https://gitlab.com";
+
+      if (!encryptedGitLabToken) {
+        throw new HTTPException(401, {
+          message: "GitLab token header missing",
+        });
+      }
+
+      const decryptedGitLabToken = decryptSecret(encryptedGitLabToken, encryptionKey);
+
+      // Verify GitLab token and get user info
+      const gitlabUserResponse = await fetch(`${gitlabBaseUrl}/api/v4/user`, {
+        headers: {
+          Authorization: `Bearer ${decryptedGitLabToken}`,
+        },
+      });
+
+      if (!gitlabUserResponse.ok) {
+        throw new HTTPException(401, {
+          message: "Invalid GitLab token",
+        });
+      }
+
+      const gitlabUser: any = await gitlabUserResponse.json();
+
+      return {
+        identity: gitlabUser.id.toString(),
+        is_authenticated: true,
+        display_name: gitlabUser.username,
+        metadata: {
+          installation_name: gitlabUser.username, // Use username as installation name for GitLab
         },
         permissions: LANGGRAPH_USER_PERMISSIONS,
       };

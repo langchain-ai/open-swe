@@ -1,0 +1,195 @@
+---
+title: "From GitLab"
+description: "How to use Open SWE from GitLab"
+---
+
+<Warning>
+  GitLab webhooks are _not_ available via the demo application. To use GitLab webhooks, you must set up your own instance of Open SWE following the [development setup guide](/labs/swe/setup/development).
+</Warning>
+
+# GitLab Webhook Integration
+
+Open SWE integrates seamlessly with GitLab through webhooks, allowing you to trigger automated code changes directly from GitLab issues. This provides a streamlined workflow where you can request code changes by simply adding labels to issues in projects where Open SWE is configured. GitLab integration works with both GitLab.com and self-hosted GitLab instances.
+
+## Triggering Runs with Labels
+
+Open SWE monitors GitLab issues for specific labels that trigger automated runs. When you add one of these labels to an issue, Open SWE will automatically create a new run to process your request.
+
+### Label Types
+
+Open SWE supports the same label types for GitLab as it does for GitHub:
+
+**Manual Mode (`open-swe`)**
+
+- Requires manual approval of the generated plan before code execution
+- Gives you full control over what changes will be made
+- Ideal for complex or sensitive changes where you want to review the approach first
+
+**Auto Mode (`open-swe-auto`)**
+
+- Automatically approves and executes the generated plan
+- Provides faster turnaround for straightforward requests
+- Best for simple changes or when you trust the agent to proceed autonomously
+
+**Max Mode (`open-swe-max` and `open-swe-max-auto`)**
+
+- Uses Claude Opus 4.1 for both planning and programming tasks
+- Provides enhanced performance and reasoning capabilities for complex problems
+- `open-swe-max`: Requires manual plan approval with premium model performance
+- `open-swe-max-auto`: Combines automatic execution with premium model capabilities
+- Ideal for challenging tasks that benefit from the most advanced AI reasoning
+
+<Note>
+  In development environments, the labels are `open-swe-dev`,
+  `open-swe-auto-dev`, `open-swe-max-dev`, and `open-swe-max-auto-dev`
+  respectively. The system automatically uses the appropriate labels based on
+  the `NODE_ENV` environment variable.
+</Note>
+
+## Automatic Run Creation
+
+When you add a supported label to a GitLab issue, Open SWE's webhook handler automatically:
+
+1. **Validates the request** - Verifies webhook tokens and authentication
+2. **Extracts issue context** - Captures the issue title, description, and metadata
+3. **Creates a new thread** - Generates a unique thread ID for the conversation
+4. **Starts the Manager Graph** - Initiates the agent workflow with the issue content
+5. **Configures execution mode** - Sets auto-accept based on the label type used
+
+The entire process happens within seconds of adding the label, providing immediate feedback through issue comments.
+
+## Issue Comments and Run Links
+
+Once a run is created, Open SWE automatically posts a comment on the triggering issue to confirm processing has started. This comment includes:
+
+- **Status confirmation** - "🤖 Open SWE has been triggered for this issue. Processing..."
+- **Run link** - Direct URL to view the run in the Open SWE web interface
+- **Access restriction notice** - Clarifies that only the issue creator can access the run
+- **Development metadata** - Run ID and thread ID for debugging (in a collapsible section)
+
+<Tip>
+  The run link allows you to monitor progress in real-time, view the generated
+  plan, and interact with the agent if needed. You can switch between manual and
+  auto mode even after the run has started.
+</Tip>
+
+## User Access Restrictions
+
+Open SWE implements strict access controls to ensure security and privacy:
+
+### Issue Creator Access
+
+- **Only the user who created the issue** can access the generated run URL
+- This prevents unauthorized users from viewing or modifying runs triggered by others
+- Access is enforced through GitLab authentication and user verification
+
+### Project Permissions
+
+- Open SWE respects GitLab's project permissions
+- Users must have appropriate access to the project to trigger runs
+- The GitLab access token determines which projects can use Open SWE
+
+<Note>
+  If you need to share access to a run with team members, you can do so through
+  the Open SWE web interface after the run is created, or by having team members
+  with project access create their own issues.
+</Note>
+
+## Merge Request Integration
+
+When Open SWE successfully completes code changes, it automatically creates merge requests that are linked back to the original issue:
+
+### Automatic MR Creation
+
+- **Generated after plan execution** - MRs are created once the Programmer Graph completes its work
+- **Linked to triggering issue** - MRs reference the original issue in their description
+- **Preserves commit history** - All intermediate commits are maintained for transparency
+
+### Issue Resolution
+
+- **Automatic closure** - When the generated MR is merged, GitLab automatically closes the linked issue
+- **Clear audit trail** - The connection between issue, run, and MR provides complete traceability
+- **Status updates** - Issue comments track the progress from request to completion
+
+<Tip>
+  You can review the generated MR before merging, even in auto mode. The
+  auto-accept setting only applies to plan approval, not MR merging, giving you
+  final control over what code enters your project.
+</Tip>
+
+## Merge Request Comments
+
+Open SWE also supports triggering runs directly from merge request comments:
+
+### Mentioning the Agent
+
+- **Use `@open-swe`** (or your configured trigger username) in an MR comment to request changes
+- The agent will process your request and update the MR accordingly
+- Plans are auto-accepted for MR comment triggers
+
+<Note>
+  Make sure to tag the configured trigger username in your GitLab project. The
+  default is `@open-swe`, but this can be customized via the
+  `GITLAB_TRIGGER_USERNAME` environment variable.
+</Note>
+
+## Self-Hosted GitLab Support
+
+Open SWE fully supports self-hosted GitLab instances:
+
+### Configuration
+
+Set the `GITLAB_BASE_URL` environment variable to your GitLab instance URL:
+
+```bash
+GITLAB_BASE_URL="https://gitlab.your-company.com"
+```
+
+### Requirements
+
+- GitLab CE/EE version 13.0 or higher
+- API access enabled
+- Webhook support enabled
+
+<Tip>
+  Self-hosted GitLab instances work identically to GitLab.com, with the same
+  features and capabilities.
+</Tip>
+
+## Getting Started
+
+To start using Open SWE with GitLab webhooks:
+
+1. **Configure GitLab OAuth** in your Open SWE instance
+2. **Set up webhook integration** in your GitLab project
+3. **Create a detailed issue** describing the changes you want
+4. **Add the appropriate label** (`open-swe` for manual mode or `open-swe-auto` for automatic mode)
+5. **Monitor the issue comments** for the run link and status updates
+6. **Review and merge the MR** when Open SWE completes the changes
+
+For setup instructions, see the [Development Setup](/labs/swe/setup/development) guide.
+
+## Differences from GitHub
+
+While the GitLab integration mirrors GitHub functionality, there are some key differences:
+
+### Terminology
+
+- **Merge Requests (MRs)** instead of Pull Requests (PRs)
+- **Projects** instead of Repositories
+- **Notes** instead of Comments
+
+### Authentication
+
+- Uses GitLab **Personal Access Tokens** instead of GitHub App installation
+- OAuth flow is similar but uses GitLab's OAuth provider
+
+### Webhooks
+
+- GitLab webhooks use **token-based authentication** instead of HMAC signatures
+- Configure webhook token in `GITLAB_WEBHOOK_TOKEN` environment variable
+
+<Note>
+  Despite these differences, the Open SWE provider abstraction ensures a
+  consistent experience across both platforms.
+</Note>

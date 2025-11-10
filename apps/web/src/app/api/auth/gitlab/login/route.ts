@@ -4,9 +4,9 @@ const GITLAB_AUTH_STATE_COOKIE = "gitlab_auth_state";
 
 export async function GET(_request: NextRequest) {
   try {
-    const clientId = process.env.NEXT_PUBLIC_GITLAB_APPLICATION_ID;
+    const clientId = process.env.NEXT_PUBLIC_GITLAB_APP_CLIENT_ID;
     const redirectUri = process.env.GITLAB_REDIRECT_URI;
-    const baseUrl = process.env.NEXT_PUBLIC_GITLAB_BASE_URL || "https://gitlab.com";
+    const baseUrl = process.env.GITLAB_BASE_URL || "https://gitlab.com";
 
     if (!clientId || !redirectUri) {
       return NextResponse.json(

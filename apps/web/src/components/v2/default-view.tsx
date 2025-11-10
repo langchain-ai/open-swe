@@ -27,7 +27,7 @@ import { UserPopover } from "../user-popover";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
 import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
 import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
@@ -98,6 +98,20 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     dragOver,
     handlePaste,
   } = useFileUpload();
+  const [provider, setProvider] = useState<"github" | "gitlab" | null>(null);
+
+  useEffect(() => {
+    const checkProvider = async () => {
+      try {
+        const response = await fetch("/api/auth/status");
+        const data = await response.json();
+        setProvider(data.provider);
+      } catch (error) {
+        console.error("[DefaultView] Error checking provider:", error);
+      }
+    };
+    checkProvider();
+  }, []);
   const [autoAccept, setAutoAccept] = useState(false);
   const [shouldCreateIssue, setShouldCreateIssue] = useState(
     config?.shouldCreateIssue != null ? !!config.shouldCreateIssue : true,
@@ -151,9 +165,9 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
-          <GitHubInstallationBanner />
+          {provider === "github" && <GitHubInstallationBanner />}
           <ApiKeyBanner />
-          <IssuesRequiredBanner />
+          {provider === "github" && <IssuesRequiredBanner />}
           {/* Terminal Chat Input */}
           <Card
             className={cn(

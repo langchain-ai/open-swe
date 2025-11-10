@@ -10,6 +10,7 @@ import { createGitProvider } from "@openswe/shared/git-provider/factory";
 import type { GitProvider, ProviderType } from "@openswe/shared/git-provider/types";
 import { GIT_PROVIDER_TYPE, GITLAB_BASE_URL } from "@openswe/shared/constants";
 import { getGitHubTokensFromConfig } from "./github-tokens.js";
+import { decryptSecret } from "@openswe/shared/crypto";
 
 /**
  * Gets the provider type from config, defaulting to GitHub for backward compatibility
@@ -27,12 +28,22 @@ function getProviderToken(config: GraphConfig, providerType: ProviderType): stri
     const { githubInstallationToken } = getGitHubTokensFromConfig(config);
     return githubInstallationToken;
   } else {
-    // GitLab
-    const gitlabToken = (config.configurable as any)?.["x-gitlab-access-token"];
-    if (!gitlabToken) {
+    // GitLab - need to decrypt the token
+    const encryptedGitlabToken = (config.configurable as any)?.["x-gitlab-access-token"];
+    console.log("[getProviderToken] Encrypted GitLab token:", encryptedGitlabToken?.substring(0, 20) + "...");
+
+    if (!encryptedGitlabToken) {
       throw new Error("GitLab access token not found in config");
     }
-    return gitlabToken;
+
+    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable");
+    }
+
+    const decryptedToken = decryptSecret(encryptedGitlabToken, encryptionKey);
+    console.log("[getProviderToken] Decrypted token starts with:", decryptedToken.substring(0, 10) + "...");
+    return decryptedToken;
   }
 }
 
@@ -145,6 +156,53 @@ export async function updatePullRequest(
 }
 
 /**
+ * Provider-agnostic wrapper for creating an issue
+ */
+export interface CreateIssueParams {
+  owner: string;
+  repo: string;
+  title: string;
+  body: string;
+  labels?: string[];
+}
+
+export async function createIssue(
+  params: CreateIssueParams,
+  config: GraphConfig,
+) {
+  const provider = getGitProviderFromConfig(config);
+
+  const issue = await provider.createIssue({
+    owner: params.owner,
+    repo: params.repo,
+    title: params.title,
+    body: params.body,
+    labels: params.labels,
+  });
+
+  // Return in GitHub-compatible format
+  return {
+    id: issue.id,
+    number: issue.number,
+    title: issue.title,
+    body: issue.body,
+    state: issue.state,
+    html_url: issue.url,
+    user: {
+      login: issue.author.login,
+      id: issue.author.id,
+    },
+    labels: issue.labels.map((label: any) => ({
+      id: label.id,
+      name: label.name,
+      color: label.color,
+    })),
+    created_at: issue.createdAt.toISOString(),
+    updated_at: issue.updatedAt.toISOString(),
+  };
+}
+
+/**
  * Provider-agnostic wrapper for creating an issue comment
  */
 export interface CreateCommentParams {
@@ -188,9 +246,8 @@ export interface UpdateIssueParams {
   owner: string;
   repo: string;
   issueNumber: number;
-  title?: string;
   body?: string;
-  state?: 'open' | 'closed';
+  title?: string;
 }
 
 export async function updateIssue(
@@ -203,9 +260,8 @@ export async function updateIssue(
     owner: params.owner,
     repo: params.repo,
     issueNumber: params.issueNumber,
-    title: params.title,
     body: params.body,
-    state: params.state,
+    title: params.title,
   });
 
   // Return in GitHub-compatible format
@@ -219,6 +275,13 @@ export async function updateIssue(
       login: issue.author.login,
       id: issue.author.id,
     },
+    labels: issue.labels.map((label: any) => ({
+      id: label.id,
+      name: label.name,
+      color: label.color,
+    })),
+    created_at: issue.createdAt.toISOString(),
+    updated_at: issue.updatedAt.toISOString(),
   };
 }
 
@@ -254,6 +317,57 @@ export async function getIssue(
     created_at: issue.createdAt.toISOString(),
     updated_at: issue.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Provider-agnostic wrapper for listing issue comments
+ */
+export async function listIssueComments(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  config: GraphConfig,
+) {
+  const provider = getGitProviderFromConfig(config);
+
+  const comments = await provider.listIssueComments({
+    owner,
+    repo,
+    issueNumber,
+  });
+
+  // Return in GitHub-compatible format for backward compatibility
+  return comments.map((comment) => ({
+    id: typeof comment.id === 'number' ? comment.id : parseInt(comment.id as string),
+    node_id: '',  // Not used, but required by type
+    url: comment.url,
+    issue_url: comment.url,
+    body: comment.body,
+    user: {
+      login: comment.author.login,
+      id: comment.author.id,
+      node_id: '',
+      avatar_url: '',
+      gravatar_id: null,
+      url: '',
+      html_url: '',
+      followers_url: '',
+      following_url: '',
+      gists_url: '',
+      starred_url: '',
+      subscriptions_url: '',
+      organizations_url: '',
+      repos_url: '',
+      events_url: '',
+      received_events_url: '',
+      type: 'User',
+      site_admin: false,
+    },
+    created_at: comment.createdAt.toISOString(),
+    updated_at: comment.updatedAt.toISOString(),
+    html_url: comment.url,
+    author_association: 'NONE',
+  } as any));
 }
 
 /**

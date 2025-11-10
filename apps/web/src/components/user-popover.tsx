@@ -17,7 +17,8 @@ import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { Building2, LogOut, User } from "lucide-react";
 import { GitHubSVG } from "@/components/icons/github";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useUser } from "@/hooks/useUser";
 
 interface UserPopoverProps {
   className?: string;
@@ -33,6 +34,21 @@ export function UserPopover({ className }: UserPopoverProps) {
   } = useGitHubAppProvider();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [provider, setProvider] = useState<"github" | "gitlab" | null>(null);
+  const { user, isLoading: isUserLoading } = useUser();
+
+  useEffect(() => {
+    const checkProvider = async () => {
+      try {
+        const response = await fetch("/api/auth/status");
+        const data = await response.json();
+        setProvider(data.provider);
+      } catch (error) {
+        console.error("[UserPopover] Error checking provider:", error);
+      }
+    };
+    checkProvider();
+  }, []);
 
   const GITHUB_APP_INSTALLED_KEY = "github_app_installed";
 
@@ -67,6 +83,73 @@ export function UserPopover({ className }: UserPopoverProps) {
     );
   };
 
+  // GitLab user display
+  if (provider === "gitlab") {
+    if (isUserLoading || !user) {
+      return (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled
+          className={cn("h-8 w-8 rounded-full p-0", className)}
+        >
+          <div className="bg-muted h-6 w-6 animate-pulse rounded-full" />
+        </Button>
+      );
+    }
+
+    return (
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn("hover:bg-accent h-8 w-8 rounded-full p-0", className)}
+          >
+            <img
+              src={user.avatar_url}
+              alt={`${user.login} avatar`}
+              className="h-6 w-6 rounded-full"
+            />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-80 p-0"
+          align="end"
+        >
+          <div className="p-4">
+            <div className="mb-4 flex items-center gap-3">
+              <img
+                src={user.avatar_url}
+                alt={`${user.login} avatar`}
+                className="h-10 w-10 rounded-full"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">
+                  {user.name || user.login}
+                </div>
+                <div className="text-muted-foreground text-sm">
+                  @{user.login}
+                </div>
+              </div>
+            </div>
+
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/50 dark:hover:text-red-300"
+              onClick={handleLogout}
+              disabled={isLoggingOut}
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              {isLoggingOut ? "Signing out..." : "Sign out"}
+            </Button>
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
+  // GitHub installation display
   if (isLoading || !currentInstallation) {
     return (
       <Button

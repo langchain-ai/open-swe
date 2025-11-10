@@ -36,6 +36,8 @@ import { createGrepTool } from "../../../tools/grep.js";
 import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
+import { GIT_PROVIDER_TYPE, GITLAB_TOKEN_COOKIE } from "@openswe/shared/constants";
+import { decryptSecret } from "@openswe/shared/crypto";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { getActiveTask } from "@openswe/shared/open-swe/tasks";
 import { createPullRequestToolCallMessage } from "../../../utils/message/create-pr-message.js";
@@ -49,6 +51,29 @@ import {
 } from "../../../tools/reply-to-review-comment.js";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
+
+/**
+ * Get the git authentication token based on provider type
+ */
+function getGitToken(config: GraphConfig): string {
+  const providerType = (config.configurable as any)?.[GIT_PROVIDER_TYPE];
+
+  if (providerType === "gitlab") {
+    const encryptedGitlabToken = (config.configurable as any)?.[GITLAB_TOKEN_COOKIE];
+    const encryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
+    if (!encryptionKey) {
+      throw new Error("Missing SECRETS_ENCRYPTION_KEY environment variable.");
+    }
+    if (!encryptedGitlabToken) {
+      throw new Error("Missing GitLab token in configuration");
+    }
+    return decryptSecret(encryptedGitlabToken, encryptionKey);
+  }
+
+  // Default to GitHub
+  const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+  return githubInstallationToken;
+}
 
 export async function takeAction(
   state: GraphState,
@@ -251,14 +276,14 @@ export async function takeAction(
         changedFiles,
       });
 
-      const { githubInstallationToken } = getGitHubTokensFromConfig(config);
+      const gitToken = getGitToken(config);
       const result = await checkoutBranchAndCommit(
         config,
         state.targetRepository,
         sandbox,
         {
           branchName,
-          githubInstallationToken,
+          githubInstallationToken: gitToken,
           taskPlan: state.taskPlan,
           githubIssueId: state.githubIssueId,
         },

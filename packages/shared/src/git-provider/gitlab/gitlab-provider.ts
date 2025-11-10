@@ -32,6 +32,11 @@ export class GitLabProvider implements GitProvider {
   private gitlab: InstanceType<typeof Gitlab>;
 
   constructor(token: string, baseUrl: string = "https://gitlab.com") {
+    console.log("[GitLabProvider] Initializing with:");
+    console.log(`  Base URL: ${baseUrl}`);
+    console.log(`  Token (first 10): ${token.substring(0, 10)}...`);
+    console.log(`  Token length: ${token.length}`);
+
     this.gitlab = new Gitlab({
       token,
       host: baseUrl,
@@ -156,17 +161,105 @@ export class GitLabProvider implements GitProvider {
 
   async getIssue(owner: string, repo: string, issueNumber: number): Promise<Issue> {
     const projectId = this.getProjectId(owner, repo);
-    const issue = await (this.gitlab.Issues as any).show(projectId, issueNumber);
-    return this.mapIssue(issue);
+    console.log("[GitLabProvider.getIssue] Fetching issue:");
+    console.log(`  Project ID: ${projectId}`);
+    console.log(`  Issue Number (IID): ${issueNumber}`);
+
+    // First, get the numeric project ID
+    // Note: Issues.show() doesn't work with gitbeaker, so we use Issues.all() with filters
+    const project = await this.gitlab.Projects.show(projectId);
+    const numericProjectId = project.id;
+
+    console.log(`  Numeric Project ID: ${numericProjectId}`);
+
+    // Retry logic for race conditions (GitLab might need a moment to index new issues)
+    const maxRetries = 3;
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Use Issues.all() with filters instead of Issues.show() because Issues.show() has a bug
+        const issues = await this.gitlab.Issues.all({ projectId: numericProjectId, iids: [issueNumber] });
+
+        if (issues.length === 0) {
+          throw new Error(`404 Not Found`);
+        }
+
+        const issue = Array.isArray(issues) ? issues[0] : issues;
+
+        if (attempt > 1) {
+          console.log(`[GitLabProvider.getIssue] ✅ Issue fetched successfully on attempt ${attempt}`);
+        } else {
+          console.log("[GitLabProvider.getIssue] ✅ Issue fetched successfully");
+        }
+        return this.mapIssue(issue);
+      } catch (error: any) {
+        lastError = error;
+
+        // Only retry on 404, not on other errors
+        if (error.message?.includes('404') && attempt < maxRetries) {
+          const waitMs = attempt * 500; // 500ms, 1000ms
+          console.log(`[GitLabProvider.getIssue] ⚠️  404 error, retrying in ${waitMs}ms (attempt ${attempt}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, waitMs));
+          continue;
+        }
+
+        console.error("[GitLabProvider.getIssue] ❌ Failed to fetch issue:");
+        console.error(`  Error: ${error.message}`);
+        if (error.response) {
+          console.error(`  Status: ${error.response.status}`);
+          console.error(`  Response:`, error.response.data);
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
   }
 
   async createIssue(params: CreateIssueParams): Promise<Issue> {
     const projectId = this.getProjectId(params.owner, params.repo);
-    const issue = await this.gitlab.Issues.create(projectId, params.title, {
-      description: params.body,
-      labels: params.labels?.join(","),
-    });
-    return this.mapIssue(issue);
+
+    console.log("[GitLabProvider.createIssue] Creating issue:");
+    console.log(`  Project ID: ${projectId}`);
+    console.log(`  Title: ${params.title}`);
+    console.log(`  Body length: ${params.body?.length || 0}`);
+    console.log(`  Labels: ${params.labels?.join(", ") || "none"}`);
+
+    try {
+      const issue = await this.gitlab.Issues.create(projectId, params.title, {
+        description: params.body,
+        labels: params.labels?.join(","),
+      });
+
+      console.log("[GitLabProvider.createIssue] ✅ Issue created successfully:");
+      console.log(`  Issue ID: ${issue.id}`);
+      console.log(`  Issue IID: ${issue.iid}`);
+      console.log(`  URL: ${issue.web_url}`);
+
+      return this.mapIssue(issue);
+    } catch (error: any) {
+      console.error("[GitLabProvider.createIssue] ❌ Error creating issue:");
+      console.error(`  Error message: ${error.message}`);
+      console.error(`  Error description: ${error.description || 'N/A'}`);
+
+      if (error.response) {
+        console.error(`  HTTP Status: ${error.response.status} ${error.response.statusText}`);
+        console.error(`  Response data:`, JSON.stringify(error.response.data, null, 2));
+      }
+
+      if (error.cause) {
+        console.error(`  Cause:`, error.cause);
+      }
+
+      // Log the request details for debugging
+      console.error(`  Request details:`);
+      console.error(`    - Project ID: ${projectId}`);
+      console.error(`    - Title: ${params.title}`);
+      console.error(`    - Base URL: ${(this.gitlab as any).requester?.requestOptions?.host || 'unknown'}`);
+
+      throw error;
+    }
   }
 
   async updateIssue(params: UpdateIssueParams): Promise<Issue> {
@@ -310,8 +403,20 @@ export class GitLabProvider implements GitProvider {
   // ========== Authentication Operations ==========
 
   async verifyToken(): Promise<User> {
-    const user = await this.gitlab.Users.showCurrentUser();
-    return this.mapUser(user);
+    console.log("[GitLabProvider.verifyToken] Verifying token...");
+    try {
+      const user = await this.gitlab.Users.showCurrentUser();
+      console.log("[GitLabProvider.verifyToken] ✅ Token valid!");
+      console.log(`  User: ${user.username} (ID: ${user.id})`);
+      return this.mapUser(user);
+    } catch (error: any) {
+      console.error("[GitLabProvider.verifyToken] ❌ Token verification failed:");
+      console.error(`  Error: ${error.message}`);
+      if (error.response) {
+        console.error(`  Status: ${error.response.status}`);
+      }
+      throw error;
+    }
   }
 
   // ========== Webhook Operations ==========
