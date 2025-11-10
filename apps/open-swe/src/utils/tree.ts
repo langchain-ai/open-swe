@@ -22,7 +22,7 @@ export async function getCodebaseTree(
   targetRepository_?: TargetRepository,
 ): Promise<string> {
   try {
-    const command = `git ls-files | tree --fromfile -L 3`;
+    const command = `git ls-files | tree --fromfile -L 5`;
     let sandboxSessionId = sandboxSessionId_;
     let targetRepository = targetRepository_;
 
@@ -94,7 +94,7 @@ export async function getCodebaseTree(
 async function getCodebaseTreeLocal(config: GraphConfig): Promise<string> {
   try {
     const executor = createShellExecutor(config);
-    const command = `git ls-files | tree --fromfile -L 3`;
+    const command = `git ls-files | tree --fromfile -L 5`;
 
     const response = await executor.executeCommand({
       command,
