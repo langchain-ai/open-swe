@@ -142,12 +142,6 @@ export function useThreadsStatus(
   } = useSWR(
     swrKey,
     async () => {
-      if (process.env.NODE_ENV === "development") {
-        console.log(
-          `[Status SWR] Fetching statuses for ${threadIds.length} threads`,
-        );
-      }
-
       const result = await fetchAllThreadStatuses(
         sortedThreadIds, // Use sorted array for consistency
         lastPollingStatesRef.current,

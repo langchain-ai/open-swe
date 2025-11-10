@@ -153,13 +153,11 @@ export function useThreadsSWR<
 
     // For GitLab, don't filter by installation (installation is GitHub-specific)
     if (provider === "gitlab") {
-      console.log("[useThreadsSWR] GitLab provider detected, returning all threads:", allThreads.length);
       return allThreads;
     }
 
     // For GitHub, filter by installation
     if (!currentInstallation) {
-      console.log("[useThreadsSWR] No current installation for GitHub, returning empty array");
       setHasMoreState(false);
       return [];
     }
@@ -171,7 +169,6 @@ export function useThreadsSWR<
         threadInstallationName === currentInstallation.accountName
       );
     });
-    console.log("[useThreadsSWR] Filtered threads by installation:", filtered.length);
     return filtered;
   }, [data, currentInstallation, disableOrgFiltering, provider]);
 

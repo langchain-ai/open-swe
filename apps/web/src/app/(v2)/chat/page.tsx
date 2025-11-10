@@ -15,23 +15,17 @@ function ChatPageComponent() {
   useEffect(() => {
     const checkProvider = async () => {
       try {
-        console.log("[ChatPage] Checking provider...");
         const response = await fetch("/api/auth/status");
         const data = await response.json();
-        console.log("[ChatPage] Auth status:", data);
         setProvider(data.provider);
-        console.log("[ChatPage] Provider set to:", data.provider);
       } catch (error) {
         console.error("[ChatPage] Error checking provider:", error);
       } finally {
         setIsCheckingAuth(false);
-        console.log("[ChatPage] Finished checking auth");
       }
     };
     checkProvider();
   }, []);
-
-  console.log("[ChatPage] Rendering - provider:", provider, "isCheckingAuth:", isCheckingAuth, "currentInstallation:", currentInstallation);
 
   const { threads, isLoading: threadsLoading } = useThreadsSWR({
     assistantId: MANAGER_GRAPH_ID,
@@ -39,10 +33,7 @@ function ChatPageComponent() {
     provider: provider,
   });
 
-  console.log("[ChatPage] Threads:", threads, "threadsLoading:", threadsLoading);
-
   if (isCheckingAuth) {
-    console.log("[ChatPage] Showing loading screen");
     return (
       <div className="flex h-screen items-center justify-center">
         <div>Loading...</div>
@@ -51,7 +42,6 @@ function ChatPageComponent() {
   }
 
   if (!threads) {
-    console.log("[ChatPage] No threads available, provider:", provider);
     return (
       <div className="flex h-screen items-center justify-center">
         <div>No threads available (Provider: {provider || "unknown"})</div>
@@ -59,7 +49,6 @@ function ChatPageComponent() {
     );
   }
 
-  console.log("[ChatPage] Rendering DefaultView with threads:", threads.length);
   return (
     <div className="bg-background h-screen">
       <Suspense>

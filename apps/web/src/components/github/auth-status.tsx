@@ -25,10 +25,8 @@ function AuthStatusContent() {
   useEffect(() => {
     // Check if we should redirect to chat
     if (authenticatedProvider === "gitlab" && isGitLabAuth) {
-      console.log("redirecting to chat - gitlab authenticated");
       router.push("/chat");
     } else if (authenticatedProvider === "github" && githubToken) {
-      console.log("redirecting to chat - github authenticated");
       router.push("/chat");
     }
   }, [authenticatedProvider, githubToken, isGitLabAuth, router]);

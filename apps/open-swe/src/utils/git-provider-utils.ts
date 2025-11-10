@@ -30,7 +30,6 @@ function getProviderToken(config: GraphConfig, providerType: ProviderType): stri
   } else {
     // GitLab - need to decrypt the token
     const encryptedGitlabToken = (config.configurable as any)?.["x-gitlab-access-token"];
-    console.log("[getProviderToken] Encrypted GitLab token:", encryptedGitlabToken?.substring(0, 20) + "...");
 
     if (!encryptedGitlabToken) {
       throw new Error("GitLab access token not found in config");
@@ -42,7 +41,6 @@ function getProviderToken(config: GraphConfig, providerType: ProviderType): stri
     }
 
     const decryptedToken = decryptSecret(encryptedGitlabToken, encryptionKey);
-    console.log("[getProviderToken] Decrypted token starts with:", decryptedToken.substring(0, 10) + "...");
     return decryptedToken;
   }
 }
