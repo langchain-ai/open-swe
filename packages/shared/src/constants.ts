@@ -25,6 +25,21 @@ export const PROGRAMMER_GRAPH_ID = "programmer";
 export const GITHUB_USER_ID_HEADER = "x-github-user-id";
 export const GITHUB_USER_LOGIN_HEADER = "x-github-user-login";
 
+// GitLab-specific constants
+export const GITLAB_TOKEN_COOKIE = "x-gitlab-access-token";
+export const GITLAB_BASE_URL = "x-gitlab-base-url";
+export const GITLAB_USER_ID_HEADER = "x-gitlab-user-id";
+export const GITLAB_USER_LOGIN_HEADER = "x-gitlab-user-login";
+export const GITLAB_WEBHOOK_TOKEN = "x-gitlab-webhook-token";
+
+// Provider-agnostic constants
+export const GIT_PROVIDER_TYPE = "x-git-provider-type";
+export const GIT_PROVIDER_TOKEN = "x-git-provider-token";
+export const GIT_PROVIDER_USER_ID = "x-git-provider-user-id";
+export const GIT_PROVIDER_USER_LOGIN = "x-git-provider-user-login";
+export const GIT_PROVIDER_INSTALLATION_ID = "x-git-provider-installation-id";
+export const GIT_PROVIDER_INSTALLATION_NAME = "x-git-provider-installation-name";
+
 export const DEFAULT_MCP_SERVERS = {
   "langgraph-docs-mcp": {
     command: "uvx",

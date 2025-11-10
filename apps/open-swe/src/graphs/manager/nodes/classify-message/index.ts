@@ -19,9 +19,9 @@ import { LLMTask } from "@openswe/shared/open-swe/llm-task";
 import { Command, END } from "@langchain/langgraph";
 import { getMessageContentString } from "@openswe/shared/messages";
 import {
-  createIssue,
   createIssueComment,
-} from "../../../../utils/github/api.js";
+} from "../../../../utils/git-provider-utils.js";
+import { createIssue } from "../../../../utils/github/api.js";
 import { getGitHubTokensFromConfig } from "../../../../utils/github-tokens.js";
 import { createIssueFieldsFromMessages } from "../../utils/generate-issue-fields.js";
 import {
@@ -281,8 +281,7 @@ export async function classifyMessage(
         repo: state.targetRepository.repo,
         issueNumber: githubIssueId,
         body: getMessageContentString(message.content),
-        githubToken: githubAccessToken,
-      });
+      }, config);
       if (!createdIssue?.id) {
         throw new Error("Failed to create issue comment");
       }

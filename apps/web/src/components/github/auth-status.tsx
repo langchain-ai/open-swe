@@ -9,11 +9,13 @@ import { useGitHubToken } from "@/hooks/useGitHubToken";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { GitHubAppProvider } from "@/providers/GitHubApp";
 import { useRouter } from "next/navigation";
+import { useGitLabAuth } from "@/hooks/useGitLabAuth";
 
 function AuthStatusContent() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<"github" | "gitlab">("github");
 
   const {
     token: githubToken,
@@ -25,6 +27,8 @@ function AuthStatusContent() {
     isInstalled: hasGitHubAppInstalled,
     isLoading: isCheckingAppInstallation,
   } = useGitHubAppProvider();
+
+  const { isAuthenticated: isGitLabAuth, loading: isGitLabLoading } = useGitLabAuth();
 
   useEffect(() => {
     checkAuthStatus();
@@ -44,11 +48,11 @@ function AuthStatusContent() {
   ]);
 
   useEffect(() => {
-    if (githubToken) {
+    if (githubToken || isGitLabAuth) {
       console.log("redirecting to chat");
       router.push("/chat");
     }
-  }, [githubToken]);
+  }, [githubToken, isGitLabAuth]);
 
   const checkAuthStatus = async () => {
     try {
@@ -63,7 +67,11 @@ function AuthStatusContent() {
 
   const handleLogin = () => {
     setIsLoading(true);
-    window.location.href = "/api/auth/github/login";
+    if (selectedProvider === "github") {
+      window.location.href = "/api/auth/github/login";
+    } else {
+      window.location.href = "/api/auth/gitlab/login";
+    }
   };
 
   const handleInstallGitHubApp = () => {
@@ -71,10 +79,10 @@ function AuthStatusContent() {
     window.location.href = "/api/github/installation";
   };
 
-  const showGetStarted = !isAuth;
+  const showGetStarted = !isAuth && !isGitLabAuth;
   const showInstallApp =
-    !showGetStarted && !hasGitHubAppInstalled && !isTokenLoading;
-  const showLoading = !showGetStarted && !showInstallApp && !githubToken;
+    !showGetStarted && selectedProvider === "github" && !hasGitHubAppInstalled && !isTokenLoading;
+  const showLoading = !showGetStarted && !showInstallApp && !githubToken && !isGitLabAuth;
 
   useEffect(() => {
     if (!showGetStarted && !showInstallApp && !showLoading) {
@@ -94,17 +102,53 @@ function AuthStatusContent() {
               </h1>
             </div>
             <p className="text-muted-foreground">
-              Connect your GitHub account to get started with Open SWE.
+              Connect your {selectedProvider === "github" ? "GitHub" : "GitLab"} account to get started with Open SWE.
             </p>
+
+            {/* Provider Selector */}
+            <div className="flex gap-2 rounded-md border p-1">
+              <button
+                onClick={() => setSelectedProvider("github")}
+                className={`flex-1 rounded px-3 py-2 text-sm font-medium transition-colors ${
+                  selectedProvider === "github"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <GitHubSVG width="16" height="16" />
+                  GitHub
+                </div>
+              </button>
+              <button
+                onClick={() => setSelectedProvider("gitlab")}
+                className={`flex-1 rounded px-3 py-2 text-sm font-medium transition-colors ${
+                  selectedProvider === "gitlab"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.955 13.587l-1.342-4.135-2.664-8.189a.455.455 0 00-.867 0L16.418 9.45H7.582L4.919 1.263a.455.455 0 00-.867 0L1.388 9.452.046 13.587a.924.924 0 00.331 1.031l11.625 8.445 11.625-8.445a.92.92 0 00.328-1.031z"/>
+                  </svg>
+                  GitLab
+                </div>
+              </button>
+            </div>
+
             <Button
               onClick={handleLogin}
               disabled={isLoading}
             >
-              <GitHubSVG
-                width="16"
-                height="16"
-              />
-              {isLoading ? "Connecting..." : "Connect GitHub"}
+              {selectedProvider === "github" ? (
+                <GitHubSVG width="16" height="16" />
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M23.955 13.587l-1.342-4.135-2.664-8.189a.455.455 0 00-.867 0L16.418 9.45H7.582L4.919 1.263a.455.455 0 00-.867 0L1.388 9.452.046 13.587a.924.924 0 00.331 1.031l11.625 8.445 11.625-8.445a.92.92 0 00.328-1.031z"/>
+                </svg>
+              )}
+              {isLoading ? "Connecting..." : `Connect ${selectedProvider === "github" ? "GitHub" : "GitLab"}`}
             </Button>
           </div>
         </div>

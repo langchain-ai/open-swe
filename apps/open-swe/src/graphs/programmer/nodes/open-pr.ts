@@ -15,7 +15,7 @@ import {
 import {
   createPullRequest,
   updatePullRequest,
-} from "../../../utils/github/api.js";
+} from "../../../utils/git-provider-utils.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { z } from "zod";
 import {
@@ -221,9 +221,8 @@ export async function openPullRequest(
       headBranch: branchName,
       title,
       body: prBody,
-      githubInstallationToken,
       baseBranch: state.targetRepository.branch,
-    });
+    }, config) as any;
   } else {
     // Ensure the PR is ready for review
     pullRequest = await updatePullRequest({
@@ -232,8 +231,7 @@ export async function openPullRequest(
       title,
       body: prBody,
       pullNumber: prForTask,
-      githubInstallationToken,
-    });
+    }, config) as any;
   }
 
   let sandboxDeleted = false;

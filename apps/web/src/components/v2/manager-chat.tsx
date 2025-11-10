@@ -92,6 +92,8 @@ function extractResponseFromMessage(message: Message): string {
   }
   if (
     Array.isArray(message.content) &&
+    message.content.length > 0 &&
+    message.content[0] &&
     ["input_json_delta", "tool_use"].includes(
       message.content[0].type as string,
     ) &&

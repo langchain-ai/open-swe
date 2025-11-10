@@ -21,6 +21,17 @@
         "x-github-installation-name",
         "x-github-installation-id",
         "x-github-pat",
+        "x-gitlab-access-token",
+        "x-gitlab-base-url",
+        "x-gitlab-user-id",
+        "x-gitlab-user-login",
+        "x-gitlab-webhook-token",
+        "x-git-provider-type",
+        "x-git-provider-token",
+        "x-git-provider-user-id",
+        "x-git-provider-user-login",
+        "x-git-provider-installation-id",
+        "x-git-provider-installation-name",
         "x-local-mode"
       ]
     }

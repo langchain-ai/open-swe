@@ -4,7 +4,8 @@ import {
 } from "@openswe/shared/open-swe/planner/types";
 import { Command } from "@langchain/langgraph";
 import { getGitHubTokensFromConfig } from "../../../utils/github-tokens.js";
-import { getIssue, getIssueComments } from "../../../utils/github/api.js";
+import { getIssue } from "../../../utils/git-provider-utils.js";
+import { getIssueComments } from "../../../utils/github/api.js";
 import { v4 as uuidv4 } from "uuid";
 import {
   AIMessage,
@@ -50,7 +51,12 @@ export async function prepareGraphState(
     githubInstallationToken,
   };
   const [issue, comments] = await Promise.all([
-    getIssue(baseGetIssueInputs),
+    getIssue(
+      state.targetRepository.owner,
+      state.targetRepository.repo,
+      state.githubIssueId,
+      config,
+    ),
     getIssueComments({
       ...baseGetIssueInputs,
       filterBotComments: true,
@@ -66,7 +72,7 @@ export async function prepareGraphState(
       messages: [
         new HumanMessage({
           id: uuidv4(),
-          content: getMessageContentFromIssue(issue),
+          content: getMessageContentFromIssue(issue as any),
           additional_kwargs: {
             githubIssueId: state.githubIssueId,
             isOriginalIssue: true,
