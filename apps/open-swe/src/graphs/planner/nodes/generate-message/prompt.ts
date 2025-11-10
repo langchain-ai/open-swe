@@ -87,7 +87,7 @@ Your sole objective in this phase is to gather comprehensive context about the c
     {LOCAL_MODE_NOTE}
 
     <codebase_tree>
-        Generated via: \`git ls-files | tree --fromfile -L 3\`:
+        Generated via: \`git ls-files | tree --fromfile -L 5\` (tree goes 5 levels deep):
         {CODEBASE_TREE}
     </codebase_tree>
 </workspace_information>
