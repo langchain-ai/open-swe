@@ -24,6 +24,7 @@
     "@langchain/langgraph-sdk": "^0.0.95",
     "dockerode": "^4.0.2",
     "jsonwebtoken": "^9.0.2",
+    "yaml": "^2.6.0",
     "zod": "^3.25.32"
   },
   "devDependencies": {
