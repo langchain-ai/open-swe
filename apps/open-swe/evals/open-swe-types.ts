@@ -26,11 +26,22 @@ export interface OpenSWEInput {
 /**
  * Process execution options
  */
+export interface FeatureScopeOptions {
+  enabled?: boolean;
+  graphPath?: string;
+  baseBranch?: string;
+  headBranch?: string;
+  changedPaths?: string[];
+  artifactPaths?: string[];
+  fallbackToWorkspace?: boolean;
+}
+
 export interface ExecOptions {
   command: string;
   workingDir: string;
   env: Record<string, string> | undefined;
   timeoutSec: number;
+  featureScope?: FeatureScopeOptions;
 }
 
 /**
