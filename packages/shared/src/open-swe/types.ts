@@ -11,7 +11,12 @@ import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 import { tokenDataReducer } from "../caching.js";
-import { featureNodeSchema } from "../feature-graph/types.js";
+import {
+  featureNodeSchema,
+  type FeatureNode,
+} from "../feature-graph/types.js";
+
+const featureNodeListSchema = z.array(featureNodeSchema);
 
 const REASONING_EFFORT_OPTIONS = [
   { label: "Low", value: "low" },
@@ -193,21 +198,38 @@ export const GraphAnnotation = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
-  features: withLangGraph(z.array(featureNodeSchema).optional(), {
-    reducer: {
-      schema: z.array(featureNodeSchema).optional(),
-      fn: (state, update) => update ?? state,
-    },
-    default: () => [],
-  }),
-  featureDependencies: withLangGraph(
-    z.array(featureNodeSchema).optional(),
+  features: withLangGraph<
+    FeatureNode[],
+    FeatureNode[] | undefined,
+    typeof featureNodeListSchema
+  >(
+    featureNodeListSchema,
     {
       reducer: {
-        schema: z.array(featureNodeSchema).optional(),
-        fn: (state, update) => update ?? state,
+        schema: featureNodeListSchema.optional(),
+        fn: (
+          state: FeatureNode[],
+          update: FeatureNode[] | undefined,
+        ): FeatureNode[] => update ?? state,
       },
-      default: () => [],
+      default: (): FeatureNode[] => [],
+    },
+  ),
+  featureDependencies: withLangGraph<
+    FeatureNode[],
+    FeatureNode[] | undefined,
+    typeof featureNodeListSchema
+  >(
+    featureNodeListSchema,
+    {
+      reducer: {
+        schema: featureNodeListSchema.optional(),
+        fn: (
+          state: FeatureNode[],
+          update: FeatureNode[] | undefined,
+        ): FeatureNode[] => update ?? state,
+      },
+      default: (): FeatureNode[] => [],
     },
   ),
   activeFeatureIds: withLangGraph(z.array(z.string()).optional(), {
