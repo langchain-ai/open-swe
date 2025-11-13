@@ -1,6 +1,18 @@
 import { v4 as uuidv4 } from "uuid";
 import { PlanItem, Task, TaskPlan, PlanRevision } from "./types.js";
 
+const normalizeFeatureIds = (featureIds?: string[]): string[] | undefined => {
+  if (!featureIds?.length) return undefined;
+  const deduped = new Set<string>();
+  for (const featureId of featureIds) {
+    const trimmed = featureId.trim();
+    if (trimmed) {
+      deduped.add(trimmed);
+    }
+  }
+  return deduped.size > 0 ? Array.from(deduped) : undefined;
+};
+
 /**
  * Creates a new task with the provided plan items.
  * Can either add to an existing TaskPlan or create a brand new one.
@@ -19,14 +31,28 @@ export function createNewTask(
   options?: {
     existingTaskPlan?: TaskPlan;
     parentTaskId?: string;
+    featureIds?: string[];
   },
 ): TaskPlan {
   const { existingTaskPlan, parentTaskId } = options ?? {};
+  const featureIds = normalizeFeatureIds(options?.featureIds);
+
+  const planItemsWithFeatures = planItems.map((item) => {
+    const itemFeatureIds =
+      item.featureIds && item.featureIds.length > 0
+        ? normalizeFeatureIds(item.featureIds)
+        : featureIds;
+
+    return {
+      ...item,
+      ...(itemFeatureIds ? { featureIds: itemFeatureIds } : {}),
+    };
+  });
 
   // Create the initial plan revision
   const initialRevision: PlanRevision = {
     revisionIndex: 0,
-    plans: planItems,
+    plans: planItemsWithFeatures,
     createdAt: Date.now(),
     createdBy: "agent",
   };
@@ -42,6 +68,7 @@ export function createNewTask(
     planRevisions: [initialRevision],
     activeRevisionIndex: 0,
     parentTaskId,
+    ...(featureIds ? { featureIds } : {}),
   };
 
   // If there's an existing task plan, add the new task to it
@@ -84,10 +111,23 @@ export function updateTaskPlanItems(
 
   const task = taskPlan.tasks[taskIndex];
 
+  const taskFeatureIds = normalizeFeatureIds(task.featureIds);
+  const planItemsWithFeatures = planItems.map((item) => {
+    const itemFeatureIds =
+      item.featureIds && item.featureIds.length > 0
+        ? normalizeFeatureIds(item.featureIds)
+        : taskFeatureIds;
+
+    return {
+      ...item,
+      ...(itemFeatureIds ? { featureIds: itemFeatureIds } : {}),
+    };
+  });
+
   // Create a new revision with the updated plan items
   const newRevision: PlanRevision = {
     revisionIndex: task.planRevisions.length,
-    plans: planItems,
+    plans: planItemsWithFeatures,
     createdAt: Date.now(),
     createdBy,
   };

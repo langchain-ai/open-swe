@@ -87,6 +87,7 @@ const taskPlan: TaskPlan = {
       title: "Expand login tests",
       createdAt: 1,
       completed: false,
+      featureIds: ["feature-login"],
       planRevisions: [
         {
           revisionIndex: 0,
@@ -95,11 +96,13 @@ const taskPlan: TaskPlan = {
               index: 0,
               plan: "Update apps/web/src/features/login/__tests__/login.test.ts with happy path coverage",
               completed: false,
+              featureIds: ["feature-login"],
             },
             {
               index: 1,
               plan: "Document changes in docs/auth/login.md",
               completed: false,
+              featureIds: ["feature-login"],
             },
           ],
           createdAt: 1,
@@ -115,6 +118,7 @@ const taskPlan: TaskPlan = {
       title: "Orders e2e tests",
       createdAt: 2,
       completed: false,
+      featureIds: ["feature-orders"],
       planRevisions: [
         {
           revisionIndex: 0,
@@ -123,6 +127,7 @@ const taskPlan: TaskPlan = {
               index: 0,
               plan: "Author services/orders/tests/order.spec.ts to cover the order flow",
               completed: false,
+              featureIds: ["feature-orders"],
             },
           ],
           createdAt: 2,

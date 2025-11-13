@@ -23,6 +23,7 @@ import { Command } from "@langchain/langgraph";
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import {
   FAILED_TO_GENERATE_TREE_MESSAGE,
+  FeatureTreeOptions,
   getCodebaseTree,
 } from "../../../utils/tree.js";
 import { createInstallDependenciesTool } from "../../../tools/install-dependencies.js";
@@ -32,6 +33,8 @@ import { getMcpTools } from "../../../utils/mcp-client.js";
 import { shouldDiagnoseError } from "../../../utils/tool-message-error.js";
 import { processToolCallContent } from "../../../utils/tool-output-processing.js";
 import { filterUnsafeCommands } from "../../../utils/command-evaluation.js";
+import { getActiveTask } from "@openswe/shared/open-swe/tasks";
+import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 
 const logger = createLogger(LogLevel.INFO, "TakeAction");
 
@@ -221,7 +224,75 @@ export async function takeAction(
     ...toolCallResults,
   ]);
 
-  const codebaseTree = await getCodebaseTree(config);
+  const featureLookup = new Map<string, FeatureNode>();
+  const combinedFeatures: FeatureNode[] = [];
+  for (const feature of [
+    ...(state.features ?? []),
+    ...(state.featureDependencies ?? []),
+  ]) {
+    if (!feature?.id) continue;
+    if (!featureLookup.has(feature.id)) {
+      featureLookup.set(feature.id, feature);
+      combinedFeatures.push(feature);
+    }
+  }
+
+  const aggregatedFeatureIds = new Set<string>();
+  for (const featureId of state.activeFeatureIds ?? []) {
+    const trimmed = featureId.trim();
+    if (trimmed) {
+      aggregatedFeatureIds.add(trimmed);
+    }
+  }
+
+  if (state.taskPlan) {
+    try {
+      const activeTask = getActiveTask(state.taskPlan);
+      for (const featureId of activeTask.featureIds ?? []) {
+        const trimmed = featureId.trim();
+        if (trimmed) {
+          aggregatedFeatureIds.add(trimmed);
+        }
+      }
+      const activeRevision = activeTask.planRevisions[activeTask.activeRevisionIndex];
+      if (activeRevision) {
+        for (const item of activeRevision.plans) {
+          for (const featureId of item.featureIds ?? []) {
+            const trimmed = featureId.trim();
+            if (trimmed) {
+              aggregatedFeatureIds.add(trimmed);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.debug("Unable to resolve active task for feature annotations", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const featureIds = aggregatedFeatureIds.size
+    ? Array.from(aggregatedFeatureIds)
+    : combinedFeatures
+        .map((feature) => feature?.id?.trim())
+        .filter((id): id is string => Boolean(id));
+
+  const featureTreeOptions: FeatureTreeOptions | undefined =
+    combinedFeatures.length > 0 && featureIds.length > 0
+      ? {
+          features: combinedFeatures,
+          featureIds,
+          mode: "annotate",
+        }
+      : undefined;
+
+  const codebaseTree = await getCodebaseTree(
+    config,
+    undefined,
+    undefined,
+    featureTreeOptions,
+  );
   // If the codebase tree failed to generate, fallback to the previous codebase tree, or if that's not defined, use the failed to generate message.
   const codebaseTreeToReturn =
     codebaseTree === FAILED_TO_GENERATE_TREE_MESSAGE

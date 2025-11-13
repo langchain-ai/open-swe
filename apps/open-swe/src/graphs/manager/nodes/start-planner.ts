@@ -14,7 +14,11 @@ import {
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { PlannerGraphUpdate } from "@openswe/shared/open-swe/planner/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
-import { getRecentUserRequest } from "../../../utils/user-request.js";
+import {
+  getInitialUserRequestDetails,
+  getRecentUserRequest,
+  getRecentUserRequestDetails,
+} from "../../../utils/user-request.js";
 import { StreamMode } from "@langchain/langgraph-sdk";
 
 const logger = createLogger(LogLevel.INFO, "StartPlanner");
@@ -33,6 +37,10 @@ export async function startPlanner(
     returnFullMessage: true,
     config,
   });
+  const initialRequestDetails = getInitialUserRequestDetails(state.messages);
+  const followupRequestDetails = getRecentUserRequestDetails(state.messages, {
+    config,
+  });
 
   const localMode = isLocalMode(config);
   const defaultHeaders: Record<string, string> = localMode
@@ -44,8 +52,16 @@ export async function startPlanner(
       defaultHeaders,
     });
 
-    const activeFeatureIds = state.activeFeatureIds?.filter(
-      (featureId) => featureId.trim().length > 0,
+    const aggregatedFeatureIds = Array.from(
+      new Set(
+        [
+          ...(state.activeFeatureIds ?? []),
+          ...initialRequestDetails.featureIds,
+          ...followupRequestDetails.featureIds,
+        ]
+          .map((featureId) => featureId.trim())
+          .filter((featureId) => featureId.length > 0),
+      ),
     );
 
     const runInput: PlannerGraphUpdate = {
@@ -56,8 +72,8 @@ export async function startPlanner(
       autoAcceptPlan: state.autoAcceptPlan,
       workspacePath: state.workspacePath,
       ...(followupMessage ? { messages: [followupMessage] } : {}),
-      ...(activeFeatureIds && activeFeatureIds.length > 0
-        ? { activeFeatureIds }
+      ...(aggregatedFeatureIds.length > 0
+        ? { activeFeatureIds: aggregatedFeatureIds }
         : {}),
     };
 
@@ -89,6 +105,9 @@ export async function startPlanner(
         threadId: plannerThreadId,
         runId: run.run_id,
       },
+      ...(aggregatedFeatureIds.length > 0
+        ? { activeFeatureIds: aggregatedFeatureIds }
+        : {}),
     };
   } catch (error) {
     logger.error("Failed to start planner", {
