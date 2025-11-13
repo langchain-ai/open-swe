@@ -28,7 +28,8 @@
       "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"],
       "@openswe/sandbox-docker": ["packages/sandbox-docker/src/index.ts"],
       "@openswe/sandbox-docker/*": ["packages/sandbox-docker/src/*"]
-    }
+    },
+    "rootDir": "src"
   },
   "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
   "exclude": ["node_modules", "dist"]

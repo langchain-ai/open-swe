@@ -44,34 +44,40 @@ const isPlainObject = (value: unknown): value is PlainObject =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const isFeatureNode = (entry: FeatureNodeEntry): entry is FeatureNode =>
-  Object.prototype.hasOwnProperty.call(entry, "id");
+  typeof entry === "object" && entry !== null && "id" in entry;
 
 const isFeatureNodeSource = (
   entry: FeatureNodeEntry,
 ): entry is { source: string } =>
-  Object.prototype.hasOwnProperty.call(entry, "source") &&
-  !Object.prototype.hasOwnProperty.call(entry, "manifest");
+  typeof entry === "object" &&
+  entry !== null &&
+  "source" in entry &&
+  !("manifest" in entry);
 
 const isFeatureNodeManifest = (
   entry: FeatureNodeEntry,
 ): entry is { manifest: string } =>
-  Object.prototype.hasOwnProperty.call(entry, "manifest");
+  typeof entry === "object" && entry !== null && "manifest" in entry;
 
 const isConcreteEdge = (entry: FeatureEdgeEntry): entry is EdgeLike =>
-  Object.prototype.hasOwnProperty.call(entry, "target") &&
-  Object.prototype.hasOwnProperty.call(entry, "type");
+  typeof entry === "object" &&
+  entry !== null &&
+  "target" in entry &&
+  "type" in entry;
 
 const isEdgeSourceReference = (
   entry: FeatureEdgeEntry,
 ): entry is { source: string } =>
-  Object.prototype.hasOwnProperty.call(entry, "source") &&
-  !Object.prototype.hasOwnProperty.call(entry, "target") &&
-  !Object.prototype.hasOwnProperty.call(entry, "manifest");
+  typeof entry === "object" &&
+  entry !== null &&
+  "source" in entry &&
+  !("target" in entry) &&
+  !("manifest" in entry);
 
 const isEdgeManifestReference = (
   entry: FeatureEdgeEntry,
 ): entry is { manifest: string } =>
-  Object.prototype.hasOwnProperty.call(entry, "manifest");
+  typeof entry === "object" && entry !== null && "manifest" in entry;
 
 const getNodeEntryKey = (entry: FeatureNodeEntry): string => {
   if (isFeatureNodeManifest(entry)) {
@@ -99,7 +105,8 @@ const getEdgeEntryKey = (entry: FeatureEdgeEntry): string => {
   }
 
   if (isConcreteEdge(entry)) {
-    return `edge:${entry.source}->${entry.target}#${entry.type}`;
+    const concrete = entry as FeatureEdge;
+    return `edge:${concrete.source}->${concrete.target}#${concrete.type}`;
   }
 
   throw new Error("Unsupported feature edge entry encountered");
