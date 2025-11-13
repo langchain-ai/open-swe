@@ -6,6 +6,9 @@
     },
     "dev": {
       "dependsOn": ["^dev"]
+    },
+    "feature-graph:validate": {
+      "cache": false
     }
   }
 }

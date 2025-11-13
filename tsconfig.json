@@ -21,6 +21,8 @@
     "types": ["jest", "node"],
     "resolveJsonModule": true,
     "paths": {
+      "@openswe/shared": ["packages/shared/src/index.ts"],
+      "@openswe/shared/*": ["packages/shared/src/*"],
       "@openswe/sandbox-core": ["packages/sandbox-core/src/index.ts"],
       "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"]
     }
