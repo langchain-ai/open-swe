@@ -371,9 +371,16 @@ const collectFeatureKeywords = (feature: FeatureNode): string[] => {
 const collectTaskTextRaw = (task: Task): string[] => {
   const values: string[] = [task.request, task.title ?? "", task.summary ?? ""];
 
+  if (task.featureIds?.length) {
+    values.push(...task.featureIds);
+  }
+
   for (const revision of task.planRevisions) {
     for (const plan of revision.plans) {
       values.push(plan.plan, plan.summary ?? "");
+      if (plan.featureIds?.length) {
+        values.push(...plan.featureIds);
+      }
     }
   }
 
@@ -406,6 +413,25 @@ const taskRelatesToFeature = (
   );
 };
 
+const hasFeatureId = (ids: string[] | undefined, candidate: string): boolean =>
+  ids?.some((id) => normalize(id) === candidate) ?? false;
+
+const taskMentionsFeatureId = (task: Task, candidate: string): boolean => {
+  if (hasFeatureId(task.featureIds, candidate)) {
+    return true;
+  }
+
+  for (const revision of task.planRevisions) {
+    for (const plan of revision.plans) {
+      if (hasFeatureId(plan.featureIds, candidate)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
 const mapTasksToFeatures = (
   tasks: Task[],
   features: FeatureNode[],
@@ -415,8 +441,13 @@ const mapTasksToFeatures = (
   if (tasks.length === 0) return mapping;
 
   for (const feature of features) {
+    const normalizedId = normalize(feature.id);
     const keywords = collectFeatureKeywords(feature);
-    const related = tasks.filter((task) => taskRelatesToFeature(task, keywords));
+    const related = tasks.filter(
+      (task) =>
+        taskMentionsFeatureId(task, normalizedId) ||
+        taskRelatesToFeature(task, keywords),
+    );
     if (related.length > 0) {
       mapping.set(feature.id, related);
     }

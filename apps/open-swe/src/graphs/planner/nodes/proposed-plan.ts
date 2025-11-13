@@ -16,8 +16,8 @@ import {
 import { getSandboxWithErrorHandling } from "../../../utils/sandbox.js";
 import { createNewTask } from "@openswe/shared/open-swe/tasks";
 import {
-  getInitialUserRequest,
-  getRecentUserRequest,
+  getInitialUserRequestDetails,
+  getRecentUserRequestDetails,
 } from "../../../utils/user-request.js";
 import {
   PLAN_INTERRUPT_ACTION_TITLE,
@@ -164,9 +164,21 @@ export async function interruptProposedPlan(
   });
 
   let planItems: PlanItem[];
-  const userRequest = getInitialUserRequest(state.messages);
-  const userFollowupRequest = getRecentUserRequest(state.messages);
-  const userTaskRequest = userFollowupRequest || userRequest;
+  const initialRequestDetails = getInitialUserRequestDetails(state.messages);
+  const followupRequestDetails = getRecentUserRequestDetails(state.messages);
+  const userTaskRequest =
+    followupRequestDetails.text || initialRequestDetails.text;
+  const combinedFeatureIds = Array.from(
+    new Set(
+      [
+        ...(state.activeFeatureIds ?? []),
+        ...initialRequestDetails.featureIds,
+        ...followupRequestDetails.featureIds,
+      ]
+        .map((featureId) => featureId.trim())
+        .filter((featureId) => featureId.length > 0),
+    ),
+  );
   const runInput: GraphUpdate = {
     contextGatheringNotes: state.contextGatheringNotes,
     branchName: state.branchName,
@@ -176,7 +188,9 @@ export async function interruptProposedPlan(
     documentCache: state.documentCache,
     features: state.features,
     featureDependencies: state.featureDependencies,
-    activeFeatureIds: state.activeFeatureIds,
+    ...(combinedFeatureIds.length > 0
+      ? { activeFeatureIds: combinedFeatureIds }
+      : {}),
   };
 
   if (state.autoAcceptPlan) {
@@ -194,12 +208,18 @@ export async function interruptProposedPlan(
       index,
       plan: p,
       completed: false,
+      ...(combinedFeatureIds.length > 0
+        ? { featureIds: combinedFeatureIds }
+        : {}),
     }));
     runInput.taskPlan = createNewTask(
       userTaskRequest,
       state.proposedPlanTitle,
       planItems,
-      { existingTaskPlan: state.taskPlan },
+      {
+        existingTaskPlan: state.taskPlan,
+        featureIds: combinedFeatureIds,
+      },
     );
 
     return await startProgrammerRun({
@@ -267,13 +287,19 @@ export async function interruptProposedPlan(
       index,
       plan: p,
       completed: false,
+      ...(combinedFeatureIds.length > 0
+        ? { featureIds: combinedFeatureIds }
+        : {}),
     }));
 
     runInput.taskPlan = createNewTask(
       userTaskRequest,
       state.proposedPlanTitle,
       planItems,
-      { existingTaskPlan: state.taskPlan },
+      {
+        existingTaskPlan: state.taskPlan,
+        featureIds: combinedFeatureIds,
+      },
     );
 
     // Update the comment to notify the user that the plan was accepted (only if not in local mode)
@@ -289,13 +315,19 @@ export async function interruptProposedPlan(
       index,
       plan: p,
       completed: false,
+      ...(combinedFeatureIds.length > 0
+        ? { featureIds: combinedFeatureIds }
+        : {}),
     }));
 
     runInput.taskPlan = createNewTask(
       userTaskRequest,
       state.proposedPlanTitle,
       planItems,
-      { existingTaskPlan: state.taskPlan },
+      {
+        existingTaskPlan: state.taskPlan,
+        featureIds: combinedFeatureIds,
+      },
     );
 
     // Update the comment to notify the user that the plan was edited (only if not in local mode)

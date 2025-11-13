@@ -53,6 +53,13 @@ export type PlanItem = {
    * A summary of the completed task.
    */
   summary?: string;
+  /**
+   * Feature identifiers that are relevant to this plan item.
+   * These identifiers map back to entries in the feature graph
+   * so downstream consumers can reason about scope and
+   * completion state by feature.
+   */
+  featureIds?: string[];
 };
 
 export type PlanRevision = {
@@ -125,6 +132,13 @@ export type Task = {
    * The pull request number associated with this task
    */
   pullRequestNumber?: number;
+  /**
+   * Feature identifiers that were active when the task was
+   * created. This is derived from the user request and manager
+   * state so downstream components can understand which
+   * features the task covers.
+   */
+  featureIds?: string[];
 };
 
 export type TaskPlan = {
