@@ -1,5 +1,6 @@
 import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
+import type { FeatureGraph } from "../../feature-graph/graph.js";
 import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
@@ -43,6 +44,14 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * Handle to the feature graph declared within the target workspace.
+   */
+  featureGraph: z.custom<FeatureGraph>().optional(),
+  /**
+   * Feature identifiers that should be considered active for the current run.
+   */
+  activeFeatureIds: z.array(z.string()).optional(),
 });
 
 export type ManagerGraphState = z.infer<typeof ManagerGraphStateObj>;

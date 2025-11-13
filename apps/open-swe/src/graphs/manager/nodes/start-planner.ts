@@ -44,6 +44,10 @@ export async function startPlanner(
       defaultHeaders,
     });
 
+    const activeFeatureIds = state.activeFeatureIds?.filter(
+      (featureId) => featureId.trim().length > 0,
+    );
+
     const runInput: PlannerGraphUpdate = {
       issueId: state.issueId,
       targetRepository: state.targetRepository,
@@ -52,6 +56,9 @@ export async function startPlanner(
       autoAcceptPlan: state.autoAcceptPlan,
       workspacePath: state.workspacePath,
       ...(followupMessage ? { messages: [followupMessage] } : {}),
+      ...(activeFeatureIds && activeFeatureIds.length > 0
+        ? { activeFeatureIds }
+        : {}),
     };
 
     const run = await langGraphClient.runs.create(

@@ -30,6 +30,15 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       fn: (_state, update) => update,
     },
   }),
+  /**
+   * Feature identifiers selected by the manager to scope planning.
+   */
+  activeFeatureIds: withLangGraph(z.array(z.string()).optional(), {
+    reducer: {
+      schema: z.array(z.string()).optional(),
+      fn: (_state, update) => update,
+    },
+  }),
   issueId: withLangGraph(z.custom<number>().optional(), {
     reducer: {
       schema: z.custom<number>().optional(),
