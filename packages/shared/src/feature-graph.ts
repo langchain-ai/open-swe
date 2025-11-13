@@ -1,3 +1,4 @@
 export * from "./feature-graph/types.js";
 export * from "./feature-graph/loader.js";
 export * from "./feature-graph/graph.js";
+export * from "./feature-graph/mappings.js";
