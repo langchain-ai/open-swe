@@ -1,0 +1,7 @@
+version: 1
+nodes:
+  - id: sample-feature
+    source: ../nodes/sample-feature.yaml
+  - manifest: ./nodes.manifest.yaml
+edges: []
+artifacts: []

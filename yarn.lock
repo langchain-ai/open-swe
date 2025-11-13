@@ -3220,6 +3220,8 @@ __metadata:
     "@langchain/mcp-adapters": ^0.5.2
     "@langchain/openai": ^0.5.10
     "@mendable/firecrawl-js": ^1.29.1
+    "@openswe/sandbox-core": "*"
+    "@openswe/sandbox-docker": "*"
     "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.8
     "@types/bcrypt": ^6.0.0
@@ -3293,13 +3295,13 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@openswe/sandbox-core@workspace:*, @openswe/sandbox-core@workspace:packages/sandbox-core":
+"@openswe/sandbox-core@*, @openswe/sandbox-core@workspace:*, @openswe/sandbox-core@workspace:packages/sandbox-core":
   version: 0.0.0-use.local
   resolution: "@openswe/sandbox-core@workspace:packages/sandbox-core"
   languageName: unknown
   linkType: soft
 
-"@openswe/sandbox-docker@workspace:packages/sandbox-docker":
+"@openswe/sandbox-docker@*, @openswe/sandbox-docker@workspace:packages/sandbox-docker":
   version: 0.0.0-use.local
   resolution: "@openswe/sandbox-docker@workspace:packages/sandbox-docker"
   dependencies:
@@ -3417,6 +3419,7 @@ __metadata:
     typescript-eslint: ^8.22.0
     use-stick-to-bottom: ^1.0.46
     uuid: ^11.1.0
+    vitest: ^3.2.3
     zod: ^3.25.32
     zustand: ^5.0.5
   languageName: unknown
@@ -14808,6 +14811,7 @@ __metadata:
   dependencies:
     turbo: ^2.5.0
     typescript: ^5
+    yaml: ^2.6.0
   languageName: unknown
   linkType: soft
 
@@ -19602,6 +19606,15 @@ __metadata:
   bin:
     yaml: bin.mjs
   checksum: 66f103ca5a2f02dac0526895cc7ae7626d91aa8c43aad6fdcff15edf68b1199be4012140b390063877913441aaa5288fdf57eca30e06268a8282dd741525e626
+  languageName: node
+  linkType: hard
+
+"yaml@npm:^2.6.0":
+  version: 2.8.1
+  resolution: "yaml@npm:2.8.1"
+  bin:
+    yaml: bin.mjs
+  checksum: 35b46150d48bc1da2fd5b1521a48a4fa36d68deaabe496f3c3fa9646d5796b6b974f3930a02c4b5aee6c85c860d7d7f79009416724465e835f40b87898c36de4
   languageName: node
   linkType: hard
 

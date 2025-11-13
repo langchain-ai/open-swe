@@ -1,0 +1,13 @@
+id: sample-feature
+name: Sample Feature
+description: Placeholder feature node demonstrating the schema.
+status: proposed
+group: examples
+artifacts:
+  design: ../artifacts/sample-feature-design.md
+  tracker: https://example.com/sample-feature-ticket
+metadata:
+  owner: platform-team
+  tags:
+    - demo
+    - getting-started

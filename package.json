@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "guard:scan": "node ./scripts/run-guard.mjs",
-    "guard:no-\u0064\u0061\u0079\u0074\u006f\u006e\u0061": "node ./scripts/run-guard.mjs",
+    "guard:no-daytona": "node ./scripts/run-guard.mjs",
     "prebuild": "yarn guard:scan",
     "dev": "turbo dev",
     "predev": "yarn guard:scan",
@@ -27,13 +27,15 @@
     "prelint:fix": "yarn guard:scan",
     "test": "turbo test",
     "pretest": "yarn guard:scan",
+    "format:features": "node ./scripts/format-feature-graph.mjs",
     "sandbox:build": "docker build -f Dockerfile.sandbox -t open-swe-sandbox:local .",
     "stack:up": "docker compose -f compose.local.yaml up -d",
     "stack:down": "docker compose -f compose.local.yaml down"
   },
   "devDependencies": {
     "turbo": "^2.5.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "yaml": "^2.6.0"
   },
   "resolutions": {
     "@langchain/langgraph-sdk": "^0.0.95",
