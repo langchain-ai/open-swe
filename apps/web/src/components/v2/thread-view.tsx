@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
+import { ArrowLeft, GitBranch, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadMetadata } from "./types";
@@ -49,6 +49,8 @@ import { StickToBottom } from "use-stick-to-bottom";
 import { TokenUsage } from "./token-usage";
 import { HumanMessage as HumanMessageSDK } from "@langchain/langgraph-sdk";
 import { getMessageContentString } from "@/lib/get-message-content-string";
+import { FeatureInsightsPanel } from "@/features/feature-insights";
+import { useFeatureGraphStore } from "@/stores/feature-graph-store";
 
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
@@ -175,6 +177,25 @@ export function ThreadView({
     CustomNodeEvent[]
   >([]);
 
+  const fetchFeatureGraphForThread = useFeatureGraphStore(
+    (state) => state.fetchGraphForThread,
+  );
+  const updateActiveFeatureIds = useFeatureGraphStore(
+    (state) => state.setActiveFeatureIds,
+  );
+  const clearFeatureGraph = useFeatureGraphStore((state) => state.clear);
+
+  useEffect(() => {
+    if (displayThread.id) {
+      void fetchFeatureGraphForThread(displayThread.id);
+    }
+
+    return () => {
+      clearFeatureGraph();
+    };
+  }, [displayThread.id, fetchFeatureGraphForThread, clearFeatureGraph]);
+
+
   const plannerStream = useStream<PlannerGraphState>({
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     assistantId: PLANNER_GRAPH_ID,
@@ -215,6 +236,33 @@ export function ThreadView({
     fetchStateHistory: false,
     defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
   });
+
+  const managerActiveFeatureIds = stream.values?.activeFeatureIds;
+  const plannerActiveFeatureIds = plannerStream.values?.activeFeatureIds;
+  const programmerActiveFeatureIds = programmerStream.values?.activeFeatureIds;
+
+  useEffect(() => {
+    if (
+      managerActiveFeatureIds === undefined &&
+      plannerActiveFeatureIds === undefined &&
+      programmerActiveFeatureIds === undefined
+    ) {
+      return;
+    }
+
+    const featureIds =
+      managerActiveFeatureIds ??
+      plannerActiveFeatureIds ??
+      programmerActiveFeatureIds ??
+      [];
+
+    updateActiveFeatureIds(featureIds);
+  }, [
+    managerActiveFeatureIds,
+    plannerActiveFeatureIds,
+    programmerActiveFeatureIds,
+    updateActiveFeatureIds,
+  ]);
 
   const joinedProgrammerRunId = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -408,13 +456,13 @@ export function ThreadView({
         />
         {/* Right Side - Actions & Plan */}
         <div
-          className="flex flex-1 flex-col px-4 pt-4"
+          className="flex flex-1 flex-col gap-4 px-4 pt-4"
           style={{ height: "calc(100vh - 3rem)" }}
         >
           <div className="min-h-0 flex-1">
             <Tabs
               defaultValue="planner"
-              className="flex h-full w-full flex-col"
+              className="flex w-full flex-1 flex-col"
               value={selectedTab}
               onValueChange={(value) =>
                 setSelectedTab(value as "planner" | "programmer")
@@ -461,10 +509,7 @@ export function ThreadView({
                 </div>
               </div>
 
-              <TabsContent
-                value="planner"
-                className="mb-2"
-              >
+              <TabsContent value="planner">
                 <Card className="border-border bg-card relative h-full p-0">
                   <CardContent className="h-full p-0">
                     <StickToBottom
@@ -507,10 +552,7 @@ export function ThreadView({
                   </CardContent>
                 </Card>
               </TabsContent>
-              <TabsContent
-                value="programmer"
-                className="mb-2"
-              >
+              <TabsContent value="programmer">
                 <Card className="border-border bg-card relative h-full p-0">
                   <CardContent className="h-full p-0">
                     <StickToBottom
@@ -588,6 +630,7 @@ export function ThreadView({
               </TabsContent>
             </Tabs>
           </div>
+          <FeatureInsightsPanel />
         </div>
       </div>
 
