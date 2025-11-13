@@ -27,6 +27,8 @@
     "prelint:fix": "yarn guard:scan",
     "test": "turbo test",
     "pretest": "yarn guard:scan",
+    "feature-graph:validate": "turbo feature-graph:validate",
+    "prefeature-graph:validate": "yarn guard:scan",
     "format:features": "node ./scripts/format-feature-graph.mjs",
     "sandbox:build": "docker build -f Dockerfile.sandbox -t open-swe-sandbox:local .",
     "stack:up": "docker compose -f compose.local.yaml up -d",

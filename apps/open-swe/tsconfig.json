@@ -22,6 +22,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "paths": {
+      "@openswe/shared": ["packages/shared/src/index.ts"],
+      "@openswe/shared/*": ["packages/shared/src/*"],
       "@openswe/sandbox-core": ["packages/sandbox-core/src/index.ts"],
       "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"],
       "@openswe/sandbox-docker": ["packages/sandbox-docker/src/index.ts"],

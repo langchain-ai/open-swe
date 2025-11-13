@@ -438,7 +438,7 @@ const resolveTasks = (
 
   try {
     return [getActiveTask(taskPlan)];
-  } catch (error) {
+  } catch (_error) {
     return [...taskPlan.tasks];
   }
 };
@@ -459,7 +459,7 @@ const collectTaskContext = (
         if (item.plan) keywords.add(normalize(item.plan));
         if (item.summary) keywords.add(normalize(item.summary));
       }
-    } catch (error) {
+    } catch (_error) {
       // Ignore errors from missing active tasks – the task list fallback is
       // still useful for heuristics.
     }

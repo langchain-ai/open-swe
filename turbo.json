@@ -26,6 +26,9 @@
     },
     "clean": {
       "dependsOn": ["^clean"]
+    },
+    "feature-graph:validate": {
+      "dependsOn": ["^feature-graph:validate"]
     }
   }
 }
