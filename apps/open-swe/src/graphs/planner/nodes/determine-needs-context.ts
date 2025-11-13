@@ -22,10 +22,8 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
-import {
-  formatFeatureContext,
-  resolveFeatureDependencies,
-} from "../utils/feature-graph.js";
+import { formatFeatureContext } from "@openswe/shared/feature-graph";
+import { resolveFeatureDependencies } from "../utils/feature-graph.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -134,6 +132,12 @@ export async function determineNeedsContext(
 ): Promise<Command> {
   const workspacePath =
     state.workspacePath ?? config.configurable?.workspacePath;
+  const dependenciesPromise = state.featureDependencies?.length
+    ? Promise.resolve(state.featureDependencies)
+    : resolveFeatureDependencies({
+        workspacePath,
+        featureIds: state.activeFeatureIds,
+      });
   const [missingMessages, model, dependencies] = await Promise.all([
     shouldCreateIssue(config) && state.issueId
       ? getMissingMessages(getIssueService(config), {
@@ -143,10 +147,7 @@ export async function determineNeedsContext(
         })
       : [],
     loadModel(config, LLMTask.ROUTER),
-    resolveFeatureDependencies({
-      workspacePath,
-      featureIds: state.activeFeatureIds,
-    }),
+    dependenciesPromise,
   ]);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.ROUTER);
@@ -192,6 +193,9 @@ export async function determineNeedsContext(
   const commandUpdate: PlannerGraphUpdate = {
     messages: missingMessages,
     tokenData: trackCachePerformance(response, modelName),
+    ...(state.featureDependencies?.length
+      ? {}
+      : { featureDependencies: dependencies }),
   };
 
   const shouldGatherContext =
