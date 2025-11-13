@@ -11,6 +11,7 @@ import { ConfigurableFieldUIMetadata } from "../configurable-metadata.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { BaseMessage } from "@langchain/core/messages";
 import { tokenDataReducer } from "../caching.js";
+import { featureNodeSchema } from "../feature-graph/types.js";
 
 const REASONING_EFFORT_OPTIONS = [
   { label: "Low", value: "low" },
@@ -175,6 +176,29 @@ export const GraphAnnotation = MessagesZodState.extend({
   taskPlan: withLangGraph(z.custom<TaskPlan>(), {
     reducer: {
       schema: z.custom<TaskPlan>(),
+      fn: (_state, update) => update,
+    },
+  }),
+  features: withLangGraph(z.array(featureNodeSchema).optional(), {
+    reducer: {
+      schema: z.array(featureNodeSchema).optional(),
+      fn: (state, update) => update ?? state,
+    },
+    default: () => [],
+  }),
+  featureDependencies: withLangGraph(
+    z.array(featureNodeSchema).optional(),
+    {
+      reducer: {
+        schema: z.array(featureNodeSchema).optional(),
+        fn: (state, update) => update ?? state,
+      },
+      default: () => [],
+    },
+  ),
+  activeFeatureIds: withLangGraph(z.array(z.string()).optional(), {
+    reducer: {
+      schema: z.array(z.string()).optional(),
       fn: (_state, update) => update,
     },
   }),

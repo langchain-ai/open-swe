@@ -24,6 +24,7 @@ import {
   MAX_INTERNAL_TOKENS,
 } from "../../../utils/tokens.js";
 import { z } from "zod";
+import { collectFeatureGuidance } from "../utils/feature-guidance.js";
 
 const logger = createLogger(LogLevel.INFO, "HandleCompletedTask");
 
@@ -52,10 +53,29 @@ export async function handleCompletedTask(
 
   const activePlanItems = getActivePlanItems(state.taskPlan);
   const currentTask = getCurrentPlanItem(activePlanItems);
+  const featureGuidance = await collectFeatureGuidance(state, config);
+  const pendingDependencies = featureGuidance.pendingDependencies;
+  const dependencyNote = pendingDependencies.length
+    ? [
+        "",
+        "Pending dependent features requiring follow-up:",
+        ...pendingDependencies.map((dependency) => {
+          const parts = [`- ${dependency.name ?? dependency.id} (${dependency.id})`];
+          if (dependency.status) {
+            parts.push(`status: ${dependency.status}`);
+          }
+          return parts.join(" ");
+        }),
+      ].join("\n")
+    : "";
+
   const toolMessage = new ToolMessage({
     id: uuidv4(),
     tool_call_id: toolCall.id ?? "",
-    content: `Saved task status as completed for task ${currentTask?.plan || "unknown"}`,
+    content:
+      `Saved task status as completed for task ${
+        currentTask?.plan || "unknown"
+      }` + dependencyNote,
     name: toolCall.name,
   });
 
@@ -101,6 +121,23 @@ export async function handleCompletedTask(
   // This should in theory never happen, but ensure we route properly if it does.
   const remainingTask = getRemainingPlanItems(activePlanItems)?.[0];
   if (!remainingTask) {
+    if (pendingDependencies.length > 0) {
+      logger.info(
+        "No remaining plan items but dependent features are still incomplete. Returning to generate-action for follow-up.",
+        {
+          pendingDependencies: pendingDependencies.map((dependency) => ({
+            id: dependency.id,
+            status: dependency.status,
+          })),
+        },
+      );
+
+      return new Command({
+        goto: "generate-action",
+        update: commandUpdate,
+      });
+    }
+
     logger.info(
       "Found no remaining tasks in the plan during the check plan step. Continuing to the conclusion generation step.",
     );

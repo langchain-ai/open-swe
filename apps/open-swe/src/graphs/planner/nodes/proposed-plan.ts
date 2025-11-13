@@ -174,6 +174,9 @@ export async function interruptProposedPlan(
     issueId: state.issueId,
     internalMessages: state.messages,
     documentCache: state.documentCache,
+    features: state.features,
+    featureDependencies: state.featureDependencies,
+    activeFeatureIds: state.activeFeatureIds,
   };
 
   if (state.autoAcceptPlan) {

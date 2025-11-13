@@ -21,7 +21,10 @@ import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
-import { resolveActiveFeatures } from "../utils/feature-graph.js";
+import {
+  resolveActiveFeatures,
+  resolveFeatureDependencies,
+} from "../utils/feature-graph.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
@@ -29,11 +32,20 @@ export async function prepareGraphState(
 ): Promise<Command> {
   const workspacePath =
     state.workspacePath ?? config.configurable?.workspacePath;
-  const features = await resolveActiveFeatures({
-    workspacePath,
-    featureIds: state.activeFeatureIds,
-  });
-  const featureUpdate: PlannerGraphUpdate = { features };
+  const [features, dependencies] = await Promise.all([
+    resolveActiveFeatures({
+      workspacePath,
+      featureIds: state.activeFeatureIds,
+    }),
+    resolveFeatureDependencies({
+      workspacePath,
+      featureIds: state.activeFeatureIds,
+    }),
+  ]);
+  const featureUpdate: PlannerGraphUpdate = {
+    features,
+    featureDependencies: dependencies,
+  };
 
   if (isLocalMode(config) || !shouldCreateIssue(config)) {
     return new Command({

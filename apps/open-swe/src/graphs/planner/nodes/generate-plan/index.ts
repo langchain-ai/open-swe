@@ -31,10 +31,8 @@ import { filterMessagesWithoutContent } from "../../../../utils/message/content.
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
-import {
-  formatFeatureContext,
-  resolveFeatureDependencies,
-} from "../../utils/feature-graph.js";
+import { formatFeatureContext } from "@openswe/shared/feature-graph";
+import { resolveFeatureDependencies } from "../../utils/feature-graph.js";
 
 function formatSystemPrompt(
   state: PlannerGraphState,
@@ -78,12 +76,15 @@ export async function generatePlan(
 ): Promise<PlannerGraphUpdate> {
   const workspacePath =
     state.workspacePath ?? config.configurable?.workspacePath;
+  const dependenciesPromise = state.featureDependencies?.length
+    ? Promise.resolve(state.featureDependencies)
+    : resolveFeatureDependencies({
+        workspacePath,
+        featureIds: state.activeFeatureIds,
+      });
   const [model, dependencies] = await Promise.all([
     loadModel(config, LLMTask.PLANNER),
-    resolveFeatureDependencies({
-      workspacePath,
-      featureIds: state.activeFeatureIds,
-    }),
+    dependenciesPromise,
   ]);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);
@@ -176,11 +177,17 @@ export async function generatePlan(
     name: sessionPlanTool.name,
   });
 
-  return {
+  const update: PlannerGraphUpdate = {
     messages: [response, toolResponse],
     proposedPlanTitle: proposedPlanArgs.title,
     proposedPlan: proposedPlanArgs.plan,
     ...(newSessionId && { sandboxSessionId: newSessionId }),
     tokenData: trackCachePerformance(response, modelName),
   };
+
+  if (!state.featureDependencies?.length) {
+    update.featureDependencies = dependencies;
+  }
+
+  return update;
 }

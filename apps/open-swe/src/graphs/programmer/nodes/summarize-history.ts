@@ -23,6 +23,10 @@ import { formatUserRequestPrompt } from "../../../utils/user-request.js";
 import { getMessagesSinceLastSummary } from "../../../utils/tokens.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
+import {
+  collectFeatureGuidance,
+  formatFeatureGuidance,
+} from "../utils/feature-guidance.js";
 
 const SINGLE_USER_REQUEST_PROMPT = `Here is the user's request:
 <user_request>
@@ -88,8 +92,9 @@ const formatPrompt = (inputs: {
   messages: BaseMessage[];
   plan: PlanItem[];
   conversationHistoryToSummarize: BaseMessage[];
+  featureGuidance?: string;
 }): string => {
-  return taskSummarySysPrompt
+  const basePrompt = taskSummarySysPrompt
     .replace(
       "{PLAN_PROMPT}",
       formatPlanPrompt(inputs.plan, {
@@ -109,6 +114,11 @@ const formatPrompt = (inputs: {
       "{CONVERSATION_HISTORY}",
       inputs.conversationHistoryToSummarize.map(getMessageString).join("\n"),
     );
+  const guidance = inputs.featureGuidance?.trim();
+  if (guidance) {
+    return `${basePrompt}\n\n<feature_guidance>\n${guidance}\n</feature_guidance>`;
+  }
+  return basePrompt;
 };
 
 function createSummaryMessages(summary: string): BaseMessage[] {
@@ -164,6 +174,9 @@ export async function summarizeHistory(
       excludeCountFromEnd: 20,
     },
   );
+  const featureGuidance = formatFeatureGuidance(
+    await collectFeatureGuidance(state, config),
+  );
 
   logger.info(
     `Summarizing ${conversationHistoryToSummarize.length} messages in the conversation history...`,
@@ -176,6 +189,7 @@ export async function summarizeHistory(
         messages: state.messages,
         plan,
         conversationHistoryToSummarize,
+        featureGuidance,
       }),
     },
   ]);

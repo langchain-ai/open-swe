@@ -38,6 +38,16 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
     },
     default: () => [],
   }),
+  featureDependencies: withLangGraph(
+    z.array(featureNodeSchema).optional(),
+    {
+      reducer: {
+        schema: z.array(featureNodeSchema).optional(),
+        fn: (state, update) => update ?? state,
+      },
+      default: () => [],
+    },
+  ),
   /**
    * Feature identifiers selected by the manager to scope planning.
    */

@@ -66,14 +66,21 @@ import {
 } from "@langchain/core/messages";
 import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { shouldUseCustomFramework } from "../../../../utils/should-use-custom-framework.js";
+import {
+  collectFeatureGuidance,
+  formatFeatureGuidance,
+} from "../../utils/feature-guidance.js";
 
 const logger = createLogger(LogLevel.INFO, "GenerateMessageNode");
 
-const formatDynamicContextPrompt = (state: GraphState) => {
+const formatDynamicContextPrompt = (
+  state: GraphState,
+  featureGuidance?: string,
+) => {
   const planString = getActivePlanItems(state.taskPlan)
     .map((i) => `<plan-item index="${i.index}">\n${i.plan}\n</plan-item>`)
     .join("\n");
-  return DYNAMIC_SYSTEM_PROMPT.replaceAll("{PLAN_PROMPT}", planString)
+  const basePrompt = DYNAMIC_SYSTEM_PROMPT.replaceAll("{PLAN_PROMPT}", planString)
     .replaceAll(
       "{PLAN_GENERATION_NOTES}",
       state.contextGatheringNotes || "No context gathering notes available.",
@@ -89,6 +96,11 @@ const formatDynamicContextPrompt = (state: GraphState) => {
       "{CODEBASE_TREE}",
       state.codebaseTree || "No codebase tree generated yet.",
     );
+  const trimmedGuidance = featureGuidance?.trim();
+  if (trimmedGuidance) {
+    return `${basePrompt}\n\n${trimmedGuidance}`;
+  }
+  return basePrompt;
 };
 
 const formatStaticInstructionsPrompt = (
@@ -116,6 +128,7 @@ const formatCacheablePrompt = (
   args?: {
     isAnthropicModel?: boolean;
     excludeCacheControl?: boolean;
+    featureGuidance?: string;
   },
 ): CacheablePromptSegment[] => {
   const codeReview = getCodeReviewFields(state.internalMessages);
@@ -137,7 +150,7 @@ const formatCacheablePrompt = (
     // Cache Breakpoint 3: Dynamic Context
     {
       type: "text",
-      text: formatDynamicContextPrompt(state),
+      text: formatDynamicContextPrompt(state, args?.featureGuidance),
     },
   ];
 
@@ -191,6 +204,8 @@ async function createToolsAndPrompt(
   providerMessages: Record<Provider, BaseMessageLike[]>;
 }> {
   const mcpTools = await getMcpTools(config);
+  const featureGuidance = await collectFeatureGuidance(state, config);
+  const featureGuidanceText = formatFeatureGuidance(featureGuidance);
   const sharedTools = [
     createGrepTool(state, config),
     createShellTool(state, config),
@@ -244,6 +259,7 @@ async function createToolsAndPrompt(
         {
           isAnthropicModel: true,
           excludeCacheControl: false,
+          featureGuidance: featureGuidanceText,
         },
       ),
     },
@@ -263,6 +279,7 @@ async function createToolsAndPrompt(
         {
           isAnthropicModel: false,
           excludeCacheControl: true,
+          featureGuidance: featureGuidanceText,
         },
       ),
     },
