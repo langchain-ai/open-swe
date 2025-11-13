@@ -10,6 +10,7 @@ import {
 } from "../types.js";
 import { withLangGraph } from "@langchain/langgraph/zod";
 import { tokenDataReducer } from "../../caching.js";
+import { featureNodeSchema } from "../../feature-graph/types.js";
 
 export const PlannerGraphStateObj = MessagesZodState.extend({
   sandboxSessionId: withLangGraph(z.string(), {
@@ -29,6 +30,13 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       schema: z.string().optional(),
       fn: (_state, update) => update,
     },
+  }),
+  features: withLangGraph(z.array(featureNodeSchema).optional(), {
+    reducer: {
+      schema: z.array(featureNodeSchema).optional(),
+      fn: (state, update) => update ?? state,
+    },
+    default: () => [],
   }),
   /**
    * Feature identifiers selected by the manager to scope planning.

@@ -31,17 +31,22 @@ import { filterMessagesWithoutContent } from "../../../../utils/message/content.
 import { getModelManager } from "../../../../utils/llms/model-manager.js";
 import { trackCachePerformance } from "../../../../utils/caching.js";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
+import {
+  formatFeatureContext,
+  resolveFeatureDependencies,
+} from "../../utils/feature-graph.js";
 
 function formatSystemPrompt(
   state: PlannerGraphState,
   config: GraphConfig,
+  featureContext?: string,
 ): string {
   // It's a followup if there's more than one human message.
   const isFollowup = isFollowupRequest(state.taskPlan, state.proposedPlan);
   const scratchpad = getScratchpad(state.messages)
     .map((n) => `- ${n}`)
     .join("\n");
-  return SYSTEM_PROMPT.replace(
+  const prompt = SYSTEM_PROMPT.replace(
     "{FOLLOWUP_MESSAGE_PROMPT}",
     isFollowup
       ? "\n" +
@@ -61,13 +66,25 @@ function formatSystemPrompt(
       "{ADDITIONAL_INSTRUCTIONS}",
       shouldUseCustomFramework(config) ? CUSTOM_FRAMEWORK_PROMPT : "",
     );
+
+  return featureContext && featureContext.length
+    ? `${prompt}\n\n${featureContext}`
+    : prompt;
 }
 
 export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const model = await loadModel(config, LLMTask.PLANNER);
+  const workspacePath =
+    state.workspacePath ?? config.configurable?.workspacePath;
+  const [model, dependencies] = await Promise.all([
+    loadModel(config, LLMTask.PLANNER),
+    resolveFeatureDependencies({
+      workspacePath,
+      featureIds: state.activeFeatureIds,
+    }),
+  ]);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.PLANNER);
   const modelSupportsParallelToolCallsParam = supportsParallelToolCallsParam(
@@ -109,7 +126,14 @@ export async function generatePlan(
     .invoke([
       {
         role: "system",
-        content: formatSystemPrompt(state, config),
+        content: formatSystemPrompt(
+          state,
+          config,
+          formatFeatureContext({
+            features: state.features,
+            dependencies,
+          }),
+        ),
       },
       ...inputMessages,
     ]);

@@ -22,6 +22,10 @@ import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { trackCachePerformance } from "../../../utils/caching.js";
 import { getModelManager } from "../../../utils/llms/model-manager.js";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import {
+  formatFeatureContext,
+  resolveFeatureDependencies,
+} from "../utils/feature-graph.js";
 
 const logger = createLogger(LogLevel.INFO, "DetermineNeedsContext");
 
@@ -72,7 +76,10 @@ Once again, with all of the above information, determine whether or not you need
 </determine_context>
 `;
 
-function formatSystemPrompt(state: PlannerGraphState): string {
+function formatSystemPrompt(
+  state: PlannerGraphState,
+  featureContext?: string,
+): string {
   const formattedConversationHistoryPrompt = state.messages
     .map(getMessageString)
     .join("\n");
@@ -87,13 +94,17 @@ function formatSystemPrompt(state: PlannerGraphState): string {
     userFollowupRequestMsg.content,
   );
 
-  return SYSTEM_PROMPT.replace(
+  const prompt = SYSTEM_PROMPT.replace(
     "{CONVERSATION_HISTORY}",
     formattedConversationHistoryPrompt,
   )
     .replace("{CONTEXT_GATHERING_NOTES}", state.contextGatheringNotes)
     .replace("{PROPOSED_PLAN}", formattedProposedPlan)
     .replace("{USER_FOLLOWUP_REQUEST}", userFollowupRequestStr);
+
+  return featureContext && featureContext.length
+    ? `${prompt}\n\n${featureContext}`
+    : prompt;
 }
 
 const determineContextSchema = z.object({
@@ -121,7 +132,9 @@ export async function determineNeedsContext(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const [missingMessages, model] = await Promise.all([
+  const workspacePath =
+    state.workspacePath ?? config.configurable?.workspacePath;
+  const [missingMessages, model, dependencies] = await Promise.all([
     shouldCreateIssue(config) && state.issueId
       ? getMissingMessages(getIssueService(config), {
           messages: state.messages,
@@ -130,6 +143,10 @@ export async function determineNeedsContext(
         })
       : [],
     loadModel(config, LLMTask.ROUTER),
+    resolveFeatureDependencies({
+      workspacePath,
+      featureIds: state.activeFeatureIds,
+    }),
   ]);
   const modelManager = getModelManager();
   const modelName = modelManager.getModelNameForTask(config, LLMTask.ROUTER);
@@ -154,10 +171,16 @@ export async function determineNeedsContext(
   const response = await modelWithTools.invoke([
     {
       role: "user",
-      content: formatSystemPrompt({
-        ...state,
-        messages: [...filterHiddenMessages(state.messages), ...missingMessages],
-      }),
+      content: formatSystemPrompt(
+        {
+          ...state,
+          messages: [...filterHiddenMessages(state.messages), ...missingMessages],
+        },
+        formatFeatureContext({
+          features: state.features,
+          dependencies,
+        }),
+      ),
     },
   ]);
 

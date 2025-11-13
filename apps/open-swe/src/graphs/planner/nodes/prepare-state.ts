@@ -21,14 +21,23 @@ import { filterHiddenMessages } from "../../../utils/message/filter-hidden.js";
 import { DO_NOT_RENDER_ID_PREFIX } from "@openswe/shared/constants";
 import { isLocalMode } from "@openswe/shared/open-swe/local-mode";
 import { shouldCreateIssue } from "../../../utils/should-create-issue.js";
+import { resolveActiveFeatures } from "../utils/feature-graph.js";
 
 export async function prepareGraphState(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  const workspacePath =
+    state.workspacePath ?? config.configurable?.workspacePath;
+  const features = await resolveActiveFeatures({
+    workspacePath,
+    featureIds: state.activeFeatureIds,
+  });
+  const featureUpdate: PlannerGraphUpdate = { features };
+
   if (isLocalMode(config) || !shouldCreateIssue(config)) {
     return new Command({
-      update: {},
+      update: featureUpdate,
       goto: "initialize-sandbox",
     });
   }
@@ -59,6 +68,7 @@ export async function prepareGraphState(
   // If the messages state is empty, we can just include all comments as human messages.
   if (!state.messages?.length) {
     const commandUpdate: PlannerGraphUpdate = {
+      ...featureUpdate,
       messages: [
         new HumanMessage({
           id: uuidv4(),
@@ -110,6 +120,7 @@ export async function prepareGraphState(
     : undefined;
 
   const commandUpdate: PlannerGraphUpdate = {
+    ...featureUpdate,
     messages: [
       ...removedNonSummaryMessages,
       ...(summaryMessage ? [summaryMessage] : []),
