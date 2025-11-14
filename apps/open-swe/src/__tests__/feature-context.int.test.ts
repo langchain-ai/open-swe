@@ -194,12 +194,6 @@ edges:
     const { workspacePath, cleanup } = await createWorkspaceWithGraph(graphYaml);
 
     try {
-      const config = {
-        configurable: { workspacePath, shouldCreateIssue: false },
-        thread_id: "thread-id",
-        assistant_id: "planner",
-      } as unknown as GraphConfig;
-
       const firstResolution = await resolveActiveFeatures({
         workspacePath,
         featureIds: ["feature-ui"],

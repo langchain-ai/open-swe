@@ -63,13 +63,15 @@ const collectFeatureIds = (rawText: string): UserRequestDetails => {
   ];
 
   for (const { regex, extract } of patterns) {
-    text = text.replace(regex, (match, ...args) => {
-      const result = extract([match, ...args] as RegExpExecArray);
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      const result = extract(match);
       for (const featureId of result) {
         featureIds.add(featureId);
       }
-      return " ";
-    });
+    }
+    regex.lastIndex = 0;
+    text = text.replace(regex, " ");
   }
 
   const cleanedText = text
