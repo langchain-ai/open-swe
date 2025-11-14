@@ -56,8 +56,6 @@ interface UseThreadsStatusResult {
 
 const sessionDataCache: SessionCache = new Map();
 
-const CACHE_TTL = 30000;
-
 /**
  * Fetches statuses for multiple threads in parallel
  * Uses session caching to achieve "single request per thread + cache sessions" goal
@@ -124,16 +122,27 @@ export function useThreadsStatus(
 ): UseThreadsStatusResult {
   const lastPollingStatesRef = useRef<Map<string, ThreadStatusData>>(new Map());
 
-  // Create a stable key for the thread IDs array
-  const sortedThreadIds = threadIds.sort();
-  const threadIdsKey = sortedThreadIds.join(",");
+  const { sortedThreadIds, threadIdsKey } = useMemo(() => {
+    const sortedIds = [...threadIds].sort();
+    return {
+      sortedThreadIds: sortedIds,
+      threadIdsKey: sortedIds.join(","),
+    };
+  }, [threadIds]);
 
-  const swrKey =
-    threadIds.length > 0
-      ? threadIds.length <= 4
-        ? `threads-status-batch-${threadIds.length}-${threadIdsKey}`
-        : `threads-status-${threadIdsKey}`
-      : null;
+  const totalThreads = sortedThreadIds.length;
+
+  const swrKey = useMemo(() => {
+    if (totalThreads === 0) {
+      return null;
+    }
+
+    if (totalThreads <= 4) {
+      return `threads-status-batch-${totalThreads}-${threadIdsKey}`;
+    }
+
+    return `threads-status-${threadIdsKey}`;
+  }, [threadIdsKey, totalThreads]);
 
   const {
     data: fetchResult,
@@ -149,7 +158,7 @@ export function useThreadsStatus(
       }
 
       const result = await fetchAllThreadStatuses(
-        sortedThreadIds, // Use sorted array for consistency
+        sortedThreadIds,
         lastPollingStatesRef.current,
         managerThreads,
       );
@@ -159,10 +168,14 @@ export function useThreadsStatus(
     THREAD_STATUS_SWR_CONFIG,
   );
 
-  const statusMap = fetchResult?.statusMap || {};
-  const taskPlanMap = fetchResult?.taskPlanMap || {};
+  const statusMap = fetchResult?.statusMap;
+  const taskPlanMap = fetchResult?.taskPlanMap;
+  const hasErrors = Boolean(error);
 
   return useMemo(() => {
+    const resolvedStatusMap: ThreadStatusMap = statusMap ?? {};
+    const resolvedTaskPlanMap: TaskPlanMap = taskPlanMap ?? {};
+
     const groupedThreads: GroupedThreadIds = {
       running: [],
       completed: [],
@@ -173,16 +186,14 @@ export function useThreadsStatus(
       error: [],
     };
 
-    if (statusMap) {
-      Object.entries(statusMap).forEach(([threadId, status]) => {
-        if (groupedThreads[status]) {
-          groupedThreads[status].push(threadId);
-        }
-      });
-    }
+    Object.entries(resolvedStatusMap).forEach(([threadId, status]) => {
+      if (groupedThreads[status]) {
+        groupedThreads[status].push(threadId);
+      }
+    });
 
     const statusCounts: ThreadStatusCounts = {
-      all: threadIds.length,
+      all: totalThreads,
       running: groupedThreads.running.length,
       completed: groupedThreads.completed.length,
       failed: groupedThreads.failed.length,
@@ -193,12 +204,12 @@ export function useThreadsStatus(
     };
 
     return {
-      statusMap: statusMap || {},
-      taskPlanMap: taskPlanMap || {},
+      statusMap: resolvedStatusMap,
+      taskPlanMap: resolvedTaskPlanMap,
       statusCounts,
       groupedThreads,
       isLoading,
-      hasErrors: !!error,
+      hasErrors,
     };
-  }, [statusMap, taskPlanMap, threadIds, threadIdsKey, isLoading, error]);
+  }, [statusMap, taskPlanMap, totalThreads, isLoading, hasErrors]);
 }
