@@ -105,24 +105,37 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) =>
   },
   setActiveFeatureIds(featureIds) {
     const normalized = normalizeFeatureIds(featureIds);
-    set((state) => {
-      if (normalized.length === 0) {
-        return {
-          activeFeatureIds: [],
-          selectedFeatureId: state.selectedFeatureId,
-        };
+    const state = get();
+
+    const hasActiveFeatureIdsChanged =
+      normalized.length !== state.activeFeatureIds.length ||
+      normalized.some((id, index) => id !== state.activeFeatureIds[index]);
+
+    if (normalized.length === 0) {
+      if (!hasActiveFeatureIdsChanged) {
+        return;
       }
 
-      const currentSelection = state.selectedFeatureId;
-      const nextSelection =
-        currentSelection && normalized.includes(currentSelection)
-          ? currentSelection
-          : normalized[0];
+      set({
+        activeFeatureIds: [],
+        selectedFeatureId: state.selectedFeatureId,
+      });
+      return;
+    }
 
-      return {
-        activeFeatureIds: normalized,
-        selectedFeatureId: nextSelection,
-      };
+    const currentSelection = state.selectedFeatureId;
+    const nextSelection =
+      currentSelection && normalized.includes(currentSelection)
+        ? currentSelection
+        : normalized.find((id) => Boolean(state.featuresById[id])) ?? null;
+
+    if (!hasActiveFeatureIdsChanged && nextSelection === state.selectedFeatureId) {
+      return;
+    }
+
+    set({
+      activeFeatureIds: normalized,
+      selectedFeatureId: nextSelection,
     });
   },
   clear() {
