@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-import { FeatureGraph, testsForFeature } from "@openswe/shared/feature-graph";
+import type { FeatureGraph } from "@openswe/shared/feature-graph/graph";
+import { testsForFeature } from "@openswe/shared/feature-graph/mappings";
 import type {
   ArtifactCollection,
   ArtifactRef,

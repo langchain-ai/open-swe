@@ -21,16 +21,8 @@
     "types": ["jest", "node"],
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "paths": {
-      "@openswe/shared": ["packages/shared/src/index.ts"],
-      "@openswe/shared/*": ["packages/shared/src/*"],
-      "@openswe/sandbox-core": ["packages/sandbox-core/src/index.ts"],
-      "@openswe/sandbox-core/*": ["packages/sandbox-core/src/*"],
-      "@openswe/sandbox-docker": ["packages/sandbox-docker/src/index.ts"],
-      "@openswe/sandbox-docker/*": ["packages/sandbox-docker/src/*"]
-    },
     "rootDir": "src"
   },
-  "include": ["**/*.ts", "**/*.js", "jest.setup.cjs"],
+  "include": ["src/**/*", "jest.setup.cjs"],
   "exclude": ["node_modules", "dist"]
 }

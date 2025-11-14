@@ -1,5 +1,5 @@
 import { Client } from "@langchain/langgraph-sdk";
-import { FeatureGraph } from "@openswe/shared/feature-graph";
+import { FeatureGraph } from "@openswe/shared/feature-graph/graph";
 import type {
   ArtifactCollection,
   ArtifactRef,
