@@ -1,6 +1,10 @@
 import { Auth, HTTPException } from "@langchain/langgraph-sdk/auth";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
-import { createWithOwnerMetadata, createOwnerFilter } from "./utils.js";
+import {
+  createWithOwnerMetadata,
+  createOwnerFilter,
+  STUDIO_USER_ID,
+} from "./utils.js";
 import { LANGGRAPH_USER_PERMISSIONS } from "../constants.js";
 import { validateApiBearerToken } from "./custom.js";
 
@@ -65,7 +69,15 @@ export const auth = new Auth()
       throw new HTTPException(401, { message: "Invalid API token" });
     }
 
-    throw new HTTPException(401, { message: "Unauthorized" });
+    return {
+      identity: STUDIO_USER_ID,
+      is_authenticated: false,
+      display_name: "Public User",
+      metadata: {
+        installation_name: "public",
+      },
+      permissions: LANGGRAPH_USER_PERMISSIONS,
+    };
   })
 
   // THREADS: create operations with metadata
