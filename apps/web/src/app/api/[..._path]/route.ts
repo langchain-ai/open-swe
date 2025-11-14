@@ -10,15 +10,16 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
     apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
     runtime: "nodejs",
     disableWarningLog: true,
-    headers: async (req) => {
+    headers: async (req): Promise<Record<string, string>> => {
+      const headers: Record<string, string> = {};
       const cookieHeader = req.headers.get("cookie");
       if (!cookieHeader) {
-        return {};
+        return headers;
       }
 
       const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
       if (!sessionCookie) {
-        return {};
+        return headers;
       }
 
       const cookies = cookieHeader
@@ -27,10 +28,9 @@ export const { GET, POST, PUT, PATCH, DELETE, OPTIONS, runtime } =
         .filter((cookie) => !cookie.startsWith(`${SESSION_COOKIE}=`));
 
       cookies.push(`${SESSION_COOKIE}=${sessionCookie}`);
+      headers.cookie = cookies.join("; ");
 
-      return {
-        cookie: cookies.join("; "),
-      };
+      return headers;
     },
     bodyParameters: (req, body) => {
       if (body.config?.configurable && "apiKeys" in body.config.configurable) {
