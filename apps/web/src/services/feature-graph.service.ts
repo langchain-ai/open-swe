@@ -6,6 +6,7 @@ import type {
   FeatureEdge,
   FeatureNode,
 } from "@openswe/shared/feature-graph/types";
+import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 
 import { createClient } from "@/providers/client";
@@ -40,6 +41,24 @@ export async function fetchFeatureGraph(
     graph,
     activeFeatureIds,
   };
+}
+
+export async function requestFeatureGraphGeneration(
+  threadId: string,
+  client?: Client<ManagerGraphState>,
+): Promise<void> {
+  if (!threadId) {
+    throw new Error("Thread id is required to request feature graph generation");
+  }
+
+  const resolvedClient = client ?? createClient(getApiUrl());
+
+  await resolvedClient.runs.create(threadId, MANAGER_GRAPH_ID, {
+    input: {
+      action: "generate_feature_graph",
+    },
+    ifNotExists: "create",
+  });
 }
 
 function getApiUrl(): string {

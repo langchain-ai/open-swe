@@ -46,9 +46,11 @@ export function FeatureInsightsPanel() {
     testsByFeatureId,
     artifactsByFeatureId,
     isLoading,
+    isGeneratingGraph,
     error,
     threadId,
     fetchGraphForThread,
+    requestGraphGeneration,
     selectFeature,
   } = useFeatureGraphStore(
     useShallow((state) => ({
@@ -60,9 +62,11 @@ export function FeatureInsightsPanel() {
       testsByFeatureId: state.testsByFeatureId,
       artifactsByFeatureId: state.artifactsByFeatureId,
       isLoading: state.isLoading,
+      isGeneratingGraph: state.isGeneratingGraph,
       error: state.error,
       threadId: state.threadId,
       fetchGraphForThread: state.fetchGraphForThread,
+      requestGraphGeneration: state.requestGraphGeneration,
       selectFeature: state.selectFeature,
     })),
   );
@@ -118,6 +122,12 @@ export function FeatureInsightsPanel() {
     }
   };
 
+  const handleGenerate = () => {
+    if (threadId) {
+      void requestGraphGeneration(threadId);
+    }
+  };
+
   return (
     <Card className="bg-card/95 border-border/80 shadow-sm">
       <CardHeader className="gap-2 pb-4">
@@ -137,6 +147,8 @@ export function FeatureInsightsPanel() {
           totalFeatures={features.length}
           activeFeatures={activeFeatureIds.length}
           onRetry={handleRetry}
+          onGenerate={handleGenerate}
+          isGeneratingGraph={isGeneratingGraph}
         />
 
         {isLoading && !selectedFeature && <LoadingState />}
@@ -213,12 +225,16 @@ function GraphInitializationStatus({
   totalFeatures,
   activeFeatures,
   onRetry,
+  onGenerate,
+  isGeneratingGraph,
 }: {
   isLoading: boolean;
   hasGraph: boolean;
   totalFeatures: number;
   activeFeatures: number;
   onRetry: () => void;
+  onGenerate: () => void;
+  isGeneratingGraph: boolean;
 }) {
   const statusIcon = isLoading ? (
     <Loader2 className="size-4 animate-spin" />
@@ -256,9 +272,30 @@ function GraphInitializationStatus({
           <span className="text-muted-foreground">
             No feature graph data is attached to this thread yet.
           </span>
-          <Button size="sm" variant="outline" onClick={onRetry}>
-            Reload
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onRetry}
+              disabled={isGeneratingGraph || isLoading}
+            >
+              Reload
+            </Button>
+            <Button
+              size="sm"
+              onClick={onGenerate}
+              disabled={isGeneratingGraph || isLoading}
+            >
+              {isGeneratingGraph ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin" />
+                  Generating
+                </span>
+              ) : (
+                "Generate feature graph"
+              )}
+            </Button>
+          </div>
         </div>
       )}
     </div>
