@@ -16,7 +16,7 @@ describe("loadFeatureGraph", () => {
 
       await writeFile(
         path.join(graphDir, "nodes", "auth.yaml"),
-        `id: feature-auth\nname: Authentication\ndescription: Handles login\nstatus: active\nartifacts:\n  - apps/web/src/auth/__tests__/login.test.ts\n`,
+        `id: feature-auth\nname: Authentication\ndescription: Handles login\nstatus: active\ndevelopment_progress: In Progress\nartifacts:\n  - apps/web/src/auth/__tests__/login.test.ts\n`,
         "utf8",
       );
 
@@ -34,7 +34,7 @@ describe("loadFeatureGraph", () => {
 
       await writeFile(
         path.join(graphDir, "nodes", "audit.yaml"),
-        `id: feature-audit\nname: Audit logging\ndescription: Tracks security events\nstatus: proposed\n`,
+        `id: feature-audit\nname: Audit logging\ndescription: Tracks security events\nstatus: proposed\ndevelopment_progress: To Do\n`,
         "utf8",
       );
 
@@ -81,10 +81,13 @@ describe("loadFeatureGraph", () => {
       expect(inlineFeature).toEqual(
         expect.objectContaining({
           id: "feature-inline",
+          name: "Inline feature",
           description: "Ad-hoc definition",
           status: "in-progress",
         }),
       );
+
+      expect(inlineFeature?.development_progress).toBeUndefined();
 
       expect(data.edges).toEqual(
         expect.arrayContaining([

@@ -2,6 +2,12 @@ import { z } from "zod";
 
 const metadataSchema = z.record(z.string(), z.unknown());
 
+export const developmentProgressSchema = z.enum([
+  "To Do",
+  "In Progress",
+  "Completed",
+]);
+
 export const artifactRefSchema = z.union([
   z.string(),
   z
@@ -27,6 +33,7 @@ export const featureNodeSchema = z
     name: z.string(),
     description: z.string(),
     status: z.string(),
+    development_progress: developmentProgressSchema.optional(),
     group: z.string().optional(),
     metadata: metadataSchema.optional(),
     artifacts: artifactCollectionSchema.optional(),
@@ -115,6 +122,7 @@ export const featureGraphFileSchema = z
 
 export type ArtifactRef = z.infer<typeof artifactRefSchema>;
 export type ArtifactCollection = z.infer<typeof artifactCollectionSchema>;
+export type DevelopmentProgress = z.infer<typeof developmentProgressSchema>;
 export type FeatureNode = z.infer<typeof featureNodeSchema>;
 export type FeatureNodeEntry = z.infer<typeof featureNodeEntrySchema>;
 export type FeatureEdge = z.infer<typeof featureEdgeSchema>;
