@@ -3339,6 +3339,7 @@ __metadata:
     ts-jest: ^29.1.0
     typescript: ~5.7.2
     typescript-eslint: ^8.22.0
+    yaml: ^2.6.0
     zod: ^3.25.32
   languageName: unknown
   linkType: soft
