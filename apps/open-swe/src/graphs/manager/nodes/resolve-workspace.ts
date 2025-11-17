@@ -1,4 +1,6 @@
+import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
@@ -18,6 +20,22 @@ const FEATURE_GRAPH_RELATIVE_PATH = path.join(
   "graph",
   "graph.yaml",
 );
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_FEATURE_GRAPH_PATH = path.resolve(
+  moduleDir,
+  "../../../../../../",
+  FEATURE_GRAPH_RELATIVE_PATH,
+);
+
+const fileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export async function resolveWorkspace(
   state: ManagerGraphState,
@@ -42,11 +60,27 @@ export async function resolveWorkspace(
         workspacePath,
         FEATURE_GRAPH_RELATIVE_PATH,
       );
-      logger.info("Loading feature graph", { graphPath });
-      const data = await loadFeatureGraph(graphPath);
+      let graphSourcePath = graphPath;
+
+      if (!(await fileExists(graphPath))) {
+        if (await fileExists(DEFAULT_FEATURE_GRAPH_PATH)) {
+          graphSourcePath = DEFAULT_FEATURE_GRAPH_PATH;
+          logger.info("Workspace feature graph missing, using default graph", {
+            workspaceGraphPath: graphPath,
+            defaultGraphPath: graphSourcePath,
+          });
+        } else {
+          throw new Error(
+            `Feature graph not found at ${graphPath}. Add a features/graph/graph.yaml file to your workspace.`,
+          );
+        }
+      }
+
+      logger.info("Loading feature graph", { graphPath: graphSourcePath });
+      const data = await loadFeatureGraph(graphSourcePath);
       updates.featureGraph = new FeatureGraph(data);
       logger.info("Loaded feature graph", {
-        graphPath,
+        graphPath: graphSourcePath,
         featureCount: data.nodes.size,
         edgeCount: data.edges.length,
         version: data.version,
