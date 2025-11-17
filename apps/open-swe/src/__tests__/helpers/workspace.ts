@@ -10,6 +10,10 @@ export interface WorkspaceTestContext {
   cleanup: () => Promise<void>;
 }
 
+type WorkspaceOptions = {
+  initializeGraph?: boolean;
+};
+
 function createGraphConfig(workspacePath: string): GraphConfig {
   return {
     configurable: { workspacePath },
@@ -21,12 +25,23 @@ function createGraphConfig(workspacePath: string): GraphConfig {
   } as unknown as GraphConfig;
 }
 
-export async function createGitWorkspace(): Promise<WorkspaceTestContext> {
+export async function createGitWorkspace(
+  options: WorkspaceOptions = {},
+): Promise<WorkspaceTestContext> {
   const previousWorkspacesRoot = process.env.WORKSPACES_ROOT;
   const root = await mkdtemp(path.join(tmpdir(), "open-swe-ws-root-"));
   const workspacePath = path.join(root, "workspace");
   await mkdir(workspacePath, { recursive: true });
   execSync("git init", { cwd: workspacePath });
+
+  if (options.initializeGraph) {
+    execSync(
+      "mkdir -p features/graph && printf 'version: 1\nnodes: []\nedges: []\n' > features/graph/graph.yaml",
+      {
+        cwd: workspacePath,
+      },
+    );
+  }
   process.env.WORKSPACES_ROOT = root;
   process.env.SKIP_CI_UNTIL_LAST_COMMIT = "false";
   return {
