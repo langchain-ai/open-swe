@@ -330,15 +330,26 @@ export function ThreadView({
     }
   }, [stream.error]);
 
+  const previousProgrammerSession =
+    useRef<ManagerGraphState["programmerSession"]>();
   useEffect(() => {
-    if (
-      plannerStream.values.programmerSession &&
-      (plannerStream.values.programmerSession.runId !==
-        programmerSession?.runId ||
-        plannerStream.values.programmerSession.threadId !==
-          programmerSession?.threadId)
-    ) {
-      setProgrammerSession?.(plannerStream.values.programmerSession);
+    const nextProgrammerSession = plannerStream.values.programmerSession;
+    const currentProgrammerSession = previousProgrammerSession.current;
+
+    if (!nextProgrammerSession?.runId || !nextProgrammerSession.threadId) {
+      return;
+    }
+
+    const hasProgrammerSessionChanged =
+      nextProgrammerSession.runId !== currentProgrammerSession?.runId ||
+      nextProgrammerSession.threadId !== currentProgrammerSession?.threadId;
+
+    if (!hasProgrammerSessionChanged) {
+      return;
+    }
+
+    previousProgrammerSession.current = nextProgrammerSession;
+    setProgrammerSession?.(nextProgrammerSession);
 
       // Only switch tabs from the planner ActionsRenderer to ensure proper timing
       // This allows the accepted plan step to be visible before switching
@@ -349,15 +360,32 @@ export function ThreadView({
         }, 2000);
       }
     }
-  }, [plannerStream.values, selectedTab]);
+  }, [
+    plannerStream.values.programmerSession?.runId,
+    plannerStream.values.programmerSession?.threadId,
+    selectedTab,
+  ]);
 
+  const previousProgrammerTaskPlan = useRef<TaskPlan | undefined>();
   useEffect(() => {
-    if (programmerStream.values?.taskPlan) {
-      setProgrammerTaskPlan(programmerStream.values.taskPlan);
-    } else if (realTimeTaskPlan) {
+    const nextTaskPlan = programmerStream.values?.taskPlan;
+    const currentTaskPlan = previousProgrammerTaskPlan.current;
+
+    if (nextTaskPlan) {
+      if (nextTaskPlan === currentTaskPlan) {
+        return;
+      }
+
+      previousProgrammerTaskPlan.current = nextTaskPlan;
+      setProgrammerTaskPlan(nextTaskPlan);
+      return;
+    }
+
+    if (realTimeTaskPlan && realTimeTaskPlan !== currentTaskPlan) {
+      previousProgrammerTaskPlan.current = realTimeTaskPlan;
       setProgrammerTaskPlan(realTimeTaskPlan);
     }
-  }, [programmerStream.values, realTimeTaskPlan]);
+  }, [programmerStream.values?.taskPlan, realTimeTaskPlan]);
 
   const getStatusDotColor = (status: string) => {
     switch (status) {
