@@ -277,19 +277,35 @@ export function ThreadView({
     }
   }, [programmerSession]);
 
+  const previousPlannerSession =
+    useRef<ManagerGraphState["plannerSession"]>();
   useEffect(() => {
-    if (
-      stream?.values?.plannerSession &&
-      plannerSession?.runId !== stream.values.plannerSession.runId
-    ) {
-      const prevPlannerSession = plannerSession;
-      setPlannerSession(stream.values.plannerSession);
+    const nextPlannerSession = stream.values?.plannerSession;
+    const currentPlannerSession = previousPlannerSession.current;
 
-      if (prevPlannerSession && selectedTab === "programmer") {
-        setSelectedTab("planner");
-      }
+    if (!nextPlannerSession) {
+      return;
     }
-  }, [stream?.values]);
+
+    const hasPlannerSessionChanged =
+      nextPlannerSession.runId !== currentPlannerSession?.runId ||
+      nextPlannerSession.threadId !== currentPlannerSession?.threadId;
+
+    if (!hasPlannerSessionChanged) {
+      return;
+    }
+
+    previousPlannerSession.current = nextPlannerSession;
+    setPlannerSession(nextPlannerSession);
+
+    if (currentPlannerSession && selectedTab === "programmer") {
+      setSelectedTab("planner");
+    }
+  }, [
+    stream.values?.plannerSession?.runId,
+    plannerSession?.runId,
+    selectedTab,
+  ]);
 
   useEffect(() => {
     if (stream.error) {
