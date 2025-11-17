@@ -21,6 +21,7 @@ describe("feature graph writer", () => {
       name: "Login",
       description: "Handles authentication",
       status: "active",
+      development_progress: "In Progress",
     });
 
     expect(firstInsert).toHaveLength(3);
@@ -29,6 +30,7 @@ describe("feature graph writer", () => {
       name: "Login",
       description: "Handles auth securely",
       status: "active",
+      development_progress: "Completed",
       group: "auth",
     });
 
@@ -39,6 +41,7 @@ describe("feature graph writer", () => {
         name: "Login",
         description: "Handles auth securely",
         status: "active",
+        development_progress: "Completed",
         group: "auth",
       });
   });
@@ -92,6 +95,7 @@ describe("feature graph writer", () => {
           name: "Billing",
           description: "Handles payments",
           status: "in-progress",
+          development_progress: "In Progress",
           metadata: { priority: "high" },
         },
         { source: "./nodes/feature-alpha.yaml" },
@@ -115,6 +119,7 @@ describe("feature graph writer", () => {
       "    name: Billing",
       "    description: Handles payments",
       "    status: in-progress",
+      "    development_progress: In Progress",
       "    metadata:",
       "      priority: high",
       "  - source: ./nodes/feature-alpha.yaml",

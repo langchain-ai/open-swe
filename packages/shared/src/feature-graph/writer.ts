@@ -21,6 +21,7 @@ const KEY_PRIORITY = [
   "name",
   "description",
   "status",
+  "development_progress",
   "group",
   "nodes",
   "edges",
