@@ -241,6 +241,29 @@ export function ThreadView({
   const plannerActiveFeatureIds = plannerStream.values?.activeFeatureIds;
   const programmerActiveFeatureIds = programmerStream.values?.activeFeatureIds;
 
+  const plannerSessionRunId = stream.values?.plannerSession?.runId;
+  const plannerSessionThreadId = stream.values?.plannerSession?.threadId;
+  const plannerProgrammerRunId = plannerStream.values.programmerSession?.runId;
+  const plannerProgrammerThreadId =
+    plannerStream.values.programmerSession?.threadId;
+
+  const buildTaskPlanSignature = (taskPlan?: TaskPlan) =>
+    taskPlan
+      ? `${taskPlan.activeTaskIndex}:${taskPlan.tasks
+          .map(
+            (task) =>
+              `${task.id}:${task.taskIndex}:${task.completed}:${
+                task.completedAt ?? ""
+              }`,
+          )
+          .join("|")}`
+      : undefined;
+
+  const programmerTaskPlanSignature = buildTaskPlanSignature(
+    programmerStream.values?.taskPlan,
+  );
+  const realTimeTaskPlanSignature = buildTaskPlanSignature(realTimeTaskPlan);
+
   useEffect(() => {
     if (
       managerActiveFeatureIds === undefined &&
@@ -278,12 +301,12 @@ export function ThreadView({
   }, [programmerSession]);
 
   const previousPlannerSession =
-    useRef<ManagerGraphState["plannerSession"]>();
+    useRef<ManagerGraphState["plannerSession"] | undefined>(undefined);
   useEffect(() => {
     const nextPlannerSession = stream.values?.plannerSession;
     const currentPlannerSession = previousPlannerSession.current;
 
-    if (!nextPlannerSession) {
+    if (!nextPlannerSession?.runId || !nextPlannerSession.threadId) {
       return;
     }
 
@@ -302,8 +325,8 @@ export function ThreadView({
       setSelectedTab("planner");
     }
   }, [
-    stream.values?.plannerSession?.runId,
-    plannerSession?.runId,
+    plannerSessionRunId,
+    plannerSessionThreadId,
     selectedTab,
   ]);
 
@@ -331,7 +354,7 @@ export function ThreadView({
   }, [stream.error]);
 
   const previousProgrammerSession =
-    useRef<ManagerGraphState["programmerSession"]>();
+    useRef<ManagerGraphState["programmerSession"] | undefined>(undefined);
   useEffect(() => {
     const nextProgrammerSession = plannerStream.values.programmerSession;
     const currentProgrammerSession = previousProgrammerSession.current;
@@ -351,41 +374,50 @@ export function ThreadView({
     previousProgrammerSession.current = nextProgrammerSession;
     setProgrammerSession?.(nextProgrammerSession);
 
-      // Only switch tabs from the planner ActionsRenderer to ensure proper timing
-      // This allows the accepted plan step to be visible before switching
-      if (selectedTab === PLANNER_GRAPH_ID) {
-        // Add a small delay to allow the accepted plan step to render first
-        setTimeout(() => {
-          setSelectedTab?.("programmer");
-        }, 2000);
-      }
+    // Only switch tabs from the planner ActionsRenderer to ensure proper timing
+    // This allows the accepted plan step to be visible before switching
+    if (selectedTab === PLANNER_GRAPH_ID) {
+      // Add a small delay to allow the accepted plan step to render first
+      setTimeout(() => {
+        setSelectedTab?.("programmer");
+      }, 2000);
     }
   }, [
-    plannerStream.values.programmerSession?.runId,
-    plannerStream.values.programmerSession?.threadId,
+    plannerProgrammerRunId,
+    plannerProgrammerThreadId,
     selectedTab,
   ]);
 
-  const previousProgrammerTaskPlan = useRef<TaskPlan | undefined>();
+  const previousProgrammerTaskPlan = useRef<TaskPlan | undefined>(undefined);
+  const previousProgrammerTaskPlanSignature = useRef<string | undefined>(
+    undefined,
+  );
   useEffect(() => {
     const nextTaskPlan = programmerStream.values?.taskPlan;
     const currentTaskPlan = previousProgrammerTaskPlan.current;
+    const nextTaskPlanSignature = programmerTaskPlanSignature;
+    const currentSignature = previousProgrammerTaskPlanSignature.current;
 
-    if (nextTaskPlan) {
-      if (nextTaskPlan === currentTaskPlan) {
-        return;
-      }
-
+    if (nextTaskPlan && nextTaskPlanSignature !== currentSignature) {
       previousProgrammerTaskPlan.current = nextTaskPlan;
+      previousProgrammerTaskPlanSignature.current = nextTaskPlanSignature;
       setProgrammerTaskPlan(nextTaskPlan);
       return;
     }
 
-    if (realTimeTaskPlan && realTimeTaskPlan !== currentTaskPlan) {
+    const nextRealTimeSignature = realTimeTaskPlanSignature;
+
+    if (
+      realTimeTaskPlan &&
+      nextRealTimeSignature &&
+      nextRealTimeSignature !== currentSignature &&
+      realTimeTaskPlan !== currentTaskPlan
+    ) {
       previousProgrammerTaskPlan.current = realTimeTaskPlan;
+      previousProgrammerTaskPlanSignature.current = nextRealTimeSignature;
       setProgrammerTaskPlan(realTimeTaskPlan);
     }
-  }, [programmerStream.values?.taskPlan, realTimeTaskPlan]);
+  }, [programmerTaskPlanSignature, realTimeTaskPlanSignature]);
 
   const getStatusDotColor = (status: string) => {
     switch (status) {
