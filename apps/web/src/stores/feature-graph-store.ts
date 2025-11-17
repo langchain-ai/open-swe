@@ -9,7 +9,10 @@ import type {
 } from "@openswe/shared/feature-graph/types";
 
 import type { FeatureGraphFetchResult } from "@/services/feature-graph.service";
-import { fetchFeatureGraph } from "@/services/feature-graph.service";
+import {
+  fetchFeatureGraph,
+  requestFeatureGraphGeneration,
+} from "@/services/feature-graph.service";
 
 export type FeatureResource = {
   id: string;
@@ -29,17 +32,26 @@ interface FeatureGraphStoreState {
   testsByFeatureId: Record<string, FeatureResource[]>;
   artifactsByFeatureId: Record<string, FeatureResource[]>;
   isLoading: boolean;
+  isGeneratingGraph: boolean;
   error: string | null;
   fetchGraphForThread: (
     threadId: string,
     options?: { force?: boolean },
   ) => Promise<void>;
+  requestGraphGeneration: (threadId: string) => Promise<void>;
   selectFeature: (featureId: string | null) => void;
   setActiveFeatureIds: (featureIds?: string[] | null) => void;
   clear: () => void;
 }
 
-const INITIAL_STATE: Omit<FeatureGraphStoreState, "fetchGraphForThread" | "selectFeature" | "setActiveFeatureIds" | "clear"> = {
+const INITIAL_STATE: Omit<
+  FeatureGraphStoreState,
+  | "fetchGraphForThread"
+  | "requestGraphGeneration"
+  | "selectFeature"
+  | "setActiveFeatureIds"
+  | "clear"
+> = {
   threadId: null,
   graph: null,
   features: [],
@@ -49,6 +61,7 @@ const INITIAL_STATE: Omit<FeatureGraphStoreState, "fetchGraphForThread" | "selec
   testsByFeatureId: {},
   artifactsByFeatureId: {},
   isLoading: false,
+  isGeneratingGraph: false,
   error: null,
 };
 
@@ -64,11 +77,12 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) =>
 
     if (shouldSkip) return;
 
-    set({
+    set((state) => ({
       ...INITIAL_STATE,
       threadId,
       isLoading: true,
-    });
+      isGeneratingGraph: state.isGeneratingGraph,
+    }));
 
     try {
       const result = await fetchFeatureGraph(threadId);
@@ -81,6 +95,7 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) =>
       set({
         threadId,
         isLoading: false,
+        isGeneratingGraph: false,
         error: message,
         graph: null,
         features: [],
@@ -89,6 +104,27 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) =>
         artifactsByFeatureId: {},
         activeFeatureIds: [],
         selectedFeatureId: null,
+      });
+    }
+  },
+  async requestGraphGeneration(threadId) {
+    const { isGeneratingGraph } = get();
+    if (!threadId || isGeneratingGraph) return;
+
+    set({ isGeneratingGraph: true, threadId, error: null });
+
+    try {
+      await requestFeatureGraphGeneration(threadId);
+      await get().fetchGraphForThread(threadId, { force: true });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to request feature graph generation";
+      set({
+        threadId,
+        isGeneratingGraph: false,
+        error: message,
       });
     }
   },
@@ -158,6 +194,7 @@ function mapFetchResultToState(
       activeFeatureIds: result.activeFeatureIds,
       selectedFeatureId: result.activeFeatureIds[0] ?? null,
       isLoading: false,
+      isGeneratingGraph: false,
       error: null,
     } satisfies Partial<FeatureGraphStoreState>;
   }
@@ -201,6 +238,7 @@ function mapFetchResultToState(
     activeFeatureIds: result.activeFeatureIds,
     selectedFeatureId,
     isLoading: false,
+    isGeneratingGraph: false,
     error: null,
   } satisfies Partial<FeatureGraphStoreState>;
 }
