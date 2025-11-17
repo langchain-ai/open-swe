@@ -1,10 +1,11 @@
 import { create } from "zustand";
 
-import type { FeatureGraph } from "@openswe/shared/feature-graph/graph";
+import { FeatureGraph } from "@openswe/shared/feature-graph/graph";
 import { testsForFeature } from "@openswe/shared/feature-graph/mappings";
 import type {
   ArtifactCollection,
   ArtifactRef,
+  FeatureEdge,
   FeatureNode,
 } from "@openswe/shared/feature-graph/types";
 
@@ -38,6 +39,7 @@ interface FeatureGraphStoreState {
     threadId: string,
     options?: { force?: boolean },
   ) => Promise<void>;
+  generateGraph: (threadId: string, prompt: string) => Promise<void>;
   requestGraphGeneration: (threadId: string) => Promise<void>;
   selectFeature: (featureId: string | null) => void;
   setActiveFeatureIds: (featureIds?: string[] | null) => void;
@@ -105,6 +107,59 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) =>
         activeFeatureIds: [],
         selectedFeatureId: null,
       });
+    }
+  },
+  async generateGraph(threadId, prompt) {
+    const { isGeneratingGraph } = get();
+    if (!threadId || isGeneratingGraph) return;
+
+    set((state) => ({
+      ...state,
+      threadId,
+      isGeneratingGraph: true,
+      isLoading: true,
+      error: null,
+    }));
+
+    try {
+      const response = await fetch("/api/feature-graph/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ thread_id: threadId, prompt }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message =
+          (payload && typeof payload.message === "string"
+            ? payload.message
+            : null) ?? "Failed to generate feature graph";
+        throw new Error(message);
+      }
+
+      const payload = await response.json();
+      const result = mapGenerationResponseToResult(payload);
+
+      set((state) =>
+        mapFetchResultToState(
+          { ...state, threadId, isGeneratingGraph: false },
+          result,
+        ),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate feature graph";
+      set((state) => ({
+        ...state,
+        threadId,
+        isGeneratingGraph: false,
+        isLoading: false,
+        error: message,
+      }));
     }
   },
   async requestGraphGeneration(threadId) {
@@ -354,4 +409,150 @@ function pickFirst(...candidates: (string | undefined)[]): string {
 
 function isHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
+}
+
+function mapGenerationResponseToResult(
+  data: unknown,
+): FeatureGraphFetchResult {
+  const graph = coerceGeneratedGraph(getGraphPayload(data));
+  const activeFeatureIds = normalizeFeatureIds(
+    getActiveFeatureIdsPayload(data),
+  );
+
+  return {
+    graph,
+    activeFeatureIds,
+  };
+}
+
+function getGraphPayload(data: unknown) {
+  if (!data || typeof data !== "object") return null;
+  if ("feature_graph" in data) return (data as Record<string, unknown>)["feature_graph"];
+  if ("featureGraph" in data) return (data as Record<string, unknown>)["featureGraph"];
+  if ("graph" in data) return (data as Record<string, unknown>)["graph"];
+  return null;
+}
+
+function getActiveFeatureIdsPayload(data: unknown): unknown {
+  if (!data || typeof data !== "object") return null;
+  if ("active_feature_ids" in data) {
+    return (data as Record<string, unknown>)["active_feature_ids"];
+  }
+  if ("activeFeatureIds" in data) {
+    return (data as Record<string, unknown>)["activeFeatureIds"];
+  }
+  return null;
+}
+
+function coerceGeneratedGraph(value: unknown): FeatureGraph | null {
+  if (!value || typeof value !== "object") return null;
+
+  const payload = value as Record<string, unknown>;
+  const version = typeof payload.version === "number" ? payload.version : 1;
+
+  const nodes = coerceGeneratedNodes(payload.nodes);
+  if (!nodes) return null;
+
+  const edges = coerceGeneratedEdges(payload.edges);
+  const artifacts = payload.artifacts as ArtifactCollection | undefined;
+
+  try {
+    return new FeatureGraph({
+      version,
+      nodes,
+      edges,
+      artifacts,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function coerceGeneratedNodes(value: unknown): Map<string, FeatureNode> | null {
+  if (!Array.isArray(value)) return null;
+
+  const map = new Map<string, FeatureNode>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const node = candidate as Record<string, unknown>;
+    const id = node.id;
+    const name = node.name;
+    const description = node.description;
+    const status = node.status;
+
+    if (
+      typeof id !== "string" ||
+      typeof name !== "string" ||
+      typeof description !== "string" ||
+      typeof status !== "string"
+    ) {
+      continue;
+    }
+
+    let normalizedMetadata: Record<string, unknown> | undefined =
+      isPlainObject(node.metadata) ? { ...node.metadata } : undefined;
+
+    if (typeof node.development_progress === "number") {
+      if (normalizedMetadata) {
+        normalizedMetadata.development_progress = node.development_progress;
+      } else {
+        normalizedMetadata = { development_progress: node.development_progress };
+      }
+    }
+
+    const normalizedNode: FeatureNode = {
+      id,
+      name,
+      description,
+      status,
+    };
+
+    if (typeof node.group === "string") {
+      normalizedNode.group = node.group;
+    }
+
+    if (normalizedMetadata) {
+      normalizedNode.metadata = normalizedMetadata;
+    }
+
+    if (node.artifacts) {
+      normalizedNode.artifacts = node.artifacts as ArtifactCollection;
+    }
+
+    map.set(normalizedNode.id, normalizedNode);
+  }
+
+  return map.size > 0 ? map : null;
+}
+
+function coerceGeneratedEdges(value: unknown): FeatureEdge[] {
+  if (!Array.isArray(value)) return [];
+
+  const edges: FeatureEdge[] = [];
+
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const edge = candidate as Record<string, unknown>;
+    const source = edge.source;
+    const target = edge.target;
+    const type = edge.type;
+
+    if (typeof source !== "string" || typeof target !== "string" || typeof type !== "string") {
+      continue;
+    }
+
+    const normalizedEdge: FeatureEdge = { source, target, type };
+
+    if (isPlainObject(edge.metadata)) {
+      normalizedEdge.metadata = edge.metadata as Record<string, unknown>;
+    }
+
+    edges.push(normalizedEdge);
+  }
+
+  return edges;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
