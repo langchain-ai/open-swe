@@ -10,6 +10,8 @@ import {
   Network,
 } from "lucide-react";
 
+import { useShallow } from "zustand/react/shallow";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,20 +48,22 @@ export function FeatureInsightsPanel() {
     threadId,
     fetchGraphForThread,
     selectFeature,
-  } = useFeatureGraphStore((state) => ({
-    graph: state.graph,
-    features: state.features,
-    featuresById: state.featuresById,
-    activeFeatureIds: state.activeFeatureIds,
-    selectedFeatureId: state.selectedFeatureId,
-    testsByFeatureId: state.testsByFeatureId,
-    artifactsByFeatureId: state.artifactsByFeatureId,
-    isLoading: state.isLoading,
-    error: state.error,
-    threadId: state.threadId,
-    fetchGraphForThread: state.fetchGraphForThread,
-    selectFeature: state.selectFeature,
-  }));
+  } = useFeatureGraphStore(
+    useShallow((state) => ({
+      graph: state.graph,
+      features: state.features,
+      featuresById: state.featuresById,
+      activeFeatureIds: state.activeFeatureIds,
+      selectedFeatureId: state.selectedFeatureId,
+      testsByFeatureId: state.testsByFeatureId,
+      artifactsByFeatureId: state.artifactsByFeatureId,
+      isLoading: state.isLoading,
+      error: state.error,
+      threadId: state.threadId,
+      fetchGraphForThread: state.fetchGraphForThread,
+      selectFeature: state.selectFeature,
+    })),
+  );
 
   const activeFeatures = useMemo(
     () =>
