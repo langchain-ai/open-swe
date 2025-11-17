@@ -185,15 +185,26 @@ export function ThreadView({
   );
   const clearFeatureGraph = useFeatureGraphStore((state) => state.clear);
 
+  const fetchFeatureGraphForThreadRef = useRef(fetchFeatureGraphForThread);
+  const clearFeatureGraphRef = useRef(clearFeatureGraph);
+
+  useEffect(() => {
+    fetchFeatureGraphForThreadRef.current = fetchFeatureGraphForThread;
+  }, [fetchFeatureGraphForThread]);
+
+  useEffect(() => {
+    clearFeatureGraphRef.current = clearFeatureGraph;
+  }, [clearFeatureGraph]);
+
   useEffect(() => {
     if (displayThread.id) {
-      void fetchFeatureGraphForThread(displayThread.id);
+      void fetchFeatureGraphForThreadRef.current(displayThread.id);
     }
 
     return () => {
-      clearFeatureGraph();
+      clearFeatureGraphRef.current();
     };
-  }, [displayThread.id, fetchFeatureGraphForThread, clearFeatureGraph]);
+  }, [displayThread.id]);
 
 
   const plannerStream = useStream<PlannerGraphState>({
