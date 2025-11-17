@@ -3,10 +3,12 @@
 import { type ReactNode, useMemo } from "react";
 import {
   AlertCircle,
+  CheckCircle2,
   ExternalLink,
   FileText,
   Layers,
   ListChecks,
+  Loader2,
   Network,
 } from "lucide-react";
 
@@ -77,6 +79,9 @@ export function FeatureInsightsPanel() {
     ? featuresById[selectedFeatureId]
     : undefined;
 
+  const selectionCandidates =
+    activeFeatures.length > 0 ? activeFeatures : features;
+
   const upstreamDependencies = useMemo(() => {
     if (!graph || !selectedFeature) return [];
     return graph
@@ -98,7 +103,10 @@ export function FeatureInsightsPanel() {
     ? artifactsByFeatureId[selectedFeatureId] ?? []
     : [];
 
-  const hasData = features.length > 0 || activeFeatures.length > 0;
+  const hasData =
+    features.length > 0 ||
+    activeFeatures.length > 0 ||
+    activeFeatureIds.length > 0;
 
   if (!hasData && !isLoading && !error) {
     return null;
@@ -123,65 +131,161 @@ export function FeatureInsightsPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 pb-6">
+        <GraphInitializationStatus
+          isLoading={isLoading}
+          hasGraph={Boolean(graph)}
+          totalFeatures={features.length}
+          activeFeatures={activeFeatureIds.length}
+          onRetry={handleRetry}
+        />
+
         {isLoading && !selectedFeature && <LoadingState />}
 
         {!isLoading && error && (
           <ErrorState message={error} onRetry={handleRetry} />
         )}
 
-        {!isLoading && !error && !selectedFeature && (
+        {!isLoading && !error && selectionCandidates.length === 0 && (
           <EmptyState message={EMPTY_STATE_MESSAGE} />
         )}
 
-        {selectedFeature && (
+        {selectionCandidates.length > 0 && (
           <div className="flex flex-col gap-4">
-            <FeatureSummary
-              feature={selectedFeature}
-              isActive={activeFeatureIds.includes(selectedFeature.id)}
-            />
+            {selectedFeature && (
+              <FeatureSummary
+                feature={selectedFeature}
+                isActive={activeFeatureIds.includes(selectedFeature.id)}
+              />
+            )}
 
             <FeatureSelection
-              features={activeFeatures.length > 0 ? activeFeatures : features}
+              features={selectionCandidates}
               selectedId={selectedFeatureId}
               onSelect={selectFeature}
               hasActiveFeatures={activeFeatures.length > 0}
             />
 
-            <Separator className="bg-border/60" />
+            {selectedFeature && <Separator className="bg-border/60" />}
 
-            <DependencySection
-              title="Upstream dependencies"
-              description="Features that must be in place before this work can succeed."
-              icon={<Network className="size-4" />}
-              features={upstreamDependencies}
-              onSelect={selectFeature}
-            />
+            {selectedFeature && (
+              <>
+                <DependencySection
+                  title="Upstream dependencies"
+                  description="Features that must be in place before this work can succeed."
+                  icon={<Network className="size-4" />}
+                  features={upstreamDependencies}
+                  onSelect={selectFeature}
+                />
 
-            <DependencySection
-              title="Downstream impact"
-              description="Features that rely on the current feature and may require verification."
-              icon={<Network className="size-4 rotate-180" />}
-              features={downstreamDependencies}
-              onSelect={selectFeature}
-            />
+                <DependencySection
+                  title="Downstream impact"
+                  description="Features that rely on the current feature and may require verification."
+                  icon={<Network className="size-4 rotate-180" />}
+                  features={downstreamDependencies}
+                  onSelect={selectFeature}
+                />
 
-            <ResourceSection
-              title="Suggested tests"
-              description="Run these tests to validate the feature’s behaviour."
-              icon={<ListChecks className="size-4" />}
-              resources={tests}
-            />
+                <ResourceSection
+                  title="Suggested tests"
+                  description="Run these tests to validate the feature’s behaviour."
+                  icon={<ListChecks className="size-4" />}
+                  resources={tests}
+                />
 
-            <ResourceSection
-              title="Related artifacts"
-              description="Review these documents, manifests, or code artifacts for additional context."
-              icon={<FileText className="size-4" />}
-              resources={artifacts}
-            />
+                <ResourceSection
+                  title="Related artifacts"
+                  description="Review these documents, manifests, or code artifacts for additional context."
+                  icon={<FileText className="size-4" />}
+                  resources={artifacts}
+                />
+              </>
+            )}
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function GraphInitializationStatus({
+  isLoading,
+  hasGraph,
+  totalFeatures,
+  activeFeatures,
+  onRetry,
+}: {
+  isLoading: boolean;
+  hasGraph: boolean;
+  totalFeatures: number;
+  activeFeatures: number;
+  onRetry: () => void;
+}) {
+  const statusIcon = isLoading ? (
+    <Loader2 className="size-4 animate-spin" />
+  ) : hasGraph ? (
+    <CheckCircle2 className="size-4 text-emerald-500" />
+  ) : (
+    <AlertCircle className="size-4 text-amber-500" />
+  );
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/40 p-3">
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {statusIcon}
+        <span>Graph initialization</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <StatusTile
+          label="Graph state"
+          value={hasGraph ? "Loaded" : isLoading ? "Loading" : "Not available"}
+          tone={hasGraph ? "positive" : "neutral"}
+        />
+        <StatusTile
+          label="Defined features"
+          value={`${totalFeatures}`}
+          tone={totalFeatures > 0 ? "positive" : "neutral"}
+        />
+        <StatusTile
+          label="Active features"
+          value={`${activeFeatures}`}
+          tone={activeFeatures > 0 ? "positive" : "neutral"}
+        />
+      </div>
+      {!hasGraph && !isLoading && (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border/70 bg-background/60 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">
+            No feature graph data is attached to this thread yet.
+          </span>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Reload
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "positive" | "neutral";
+}) {
+  return (
+    <div
+      className={cn(
+        "border-border/70 bg-background/80 flex flex-col rounded-md border px-3 py-2 text-sm",
+        tone === "positive" && "border-emerald-400/50 bg-emerald-50/70 dark:bg-emerald-950/30",
+      )}
+    >
+      <span className="text-muted-foreground text-xs uppercase tracking-wide">
+        {label}
+      </span>
+      <span className="font-semibold">{value}</span>
+    </div>
   );
 }
 
