@@ -54,7 +54,9 @@ type WorkspaceContext = {
   directories: string[];
 };
 
-async function collectWorkspaceContext(workspacePath: string): Promise<WorkspaceContext> {
+async function collectWorkspaceContext(
+  workspacePath: string,
+): Promise<WorkspaceContext> {
   const directories: string[] = [];
   try {
     const entries = await fs.readdir(workspacePath, { withFileTypes: true });
@@ -98,15 +100,17 @@ function coerceFeatureGraph(content: string): FeatureGraphFile {
   }
 
   const normalized = featureGraphFileSchema.parse(parsed);
-  const nodes = normalized.nodes.map((node) => {
-    if (featureNodeSchema.safeParse(node).success) {
-      const candidate = node as FeatureGraphFile["nodes"][number];
-      const progress = (candidate as any).development_progress;
-      const validatedProgress = developmentProgressSchema.safeParse(progress).success
-        ? progress
+  const nodes: FeatureGraphFile["nodes"] = normalized.nodes.map((node) => {
+    const parsedNode = featureNodeSchema.safeParse(node);
+    if (parsedNode.success) {
+      const validatedProgress = developmentProgressSchema.safeParse(
+        parsedNode.data.development_progress,
+      ).success
+        ? parsedNode.data.development_progress
         : "To Do";
+
       return {
-        ...(candidate as Record<string, unknown>),
+        ...parsedNode.data,
         development_progress: validatedProgress,
       };
     }
@@ -156,7 +160,13 @@ export async function generateFeatureGraphForWorkspace({
   const graphFile = coerceFeatureGraph(content);
 
   await fs.mkdir(path.dirname(graphPath), { recursive: true });
-  await writeFeatureGraphFile({ targetPath: graphPath, data: graphFile });
+  await writeFeatureGraphFile({
+    graphPath,
+    version: graphFile.version,
+    nodes: graphFile.nodes,
+    edges: graphFile.edges,
+    artifacts: graphFile.artifacts,
+  });
 
   const graphData = await loadFeatureGraph(graphPath);
   const featureGraph = new FeatureGraph(graphData);

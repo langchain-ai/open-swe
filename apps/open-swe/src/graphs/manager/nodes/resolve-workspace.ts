@@ -114,7 +114,7 @@ export async function resolveWorkspace(
           const generated = await featureGraphGenerator({
             workspacePath,
             graphPath,
-            config,
+            config: _config,
           });
           graphData = generated.graphData;
           activeFeatureIds = generated.activeFeatureIds;
@@ -128,10 +128,13 @@ export async function resolveWorkspace(
           });
           if (await fileExists(DEFAULT_FEATURE_GRAPH_PATH)) {
             graphSourcePath = DEFAULT_FEATURE_GRAPH_PATH;
-            logger.info("Workspace feature graph missing, using default graph", {
-              workspaceGraphPath: graphPath,
-              defaultGraphPath: graphSourcePath,
-            });
+            logger.info(
+              "Workspace feature graph missing, using default graph",
+              {
+                workspaceGraphPath: graphPath,
+                defaultGraphPath: graphSourcePath,
+              },
+            );
           } else {
             throw new Error(
               `Feature graph not found at ${graphPath}. Add a features/graph/graph.yaml file to your workspace.`,

@@ -49,6 +49,7 @@ interface FeatureGraphStoreState {
 const INITIAL_STATE: Omit<
   FeatureGraphStoreState,
   | "fetchGraphForThread"
+  | "generateGraph"
   | "requestGraphGeneration"
   | "selectFeature"
   | "setActiveFeatureIds"
@@ -67,172 +68,177 @@ const INITIAL_STATE: Omit<
   error: null,
 };
 
-export const useFeatureGraphStore = create<FeatureGraphStoreState>((set, get) => ({
-  ...INITIAL_STATE,
-  async fetchGraphForThread(threadId, options) {
-    const { threadId: currentThreadId, isLoading, graph } = get();
-    const shouldSkip =
-      !threadId ||
-      (!options?.force &&
-        threadId === currentThreadId &&
-        (graph !== null || isLoading));
+export const useFeatureGraphStore = create<FeatureGraphStoreState>(
+  (set, get) => ({
+    ...INITIAL_STATE,
+    async fetchGraphForThread(threadId, options) {
+      const { threadId: currentThreadId, isLoading, graph } = get();
+      const shouldSkip =
+        !threadId ||
+        (!options?.force &&
+          threadId === currentThreadId &&
+          (graph !== null || isLoading));
 
-    if (shouldSkip) return;
+      if (shouldSkip) return;
 
-    set((state) => ({
-      ...INITIAL_STATE,
-      threadId,
-      isLoading: true,
-      isGeneratingGraph: state.isGeneratingGraph,
-    }));
-
-    try {
-      const result = await fetchFeatureGraph(threadId);
-      set((state) => mapFetchResultToState(state, result));
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to load feature graph";
-      set({
+      set((state) => ({
+        ...INITIAL_STATE,
         threadId,
-        isLoading: false,
-        isGeneratingGraph: false,
-        error: message,
-        graph: null,
-        features: [],
-        featuresById: {},
-        testsByFeatureId: {},
-        artifactsByFeatureId: {},
-        activeFeatureIds: [],
-        selectedFeatureId: null,
-      });
-    }
-  },
-  async generateGraph(threadId, prompt) {
-    const { isGeneratingGraph } = get();
-    if (!threadId || isGeneratingGraph) return;
+        isLoading: true,
+        isGeneratingGraph: state.isGeneratingGraph,
+      }));
 
-    set((state) => ({
-      ...state,
-      threadId,
-      isGeneratingGraph: true,
-      isLoading: true,
-      error: null,
-    }));
-
-    try {
-      const response = await fetch("/api/feature-graph/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ thread_id: threadId, prompt }),
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null);
+      try {
+        const result = await fetchFeatureGraph(threadId);
+        set((state) => mapFetchResultToState(state, result));
+      } catch (error) {
         const message =
-          (payload && typeof payload.message === "string"
-            ? payload.message
-            : null) ?? "Failed to generate feature graph";
-        throw new Error(message);
+          error instanceof Error
+            ? error.message
+            : "Failed to load feature graph";
+        set({
+          threadId,
+          isLoading: false,
+          isGeneratingGraph: false,
+          error: message,
+          graph: null,
+          features: [],
+          featuresById: {},
+          testsByFeatureId: {},
+          artifactsByFeatureId: {},
+          activeFeatureIds: [],
+          selectedFeatureId: null,
+        });
       }
+    },
+    async generateGraph(threadId, prompt) {
+      const { isGeneratingGraph } = get();
+      if (!threadId || isGeneratingGraph) return;
 
-      const payload = await response.json();
-      const result = mapGenerationResponseToResult(payload);
-
-      set((state) =>
-        mapFetchResultToState(
-          { ...state, threadId, isGeneratingGraph: false },
-          result,
-        ),
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to generate feature graph";
       set((state) => ({
         ...state,
         threadId,
-        isGeneratingGraph: false,
-        isLoading: false,
-        error: message,
+        isGeneratingGraph: true,
+        isLoading: true,
+        error: null,
       }));
-    }
-  },
-  async requestGraphGeneration(threadId) {
-    const { isGeneratingGraph } = get();
-    if (!threadId || isGeneratingGraph) return;
 
-    set({ isGeneratingGraph: true, threadId, error: null });
+      try {
+        const response = await fetch("/api/feature-graph/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ thread_id: threadId, prompt }),
+        });
 
-    try {
-      await requestFeatureGraphGeneration(threadId);
-      await get().fetchGraphForThread(threadId, { force: true });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to request feature graph generation";
-      set({
-        threadId,
-        isGeneratingGraph: false,
-        error: message,
-      });
-    }
-  },
-  selectFeature(featureId) {
-    if (!featureId) {
-      set({ selectedFeatureId: null });
-      return;
-    }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          const message =
+            (payload && typeof payload.message === "string"
+              ? payload.message
+              : null) ?? "Failed to generate feature graph";
+          throw new Error(message);
+        }
 
-    const { featuresById } = get();
-    if (!featuresById[featureId]) return;
+        const payload = await response.json();
+        const result = mapGenerationResponseToResult(payload);
 
-    set({ selectedFeatureId: featureId });
-  },
-  setActiveFeatureIds(featureIds) {
-    const normalized = normalizeFeatureIds(featureIds);
-    const state = get();
+        set((state) =>
+          mapFetchResultToState(
+            { ...state, threadId, isGeneratingGraph: false },
+            result,
+          ),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to generate feature graph";
+        set((state) => ({
+          ...state,
+          threadId,
+          isGeneratingGraph: false,
+          isLoading: false,
+          error: message,
+        }));
+      }
+    },
+    async requestGraphGeneration(threadId) {
+      const { isGeneratingGraph } = get();
+      if (!threadId || isGeneratingGraph) return;
 
-    const hasActiveFeatureIdsChanged =
-      normalized.length !== state.activeFeatureIds.length ||
-      normalized.some((id, index) => id !== state.activeFeatureIds[index]);
+      set({ isGeneratingGraph: true, threadId, error: null });
 
-    if (normalized.length === 0) {
-      if (!hasActiveFeatureIdsChanged) {
+      try {
+        await requestFeatureGraphGeneration(threadId);
+        await get().fetchGraphForThread(threadId, { force: true });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to request feature graph generation";
+        set({
+          threadId,
+          isGeneratingGraph: false,
+          error: message,
+        });
+      }
+    },
+    selectFeature(featureId) {
+      if (!featureId) {
+        set({ selectedFeatureId: null });
+        return;
+      }
+
+      const { featuresById } = get();
+      if (!featuresById[featureId]) return;
+
+      set({ selectedFeatureId: featureId });
+    },
+    setActiveFeatureIds(featureIds) {
+      const normalized = normalizeFeatureIds(featureIds);
+      const state = get();
+
+      const hasActiveFeatureIdsChanged =
+        normalized.length !== state.activeFeatureIds.length ||
+        normalized.some((id, index) => id !== state.activeFeatureIds[index]);
+
+      if (normalized.length === 0) {
+        if (!hasActiveFeatureIdsChanged) {
+          return;
+        }
+
+        set({
+          activeFeatureIds: [],
+          selectedFeatureId: state.selectedFeatureId,
+        });
+        return;
+      }
+
+      const currentSelection = state.selectedFeatureId;
+      const nextSelection =
+        currentSelection && normalized.includes(currentSelection)
+          ? currentSelection
+          : (normalized.find((id) => Boolean(state.featuresById[id])) ?? null);
+
+      if (
+        !hasActiveFeatureIdsChanged &&
+        nextSelection === state.selectedFeatureId
+      ) {
         return;
       }
 
       set({
-        activeFeatureIds: [],
-        selectedFeatureId: state.selectedFeatureId,
+        activeFeatureIds: normalized,
+        selectedFeatureId: nextSelection,
       });
-      return;
-    }
-
-    const currentSelection = state.selectedFeatureId;
-    const nextSelection =
-      currentSelection && normalized.includes(currentSelection)
-        ? currentSelection
-        : normalized.find((id) => Boolean(state.featuresById[id])) ?? null;
-
-    if (!hasActiveFeatureIdsChanged && nextSelection === state.selectedFeatureId) {
-      return;
-    }
-
-    set({
-      activeFeatureIds: normalized,
-      selectedFeatureId: nextSelection,
-    });
-  },
-  clear() {
-    set({ ...INITIAL_STATE });
-  },
-}));
+    },
+    clear() {
+      set({ ...INITIAL_STATE });
+    },
+  }),
+);
 
 function mapFetchResultToState(
   prevState: FeatureGraphStoreState,
@@ -303,8 +309,14 @@ function resolveSelectedFeatureId(
   activeFeatureIds: string[],
   features: FeatureNode[],
 ): string | null {
-  if (currentSelection && features.some((feature) => feature.id === currentSelection)) {
-    if (activeFeatureIds.length === 0 || activeFeatureIds.includes(currentSelection)) {
+  if (
+    currentSelection &&
+    features.some((feature) => feature.id === currentSelection)
+  ) {
+    if (
+      activeFeatureIds.length === 0 ||
+      activeFeatureIds.includes(currentSelection)
+    ) {
       return currentSelection;
     }
   }
@@ -374,7 +386,8 @@ function normalizeArtifactRef(
   );
 
   const secondary = ref.path && ref.path !== label ? ref.path : undefined;
-  const description = ref.description && ref.description !== label ? ref.description : undefined;
+  const description =
+    ref.description && ref.description !== label ? ref.description : undefined;
 
   const href = ref.url && isHttpUrl(ref.url) ? ref.url : undefined;
 
@@ -411,9 +424,7 @@ function isHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url.trim());
 }
 
-function mapGenerationResponseToResult(
-  data: unknown,
-): FeatureGraphFetchResult {
+function mapGenerationResponseToResult(data: unknown): FeatureGraphFetchResult {
   const graph = coerceGeneratedGraph(getGraphPayload(data));
   const activeFeatureIds = normalizeFeatureIds(
     getActiveFeatureIdsPayload(data),
@@ -427,21 +438,32 @@ function mapGenerationResponseToResult(
 
 function getGraphPayload(data: unknown) {
   if (!data || typeof data !== "object") return null;
-  if ("feature_graph" in data) return (data as Record<string, unknown>)["feature_graph"];
-  if ("featureGraph" in data) return (data as Record<string, unknown>)["featureGraph"];
+  if ("feature_graph" in data)
+    return (data as Record<string, unknown>)["feature_graph"];
+  if ("featureGraph" in data)
+    return (data as Record<string, unknown>)["featureGraph"];
   if ("graph" in data) return (data as Record<string, unknown>)["graph"];
   return null;
 }
 
-function getActiveFeatureIdsPayload(data: unknown): unknown {
+function getActiveFeatureIdsPayload(data: unknown): string[] | null {
   if (!data || typeof data !== "object") return null;
-  if ("active_feature_ids" in data) {
-    return (data as Record<string, unknown>)["active_feature_ids"];
-  }
-  if ("activeFeatureIds" in data) {
-    return (data as Record<string, unknown>)["activeFeatureIds"];
-  }
-  return null;
+
+  const candidates = (() => {
+    if ("active_feature_ids" in data) {
+      return (data as Record<string, unknown>)["active_feature_ids"];
+    }
+    if ("activeFeatureIds" in data) {
+      return (data as Record<string, unknown>)["activeFeatureIds"];
+    }
+    return null;
+  })();
+
+  if (!Array.isArray(candidates)) return null;
+
+  return candidates.every((item) => typeof item === "string")
+    ? candidates
+    : null;
 }
 
 function coerceGeneratedGraph(value: unknown): FeatureGraph | null {
@@ -489,14 +511,19 @@ function coerceGeneratedNodes(value: unknown): Map<string, FeatureNode> | null {
       continue;
     }
 
-    let normalizedMetadata: Record<string, unknown> | undefined =
-      isPlainObject(node.metadata) ? { ...node.metadata } : undefined;
+    let normalizedMetadata: Record<string, unknown> | undefined = isPlainObject(
+      node.metadata,
+    )
+      ? { ...node.metadata }
+      : undefined;
 
     if (typeof node.development_progress === "number") {
       if (normalizedMetadata) {
         normalizedMetadata.development_progress = node.development_progress;
       } else {
-        normalizedMetadata = { development_progress: node.development_progress };
+        normalizedMetadata = {
+          development_progress: node.development_progress,
+        };
       }
     }
 
@@ -537,7 +564,11 @@ function coerceGeneratedEdges(value: unknown): FeatureEdge[] {
     const target = edge.target;
     const type = edge.type;
 
-    if (typeof source !== "string" || typeof target !== "string" || typeof type !== "string") {
+    if (
+      typeof source !== "string" ||
+      typeof target !== "string" ||
+      typeof type !== "string"
+    ) {
       continue;
     }
 
