@@ -220,6 +220,17 @@ describe("calculateConversationHistoryTokenCount", () => {
 
     expect(result).toBe(expectedResult);
   });
+
+  it("should handle 1M token limit", async () => {
+    const messages = [
+      new HumanMessage({
+        content: "A".repeat(4 * 1_000_000), // 1M tokens worth of content
+      }),
+    ];
+
+    const result = calculateConversationHistoryTokenCount(messages);
+    expect(result).toBe(1_000_000);
+  });
 });
 
 describe("getMessagesSinceLastSummary", () => {
