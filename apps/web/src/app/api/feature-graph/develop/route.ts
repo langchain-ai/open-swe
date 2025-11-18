@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { Client } from "@langchain/langgraph-sdk";
+import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import {
   LOCAL_MODE_HEADER,
   OPEN_SWE_STREAM_MODE,
@@ -11,6 +11,7 @@ import type {
   ManagerGraphUpdate,
 } from "@openswe/shared/open-swe/manager/types";
 import type { PlannerGraphUpdate } from "@openswe/shared/open-swe/planner/types";
+import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 
 function resolveApiUrl(): string {
@@ -92,7 +93,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       config: {
         recursion_limit: 400,
         configurable: {
-          ...getCustomConfigurableFields(managerThreadState.config ?? {}),
+          ...getCustomConfigurableFields({
+            configurable: (managerThreadState.metadata?.configurable ?? {}) as
+              | GraphConfig["configurable"]
+              | undefined,
+          } as GraphConfig),
           ...(managerState.workspacePath
             ? { workspacePath: managerState.workspacePath }
             : {}),
@@ -103,7 +108,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
       ifNotExists: "create",
       streamResumable: true,
-      streamMode: OPEN_SWE_STREAM_MODE,
+      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     });
 
     const updatedManagerState: ManagerGraphUpdate = {
@@ -115,7 +120,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     };
 
     await client.threads.updateState<ManagerGraphState>(threadId, {
-      values: updatedManagerState,
+      values: {
+        ...managerState,
+        ...updatedManagerState,
+      },
     });
 
     return NextResponse.json({
