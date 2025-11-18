@@ -13,6 +13,7 @@ import type { FeatureGraphFetchResult } from "@/services/feature-graph.service";
 import {
   fetchFeatureGraph,
   requestFeatureGraphGeneration,
+  startFeatureDevelopmentRun,
 } from "@/services/feature-graph.service";
 
 export type FeatureResource = {
@@ -21,6 +22,21 @@ export type FeatureResource = {
   secondaryLabel?: string;
   description?: string;
   href?: string;
+};
+
+export type FeatureRunStatus =
+  | "idle"
+  | "starting"
+  | "running"
+  | "completed"
+  | "error";
+
+export type FeatureRunState = {
+  threadId: string | null;
+  runId: string | null;
+  status: FeatureRunStatus;
+  error?: string | null;
+  updatedAt: number;
 };
 
 interface FeatureGraphStoreState {
@@ -32,6 +48,7 @@ interface FeatureGraphStoreState {
   selectedFeatureId: string | null;
   testsByFeatureId: Record<string, FeatureResource[]>;
   artifactsByFeatureId: Record<string, FeatureResource[]>;
+  featureRuns: Record<string, FeatureRunState>;
   isLoading: boolean;
   isGeneratingGraph: boolean;
   error: string | null;
@@ -41,6 +58,16 @@ interface FeatureGraphStoreState {
   ) => Promise<void>;
   generateGraph: (threadId: string, prompt: string) => Promise<void>;
   requestGraphGeneration: (threadId: string) => Promise<void>;
+  startFeatureDevelopment: (featureId: string) => Promise<void>;
+  setFeatureRunStatus: (
+    featureId: string,
+    status: FeatureRunStatus,
+    options?: {
+      runId?: string | null;
+      threadId?: string | null;
+      error?: string;
+    },
+  ) => void;
   selectFeature: (featureId: string | null) => void;
   setActiveFeatureIds: (featureIds?: string[] | null) => void;
   clear: () => void;
@@ -51,6 +78,8 @@ const INITIAL_STATE: Omit<
   | "fetchGraphForThread"
   | "generateGraph"
   | "requestGraphGeneration"
+  | "startFeatureDevelopment"
+  | "setFeatureRunStatus"
   | "selectFeature"
   | "setActiveFeatureIds"
   | "clear"
@@ -63,6 +92,7 @@ const INITIAL_STATE: Omit<
   selectedFeatureId: null,
   testsByFeatureId: {},
   artifactsByFeatureId: {},
+  featureRuns: {},
   isLoading: false,
   isGeneratingGraph: false,
   error: null,
@@ -184,6 +214,99 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
           error: message,
         });
       }
+    },
+    async startFeatureDevelopment(featureId) {
+      const { threadId, featureRuns, featuresById } = get();
+      if (!threadId || !featureId || !featuresById[featureId]) return;
+
+      const existingRun = featureRuns[featureId];
+      if (
+        existingRun?.status === "running" ||
+        existingRun?.status === "starting"
+      ) {
+        set({ selectedFeatureId: featureId });
+        return;
+      }
+
+      const nextRunState: FeatureRunState = {
+        threadId: existingRun?.threadId ?? null,
+        runId: existingRun?.runId ?? null,
+        status: "starting",
+        error: null,
+        updatedAt: Date.now(),
+      };
+
+      set((state) => ({
+        ...state,
+        selectedFeatureId: featureId,
+        featureRuns: {
+          ...state.featureRuns,
+          [featureId]: nextRunState,
+        },
+      }));
+
+      try {
+        const { plannerThreadId, runId } = await startFeatureDevelopmentRun(
+          threadId,
+          featureId,
+        );
+
+        set((state) => ({
+          ...state,
+          selectedFeatureId: featureId,
+          featureRuns: {
+            ...state.featureRuns,
+            [featureId]: {
+              threadId: plannerThreadId,
+              runId,
+              status: "running",
+              error: null,
+              updatedAt: Date.now(),
+            },
+          },
+        }));
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to start feature development";
+
+        set((state) => ({
+          ...state,
+          selectedFeatureId: featureId,
+          featureRuns: {
+            ...state.featureRuns,
+            [featureId]: {
+              threadId: null,
+              runId: null,
+              status: "error",
+              error: message,
+              updatedAt: Date.now(),
+            },
+          },
+        }));
+      }
+    },
+    setFeatureRunStatus(featureId, status, options) {
+      if (!featureId) return;
+
+      set((state) => {
+        const current = state.featureRuns[featureId];
+
+        return {
+          ...state,
+          featureRuns: {
+            ...state.featureRuns,
+            [featureId]: {
+              threadId: options?.threadId ?? current?.threadId ?? null,
+              runId: options?.runId ?? current?.runId ?? null,
+              status,
+              error: options?.error ?? null,
+              updatedAt: Date.now(),
+            },
+          },
+        };
+      });
     },
     selectFeature(featureId) {
       if (!featureId) {

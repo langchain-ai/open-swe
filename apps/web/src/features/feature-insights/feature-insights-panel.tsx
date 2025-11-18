@@ -1,6 +1,13 @@
 "use client";
 
-import { type ReactNode, useMemo } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -14,6 +21,8 @@ import {
 
 import { useShallow } from "zustand/react/shallow";
 
+import { useStream } from "@langchain/langgraph-sdk/react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,11 +35,20 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActionsRenderer } from "@/components/v2/actions-renderer";
 import { cn } from "@/lib/utils";
 import {
   FeatureResource,
+  FeatureRunState,
+  FeatureRunStatus,
   useFeatureGraphStore,
 } from "@/stores/feature-graph-store";
+import { LOCAL_MODE_HEADER, PLANNER_GRAPH_ID } from "@openswe/shared/constants";
+import {
+  CustomNodeEvent,
+  isCustomNodeEvent,
+} from "@openswe/shared/open-swe/custom-node-events";
+import type { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 
 const EMPTY_STATE_MESSAGE =
@@ -45,13 +63,15 @@ export function FeatureInsightsPanel() {
     selectedFeatureId,
     testsByFeatureId,
     artifactsByFeatureId,
+    featureRuns,
     isLoading,
     isGeneratingGraph,
     error,
     threadId,
     fetchGraphForThread,
     requestGraphGeneration,
-    selectFeature,
+    startFeatureDevelopment,
+    setFeatureRunStatus,
   } = useFeatureGraphStore(
     useShallow((state) => ({
       graph: state.graph,
@@ -61,13 +81,15 @@ export function FeatureInsightsPanel() {
       selectedFeatureId: state.selectedFeatureId,
       testsByFeatureId: state.testsByFeatureId,
       artifactsByFeatureId: state.artifactsByFeatureId,
+      featureRuns: state.featureRuns,
       isLoading: state.isLoading,
       isGeneratingGraph: state.isGeneratingGraph,
       error: state.error,
       threadId: state.threadId,
       fetchGraphForThread: state.fetchGraphForThread,
       requestGraphGeneration: state.requestGraphGeneration,
-      selectFeature: state.selectFeature,
+      startFeatureDevelopment: state.startFeatureDevelopment,
+      setFeatureRunStatus: state.setFeatureRunStatus,
     })),
   );
 
@@ -75,7 +97,9 @@ export function FeatureInsightsPanel() {
     () =>
       activeFeatureIds
         .map((id) => featuresById[id])
-        .filter((feature): feature is NonNullable<typeof feature> => Boolean(feature)),
+        .filter((feature): feature is NonNullable<typeof feature> =>
+          Boolean(feature),
+        ),
     [activeFeatureIds, featuresById],
   );
 
@@ -85,6 +109,118 @@ export function FeatureInsightsPanel() {
 
   const selectionCandidates =
     activeFeatures.length > 0 ? activeFeatures : features;
+
+  const selectedRunState =
+    selectedFeatureId && featureRuns[selectedFeatureId]
+      ? featureRuns[selectedFeatureId]
+      : undefined;
+
+  const [featureNodeEvents, setFeatureNodeEvents] = useState<
+    Record<string, CustomNodeEvent[]>
+  >({});
+
+  const selectedCustomEvents = useMemo(
+    () =>
+      selectedFeatureId && featureNodeEvents[selectedFeatureId]
+        ? featureNodeEvents[selectedFeatureId]
+        : [],
+    [featureNodeEvents, selectedFeatureId],
+  );
+
+  const setSelectedCustomEvents = useCallback(
+    (
+      updater:
+        | CustomNodeEvent[]
+        | ((events: CustomNodeEvent[]) => CustomNodeEvent[]),
+    ) => {
+      if (!selectedFeatureId) return;
+
+      setFeatureNodeEvents((prev) => {
+        const current = prev[selectedFeatureId] ?? [];
+        const next = typeof updater === "function" ? updater(current) : updater;
+        return {
+          ...prev,
+          [selectedFeatureId]: next,
+        };
+      });
+    },
+    [selectedFeatureId],
+  );
+
+  const featureRunStream = useStream<PlannerGraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PLANNER_GRAPH_ID,
+    reconnectOnMount: true,
+    threadId: selectedRunState?.threadId ?? undefined,
+    onCustomEvent: (event) => {
+      if (isCustomNodeEvent(event) && selectedFeatureId) {
+        setFeatureNodeEvents((prev) => {
+          const existing = prev[selectedFeatureId] ?? [];
+          if (existing.some((entry) => entry.actionId === event.actionId)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [selectedFeatureId]: [...existing, event],
+          };
+        });
+      }
+    },
+    fetchStateHistory: false,
+    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
+  });
+
+  const joinedFeatureRunId = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (
+      selectedRunState?.runId &&
+      selectedRunState.runId !== joinedFeatureRunId.current
+    ) {
+      joinedFeatureRunId.current = selectedRunState.runId;
+      featureRunStream.joinStream(selectedRunState.runId).catch(() => {});
+    } else if (!selectedRunState?.runId) {
+      joinedFeatureRunId.current = undefined;
+    }
+  }, [featureRunStream, selectedRunState?.runId]);
+
+  useEffect(() => {
+    if (!selectedFeatureId || !selectedRunState) return;
+
+    if (featureRunStream.error) {
+      const message =
+        typeof featureRunStream.error === "object" &&
+        featureRunStream.error &&
+        "message" in featureRunStream.error
+          ? String((featureRunStream.error as Error).message)
+          : "Feature development run encountered an error";
+      setFeatureRunStatus(selectedFeatureId, "error", {
+        runId: selectedRunState.runId,
+        threadId: selectedRunState.threadId,
+        error: message,
+      });
+      return;
+    }
+
+    if (featureRunStream.isLoading) {
+      setFeatureRunStatus(selectedFeatureId, "running", {
+        runId: selectedRunState.runId,
+        threadId: selectedRunState.threadId,
+      });
+    } else if ((featureRunStream.messages?.length ?? 0) > 0) {
+      setFeatureRunStatus(selectedFeatureId, "completed", {
+        runId: selectedRunState.runId,
+        threadId: selectedRunState.threadId,
+      });
+    }
+  }, [
+    featureRunStream.error,
+    featureRunStream.isLoading,
+    featureRunStream.messages,
+    selectedFeatureId,
+    selectedRunState,
+    setFeatureRunStatus,
+  ]);
 
   const upstreamDependencies = useMemo(() => {
     if (!graph || !selectedFeature) return [];
@@ -101,10 +237,10 @@ export function FeatureInsightsPanel() {
   }, [graph, selectedFeature]);
 
   const tests = selectedFeatureId
-    ? testsByFeatureId[selectedFeatureId] ?? []
+    ? (testsByFeatureId[selectedFeatureId] ?? [])
     : [];
   const artifacts = selectedFeatureId
-    ? artifactsByFeatureId[selectedFeatureId] ?? []
+    ? (artifactsByFeatureId[selectedFeatureId] ?? [])
     : [];
 
   const hasData =
@@ -154,7 +290,10 @@ export function FeatureInsightsPanel() {
         {isLoading && !selectedFeature && <LoadingState />}
 
         {!isLoading && error && (
-          <ErrorState message={error} onRetry={handleRetry} />
+          <ErrorState
+            message={error}
+            onRetry={handleRetry}
+          />
         )}
 
         {!isLoading && !error && selectionCandidates.length === 0 && (
@@ -173,9 +312,21 @@ export function FeatureInsightsPanel() {
             <FeatureSelection
               features={selectionCandidates}
               selectedId={selectedFeatureId}
-              onSelect={selectFeature}
+              onSelect={startFeatureDevelopment}
+              featureRuns={featureRuns}
               hasActiveFeatures={activeFeatures.length > 0}
             />
+
+            {selectedFeature && (
+              <FeatureDevelopmentPanel
+                feature={selectedFeature}
+                runState={selectedRunState}
+                onStart={() => startFeatureDevelopment(selectedFeature.id)}
+                stream={featureRunStream}
+                customNodeEvents={selectedCustomEvents}
+                setCustomNodeEvents={setSelectedCustomEvents}
+              />
+            )}
 
             {selectedFeature && <Separator className="bg-border/60" />}
 
@@ -186,7 +337,8 @@ export function FeatureInsightsPanel() {
                   description="Features that must be in place before this work can succeed."
                   icon={<Network className="size-4" />}
                   features={upstreamDependencies}
-                  onSelect={selectFeature}
+                  onSelect={startFeatureDevelopment}
+                  featureRuns={featureRuns}
                 />
 
                 <DependencySection
@@ -194,7 +346,8 @@ export function FeatureInsightsPanel() {
                   description="Features that rely on the current feature and may require verification."
                   icon={<Network className="size-4 rotate-180" />}
                   features={downstreamDependencies}
-                  onSelect={selectFeature}
+                  onSelect={startFeatureDevelopment}
+                  featureRuns={featureRuns}
                 />
 
                 <ResourceSection
@@ -245,8 +398,8 @@ function GraphInitializationStatus({
   );
 
   return (
-    <div className="rounded-md border border-border/70 bg-muted/40 p-3">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="border-border/70 bg-muted/40 rounded-md border p-3">
+      <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
         {statusIcon}
         <span>Graph initialization</span>
       </div>
@@ -268,7 +421,7 @@ function GraphInitializationStatus({
         />
       </div>
       {!hasGraph && !isLoading && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed border-border/70 bg-background/60 px-3 py-2 text-sm">
+        <div className="border-border/70 bg-background/60 mt-3 flex items-center justify-between gap-3 rounded-md border border-dashed px-3 py-2 text-sm">
           <span className="text-muted-foreground">
             No feature graph data is attached to this thread yet.
           </span>
@@ -315,10 +468,11 @@ function StatusTile({
     <div
       className={cn(
         "border-border/70 bg-background/80 flex flex-col rounded-md border px-3 py-2 text-sm",
-        tone === "positive" && "border-emerald-400/50 bg-emerald-50/70 dark:bg-emerald-950/30",
+        tone === "positive" &&
+          "border-emerald-400/50 bg-emerald-50/70 dark:bg-emerald-950/30",
       )}
     >
-      <span className="text-muted-foreground text-xs uppercase tracking-wide">
+      <span className="text-muted-foreground text-xs tracking-wide uppercase">
         {label}
       </span>
       <span className="font-semibold">{value}</span>
@@ -336,7 +490,7 @@ function FeatureSummary({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <h3 className="text-lg font-semibold leading-tight">{feature.name}</h3>
+        <h3 className="text-lg leading-tight font-semibold">{feature.name}</h3>
         <Badge variant={isActive ? "secondary" : "outline"}>
           {isActive ? "Active" : feature.status}
         </Badge>
@@ -347,9 +501,97 @@ function FeatureSummary({
       <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-xs">
         <span className="font-mono text-[11px]">{feature.id}</span>
         {feature.group && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">
+          <span className="bg-muted rounded-full px-2 py-0.5 text-[11px]">
             {feature.group}
           </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FeatureDevelopmentPanel({
+  feature,
+  runState,
+  onStart,
+  stream,
+  customNodeEvents,
+  setCustomNodeEvents,
+}: {
+  feature: FeatureNode;
+  runState: FeatureRunState | undefined;
+  onStart: () => void;
+  stream: ReturnType<typeof useStream<PlannerGraphState>>;
+  customNodeEvents: CustomNodeEvent[];
+  setCustomNodeEvents: (
+    events:
+      | CustomNodeEvent[]
+      | ((events: CustomNodeEvent[]) => CustomNodeEvent[]),
+  ) => void;
+}) {
+  const status = runState?.status ?? "idle";
+  const isRunning = status === "running" || status === "starting";
+
+  return (
+    <div className="border-border/70 bg-muted/20 rounded-md border p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-2">
+          <ListChecks className="text-muted-foreground size-4" />
+          <div className="flex flex-col">
+            <span className="text-sm leading-tight font-semibold">
+              Feature development
+            </span>
+            <span className="text-muted-foreground text-xs">
+              Launch a dedicated planner run to work on this feature.
+            </span>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          onClick={onStart}
+          disabled={isRunning}
+          variant={status === "error" ? "destructive" : "default"}
+        >
+          {isRunning ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="size-4 animate-spin" />
+              {status === "starting" ? "Starting" : "Running"}
+            </span>
+          ) : (
+            "Start development"
+          )}
+        </Button>
+      </div>
+
+      <div className="text-muted-foreground mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-foreground font-semibold">{feature.name}</span>
+        <FeatureRunStatusPill status={status} />
+        {runState?.runId && (
+          <span className="bg-background rounded px-2 py-1 font-mono text-[11px]">
+            {runState.runId}
+          </span>
+        )}
+      </div>
+
+      {runState?.error && (
+        <div className="border-destructive/40 bg-destructive/5 text-destructive mt-2 rounded-md border px-3 py-2 text-sm">
+          {runState.error}
+        </div>
+      )}
+
+      <div className="border-border/60 bg-background/70 mt-3 rounded-md border p-2">
+        {runState?.runId && runState.threadId ? (
+          <ActionsRenderer<PlannerGraphState>
+            runId={runState.runId}
+            customNodeEvents={customNodeEvents}
+            setCustomNodeEvents={setCustomNodeEvents}
+            stream={stream}
+            threadId={runState.threadId}
+          />
+        ) : (
+          <p className="text-muted-foreground text-sm">
+            Start development to stream planner progress and provide feedback.
+          </p>
         )}
       </div>
     </div>
@@ -360,11 +602,13 @@ function FeatureSelection({
   features,
   selectedId,
   onSelect,
+  featureRuns,
   hasActiveFeatures,
 }: {
   features: FeatureNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  featureRuns: Record<string, FeatureRunState>;
   hasActiveFeatures: boolean;
 }) {
   if (features.length === 0) {
@@ -373,11 +617,13 @@ function FeatureSelection({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <span>{hasActiveFeatures ? "Active features" : "Available features"}</span>
+      <div className="text-muted-foreground flex items-center justify-between text-xs font-medium tracking-wide uppercase">
+        <span>
+          {hasActiveFeatures ? "Active features" : "Available features"}
+        </span>
         <span>{features.length}</span>
       </div>
-      <ScrollArea className="max-h-32 rounded-md border border-border/60">
+      <ScrollArea className="border-border/60 max-h-32 rounded-md border">
         <div className="flex flex-wrap gap-2 p-3">
           {features.map((feature) => (
             <Button
@@ -387,12 +633,13 @@ function FeatureSelection({
               className="h-auto min-w-[8rem] flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
               onClick={() => onSelect(feature.id)}
             >
-              <span className="text-sm font-medium leading-tight">
+              <span className="text-sm leading-tight font-medium">
                 {feature.name}
               </span>
-              <span className="text-muted-foreground text-[11px] font-mono">
+              <span className="text-muted-foreground font-mono text-[11px]">
                 {feature.id}
               </span>
+              <FeatureRunStatusPill status={featureRuns[feature.id]?.status} />
             </Button>
           ))}
         </div>
@@ -407,16 +654,22 @@ function DependencySection({
   icon,
   features,
   onSelect,
+  featureRuns,
 }: {
   title: string;
   description: string;
   icon: ReactNode;
   features: FeatureNode[];
   onSelect: (id: string) => void;
+  featureRuns: Record<string, FeatureRunState>;
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <SectionHeader title={title} description={description} icon={icon} />
+      <SectionHeader
+        title={title}
+        description={description}
+        icon={icon}
+      />
       {features.length === 0 ? (
         <p className="text-muted-foreground text-sm">
           No related features found.
@@ -428,21 +681,77 @@ function DependencySection({
               key={feature.id}
               type="button"
               className={cn(
-                "border-border/70 hover:bg-muted/60 focus-visible:ring-ring flex flex-col gap-1 rounded-md border px-3 py-2 text-left shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-2",
+                "border-border/70 hover:bg-muted/60 focus-visible:ring-ring flex flex-col gap-1 rounded-md border px-3 py-2 text-left shadow-xs transition-colors focus-visible:ring-2 focus-visible:outline-none",
               )}
               onClick={() => onSelect(feature.id)}
             >
-              <span className="text-sm font-medium leading-tight">
+              <span className="text-sm leading-tight font-medium">
                 {feature.name}
               </span>
-              <span className="text-muted-foreground text-[11px] font-mono">
+              <span className="text-muted-foreground font-mono text-[11px]">
                 {feature.id}
               </span>
+              <FeatureRunStatusPill status={featureRuns[feature.id]?.status} />
             </button>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function FeatureRunStatusPill({ status }: { status?: FeatureRunStatus }) {
+  if (!status || status === "idle") return null;
+
+  const { label, tone, icon } = (() => {
+    switch (status) {
+      case "starting":
+        return {
+          label: "Starting",
+          tone: "neutral" as const,
+          icon: <Loader2 className="size-3 animate-spin" />,
+        };
+      case "running":
+        return {
+          label: "Running",
+          tone: "neutral" as const,
+          icon: <Loader2 className="size-3 animate-spin" />,
+        };
+      case "completed":
+        return {
+          label: "Completed",
+          tone: "positive" as const,
+          icon: <CheckCircle2 className="size-3" />,
+        };
+      case "error":
+        return {
+          label: "Error",
+          tone: "warning" as const,
+          icon: <AlertCircle className="size-3" />,
+        };
+      default:
+        return {
+          label: status,
+          tone: "neutral" as const,
+          icon: null,
+        };
+    }
+  })();
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+        tone === "positive" &&
+          "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200",
+        tone === "warning" &&
+          "bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
+        tone === "neutral" && "bg-muted text-foreground",
+      )}
+    >
+      {icon}
+      {label}
+    </span>
   );
 }
 
@@ -459,19 +768,28 @@ function ResourceSection({
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <SectionHeader title={title} description={description} icon={icon} />
+      <SectionHeader
+        title={title}
+        description={description}
+        icon={icon}
+      />
       {resources.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No suggestions available.</p>
+        <p className="text-muted-foreground text-sm">
+          No suggestions available.
+        </p>
       ) : (
         <ul className="flex flex-col gap-3">
           {resources.map((resource) => (
-            <li key={resource.id} className="flex items-start justify-between gap-3">
+            <li
+              key={resource.id}
+              className="flex items-start justify-between gap-3"
+            >
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium leading-tight">
+                <p className="text-sm leading-tight font-medium">
                   {resource.label}
                 </p>
                 {resource.secondaryLabel && (
-                  <p className="text-muted-foreground text-xs font-mono">
+                  <p className="text-muted-foreground font-mono text-xs">
                     {resource.secondaryLabel}
                   </p>
                 )}
@@ -517,12 +835,14 @@ function SectionHeader({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="text-muted-foreground rounded-md border border-border/60 bg-muted/40 p-2">
+      <div className="text-muted-foreground border-border/60 bg-muted/40 rounded-md border p-2">
         {icon}
       </div>
       <div className="flex flex-col">
-        <h4 className="text-sm font-semibold leading-tight">{title}</h4>
-        <p className="text-muted-foreground text-sm leading-snug">{description}</p>
+        <h4 className="text-sm leading-tight font-semibold">{title}</h4>
+        <p className="text-muted-foreground text-sm leading-snug">
+          {description}
+        </p>
       </div>
     </div>
   );
@@ -544,7 +864,7 @@ function LoadingState() {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="text-muted-foreground flex items-center gap-3 rounded-md border border-dashed border-border/70 bg-muted/20 px-4 py-3 text-sm">
+    <div className="text-muted-foreground border-border/70 bg-muted/20 flex items-center gap-3 rounded-md border border-dashed px-4 py-3 text-sm">
       <Layers className="size-4" />
       <span>{message}</span>
     </div>
@@ -559,22 +879,25 @@ function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3">
+    <div className="border-destructive/40 bg-destructive/5 flex flex-col gap-3 rounded-md border px-4 py-3">
       <div className="flex items-start gap-2">
         <AlertCircle className="text-destructive size-4" />
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-destructive">
+          <span className="text-destructive text-sm font-semibold">
             Unable to load feature graph
           </span>
           <span className="text-muted-foreground text-sm">{message}</span>
         </div>
       </div>
       <div>
-        <Button size="sm" variant="outline" onClick={onRetry}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onRetry}
+        >
           Retry
         </Button>
       </div>
     </div>
   );
 }
-
