@@ -136,4 +136,28 @@ export class FeatureGraph {
 
     return results;
   }
+
+  toJSON(): {
+    version: number;
+    nodes: [string, FeatureNode][];
+    edges: FeatureEdge[];
+    artifacts?: ArtifactCollection;
+  } {
+    const serializedNodes: [string, FeatureNode][] = [];
+
+    for (const [id, node] of this.nodes.entries()) {
+      const clonedNode: FeatureNode = { ...node };
+      if (node.artifacts) {
+        clonedNode.artifacts = cloneArtifacts(node.artifacts);
+      }
+      serializedNodes.push([id, clonedNode]);
+    }
+
+    return {
+      version: this.version,
+      nodes: serializedNodes,
+      edges: cloneEdgeList(this.edges),
+      artifacts: cloneArtifacts(this.artifacts),
+    };
+  }
 }
