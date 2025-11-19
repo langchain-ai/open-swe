@@ -625,14 +625,14 @@ function FeatureSelection({
         </span>
         <span>{features.length}</span>
       </div>
-      <ScrollArea className="border-border/60 max-h-32 rounded-md border">
-        <div className="flex flex-wrap gap-2 p-3">
+      <ScrollArea className="border-border/60 max-h-[calc(100vh-320px)] rounded-md border">
+        <div className="flex flex-col gap-2 p-3">
           {features.map((feature) => (
             <Button
               key={feature.id}
               size="sm"
               variant={feature.id === selectedId ? "secondary" : "outline"}
-              className="h-auto min-w-[8rem] flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
+              className="h-auto min-w-[8rem] w-full flex-col items-start gap-0.5 px-3 py-2 text-left"
               onClick={() => onSelect(feature.id)}
             >
               <span className="text-sm leading-tight font-medium">
