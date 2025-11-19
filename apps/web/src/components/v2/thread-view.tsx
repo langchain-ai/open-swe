@@ -553,7 +553,7 @@ export function ThreadView({
         />
         {/* Right Side - Actions & Plan */}
         <div
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-4 pt-4"
+          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-4"
           style={{ height: "calc(100vh - 3rem)" }}
         >
           <div className="min-h-0 flex-1">
@@ -613,10 +613,10 @@ export function ThreadView({
 
               <TabsContent
                 value="feature-graph"
-                className="flex h-full min-h-0 flex-1 flex-col overflow-hidden"
+                className="flex h-full min-h-0 flex-1 flex-col"
               >
-                <Card className="border-border bg-card relative flex h-full min-h-0 flex-col overflow-hidden p-0">
-                  <CardContent className="h-full min-h-0 flex-1 overflow-hidden p-0">
+                <Card className="border-border bg-card relative flex h-full min-h-0 flex-col p-0">
+                  <CardContent className="h-full min-h-0 flex-1 p-0">
                     <div className="scrollbar-pretty-auto h-full overflow-y-auto px-2 py-4">
                       <FeatureInsightsPanel />
                     </div>
