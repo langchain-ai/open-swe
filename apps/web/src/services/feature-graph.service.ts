@@ -10,6 +10,10 @@ import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 
 import { createClient } from "@/providers/client";
+import {
+  FeatureGraphFetchResult,
+  normalizeFeatureIds,
+} from "@/lib/feature-graph-payload";
 
 type SerializedFeatureGraph = {
   version?: number;
@@ -17,11 +21,6 @@ type SerializedFeatureGraph = {
   edges?: unknown;
   artifacts?: unknown;
 };
-
-export interface FeatureGraphFetchResult {
-  graph: FeatureGraph | null;
-  activeFeatureIds: string[];
-}
 
 export interface FeatureDevelopmentResponse {
   plannerThreadId: string;
@@ -329,25 +328,6 @@ function coerceArtifactRef(value: unknown): ArtifactRef | null {
   }
 
   return Object.keys(artifact).length > 0 ? artifact : null;
-}
-
-function normalizeFeatureIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    normalized.push(trimmed);
-  }
-
-  return normalized;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

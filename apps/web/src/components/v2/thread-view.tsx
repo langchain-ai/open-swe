@@ -183,6 +183,9 @@ export function ThreadView({
   const fetchFeatureGraphForThread = useFeatureGraphStore(
     (state) => state.fetchGraphForThread,
   );
+  const generateFeatureGraph = useFeatureGraphStore(
+    (state) => state.generateGraph,
+  );
   const updateActiveFeatureIds = useFeatureGraphStore(
     (state) => state.setActiveFeatureIds,
   );
@@ -454,10 +457,11 @@ export function ThreadView({
   };
 
   const handleSendMessage = () => {
-    if (chatInput.trim()) {
+    const trimmed = chatInput.trim();
+    if (trimmed) {
       const newHumanMessage = new HumanMessage({
         id: uuidv4(),
-        content: chatInput,
+        content: trimmed,
       });
       stream.submit(
         {
@@ -471,6 +475,9 @@ export function ThreadView({
           }),
         },
       );
+      if (displayThread.id) {
+        void generateFeatureGraph(displayThread.id, trimmed);
+      }
       setChatInput("");
     }
   };

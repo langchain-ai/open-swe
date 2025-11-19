@@ -71,6 +71,7 @@ export function FeatureInsightsPanel() {
     fetchGraphForThread,
     requestGraphGeneration,
     startFeatureDevelopment,
+    selectFeature,
     setFeatureRunStatus,
   } = useFeatureGraphStore(
     useShallow((state) => ({
@@ -89,6 +90,7 @@ export function FeatureInsightsPanel() {
       fetchGraphForThread: state.fetchGraphForThread,
       requestGraphGeneration: state.requestGraphGeneration,
       startFeatureDevelopment: state.startFeatureDevelopment,
+      selectFeature: state.selectFeature,
       setFeatureRunStatus: state.setFeatureRunStatus,
     })),
   );
@@ -312,7 +314,7 @@ export function FeatureInsightsPanel() {
             <FeatureSelection
               features={selectionCandidates}
               selectedId={selectedFeatureId}
-              onSelect={startFeatureDevelopment}
+              onSelect={selectFeature}
               featureRuns={featureRuns}
               hasActiveFeatures={activeFeatures.length > 0}
             />
@@ -337,7 +339,7 @@ export function FeatureInsightsPanel() {
                   description="Features that must be in place before this work can succeed."
                   icon={<Network className="size-4" />}
                   features={upstreamDependencies}
-                  onSelect={startFeatureDevelopment}
+                  onSelect={selectFeature}
                   featureRuns={featureRuns}
                 />
 
@@ -346,7 +348,7 @@ export function FeatureInsightsPanel() {
                   description="Features that rely on the current feature and may require verification."
                   icon={<Network className="size-4 rotate-180" />}
                   features={downstreamDependencies}
-                  onSelect={startFeatureDevelopment}
+                  onSelect={selectFeature}
                   featureRuns={featureRuns}
                 />
 

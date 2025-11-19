@@ -10,6 +10,7 @@ const logger = createLogger(LogLevel.INFO, "FeatureGraphRoute");
 type GenerateRequestBody = {
   workspaceAbsPath?: unknown;
   configurable?: Record<string, unknown>;
+  prompt?: unknown;
 };
 
 export function registerFeatureGraphRoute(app: Hono) {
@@ -30,6 +31,10 @@ export function registerFeatureGraphRoute(app: Hono) {
 
     const workspaceAbsPath =
       typeof body.workspaceAbsPath === "string" ? body.workspaceAbsPath : undefined;
+    const prompt =
+      typeof body.prompt === "string" && body.prompt.trim()
+        ? body.prompt.trim()
+        : undefined;
 
     if (!workspaceAbsPath) {
       return ctx.json(
@@ -52,6 +57,7 @@ export function registerFeatureGraphRoute(app: Hono) {
         workspacePath: resolvedWorkspaceAbsPath,
         graphPath,
         config,
+        prompt,
       });
 
       return ctx.json({
