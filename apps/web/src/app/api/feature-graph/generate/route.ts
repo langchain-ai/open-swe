@@ -129,13 +129,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       configurable: resolveConfigurable(managerState.metadata?.configurable),
     });
 
-    const { activeFeatureIds } = mapFeatureGraphPayload(payload);
+    const { graph, activeFeatureIds } = mapFeatureGraphPayload(payload);
+
+    if (!graph) {
+      return NextResponse.json(
+        { error: "Generated feature graph payload was invalid" },
+        { status: 500 },
+      );
+    }
 
     await client.threads.updateState<ManagerGraphState>(threadId, {
       values: {
         ...managerState.values,
-        featureGraph:
-          payload?.featureGraph ?? payload?.feature_graph ?? payload?.graph,
+        featureGraph: graph,
         activeFeatureIds,
       },
     });
