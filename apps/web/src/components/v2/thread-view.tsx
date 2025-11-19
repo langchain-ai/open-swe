@@ -611,9 +611,12 @@ export function ThreadView({
                 </div>
               </div>
 
-              <TabsContent value="feature-graph">
-                <Card className="border-border bg-card relative h-full p-0">
-                  <CardContent className="h-full p-0">
+              <TabsContent
+                value="feature-graph"
+                className="flex h-full flex-1 flex-col"
+              >
+                <Card className="border-border bg-card relative flex h-full flex-col p-0">
+                  <CardContent className="h-full flex-1 p-0">
                     <div className="scrollbar-pretty-auto h-full overflow-y-auto px-2 py-4">
                       <FeatureInsightsPanel />
                     </div>
