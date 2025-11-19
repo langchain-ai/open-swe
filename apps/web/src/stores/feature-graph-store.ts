@@ -459,25 +459,6 @@ function resolveSelectedFeatureId(
   return features[0]?.id ?? null;
 }
 
-function normalizeFeatureIds(value?: string[] | null): string[] {
-  if (!Array.isArray(value)) return [];
-
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    normalized.push(trimmed);
-  }
-
-  return normalized;
-}
-
 function collectFeatureArtifacts(
   artifacts: ArtifactCollection | undefined,
 ): ArtifactRef[] {

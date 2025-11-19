@@ -27,6 +27,15 @@ function resolvePrompt(value: unknown): string {
   return "";
 }
 
+function resolveConfigurable(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 async function requestGraphGeneration({
   workspaceAbsPath,
   prompt,
@@ -117,13 +126,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const payload = await requestGraphGeneration({
       workspaceAbsPath,
       prompt,
-      configurable: managerState.metadata?.configurable,
+      configurable: resolveConfigurable(managerState.metadata?.configurable),
     });
 
     const { activeFeatureIds } = mapFeatureGraphPayload(payload);
 
     await client.threads.updateState<ManagerGraphState>(threadId, {
       values: {
+        ...managerState.values,
         featureGraph:
           payload?.featureGraph ?? payload?.feature_graph ?? payload?.graph,
         activeFeatureIds,
