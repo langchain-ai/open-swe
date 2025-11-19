@@ -115,7 +115,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const workspaceAbsPath = managerState.values.workspaceAbsPath;
+    const workspaceAbsPath =
+      managerState.values.workspaceAbsPath ?? managerState.values.workspacePath;
     if (!workspaceAbsPath) {
       return NextResponse.json(
         { error: "Workspace path unavailable for this thread" },
