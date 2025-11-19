@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@langchain/langgraph-sdk";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import { createLogger, LogLevel } from "@openswe/shared/logger";
 
 import { mapFeatureGraphPayload } from "@/lib/feature-graph-payload";
+
+const logger = createLogger(LogLevel.INFO, "FeatureGraphGenerateRoute");
 
 function resolveApiUrl(): string {
   return (
@@ -37,10 +40,12 @@ function resolveConfigurable(
 }
 
 async function requestGraphGeneration({
+  threadId,
   workspaceAbsPath,
   prompt,
   configurable,
 }: {
+  threadId: string;
   workspaceAbsPath: string;
   prompt: string;
   configurable?: Record<string, unknown>;
@@ -49,6 +54,7 @@ async function requestGraphGeneration({
   status: number;
   payload: unknown;
   message: string;
+  rawBody?: string;
 }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -57,6 +63,12 @@ async function requestGraphGeneration({
   if (process.env.OPEN_SWE_LOCAL_MODE === "true") {
     headers[LOCAL_MODE_HEADER] = "true";
   }
+
+  logger.info("Requesting feature graph generation", {
+    threadId,
+    workspaceAbsPath,
+    configurablePresent: Boolean(configurable),
+  });
 
   const response = await fetch(`${resolveApiUrl()}/feature-graph/generate`, {
     method: "POST",
@@ -68,14 +80,40 @@ async function requestGraphGeneration({
     }),
   });
 
-  const payload = await response.json().catch(() => null);
+  const rawBody = await response.text();
+  let payload: unknown = null;
+
+  try {
+    payload = rawBody ? JSON.parse(rawBody) : null;
+  } catch (error) {
+    logger.warn("Failed to parse feature graph generation response", {
+      threadId,
+      workspaceAbsPath,
+      error,
+    });
+  }
+
   const message =
     (payload && typeof (payload as { error?: unknown })?.error === "string"
       ? (payload as { error: string }).error
-      : response.statusText || "Failed to generate feature graph") ??
+      : rawBody || response.statusText || "Failed to generate feature graph") ??
     "Failed to generate feature graph";
 
-  return { ok: response.ok, status: response.status, payload, message };
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+    message,
+    rawBody,
+  };
+}
+
+function redactMessage(message: string, workspaceAbsPath?: string): string {
+  if (!workspaceAbsPath) {
+    return message;
+  }
+
+  return message.replaceAll(workspaceAbsPath, "[redacted]");
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -128,14 +166,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const generation = await requestGraphGeneration({
+      threadId,
       workspaceAbsPath,
       prompt,
       configurable: resolveConfigurable(managerState.metadata?.configurable),
     });
 
     if (!generation.ok) {
+      const redactedMessage = redactMessage(generation.message, workspaceAbsPath);
+      const redactedRawBody = redactMessage(generation.rawBody ?? "", workspaceAbsPath);
+
       return NextResponse.json(
-        { error: generation.message },
+        {
+          error: redactedMessage,
+          upstream: {
+            status: generation.status,
+            message: redactedRawBody || undefined,
+          },
+        },
         { status: generation.status },
       );
     }
@@ -145,6 +193,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { graph, activeFeatureIds } = mapFeatureGraphPayload(payload);
 
     if (!graph) {
+      logger.error("Feature graph generation payload was invalid", {
+        threadId,
+        workspaceAbsPath,
+        payload,
+      });
+
       return NextResponse.json(
         { error: "Generated feature graph payload was invalid" },
         { status: 500 },
@@ -168,6 +222,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       error instanceof Error
         ? error.message
         : "Failed to generate feature graph";
+
+    logger.error("Failed to handle feature graph generation request", {
+      error,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
