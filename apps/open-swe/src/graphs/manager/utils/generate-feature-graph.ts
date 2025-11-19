@@ -60,6 +60,13 @@ type WorkspaceContext = {
   codeTree?: string;
 };
 
+type GenerationResult = {
+  graphData: FeatureGraphData;
+  graphFile: FeatureGraphFile;
+  featureGraph: FeatureGraph;
+  activeFeatureIds: string[];
+};
+
 const MAX_TREE_DEPTH = 7;
 const MAX_TREE_ENTRIES = 400;
 const IGNORED_DIRECTORIES = new Set([
@@ -194,12 +201,33 @@ function coerceFeatureGraph(content: string): FeatureGraphFile {
   return { ...normalized, nodes };
 }
 
-type GenerationResult = {
-  graphData: FeatureGraphData;
-  graphFile: FeatureGraphFile;
-  featureGraph: FeatureGraph;
-  activeFeatureIds: string[];
-};
+async function loadExistingGraph(graphPath: string): Promise<GenerationResult | null> {
+  const graphExists = await fs
+    .access(graphPath)
+    .then(() => true)
+    .catch(() => false);
+
+  if (!graphExists) {
+    return null;
+  }
+
+  const graphData = await loadFeatureGraph(graphPath);
+  const featureGraph = new FeatureGraph(graphData);
+  const activeFeatureIds = featureGraph.listFeatures().map((node) => node.id);
+  const graphFile: FeatureGraphFile = {
+    version: graphData.version,
+    nodes: Array.from(graphData.nodes.values()),
+    edges: graphData.edges,
+    artifacts: graphData.artifacts,
+  };
+
+  logger.info("Loaded existing feature graph file", {
+    graphPath,
+    featureCount: activeFeatureIds.length,
+  });
+
+  return { graphData, graphFile, featureGraph, activeFeatureIds };
+}
 
 export async function generateFeatureGraphForWorkspace({
   workspacePath,
@@ -212,6 +240,18 @@ export async function generateFeatureGraphForWorkspace({
   config: GraphConfig;
   prompt?: string;
 }): Promise<GenerationResult> {
+  if (process.env.OPEN_SWE_LOCAL_MODE === "true") {
+    const existingGraph = await loadExistingGraph(graphPath);
+    if (existingGraph) {
+      return existingGraph;
+    }
+
+    logger.warn("Local mode enabled but no existing feature graph found", {
+      workspacePath,
+      graphPath,
+    });
+  }
+
   const context = await collectWorkspaceContext(workspacePath);
 
   const model = await loadModel(config, LLMTask.PLANNER);
