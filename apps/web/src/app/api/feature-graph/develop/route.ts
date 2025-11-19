@@ -86,6 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       workspacePath: managerState.workspacePath,
       activeFeatureIds: [featureId],
       programmerSession: managerState.programmerSession,
+      messages: managerState.messages,
     };
 
     const run = await client.runs.create(plannerThreadId, PLANNER_GRAPH_ID, {
