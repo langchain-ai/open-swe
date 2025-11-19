@@ -632,7 +632,7 @@ function FeatureSelection({
               key={feature.id}
               size="sm"
               variant={feature.id === selectedId ? "secondary" : "outline"}
-              className="h-auto min-w-[8rem] w-full flex-col items-start gap-0.5 px-3 py-2 text-left"
+              className="h-auto min-w-[8rem] w-full flex-col items-start gap-0.5 whitespace-normal px-3 py-2 text-left"
               onClick={() => onSelect(feature.id)}
             >
               <span className="text-sm leading-tight font-medium">
@@ -683,7 +683,7 @@ function DependencySection({
               key={feature.id}
               type="button"
               className={cn(
-                "border-border/70 hover:bg-muted/60 focus-visible:ring-ring flex flex-col gap-1 rounded-md border px-3 py-2 text-left shadow-xs transition-colors focus-visible:ring-2 focus-visible:outline-none",
+                "border-border/70 hover:bg-muted/60 focus-visible:ring-ring flex flex-col gap-1 rounded-md border px-3 py-2 text-left shadow-xs transition-colors focus-visible:ring-2 focus-visible:outline-none whitespace-normal break-words",
               )}
               onClick={() => onSelect(feature.id)}
             >
