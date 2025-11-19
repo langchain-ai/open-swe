@@ -29,6 +29,7 @@ import { hasApiKeySet } from "@/lib/api-keys";
 import { useUser, DEFAULT_USER } from "@/hooks/useUser";
 import { isAllowedUser } from "@/lib/is-allowed-user";
 import { useLocalRepositories } from "@/hooks/useLocalRepositories";
+import { useFeatureGraphStore } from "@/stores/feature-graph-store";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -89,6 +90,9 @@ export function TerminalInput({
   const { user, isLoading: isUserLoading } = useUser();
   const isLocalMode = process.env.NEXT_PUBLIC_OPEN_SWE_LOCAL_MODE === "true";
   const { repositories } = useLocalRepositories("");
+  const generateFeatureGraph = useFeatureGraphStore(
+    (state) => state.generateGraph,
+  );
 
   const workspaceAbsPath = useMemo(() => {
     if (!selectedRepository) {
@@ -216,6 +220,9 @@ export function TerminalInput({
         }
 
         push(`/chat/${newThreadId}`);
+        if (trimmedMessage) {
+          void generateFeatureGraph(newThreadId, trimmedMessage);
+        }
         clearCurrentDraft();
         setMessage("");
         setContentBlocks([]);

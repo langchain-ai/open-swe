@@ -102,9 +102,12 @@ const isLikelyPythonTarget = (candidate: string): boolean => {
   return /(^|\/)(tests?|test_utils|integration)(\/|$)/u.test(candidate);
 };
 
+const SAFE_PATH_PATTERN = /^[-\w@/.]+$/u;
+const SHELL_ESCAPE_PATTERN = /(["\\$`])/g;
+
 const quotePath = (candidate: string): string => {
-  if (/^[\w@/\.\-]+$/u.test(candidate)) return candidate;
-  return `"${candidate.replace(/(["\\$`])/g, "\\$1")}"`;
+  if (SAFE_PATH_PATTERN.test(candidate)) return candidate;
+  return `"${candidate.replace(SHELL_ESCAPE_PATTERN, "\\$1")}"`;
 };
 
 const injectPathFiltersIntoCommand = (

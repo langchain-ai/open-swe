@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
@@ -47,12 +48,83 @@ Rules:
 - Prefer 5-12 feature nodes that reflect the repository's actual functionality.
 - Keep names short and descriptions focused on user-visible outcomes.
 - Capture major dependencies between features using edges.
+- Use the provided repository tree (up to 7 layers) and README excerpt to ground each feature in the existing codebase.
+- When a user request is provided, treat it as the authoritative requirements and ensure every node aligns with it.
+- Each feature description must read like a mini design spec with explicit implementation guidance for planners/programmers.
+- If key questions remain unanswered, dedicate nodes to clarifying those unknowns so the chat agent can follow up.
 - Only return JSON. Do not wrap the response in markdown fences.`;
 
 type WorkspaceContext = {
   readmeSnippet?: string;
   directories: string[];
+  codeTree?: string;
 };
+
+const MAX_TREE_DEPTH = 7;
+const MAX_TREE_ENTRIES = 400;
+const IGNORED_DIRECTORIES = new Set([
+  ".git",
+  "node_modules",
+  ".next",
+  "build",
+  "dist",
+  ".turbo",
+]);
+
+async function buildDirectoryTree(
+  workspacePath: string,
+): Promise<string | undefined> {
+  const lines: string[] = [];
+  let entryCount = 0;
+
+  const walk = async (currentPath: string, depth: number) => {
+    if (depth >= MAX_TREE_DEPTH || entryCount >= MAX_TREE_ENTRIES) {
+      return;
+    }
+
+  let entries: Dirent[];
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    entries = entries
+      .filter((entry) => !entry.name.startsWith(".") || depth === 0)
+      .filter((entry) =>
+        entry.isDirectory() ? !IGNORED_DIRECTORIES.has(entry.name) : true,
+      )
+      .sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) {
+          return a.isDirectory() ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+    for (const entry of entries) {
+      if (entryCount >= MAX_TREE_ENTRIES) {
+        break;
+      }
+
+      entryCount += 1;
+      const prefix = depth > 0 ? "  ".repeat(depth) : "";
+      const label = `${prefix}${entry.name}${entry.isDirectory() ? "/" : ""}`;
+      lines.push(label);
+
+      if (entry.isDirectory()) {
+        await walk(path.join(currentPath, entry.name), depth + 1);
+      }
+
+      if (entryCount >= MAX_TREE_ENTRIES) {
+        break;
+      }
+    }
+  };
+
+  await walk(workspacePath, 0);
+
+  return lines.length ? lines.join("\n") : undefined;
+}
 
 async function collectWorkspaceContext(
   workspacePath: string,
@@ -81,7 +153,9 @@ async function collectWorkspaceContext(
     // optional
   }
 
-  return { directories, readmeSnippet };
+  const codeTree = await buildDirectoryTree(workspacePath);
+
+  return { directories, readmeSnippet, codeTree };
 }
 
 function coerceFeatureGraph(content: string): FeatureGraphFile {
@@ -131,10 +205,12 @@ export async function generateFeatureGraphForWorkspace({
   workspacePath,
   graphPath,
   config,
+  prompt,
 }: {
   workspacePath: string;
   graphPath: string;
   config: GraphConfig;
+  prompt?: string;
 }): Promise<GenerationResult> {
   const context = await collectWorkspaceContext(workspacePath);
 
@@ -146,9 +222,15 @@ export async function generateFeatureGraphForWorkspace({
       content: [
         "Generate a feature graph for the workspace using the schema above.",
         `Workspace path: ${workspacePath}`,
+        prompt
+          ? `Primary user request:\n${prompt}`
+          : "Primary user request not provided. Infer improvements based on the repository.",
         context.directories.length
           ? `Top-level directories: ${context.directories.join(", ")}`
           : "Top-level directories unknown.",
+        context.codeTree
+          ? `Repository structure (max ${MAX_TREE_DEPTH} levels):\n${context.codeTree}`
+          : "Repository structure unavailable.",
         context.readmeSnippet
           ? `README.md excerpt:\n${context.readmeSnippet}`
           : "No README.md excerpt available.",
