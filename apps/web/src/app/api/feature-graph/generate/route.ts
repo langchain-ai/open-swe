@@ -44,7 +44,12 @@ async function requestGraphGeneration({
   workspaceAbsPath: string;
   prompt: string;
   configurable?: Record<string, unknown>;
-}) {
+}): Promise<{
+  ok: boolean;
+  status: number;
+  payload: unknown;
+  message: string;
+}> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -63,16 +68,14 @@ async function requestGraphGeneration({
     }),
   });
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    const message =
-      (payload && typeof payload.error === "string"
-        ? payload.error
-        : null) ?? "Failed to generate feature graph";
-    throw new Error(message);
-  }
+  const payload = await response.json().catch(() => null);
+  const message =
+    (payload && typeof (payload as { error?: unknown })?.error === "string"
+      ? (payload as { error: string }).error
+      : response.statusText || "Failed to generate feature graph") ??
+    "Failed to generate feature graph";
 
-  return response.json();
+  return { ok: response.ok, status: response.status, payload, message };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -124,11 +127,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const payload = await requestGraphGeneration({
+    const generation = await requestGraphGeneration({
       workspaceAbsPath,
       prompt,
       configurable: resolveConfigurable(managerState.metadata?.configurable),
     });
+
+    if (!generation.ok) {
+      return NextResponse.json(
+        { error: generation.message },
+        { status: generation.status },
+      );
+    }
+
+    const payload = generation.payload;
 
     const { graph, activeFeatureIds } = mapFeatureGraphPayload(payload);
 
