@@ -158,10 +158,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const configurableFields = getCustomConfigurableFields({
-      configurable: managerState.metadata
-        ?.configurable as GraphConfig["configurable"],
-    } as GraphConfig);
+    const configurableFields =
+      getCustomConfigurableFields({
+        configurable: managerState.metadata
+          ?.configurable as GraphConfig["configurable"],
+      } as GraphConfig) ?? {};
 
     const generation = await requestGraphGeneration({
       threadId,
