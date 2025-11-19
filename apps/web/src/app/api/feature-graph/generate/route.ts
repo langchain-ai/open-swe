@@ -160,8 +160,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
 
     return NextResponse.json({
-      featureGraph:
-        payload?.featureGraph ?? payload?.feature_graph ?? payload?.graph,
+      featureGraph: graph,
       activeFeatureIds,
     });
   } catch (error) {
