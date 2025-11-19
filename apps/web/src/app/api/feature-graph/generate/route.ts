@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { Client } from "@langchain/langgraph-sdk";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import type { GraphConfig } from "@openswe/shared/open-swe/types";
+import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { createLogger, LogLevel } from "@openswe/shared/logger";
 
 import { mapFeatureGraphPayload } from "@/lib/feature-graph-payload";
@@ -28,15 +30,6 @@ function resolvePrompt(value: unknown): string {
     return value.trim();
   }
   return "";
-}
-
-function resolveConfigurable(
-  value: unknown,
-): Record<string, unknown> | undefined {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return undefined;
 }
 
 async function requestGraphGeneration({
@@ -165,11 +158,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    const configurableFields = getCustomConfigurableFields({
+      configurable: managerState.metadata
+        ?.configurable as GraphConfig["configurable"],
+    } as GraphConfig);
+
     const generation = await requestGraphGeneration({
       threadId,
       workspaceAbsPath,
       prompt,
-      configurable: resolveConfigurable(managerState.metadata?.configurable),
+      configurable:
+        Object.keys(configurableFields).length > 0
+          ? configurableFields
+          : undefined,
     });
 
     if (!generation.ok) {
