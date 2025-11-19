@@ -29,12 +29,14 @@
     "pretest": "yarn guard:scan",
     "feature-graph:validate": "turbo feature-graph:validate",
     "prefeature-graph:validate": "yarn guard:scan",
+    "feature-graph:test": "tsx scripts/test-feature-graph-generate.ts",
     "format:features": "node ./scripts/format-feature-graph.mjs",
     "sandbox:build": "docker build -f Dockerfile.sandbox -t open-swe-sandbox:local .",
     "stack:up": "docker compose -f compose.local.yaml up -d",
     "stack:down": "docker compose -f compose.local.yaml down"
   },
   "devDependencies": {
+    "tsx": "^4.20.3",
     "turbo": "^2.5.0",
     "typescript": "^5",
     "yaml": "^2.6.0"

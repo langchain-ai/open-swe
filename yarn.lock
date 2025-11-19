@@ -14810,6 +14810,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "open-swe@workspace:."
   dependencies:
+    tsx: ^4.20.3
     turbo: ^2.5.0
     typescript: ^5
     yaml: ^2.6.0
