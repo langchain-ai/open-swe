@@ -52,7 +52,7 @@ import { getMessageContentString } from "@/lib/get-message-content-string";
 import { FeatureInsightsPanel } from "@/features/feature-insights";
 import { useFeatureGraphStore } from "@/stores/feature-graph-store";
 
-type ThreadTab = "planner" | "programmer" | "feature-graph";
+type ThreadTab = "feature-graph" | "planner" | "programmer";
 
 const isThreadTab = (value: string): value is ThreadTab =>
   value === "planner" || value === "programmer" || value === "feature-graph";
@@ -102,7 +102,7 @@ export function ThreadView({
   onBackToHome,
 }: ThreadViewProps) {
   const [chatInput, setChatInput] = useState("");
-  const [selectedTab, setSelectedTab] = useState<ThreadTab>("planner");
+  const [selectedTab, setSelectedTab] = useState<ThreadTab>("feature-graph");
   const [plannerSession, setPlannerSession] =
     useState<ManagerGraphState["plannerSession"]>();
   const [programmerSession, setProgrammerSession] =
@@ -551,7 +551,7 @@ export function ThreadView({
         >
           <div className="min-h-0 flex-1">
             <Tabs
-              defaultValue="planner"
+              defaultValue="feature-graph"
               className="flex w-full flex-1 flex-col"
               value={selectedTab}
               onValueChange={(value) => {
@@ -562,11 +562,11 @@ export function ThreadView({
             >
               <div className="flex flex-shrink-0 items-center gap-3">
                 <TabsList className="bg-muted/70">
-                  <TabsTrigger value="planner">Planner</TabsTrigger>
-                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
                   <TabsTrigger value="feature-graph">
                     Feature graph
                   </TabsTrigger>
+                  <TabsTrigger value="planner">Planner</TabsTrigger>
+                  <TabsTrigger value="programmer">Programmer</TabsTrigger>
                 </TabsList>
 
                 {programmerTaskPlan && (
@@ -604,6 +604,15 @@ export function ThreadView({
                 </div>
               </div>
 
+              <TabsContent value="feature-graph">
+                <Card className="border-border bg-card relative h-full p-0">
+                  <CardContent className="h-full p-0">
+                    <div className="scrollbar-pretty-auto h-full overflow-y-auto px-2 py-4">
+                      <FeatureInsightsPanel />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
               <TabsContent value="planner">
                 <Card className="border-border bg-card relative h-full p-0">
                   <CardContent className="h-full p-0">
@@ -720,15 +729,6 @@ export function ThreadView({
                         }
                       />
                     </StickToBottom>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              <TabsContent value="feature-graph">
-                <Card className="border-border bg-card relative h-full p-0">
-                  <CardContent className="h-full p-0">
-                    <div className="scrollbar-pretty-auto h-full overflow-y-auto px-2 py-4">
-                      <FeatureInsightsPanel />
-                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
