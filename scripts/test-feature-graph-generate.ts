@@ -199,6 +199,7 @@ function buildDiagnosticNotes({
   managerState,
   configurableFields,
   skippedUpstream,
+  skippedManagerState,
 }: {
   nextResponse: ParsedResponse;
   upstreamResponse?: ParsedResponse;
@@ -206,10 +207,13 @@ function buildDiagnosticNotes({
   managerState: ManagerGraphState | null;
   configurableFields: Record<string, unknown>;
   skippedUpstream: boolean;
+  skippedManagerState: boolean;
 }): string[] {
   const notes: string[] = [];
 
-  if (!managerState) {
+  if (skippedManagerState) {
+    notes.push("Manager state fetch was skipped.");
+  } else if (!managerState) {
     notes.push(
       "Manager state could not be loaded. Verify the thread ID exists and the LangGraph service is reachable.",
     );
@@ -282,6 +286,7 @@ async function main() {
   const webUrl = resolveWebApiUrl(args.webUrl);
   const langgraphApiUrl = resolveLangGraphApiUrl(args.langgraphApiUrl);
   const localMode = process.env.OPEN_SWE_LOCAL_MODE === "true";
+  const skipManagerState = Boolean(args.skipUpstream);
 
   logger.info("Starting feature graph generation check", {
     threadId,
@@ -291,12 +296,15 @@ async function main() {
     localMode,
   });
 
-  const client = new Client({
-    apiUrl: langgraphApiUrl,
-    defaultHeaders: localMode ? { [LOCAL_MODE_HEADER]: "true" } : undefined,
-  });
-
-  const managerState = await fetchManagerState(client, threadId);
+  const managerState = skipManagerState
+    ? null
+    : await fetchManagerState(
+        new Client({
+          apiUrl: langgraphApiUrl,
+          defaultHeaders: localMode ? { [LOCAL_MODE_HEADER]: "true" } : undefined,
+        }),
+        threadId,
+      );
   const configurableFields =
     getCustomConfigurableFields({
       configurable: managerState?.metadata?.configurable as GraphConfig["configurable"],
@@ -305,8 +313,10 @@ async function main() {
   const workspaceAbsPath =
     managerState?.values?.workspaceAbsPath ?? managerState?.values?.workspacePath;
 
-  if (!workspaceAbsPath) {
+  if (!workspaceAbsPath && !skipManagerState) {
     logger.error("Manager state did not include a workspace path", { threadId });
+  } else if (skipManagerState) {
+    logger.info("Skipping manager state fetch because upstream request is disabled");
   }
 
   const nextResponse = await requestNextApi({ webUrl, threadId, prompt });
@@ -332,6 +342,7 @@ async function main() {
     managerState,
     configurableFields,
     skippedUpstream: Boolean(args.skipUpstream),
+    skippedManagerState: skipManagerState,
   });
 
   if (diagnosticNotes.length > 0) {
