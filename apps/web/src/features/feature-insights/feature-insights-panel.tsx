@@ -32,7 +32,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ActionsRenderer } from "@/components/v2/actions-renderer";
@@ -617,6 +623,8 @@ function FeatureSelection({
     return null;
   }
 
+  const selectedFeature = features.find((feature) => feature.id === selectedId);
+
   return (
     <div className="flex flex-col gap-2">
       <div className="text-muted-foreground flex items-center justify-between text-xs font-medium tracking-wide uppercase">
@@ -625,27 +633,50 @@ function FeatureSelection({
         </span>
         <span>{features.length}</span>
       </div>
-      <ScrollArea className="border-border/60 max-h-[calc(100vh-320px)] rounded-md border">
-        <div className="flex flex-col gap-2 p-3">
-          {features.map((feature) => (
-            <Button
-              key={feature.id}
-              size="sm"
-              variant={feature.id === selectedId ? "secondary" : "outline"}
-              className="h-auto min-w-[8rem] w-full flex-col items-start gap-0.5 whitespace-normal px-3 py-2 text-left"
-              onClick={() => onSelect(feature.id)}
-            >
-              <span className="text-sm leading-tight font-medium">
-                {feature.name}
-              </span>
-              <span className="text-muted-foreground font-mono text-[11px]">
-                {feature.id}
-              </span>
-              <FeatureRunStatusPill status={featureRuns[feature.id]?.status} />
-            </Button>
-          ))}
-        </div>
-      </ScrollArea>
+      <Select
+        value={selectedId ?? undefined}
+        onValueChange={onSelect}
+      >
+        <SelectTrigger className="w-full justify-between">
+          <div className="flex flex-col text-left">
+            <span className="text-sm leading-tight font-medium">
+              {selectedFeature ? selectedFeature.name : "Select a feature"}
+            </span>
+            <span className="text-muted-foreground font-mono text-[11px]">
+              {selectedFeature
+                ? selectedFeature.id
+                : "Choose a feature to view details"}
+            </span>
+          </div>
+          {selectedId && (
+            <FeatureRunStatusPill status={featureRuns[selectedId]?.status} />
+          )}
+        </SelectTrigger>
+        <SelectContent className="w-full min-w-[18rem]">
+          <SelectGroup>
+            {features.map((feature) => (
+              <SelectItem
+                key={feature.id}
+                value={feature.id}
+              >
+                <div className="flex flex-col gap-1 text-left">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm leading-tight font-medium">
+                      {feature.name}
+                    </span>
+                    <FeatureRunStatusPill
+                      status={featureRuns[feature.id]?.status}
+                    />
+                  </div>
+                  <span className="text-muted-foreground font-mono text-[11px]">
+                    {feature.id}
+                  </span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </div>
   );
 }
