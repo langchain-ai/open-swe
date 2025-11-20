@@ -195,6 +195,7 @@ export function FeatureInsightsPanel() {
   useEffect(() => {
     if (!selectedFeatureId || !selectedRunState) return;
 
+    const { status: currentStatus, error: currentError } = selectedRunState;
     if (featureRunStream.error) {
       const message =
         typeof featureRunStream.error === "object" &&
@@ -202,6 +203,9 @@ export function FeatureInsightsPanel() {
         "message" in featureRunStream.error
           ? String((featureRunStream.error as Error).message)
           : "Feature development run encountered an error";
+      if (currentStatus === "error" && currentError === message) {
+        return;
+      }
       setFeatureRunStatus(selectedFeatureId, "error", {
         runId: selectedRunState.runId,
         threadId: selectedRunState.threadId,
@@ -211,11 +215,17 @@ export function FeatureInsightsPanel() {
     }
 
     if (featureRunStream.isLoading) {
+      if (currentStatus === "running") {
+        return;
+      }
       setFeatureRunStatus(selectedFeatureId, "running", {
         runId: selectedRunState.runId,
         threadId: selectedRunState.threadId,
       });
     } else if ((featureRunStream.messages?.length ?? 0) > 0) {
+      if (currentStatus === "completed") {
+        return;
+      }
       setFeatureRunStatus(selectedFeatureId, "completed", {
         runId: selectedRunState.runId,
         threadId: selectedRunState.threadId,
