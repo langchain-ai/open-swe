@@ -13,6 +13,7 @@ import type {
 import type { PlannerGraphUpdate } from "@openswe/shared/open-swe/planner/types";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
+import { coerceFeatureGraph } from "@/lib/coerce-feature-graph";
 
 function resolveApiUrl(): string {
   return (
@@ -74,10 +75,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const managerState = managerThreadState.values;
+    const featureGraph = coerceFeatureGraph(managerState.featureGraph);
     const plannerThreadId =
       managerState.plannerSession?.threadId ?? randomUUID();
 
-    const selectedFeature = managerState.featureGraph?.getFeature(featureId);
+    const selectedFeature = featureGraph?.getFeature(featureId);
 
     if (!selectedFeature) {
       return NextResponse.json(
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const featureDependencies = managerState.featureGraph
+    const featureDependencies = featureGraph
       ?.getNeighbors(featureId, "both")
       .filter((neighbor) => neighbor.id !== selectedFeature.id);
 
