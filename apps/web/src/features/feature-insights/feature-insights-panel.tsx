@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -20,8 +13,6 @@ import {
 } from "lucide-react";
 
 import { useShallow } from "zustand/react/shallow";
-
-import { useStream } from "@langchain/langgraph-sdk/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +32,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ActionsRenderer } from "@/components/v2/actions-renderer";
 import { cn } from "@/lib/utils";
 import {
   FeatureResource,
@@ -49,12 +39,6 @@ import {
   FeatureRunStatus,
   useFeatureGraphStore,
 } from "@/stores/feature-graph-store";
-import { LOCAL_MODE_HEADER, PLANNER_GRAPH_ID } from "@openswe/shared/constants";
-import {
-  CustomNodeEvent,
-  isCustomNodeEvent,
-} from "@openswe/shared/open-swe/custom-node-events";
-import type { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 
 const EMPTY_STATE_MESSAGE =
@@ -82,7 +66,6 @@ export function FeatureInsightsPanel({
     requestGraphGeneration,
     startFeatureDevelopment,
     selectFeature,
-    setFeatureRunStatus,
   } = useFeatureGraphStore(
     useShallow((state) => ({
       graph: state.graph,
@@ -101,7 +84,6 @@ export function FeatureInsightsPanel({
       requestGraphGeneration: state.requestGraphGeneration,
       startFeatureDevelopment: state.startFeatureDevelopment,
       selectFeature: state.selectFeature,
-      setFeatureRunStatus: state.setFeatureRunStatus,
     })),
   );
 
@@ -126,123 +108,6 @@ export function FeatureInsightsPanel({
     selectedFeatureId && featureRuns[selectedFeatureId]
       ? featureRuns[selectedFeatureId]
       : undefined;
-
-  const [featureNodeEvents, setFeatureNodeEvents] = useState<
-    Record<string, CustomNodeEvent[]>
-  >({});
-
-  const selectedCustomEvents = useMemo(
-    () =>
-      selectedFeatureId && featureNodeEvents[selectedFeatureId]
-        ? featureNodeEvents[selectedFeatureId]
-        : [],
-    [featureNodeEvents, selectedFeatureId],
-  );
-
-  const setSelectedCustomEvents = useCallback(
-    (
-      updater:
-        | CustomNodeEvent[]
-        | ((events: CustomNodeEvent[]) => CustomNodeEvent[]),
-    ) => {
-      if (!selectedFeatureId) return;
-
-      setFeatureNodeEvents((prev) => {
-        const current = prev[selectedFeatureId] ?? [];
-        const next = typeof updater === "function" ? updater(current) : updater;
-        return {
-          ...prev,
-          [selectedFeatureId]: next,
-        };
-      });
-    },
-    [selectedFeatureId],
-  );
-
-  const featureRunStream = useStream<PlannerGraphState>({
-    apiUrl: process.env.NEXT_PUBLIC_API_URL,
-    assistantId: PLANNER_GRAPH_ID,
-    reconnectOnMount: true,
-    threadId: selectedRunState?.threadId ?? undefined,
-    onCustomEvent: (event) => {
-      if (isCustomNodeEvent(event) && selectedFeatureId) {
-        setFeatureNodeEvents((prev) => {
-          const existing = prev[selectedFeatureId] ?? [];
-          if (existing.some((entry) => entry.actionId === event.actionId)) {
-            return prev;
-          }
-          return {
-            ...prev,
-            [selectedFeatureId]: [...existing, event],
-          };
-        });
-      }
-    },
-    fetchStateHistory: false,
-    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
-  });
-
-  const joinedFeatureRunId = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    if (
-      selectedRunState?.runId &&
-      selectedRunState.runId !== joinedFeatureRunId.current
-    ) {
-      joinedFeatureRunId.current = selectedRunState.runId;
-      featureRunStream.joinStream(selectedRunState.runId).catch(() => {});
-    } else if (!selectedRunState?.runId) {
-      joinedFeatureRunId.current = undefined;
-    }
-  }, [featureRunStream, selectedRunState?.runId]);
-
-  useEffect(() => {
-    if (!selectedFeatureId || !selectedRunState) return;
-
-    const { status: currentStatus, error: currentError } = selectedRunState;
-    if (featureRunStream.error) {
-      const message =
-        typeof featureRunStream.error === "object" &&
-        featureRunStream.error &&
-        "message" in featureRunStream.error
-          ? String((featureRunStream.error as Error).message)
-          : "Feature development run encountered an error";
-      if (currentStatus === "error" && currentError === message) {
-        return;
-      }
-      setFeatureRunStatus(selectedFeatureId, "error", {
-        runId: selectedRunState.runId,
-        threadId: selectedRunState.threadId,
-        error: message,
-      });
-      return;
-    }
-
-    if (featureRunStream.isLoading) {
-      if (currentStatus === "running") {
-        return;
-      }
-      setFeatureRunStatus(selectedFeatureId, "running", {
-        runId: selectedRunState.runId,
-        threadId: selectedRunState.threadId,
-      });
-    } else if ((featureRunStream.messages?.length ?? 0) > 0) {
-      if (currentStatus === "completed") {
-        return;
-      }
-      setFeatureRunStatus(selectedFeatureId, "completed", {
-        runId: selectedRunState.runId,
-        threadId: selectedRunState.threadId,
-      });
-    }
-  }, [
-    featureRunStream.error,
-    featureRunStream.isLoading,
-    featureRunStream.messages,
-    selectedFeatureId,
-    selectedRunState,
-    setFeatureRunStatus,
-  ]);
 
   const upstreamDependencies = useMemo(() => {
     if (!graph || !selectedFeature) return [];
@@ -351,9 +216,6 @@ export function FeatureInsightsPanel({
                 feature={selectedFeature}
                 runState={selectedRunState}
                 onStart={handleStartDevelopment}
-                stream={featureRunStream}
-                customNodeEvents={selectedCustomEvents}
-                setCustomNodeEvents={setSelectedCustomEvents}
               />
             )}
 
@@ -543,20 +405,10 @@ function FeatureDevelopmentPanel({
   feature,
   runState,
   onStart,
-  stream,
-  customNodeEvents,
-  setCustomNodeEvents,
 }: {
   feature: FeatureNode;
   runState: FeatureRunState | undefined;
   onStart: () => void;
-  stream: ReturnType<typeof useStream<PlannerGraphState>>;
-  customNodeEvents: CustomNodeEvent[];
-  setCustomNodeEvents: (
-    events:
-      | CustomNodeEvent[]
-      | ((events: CustomNodeEvent[]) => CustomNodeEvent[]),
-  ) => void;
 }) {
   const status = runState?.status ?? "idle";
   const isRunning = status === "running" || status === "starting";
@@ -610,13 +462,10 @@ function FeatureDevelopmentPanel({
 
       <div className="border-border/60 bg-background/70 mt-3 rounded-md border p-2">
         {runState?.runId && runState.threadId ? (
-          <ActionsRenderer<PlannerGraphState>
-            runId={runState.runId}
-            customNodeEvents={customNodeEvents}
-            setCustomNodeEvents={setCustomNodeEvents}
-            stream={stream}
-            threadId={runState.threadId}
-          />
+          <p className="text-muted-foreground text-sm">
+            Planner output is available in the Planner tab. Open it to view the
+            current run and share feedback.
+          </p>
         ) : (
           <p className="text-muted-foreground text-sm">
             Start development to stream planner progress and provide feedback.

@@ -1,12 +1,13 @@
 "use client";
 
 import { v4 as uuidv4 } from "uuid";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ArrowLeft, GitBranch, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
+import { useShallow } from "zustand/react/shallow";
 import { ThreadMetadata } from "./types";
 import { useStream } from "@langchain/langgraph-sdk/react";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
@@ -179,6 +180,50 @@ export function ThreadView({
   const [customProgrammerNodeEvents, setCustomProgrammerNodeEvents] = useState<
     CustomNodeEvent[]
   >([]);
+  const { selectedFeatureId, featureRuns, setFeatureRunStatus } =
+    useFeatureGraphStore(
+      useShallow((state) => ({
+        selectedFeatureId: state.selectedFeatureId,
+        featureRuns: state.featureRuns,
+        setFeatureRunStatus: state.setFeatureRunStatus,
+      })),
+    );
+  const [featureRunEvents, setFeatureRunEvents] = useState<
+    Record<string, CustomNodeEvent[]>
+  >({});
+
+  const selectedFeatureRunEvents = useMemo(
+    () =>
+      selectedFeatureId && featureRunEvents[selectedFeatureId]
+        ? featureRunEvents[selectedFeatureId]
+        : [],
+    [featureRunEvents, selectedFeatureId],
+  );
+
+  const setSelectedFeatureRunEvents = useCallback(
+    (
+      updater:
+        | CustomNodeEvent[]
+        | ((events: CustomNodeEvent[]) => CustomNodeEvent[]),
+    ) => {
+      if (!selectedFeatureId) return;
+
+      setFeatureRunEvents((prev) => {
+        const current = prev[selectedFeatureId] ?? [];
+        const next = typeof updater === "function" ? updater(current) : updater;
+        return {
+          ...prev,
+          [selectedFeatureId]: next,
+        };
+      });
+    },
+    [selectedFeatureId],
+  );
+
+  const selectedFeatureRunState =
+    selectedFeatureId && featureRuns[selectedFeatureId]
+      ? featureRuns[selectedFeatureId]
+      : undefined;
 
   const fetchFeatureGraphForThread = useFeatureGraphStore(
     (state) => state.fetchGraphForThread,
@@ -211,6 +256,95 @@ export function ThreadView({
       clearFeatureGraphRef.current();
     };
   }, [displayThread.id]);
+
+
+  const featureRunStream = useStream<PlannerGraphState>({
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    assistantId: PLANNER_GRAPH_ID,
+    reconnectOnMount: true,
+    threadId: selectedFeatureRunState?.threadId ?? undefined,
+    onCustomEvent: (event) => {
+      if (isCustomNodeEvent(event) && selectedFeatureId) {
+        setFeatureRunEvents((prev) => {
+          const existing = prev[selectedFeatureId] ?? [];
+          if (existing.some((entry) => entry.actionId === event.actionId)) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [selectedFeatureId]: [...existing, event],
+          };
+        });
+      }
+    },
+    fetchStateHistory: false,
+    defaultHeaders: { [LOCAL_MODE_HEADER]: "true" },
+  });
+
+  const joinedFeatureRunId = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (
+      selectedFeatureRunState?.runId &&
+      selectedFeatureRunState.runId !== joinedFeatureRunId.current
+    ) {
+      joinedFeatureRunId.current = selectedFeatureRunState.runId;
+      featureRunStream
+        .joinStream(selectedFeatureRunState.runId)
+        .catch(() => {});
+    } else if (!selectedFeatureRunState?.runId) {
+      joinedFeatureRunId.current = undefined;
+    }
+  }, [featureRunStream, selectedFeatureRunState?.runId]);
+
+  useEffect(() => {
+    if (!selectedFeatureId || !selectedFeatureRunState) return;
+
+    const { status: currentStatus, error: currentError } =
+      selectedFeatureRunState;
+    if (featureRunStream.error) {
+      const message =
+        typeof featureRunStream.error === "object" &&
+        featureRunStream.error &&
+        "message" in featureRunStream.error
+          ? String((featureRunStream.error as Error).message)
+          : "Feature development run encountered an error";
+      if (currentStatus === "error" && currentError === message) {
+        return;
+      }
+      setFeatureRunStatus(selectedFeatureId, "error", {
+        runId: selectedFeatureRunState.runId,
+        threadId: selectedFeatureRunState.threadId,
+        error: message,
+      });
+      return;
+    }
+
+    if (featureRunStream.isLoading) {
+      if (currentStatus === "running") {
+        return;
+      }
+      setFeatureRunStatus(selectedFeatureId, "running", {
+        runId: selectedFeatureRunState.runId,
+        threadId: selectedFeatureRunState.threadId,
+      });
+    } else if ((featureRunStream.messages?.length ?? 0) > 0) {
+      if (currentStatus === "completed") {
+        return;
+      }
+      setFeatureRunStatus(selectedFeatureId, "completed", {
+        runId: selectedFeatureRunState.runId,
+        threadId: selectedFeatureRunState.threadId,
+      });
+    }
+  }, [
+    featureRunStream.error,
+    featureRunStream.isLoading,
+    featureRunStream.messages,
+    selectedFeatureId,
+    selectedFeatureRunState,
+    setFeatureRunStatus,
+  ]);
 
 
   const plannerStream = useStream<PlannerGraphState>({
@@ -497,6 +631,28 @@ export function ThreadView({
   const shouldDisableManagerInput =
     stream.isLoading || plannerStream.isLoading || programmerStream.isLoading;
 
+  const featurePlannerThreadId = selectedFeatureRunState?.threadId ?? undefined;
+  const featurePlannerRunId = selectedFeatureRunState?.runId ?? undefined;
+  const hasFeaturePlannerRun = Boolean(
+    featurePlannerRunId && featurePlannerThreadId,
+  );
+
+  const plannerDisplayStream = hasFeaturePlannerRun
+    ? featureRunStream
+    : plannerStream;
+  const plannerDisplayRunId = hasFeaturePlannerRun
+    ? featurePlannerRunId
+    : plannerSession?.runId;
+  const plannerDisplayThreadId = hasFeaturePlannerRun
+    ? featurePlannerThreadId
+    : plannerSession?.threadId;
+  const plannerDisplayCustomEvents = hasFeaturePlannerRun
+    ? selectedFeatureRunEvents
+    : customPlannerNodeEvents;
+  const setPlannerDisplayCustomEvents = hasFeaturePlannerRun
+    ? setSelectedFeatureRunEvents
+    : setCustomPlannerNodeEvents;
+
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
       {/* Header */}
@@ -584,11 +740,11 @@ export function ThreadView({
                 )}
 
                 <div className="ml-auto flex items-center justify-center gap-2">
-                  {selectedTab === "planner" && plannerStream.isLoading && (
+                  {selectedTab === "planner" && plannerDisplayStream.isLoading && (
                     <CancelStreamButton
-                      stream={plannerStream}
-                      threadId={plannerSession?.threadId}
-                      runId={plannerSession?.runId}
+                      stream={plannerDisplayStream}
+                      threadId={plannerDisplayThreadId}
+                      runId={plannerDisplayRunId}
                       streamName="Planner"
                     />
                   )}
@@ -636,16 +792,16 @@ export function ThreadView({
                         className="scrollbar-pretty-auto h-full"
                         content={
                           <>
-                            {plannerSession ? (
+                            {plannerDisplayRunId && plannerDisplayThreadId ? (
                               <div className="scrollbar-pretty-auto overflow-y-auto px-2">
                                 <ActionsRenderer<PlannerGraphState>
-                                  runId={plannerSession.runId}
-                                  customNodeEvents={customPlannerNodeEvents}
+                                  runId={plannerDisplayRunId}
+                                  customNodeEvents={plannerDisplayCustomEvents}
                                   setCustomNodeEvents={
-                                    setCustomPlannerNodeEvents
+                                    setPlannerDisplayCustomEvents
                                   }
-                                  stream={plannerStream}
-                                  threadId={plannerSession.threadId}
+                                  stream={plannerDisplayStream}
+                                  threadId={plannerDisplayThreadId}
                                 />
                               </div>
                             ) : (
