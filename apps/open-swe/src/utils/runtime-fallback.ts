@@ -51,6 +51,19 @@ export class FallbackRunnable<
   private providerTools?: Record<Provider, BindToolsInput[]>;
   private providerMessages?: Record<Provider, BaseMessageLike[]>;
 
+  _getType(): string {
+    if (typeof this.primaryRunnable?._getType === "function") {
+      return this.primaryRunnable._getType();
+    }
+
+    const primaryModel = this.getPrimaryModel();
+    if (typeof primaryModel?._getType === "function") {
+      return primaryModel._getType();
+    }
+
+    return "fallback_runnable";
+  }
+
   constructor(
     primaryRunnable: any,
     config: GraphConfig,
