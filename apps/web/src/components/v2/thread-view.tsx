@@ -618,7 +618,9 @@ export function ThreadView({
                 <Card className="border-border bg-card relative flex h-full min-h-0 flex-col p-0">
                   <CardContent className="h-full min-h-0 flex-1 p-0">
                     <div className="scrollbar-pretty-auto h-full overflow-y-auto px-2 py-4">
-                      <FeatureInsightsPanel />
+                      <FeatureInsightsPanel
+                        onStartPlanner={() => setSelectedTab("planner")}
+                      />
                     </div>
                   </CardContent>
                 </Card>

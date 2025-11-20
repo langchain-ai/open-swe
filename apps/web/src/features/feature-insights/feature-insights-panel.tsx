@@ -60,7 +60,11 @@ import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 const EMPTY_STATE_MESSAGE =
   "Feature insights will appear once the session resolves relevant features.";
 
-export function FeatureInsightsPanel() {
+export function FeatureInsightsPanel({
+  onStartPlanner,
+}: {
+  onStartPlanner?: () => void;
+}) {
   const {
     graph,
     features,
@@ -282,6 +286,13 @@ export function FeatureInsightsPanel() {
     }
   };
 
+  const handleStartDevelopment = useCallback(() => {
+    if (!selectedFeature) return;
+
+    onStartPlanner?.();
+    void startFeatureDevelopment(selectedFeature.id);
+  }, [onStartPlanner, selectedFeature, startFeatureDevelopment]);
+
   return (
     <Card className="bg-card/95 border-border/80 shadow-sm">
       <CardHeader className="gap-2 pb-4">
@@ -339,7 +350,7 @@ export function FeatureInsightsPanel() {
               <FeatureDevelopmentPanel
                 feature={selectedFeature}
                 runState={selectedRunState}
-                onStart={() => startFeatureDevelopment(selectedFeature.id)}
+                onStart={handleStartDevelopment}
                 stream={featureRunStream}
                 customNodeEvents={selectedCustomEvents}
                 setCustomNodeEvents={setSelectedCustomEvents}
