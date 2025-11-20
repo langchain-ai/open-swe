@@ -19,7 +19,6 @@ import { BindToolsInput } from "@langchain/core/language_models/chat_models";
 import { getMessageContentString } from "@openswe/shared/messages";
 import { getConfig } from "@langchain/langgraph";
 import { MODELS_NO_PARALLEL_TOOL_CALLING } from "./llms/load-model.js";
-import { sanitizeMessagesWithToolCallResponses } from "./message/content.js";
 
 const logger = createLogger(LogLevel.DEBUG, "FallbackRunnable");
 
@@ -165,12 +164,10 @@ export class FallbackRunnable<
         }
 
         const result = await runnableToUse.invoke(
-          sanitizeMessagesWithToolCallResponses(
-            useProviderMessages(
-              input,
-              this.providerMessages,
-              modelConfig.provider,
-            ) as BaseMessage[],
+          useProviderMessages(
+            input,
+            this.providerMessages,
+            modelConfig.provider,
           ),
           options,
         );
