@@ -13,16 +13,38 @@ import {
   takeActions,
   determineNeedsContext,
 } from "./nodes/index.js";
-import { isAIMessage } from "@langchain/core/messages";
+import { BaseMessage, isAIMessage, RemoveMessage } from "@langchain/core/messages";
 import { initializeSandbox } from "../shared/initialize-sandbox.js";
 import { diagnoseError } from "../shared/diagnose-error.js";
+import { filterHiddenMessages } from "../../utils/message/filter-hidden.js";
+
+function getLastVisibleMessage(
+  messages: BaseMessage[],
+): BaseMessage | undefined {
+  const visibleMessages = filterHiddenMessages(messages);
+  for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+    const candidate = visibleMessages[index];
+    if (candidate instanceof RemoveMessage) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return undefined;
+}
+
+function shouldTakePlanActions(state: PlannerGraphState): boolean {
+  const lastMessage = getLastVisibleMessage(state.messages);
+  return Boolean(
+    lastMessage && isAIMessage(lastMessage) && lastMessage.tool_calls?.length,
+  );
+}
 
 function takeActionOrGeneratePlan(
   state: PlannerGraphState,
 ): "take-plan-actions" | "generate-plan" {
-  const { messages } = state;
-  const lastMessage = messages[messages.length - 1];
-  if (isAIMessage(lastMessage) && lastMessage.tool_calls?.length) {
+  if (shouldTakePlanActions(state)) {
     return "take-plan-actions";
   }
 
@@ -49,7 +71,14 @@ const workflow = new StateGraph(PlannerGraphStateObj, GraphConfiguration)
   })
   .addNode("diagnose-error", diagnoseError)
   .addEdge(START, "prepare-graph-state")
-  .addEdge("initialize-sandbox", "generate-plan-context-action")
+  .addConditionalEdges(
+    "initialize-sandbox",
+    (state) =>
+      shouldTakePlanActions(state)
+        ? "take-plan-actions"
+        : "generate-plan-context-action",
+    ["take-plan-actions", "generate-plan-context-action"],
+  )
   .addConditionalEdges(
     "generate-plan-context-action",
     takeActionOrGeneratePlan,
