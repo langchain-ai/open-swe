@@ -28,12 +28,6 @@ interface ExtractedTools {
   kwargs: Record<string, any>;
 }
 
-function hasGetType(
-  model: unknown,
-): model is { _getType: () => string } {
-  return typeof (model as { _getType?: unknown })?._getType === "function";
-}
-
 function useProviderMessages(
   initialInput: BaseLanguageModelInput,
   providerMessages?: Record<Provider, BaseMessageLike[]>,
@@ -58,12 +52,12 @@ export class FallbackRunnable<
   private providerMessages?: Record<Provider, BaseMessageLike[]>;
 
   _getType(): string {
-    if (hasGetType(this.primaryRunnable)) {
+    if (typeof this.primaryRunnable?._getType === "function") {
       return this.primaryRunnable._getType();
     }
 
     const primaryModel = this.getPrimaryModel();
-    if (hasGetType(primaryModel)) {
+    if (typeof primaryModel?._getType === "function") {
       return primaryModel._getType();
     }
 
