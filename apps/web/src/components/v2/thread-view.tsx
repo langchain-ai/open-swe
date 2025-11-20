@@ -338,7 +338,7 @@ export function ThreadView({
     previousPlannerSession.current = nextPlannerSession;
     setPlannerSession(nextPlannerSession);
 
-    if (currentPlannerSession && selectedTab === "programmer") {
+    if (selectedTab !== "planner") {
       setSelectedTab("planner");
     }
   }, [
