@@ -265,15 +265,6 @@ export function FeatureInsightsPanel({
     ? (artifactsByFeatureId[selectedFeatureId] ?? [])
     : [];
 
-  const hasData =
-    features.length > 0 ||
-    activeFeatures.length > 0 ||
-    activeFeatureIds.length > 0;
-
-  if (!hasData && !isLoading && !error) {
-    return null;
-  }
-
   const handleRetry = () => {
     if (threadId) {
       void fetchGraphForThread(threadId, { force: true });
@@ -292,6 +283,15 @@ export function FeatureInsightsPanel({
     onStartPlanner?.();
     void startFeatureDevelopment(selectedFeature.id);
   }, [onStartPlanner, selectedFeature, startFeatureDevelopment]);
+
+  const hasData =
+    features.length > 0 ||
+    activeFeatures.length > 0 ||
+    activeFeatureIds.length > 0;
+
+  if (!hasData && !isLoading && !error) {
+    return null;
+  }
 
   return (
     <Card className="bg-card/95 border-border/80 shadow-sm">
