@@ -63,7 +63,7 @@ export function ThreadCard({
         currentTaskIndex: displayCurrentIndex,
         totalTasks: sortedPlanItems.length,
       };
-    } catch (error) {
+    } catch {
       return { currentTaskIndex: 0, totalTasks: 0 };
     }
   };

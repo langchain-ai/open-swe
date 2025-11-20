@@ -265,7 +265,7 @@ export function TerminalInput({
       // Clear quick action prompt
       setQuickActionPrompt?.("");
     }
-  }, [quickActionPrompt]);
+  }, [message, quickActionPrompt, setMessage, setQuickActionPrompt]);
 
   // Handle draft loading from external components
   useEffect(() => {
