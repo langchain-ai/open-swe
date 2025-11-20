@@ -125,6 +125,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ...managerState,
         ...updatedManagerState,
       },
+      asNode: "start-planner",
     });
 
     return NextResponse.json({
