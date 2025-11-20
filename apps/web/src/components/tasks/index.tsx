@@ -57,7 +57,6 @@ export function TasksSidebar({
   const [filter, setFilter] = useState<FilterType>("all");
 
   const currentTask = taskPlan.tasks[currentTaskIndex];
-  const isLatestTask = currentTaskIndex === taskPlan.activeTaskIndex;
   const isLatestRevision =
     currentRevisionIndex === currentTask?.activeRevisionIndex;
 

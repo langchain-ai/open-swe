@@ -77,13 +77,16 @@ export function useThreadsSWR<
   } = options;
   const [hasMoreState, setHasMoreState] = useState(true);
 
-  const paginationWithDefaults = {
-    limit: 25,
-    offset: 0,
-    sortBy: "updated_at" as ThreadSortBy,
-    sortOrder: "desc" as SortOrder,
-    ...pagination,
-  };
+  const paginationWithDefaults = useMemo(
+    () => ({
+      limit: 25,
+      offset: 0,
+      sortBy: "updated_at" as ThreadSortBy,
+      sortOrder: "desc" as SortOrder,
+      ...pagination,
+    }),
+    [pagination],
+  );
 
   const apiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL ?? "";
 

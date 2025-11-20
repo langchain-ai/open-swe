@@ -175,7 +175,7 @@ export function ActionsRenderer<
 
       return prev;
     });
-  }, [stream.messages]);
+  }, [setCustomNodeEvents, stream.messages]);
 
   // Clear streamLoading as soon as we get any content (agent has started running)
   useEffect(() => {
@@ -185,7 +185,13 @@ export function ActionsRenderer<
     if (hasContent && streamLoading) {
       setStreamLoading(false);
     }
-  }, [stream.messages, customNodeEvents, streamLoading]);
+  }, [
+    customNodeEvents,
+    filteredMessages,
+    setStreamLoading,
+    streamLoading,
+    stream.messages,
+  ]);
 
   useEffect(() => {
     if (stream.error) {

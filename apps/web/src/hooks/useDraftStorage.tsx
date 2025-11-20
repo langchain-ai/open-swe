@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { debounce } from "lodash";
 
 const DRAFT_STORAGE_KEY = "terminal-input-draft";
@@ -73,12 +73,15 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
   const hasLoadedInitialDraft = useRef(false);
 
   // Debounced auto-save function
-  const debouncedSave = useCallback(
-    debounce((content: string) => {
-      saveDraftToLocalStorage(content);
-    }, 500),
+  const debouncedSave = useMemo(
+    () =>
+      debounce((content: string) => {
+        saveDraftToLocalStorage(content);
+      }, 500),
     [],
   );
+
+  useEffect(() => () => debouncedSave.cancel(), [debouncedSave]);
 
   // Load initial draft on mount
   useEffect(() => {
