@@ -77,6 +77,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const plannerThreadId =
       managerState.plannerSession?.threadId ?? randomUUID();
 
+    const selectedFeature = managerState.featureGraph?.getFeature(featureId);
+    const featureDependencies = selectedFeature
+      ? managerState.featureGraph
+          ?.getNeighbors(featureId, "upstream")
+          .filter((neighbor) => neighbor.id !== selectedFeature.id)
+      : undefined;
+
     const plannerRunInput: PlannerGraphUpdate = {
       issueId: managerState.issueId,
       targetRepository: managerState.targetRepository,
@@ -85,6 +92,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       autoAcceptPlan: managerState.autoAcceptPlan,
       workspacePath: managerState.workspacePath,
       activeFeatureIds: [featureId],
+      features: selectedFeature ? [selectedFeature] : [],
+      featureDependencies: featureDependencies ?? [],
       programmerSession: managerState.programmerSession,
       messages: managerState.messages,
     };
