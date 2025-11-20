@@ -19,6 +19,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import _ from "lodash";
 import { cn } from "@/lib/utils";
+import { useQueryState } from "nuqs";
 import { BasicMarkdownText } from "../thread/markdown-text";
 
 interface Option {

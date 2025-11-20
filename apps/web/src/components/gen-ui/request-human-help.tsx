@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   HelpCircle,
   Loader2,
+  CheckCircle,
   ChevronDown,
   Send,
   Clock,

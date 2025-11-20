@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
-import { Trash2, FileText } from "lucide-react";
+import { Trash2, FileText, Archive } from "lucide-react";
 import { useDraftStorage } from "@/hooks/useDraftStorage";
 
 interface Draft {

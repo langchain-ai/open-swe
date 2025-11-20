@@ -69,6 +69,7 @@ type MarkTaskNotCompletedToolArgs = z.infer<
   typeof markTaskNotCompletedTool.schema
 >;
 const reviewStartedTool = createReviewStartedToolFields();
+type ReviewStartedToolArgs = z.infer<typeof reviewStartedTool.schema>;
 const grepTool = createGrepToolFields(dummyRepo);
 type GrepToolArgs = z.infer<typeof grepTool.schema>;
 const installDependenciesTool = createInstallDependenciesToolFields(dummyRepo);
@@ -103,6 +104,9 @@ type WriteTechnicalNotesToolArgs = z.infer<
 
 const conversationHistorySummaryTool =
   createConversationHistorySummaryToolFields();
+type ConversationHistorySummaryToolArgs = z.infer<
+  typeof conversationHistorySummaryTool.schema
+>;
 const requestHumanHelpTool = createRequestHumanHelpToolFields();
 type RequestHumanHelpToolArgs = z.infer<typeof requestHumanHelpTool.schema>;
 const textEditorTool = createTextEditorToolFields(
