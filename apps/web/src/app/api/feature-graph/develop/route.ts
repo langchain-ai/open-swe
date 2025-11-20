@@ -78,11 +78,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       managerState.plannerSession?.threadId ?? randomUUID();
 
     const selectedFeature = managerState.featureGraph?.getFeature(featureId);
-    const featureDependencies = selectedFeature
-      ? managerState.featureGraph
-          ?.getNeighbors(featureId, "upstream")
-          .filter((neighbor) => neighbor.id !== selectedFeature.id)
-      : undefined;
+
+    if (!selectedFeature) {
+      return NextResponse.json(
+        { error: "Feature not found in manager state" },
+        { status: 404 },
+      );
+    }
+
+    const featureDependencies = managerState.featureGraph
+      ?.getNeighbors(featureId, "both")
+      .filter((neighbor) => neighbor.id !== selectedFeature.id);
 
     const plannerRunInput: PlannerGraphUpdate = {
       issueId: managerState.issueId,
@@ -92,7 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       autoAcceptPlan: managerState.autoAcceptPlan,
       workspacePath: managerState.workspacePath,
       activeFeatureIds: [featureId],
-      features: selectedFeature ? [selectedFeature] : [],
+      features: [selectedFeature, ...(featureDependencies ?? [])],
       featureDependencies: featureDependencies ?? [],
       programmerSession: managerState.programmerSession,
       messages: managerState.messages,
