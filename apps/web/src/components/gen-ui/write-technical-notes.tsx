@@ -8,6 +8,8 @@ import {
   ChevronUp,
   FileText,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+
 type WriteTechnicalNotesProps = {
   status: "generating" | "done";
   notes?: string;

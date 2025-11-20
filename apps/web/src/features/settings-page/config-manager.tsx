@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -58,7 +58,7 @@ export function ConfigManager() {
   >([]);
   const [loading, setLoading] = useState(false);
 
-  const loadConfigurations = useCallback(async () => {
+  const loadConfigurations = async () => {
     // TODO: If we implement a concept of users and start storing config on assistants,
     // we will need to update this to fetch configs from the assistant first.
     setLoading(true);
@@ -82,11 +82,11 @@ export function ConfigManager() {
 
     setConfigurations(actualConfigs);
     setLoading(false);
-  }, [getConfig]);
+  };
 
   useEffect(() => {
     loadConfigurations();
-  }, [loadConfigurations]);
+  }, []);
 
   const hasConfiguredValues = configurations.some((config) => {
     const currentValue = configs[DEFAULT_CONFIG_KEY]?.[config.label];

@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Loader2,
   CheckCircle,
+  MessageSquare,
   ChevronDown,
 } from "lucide-react";
 import { BasicMarkdownText } from "../thread/markdown-text";
