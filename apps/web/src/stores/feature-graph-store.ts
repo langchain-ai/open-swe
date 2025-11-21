@@ -232,8 +232,8 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
       }
 
       const nextRunState: FeatureRunState = {
-        threadId: existingRun?.threadId ?? null,
-        runId: existingRun?.runId ?? null,
+        threadId: null,
+        runId: null,
         status: "starting",
         error: null,
         updatedAt: Date.now(),
