@@ -76,8 +76,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const managerState = managerThreadState.values;
     const featureGraph = coerceFeatureGraph(managerState.featureGraph);
+    const existingPlannerSession = managerState.plannerSession;
     const plannerThreadId =
-      managerState.plannerSession?.threadId ?? randomUUID();
+      existingPlannerSession?.threadId ?? randomUUID();
 
     const selectedFeature = featureGraph?.getFeature(featureId);
 
@@ -105,6 +106,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       programmerSession: managerState.programmerSession,
       messages: managerState.messages,
     };
+
+    if (existingPlannerSession?.threadId && existingPlannerSession?.runId) {
+      const updatedManagerState: ManagerGraphUpdate = {
+        plannerSession: {
+          threadId: plannerThreadId,
+          runId: existingPlannerSession.runId,
+        },
+        activeFeatureIds: [featureId],
+      };
+
+      await client.threads.updateState<ManagerGraphState>(threadId, {
+        values: {
+          ...managerState,
+          ...updatedManagerState,
+        },
+        asNode: "start-planner",
+      });
+
+      return NextResponse.json({
+        planner_thread_id: plannerThreadId,
+        run_id: existingPlannerSession.runId,
+      });
+    }
 
     const run = await client.runs.create(plannerThreadId, PLANNER_GRAPH_ID, {
       input: plannerRunInput,

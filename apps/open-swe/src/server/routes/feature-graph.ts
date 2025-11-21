@@ -171,8 +171,9 @@ export function registerFeatureGraphRoute(app: Hono) {
       .getNeighbors(featureId, "both")
       .filter((neighbor) => neighbor.id !== selectedFeature.id);
 
+    const existingPlannerSession = managerThreadState.values.plannerSession;
     const plannerThreadId =
-      managerThreadState.values.plannerSession?.threadId ?? randomUUID();
+      existingPlannerSession?.threadId ?? randomUUID();
 
     const plannerRunInput = buildPlannerRunInput({
       managerState: managerThreadState.values,
@@ -180,6 +181,35 @@ export function registerFeatureGraphRoute(app: Hono) {
       selectedFeature,
       featureDependencies,
     });
+
+    if (existingPlannerSession?.threadId && existingPlannerSession?.runId) {
+      const updatedManagerState: ManagerGraphUpdate = {
+        plannerSession: {
+          threadId: plannerThreadId,
+          runId: existingPlannerSession.runId,
+        },
+        activeFeatureIds: [featureId],
+      };
+
+      await client.threads
+        .updateState<ManagerGraphState>(threadId, {
+          values: {
+            ...managerThreadState.values,
+            ...updatedManagerState,
+          },
+          asNode: "start-planner",
+        })
+        .catch((error) => {
+          logger.error("Failed to update manager state after feature develop", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      return ctx.json({
+        planner_thread_id: plannerThreadId,
+        run_id: existingPlannerSession.runId,
+      });
+    }
 
     let run;
     try {
