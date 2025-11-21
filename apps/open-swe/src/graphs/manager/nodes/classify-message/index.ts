@@ -57,11 +57,14 @@ export async function classifyMessage(
   }
 
   const userMessageContent = getMessageContentString(userMessage.content);
+  const requestSource = userMessage.additional_kwargs?.requestSource;
+  const isChatSession =
+    requestSource === "open-swe" || requestSource === "local-user";
   const graphEditIntent = /\b(propos(e|al)|approve|reject)\b/i.test(
     userMessageContent,
   );
 
-  if (graphEditIntent) {
+  if (isChatSession && graphEditIntent) {
     return new Command({
       update: { workspacePath: state.workspacePath },
       goto: "feature-graph-agent",
