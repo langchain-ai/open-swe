@@ -41,7 +41,11 @@ type DevelopRequestBody = {
   featureId?: unknown;
 };
 
-export function registerFeatureGraphRoute(app: Hono) {
+export function registerFeatureGraphRoute(
+  app: Hono,
+  options?: { clientFactory?: typeof createLangGraphClient },
+) {
+  const getLangGraphClient = options?.clientFactory ?? createLangGraphClient;
   app.post("/feature-graph/generate", async (ctx) => {
     let body: GenerateRequestBody;
 
@@ -128,7 +132,7 @@ export function registerFeatureGraphRoute(app: Hono) {
       );
     }
 
-    const client = createLangGraphClient({
+    const client = getLangGraphClient({
       defaultHeaders:
         process.env.OPEN_SWE_LOCAL_MODE === "true"
           ? { [LOCAL_MODE_HEADER]: "true" }
@@ -181,35 +185,6 @@ export function registerFeatureGraphRoute(app: Hono) {
       selectedFeature,
       featureDependencies,
     });
-
-    if (existingPlannerSession?.threadId && existingPlannerSession?.runId) {
-      const updatedManagerState: ManagerGraphUpdate = {
-        plannerSession: {
-          threadId: plannerThreadId,
-          runId: existingPlannerSession.runId,
-        },
-        activeFeatureIds: [featureId],
-      };
-
-      await client.threads
-        .updateState<ManagerGraphState>(threadId, {
-          values: {
-            ...managerThreadState.values,
-            ...updatedManagerState,
-          },
-          asNode: "start-planner",
-        })
-        .catch((error) => {
-          logger.error("Failed to update manager state after feature develop", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-
-      return ctx.json({
-        planner_thread_id: plannerThreadId,
-        run_id: existingPlannerSession.runId,
-      });
-    }
 
     let run;
     try {
