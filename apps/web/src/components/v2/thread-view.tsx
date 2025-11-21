@@ -282,9 +282,7 @@ export function ThreadView({
   });
 
   const joinedFeatureRunId = useRef<string | undefined>(undefined);
-  const featureRunJoinTimeout = useRef<
-    ReturnType<typeof setTimeout> | undefined
-  >(undefined);
+  const featureRunJoinTimeout = useRef<ReturnType<typeof setTimeout>>();
   const featureRunJoinBackoff = useRef<number>(500);
 
   useEffect(() => {
