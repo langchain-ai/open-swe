@@ -56,6 +56,21 @@ export async function classifyMessage(
     throw new Error("No human message found.");
   }
 
+  const userMessageContent = getMessageContentString(userMessage.content);
+  const requestSource = userMessage.additional_kwargs?.requestSource;
+  const isChatSession =
+    requestSource === "open-swe" || requestSource === "local-user";
+  const graphEditIntent = /\b(propos(e|al)|approve|reject)\b/i.test(
+    userMessageContent,
+  );
+
+  if (isChatSession && graphEditIntent) {
+    return new Command({
+      update: { workspacePath: state.workspacePath },
+      goto: "feature-graph-agent",
+    });
+  }
+
   let plannerThread: Thread<PlannerGraphState> | undefined;
   let programmerThread: Thread<GraphState> | undefined;
   let langGraphClient: Client | undefined;
