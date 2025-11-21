@@ -282,105 +282,20 @@ export function ThreadView({
   });
 
   const joinedFeatureRunId = useRef<string | undefined>(undefined);
-  const featureRunJoinTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const featureRunJoinBackoff = useRef<number>(500);
 
   useEffect(() => {
-    if (featureRunJoinTimeout.current) {
-      clearTimeout(featureRunJoinTimeout.current);
-      featureRunJoinTimeout.current = undefined;
-    }
-
-    const runId = selectedFeatureRunState?.runId;
-    const threadId = selectedFeatureRunState?.threadId;
-
-    if (!runId || !threadId || !selectedFeatureId) {
+    if (
+      selectedFeatureRunState?.runId &&
+      selectedFeatureRunState.runId !== joinedFeatureRunId.current
+    ) {
+      joinedFeatureRunId.current = selectedFeatureRunState.runId;
+      featureRunStream
+        .joinStream(selectedFeatureRunState.runId)
+        .catch(() => {});
+    } else if (!selectedFeatureRunState?.runId) {
       joinedFeatureRunId.current = undefined;
-      featureRunJoinBackoff.current = 500;
-      return;
     }
-
-    if (runId === joinedFeatureRunId.current) {
-      return;
-    }
-
-    let isCancelled = false;
-
-    const scheduleRetry = () => {
-      featureRunJoinTimeout.current = setTimeout(() => {
-        void attemptJoin();
-      }, featureRunJoinBackoff.current);
-      featureRunJoinBackoff.current = Math.min(
-        featureRunJoinBackoff.current * 2,
-        4000,
-      );
-    };
-
-    const attemptJoin = async () => {
-      if (isCancelled) return;
-
-      const hasJoinableMessages = featureRunStream.messages?.some(
-        (message) =>
-          message.type === "ai" ||
-          (message.type === "tool" && "tool_call_id" in message),
-      );
-
-      const runIsResumable =
-        featureRunStream.interrupt?.resumable ||
-        (await (async () => {
-          try {
-            const run = await featureRunStream.client.runs.get(threadId, runId);
-            const runWithState = run as {
-              resumable?: boolean;
-              stream_state?: { resumable?: boolean };
-            };
-            return (
-              runWithState.resumable ?? runWithState.stream_state?.resumable
-            );
-          } catch {
-            return false;
-          }
-        })());
-
-      if (!runIsResumable && !hasJoinableMessages) {
-        scheduleRetry();
-        return;
-      }
-
-      try {
-        joinedFeatureRunId.current = runId;
-        await featureRunStream.joinStream(runId);
-        featureRunJoinBackoff.current = 500;
-      } catch (error) {
-        joinedFeatureRunId.current = undefined;
-        const friendlyMessage =
-          error instanceof Error
-            ? error.message
-            : "Unable to join the feature development run.";
-        setFeatureRunStatus(selectedFeatureId, "error", {
-          runId,
-          threadId,
-          error: friendlyMessage,
-        });
-        scheduleRetry();
-      }
-    };
-
-    void attemptJoin();
-
-    return () => {
-      isCancelled = true;
-      if (featureRunJoinTimeout.current) {
-        clearTimeout(featureRunJoinTimeout.current);
-      }
-    };
-  }, [
-    featureRunStream,
-    selectedFeatureId,
-    selectedFeatureRunState?.runId,
-    selectedFeatureRunState?.threadId,
-    setFeatureRunStatus,
-  ]);
+  }, [featureRunStream, selectedFeatureRunState?.runId]);
 
   useEffect(() => {
     if (!selectedFeatureId || !selectedFeatureRunState) return;
