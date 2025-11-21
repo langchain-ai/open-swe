@@ -4,6 +4,20 @@ import type { FeatureGraph } from "../../feature-graph/graph.js";
 import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
+export const FeatureProposalSchema = z.object({
+  proposalId: z.string(),
+  featureId: z.string(),
+  summary: z.string(),
+  status: z.enum(["proposed", "approved", "rejected"]),
+  rationale: z.string().optional(),
+  updatedAt: z.string(),
+});
+
+export const FeatureProposalStateSchema = z.object({
+  proposals: z.array(FeatureProposalSchema),
+  activeProposalId: z.string().optional(),
+});
+
 export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
    * The target repository the request should be executed in.
@@ -52,7 +66,13 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    * Feature identifiers that should be considered active for the current run.
    */
   activeFeatureIds: z.array(z.string()).optional(),
+  /**
+   * Tracks feature proposals and their lifecycle state across turns.
+   */
+  featureProposals: FeatureProposalStateSchema.optional(),
 });
 
 export type ManagerGraphState = z.infer<typeof ManagerGraphStateObj>;
 export type ManagerGraphUpdate = Partial<ManagerGraphState>;
+export type FeatureProposal = z.infer<typeof FeatureProposalSchema>;
+export type FeatureProposalState = z.infer<typeof FeatureProposalStateSchema>;

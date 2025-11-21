@@ -14,6 +14,7 @@ import {
 } from "../../../utils/workspace.js";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { generateFeatureGraphForWorkspace } from "../utils/generate-feature-graph.js";
+import { FEATURE_GRAPH_RELATIVE_PATH } from "../utils/feature-graph-path.js";
 
 let featureGraphGenerator = generateFeatureGraphForWorkspace;
 
@@ -24,12 +25,6 @@ export function setFeatureGraphGenerator(
 }
 
 const logger = createLogger(LogLevel.INFO, "ResolveWorkspace");
-
-const FEATURE_GRAPH_RELATIVE_PATH = path.join(
-  "features",
-  "graph",
-  "graph.yaml",
-);
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_FEATURE_GRAPH_PATH = path.resolve(

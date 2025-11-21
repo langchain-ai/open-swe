@@ -6,6 +6,7 @@ import {
   startPlanner,
   createNewSession,
   resolveWorkspace,
+  featureGraphAgent,
 } from "./nodes/index.js";
 
 const workflow = new StateGraph(ManagerGraphStateObj, GraphConfiguration)
@@ -13,14 +14,17 @@ const workflow = new StateGraph(ManagerGraphStateObj, GraphConfiguration)
     ends: ["classify-message"],
   })
   .addNode("classify-message", classifyMessage, {
-    ends: [END, "start-planner", "create-new-session"],
+    ends: [END, "start-planner", "create-new-session", "feature-graph-agent"],
   })
   .addNode("create-new-session", createNewSession)
   .addNode("start-planner", startPlanner)
+  .addNode("feature-graph-agent", featureGraphAgent)
   .addEdge(START, "resolve-workspace")
   .addEdge("resolve-workspace", "classify-message")
   .addEdge("create-new-session", END)
-  .addEdge("start-planner", END);
+  .addEdge("start-planner", END)
+  .addEdge("classify-message", "feature-graph-agent")
+  .addEdge("feature-graph-agent", END);
 
 export const graph = workflow.compile();
 graph.name = "Open SWE - Manager";

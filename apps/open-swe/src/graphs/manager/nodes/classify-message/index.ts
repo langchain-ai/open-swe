@@ -133,6 +133,18 @@ export async function classifyMessage(
     typeof BASE_CLASSIFICATION_SCHEMA
   >;
 
+  if (toolCallArgs.route === "feature_graph_agent") {
+    const commandUpdate: ManagerGraphUpdate = {
+      messages: [response],
+      workspacePath: state.workspacePath,
+    };
+
+    return new Command({
+      update: commandUpdate,
+      goto: "feature-graph-agent",
+    });
+  }
+
   if (toolCallArgs.route === "no_op") {
     // If it's a no_op, just add the message to the state and return.
     const commandUpdate: ManagerGraphUpdate = {
