@@ -3,16 +3,35 @@ import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { Command, END } from "@langchain/langgraph";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import type { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
+import type {
+  determineNeedsContext,
+  generateAction,
+  generatePlan,
+  interruptProposedPlan,
+  notetaker,
+  prepareGraphState,
+  takeActions,
+} from "../nodes/index.js";
+import type { initializeSandbox } from "../../shared/initialize-sandbox.js";
+import type { diagnoseError } from "../../shared/diagnose-error.js";
 
-const prepareGraphStateMock = jest.fn();
-const generateActionMock = jest.fn();
-const takeActionsMock = jest.fn();
-const generatePlanMock = jest.fn();
-const notetakerMock = jest.fn();
-const interruptProposedPlanMock = jest.fn();
-const determineNeedsContextMock = jest.fn();
-const diagnoseErrorMock = jest.fn();
-const initializeSandboxMock = jest.fn();
+const prepareGraphStateMock: jest.MockedFunction<typeof prepareGraphState> =
+  jest.fn();
+const generateActionMock: jest.MockedFunction<typeof generateAction> =
+  jest.fn();
+const takeActionsMock: jest.MockedFunction<typeof takeActions> = jest.fn();
+const generatePlanMock: jest.MockedFunction<typeof generatePlan> = jest.fn();
+const notetakerMock: jest.MockedFunction<typeof notetaker> = jest.fn();
+const interruptProposedPlanMock: jest.MockedFunction<
+  typeof interruptProposedPlan
+> = jest.fn();
+const determineNeedsContextMock: jest.MockedFunction<
+  typeof determineNeedsContext
+> = jest.fn();
+const diagnoseErrorMock: jest.MockedFunction<typeof diagnoseError> =
+  jest.fn();
+const initializeSandboxMock: jest.MockedFunction<typeof initializeSandbox> =
+  jest.fn();
 
 await jest.unstable_mockModule("../nodes/index.js", () => ({
   prepareGraphState: prepareGraphStateMock,
@@ -34,10 +53,11 @@ await jest.unstable_mockModule("../../shared/diagnose-error.js", () => ({
 
 const { graph } = await import("../index.js");
 
-const basePlannerState = {
+const basePlannerState: PlannerGraphState = {
   sandboxSessionId: "sandbox-id",
   targetRepository: { owner: "acme", repo: "demo" },
   workspacePath: "",
+  messages: [],
   features: [],
   featureDependencies: [],
   activeFeatureIds: [],
@@ -54,17 +74,19 @@ const basePlannerState = {
   customRules: undefined,
   autoAcceptPlan: undefined,
   tokenData: undefined,
-  internalMessages: [],
-} satisfies Partial<PlannerGraphState>;
+};
 
-const graphConfig = {
-  configurable: { shouldCreateIssue: false },
-  thread_id: "thread-id",
-  assistant_id: "planner",
+const graphConfig: GraphConfig = {
+  configurable: {
+    assistant_id: "planner",
+    thread_id: "thread-id",
+    shouldCreateIssue: false,
+    workspacePath: "",
+  },
   callbacks: [],
   metadata: {},
   tags: [],
-} as unknown as GraphConfig;
+};
 
 describe("planner graph pending tool calls", () => {
   beforeEach(() => {
@@ -133,7 +155,10 @@ describe("planner graph pending tool calls", () => {
       ],
     } as PlannerGraphState;
 
-    await graph.invoke(state, graphConfig);
+    await graph.invoke(
+      state,
+      graphConfig as Parameters<typeof graph.invoke>[1],
+    );
 
     expect(takeActionsMock).toHaveBeenCalledTimes(1);
     expect(generateActionMock).not.toHaveBeenCalled();
@@ -155,7 +180,10 @@ describe("planner graph pending tool calls", () => {
       ],
     } as PlannerGraphState;
 
-    await graph.invoke(state, graphConfig);
+    await graph.invoke(
+      state,
+      graphConfig as Parameters<typeof graph.invoke>[1],
+    );
 
     expect(generateActionMock).toHaveBeenCalledTimes(1);
     expect(takeActionsMock).not.toHaveBeenCalled();
