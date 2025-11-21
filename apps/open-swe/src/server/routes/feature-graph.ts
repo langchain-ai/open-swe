@@ -14,11 +14,11 @@ import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
 } from "@openswe/shared/constants";
+import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
-  GraphConfig,
   ManagerGraphState,
   ManagerGraphUpdate,
-} from "@openswe/shared/open-swe/types";
+} from "@openswe/shared/open-swe/manager/types";
 import type { PlannerGraphUpdate } from "@openswe/shared/open-swe/planner/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { createLogger, LogLevel } from "../../utils/logger.js";
@@ -475,11 +475,26 @@ function coerceArtifactRef(value: unknown): ArtifactRef | null {
     return value.trim() ? value : null;
   }
 
-  if (isPlainObject(value) && typeof (value as ArtifactRef).uri === "string") {
-    return value as ArtifactRef;
+  if (isArtifactRefObject(value)) {
+    return value;
   }
 
   return null;
+}
+
+function isArtifactRefObject(value: unknown): value is Exclude<ArtifactRef, string> {
+  if (!isPlainObject(value)) return false;
+
+  const artifact = value as Exclude<ArtifactRef, string>;
+
+  return (
+    typeof artifact.path === "string" ||
+    typeof artifact.url === "string" ||
+    typeof artifact.name === "string" ||
+    typeof artifact.description === "string" ||
+    typeof artifact.type === "string" ||
+    Boolean(artifact.metadata && typeof artifact.metadata === "object")
+  );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
