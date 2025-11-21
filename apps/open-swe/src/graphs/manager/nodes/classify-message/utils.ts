@@ -27,6 +27,7 @@ import {
   PROPOSED_PLAN_PROMPT,
   RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION,
   TASK_PLAN_PROMPT,
+  FEATURE_GRAPH_ROUTING_OPTION,
 } from "./prompts.js";
 import { createClassificationSchema } from "./schemas.js";
 
@@ -112,6 +113,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
     inputs.plannerStatus !== "not_started";
 
   const routingOptions = [
+    "feature_graph_agent",
     ...(programmerRunning ? ["update_programmer"] : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
@@ -128,6 +130,10 @@ export function createClassificationPromptAndToolSchema(inputs: {
       THREAD_STATUS_READABLE_STRING_MAP[inputs.plannerStatus],
     )
     .replaceAll("{ROUTING_OPTIONS}", routingOptions.join(", "))
+    .replaceAll(
+      "{FEATURE_GRAPH_ROUTING_OPTION}",
+      FEATURE_GRAPH_ROUTING_OPTION,
+    )
     .replaceAll(
       "{UPDATE_PROGRAMMER_ROUTING_OPTION}",
       programmerRunning ? UPDATE_PROGRAMMER_ROUTING_OPTION : "",
