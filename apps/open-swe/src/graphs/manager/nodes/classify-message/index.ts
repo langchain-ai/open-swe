@@ -56,6 +56,18 @@ export async function classifyMessage(
     throw new Error("No human message found.");
   }
 
+  const userMessageContent = getMessageContentString(userMessage.content);
+  const graphEditIntent = /\b(propos(e|al)|approve|reject)\b/i.test(
+    userMessageContent,
+  );
+
+  if (graphEditIntent) {
+    return new Command({
+      update: { workspacePath: state.workspacePath },
+      goto: "feature-graph-agent",
+    });
+  }
+
   let plannerThread: Thread<PlannerGraphState> | undefined;
   let programmerThread: Thread<GraphState> | undefined;
   let langGraphClient: Client | undefined;
