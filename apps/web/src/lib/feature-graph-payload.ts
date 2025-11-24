@@ -4,10 +4,17 @@ import type {
   FeatureEdge,
   FeatureNode,
 } from "@openswe/shared/feature-graph/types";
+import type {
+  FeatureProposal,
+  FeatureProposalState,
+} from "@openswe/shared/open-swe/manager/types";
 
 export type FeatureGraphFetchResult = {
   graph: FeatureGraph | null;
   activeFeatureIds: string[];
+  proposals: FeatureProposal[];
+  activeProposalId: string | null;
+  message?: string | null;
 };
 
 export function mapFeatureGraphPayload(
@@ -17,10 +24,19 @@ export function mapFeatureGraphPayload(
   const activeFeatureIds = normalizeFeatureIds(
     getActiveFeatureIdsPayload(data),
   );
+  const { proposals, activeProposalId } = mapFeatureProposalState(
+    getFeatureProposalsPayload(data),
+    getActiveProposalIdPayload(data),
+  );
+
+  const message = getMessagePayload(data);
 
   return {
     graph,
     activeFeatureIds,
+    proposals,
+    activeProposalId,
+    message,
   };
 }
 
@@ -45,6 +61,35 @@ export function normalizeFeatureIds(
   return normalized;
 }
 
+export function mapFeatureProposalState(
+  state: unknown,
+  activeProposalId?: unknown,
+): Pick<FeatureGraphFetchResult, "proposals" | "activeProposalId"> {
+  if (!state || typeof state !== "object") {
+    return { proposals: [], activeProposalId: normalizeProposalId(activeProposalId) };
+  }
+
+  const proposalsSource =
+    "proposals" in state && Array.isArray((state as FeatureProposalState).proposals)
+      ? (state as FeatureProposalState).proposals
+      : Array.isArray(state)
+        ? (state as FeatureProposal[])
+        : [];
+
+  const proposals = proposalsSource
+    .map((proposal) => normalizeProposal(proposal))
+    .filter((proposal): proposal is FeatureProposal => Boolean(proposal));
+
+  const resolvedActiveProposalId = normalizeProposalId(
+    activeProposalId ?? (state as FeatureProposalState).activeProposalId,
+  );
+
+  return {
+    proposals,
+    activeProposalId: resolvedActiveProposalId,
+  };
+}
+
 function getGraphPayload(data: unknown) {
   if (!data || typeof data !== "object") return null;
   if ("feature_graph" in data)
@@ -52,6 +97,24 @@ function getGraphPayload(data: unknown) {
   if ("featureGraph" in data)
     return (data as Record<string, unknown>)["featureGraph"];
   if ("graph" in data) return (data as Record<string, unknown>)["graph"];
+  return null;
+}
+
+function getFeatureProposalsPayload(data: unknown): unknown {
+  if (!data || typeof data !== "object") return null;
+
+  if ("feature_proposals" in data) {
+    return (data as Record<string, unknown>)["feature_proposals"];
+  }
+
+  if ("featureProposals" in data) {
+    return (data as Record<string, unknown>)["featureProposals"];
+  }
+
+  if ("proposals" in data) {
+    return data;
+  }
+
   return null;
 }
 
@@ -73,6 +136,22 @@ function getActiveFeatureIdsPayload(data: unknown): string[] | null {
   return candidates.every((item) => typeof item === "string")
     ? candidates
     : null;
+}
+
+function getActiveProposalIdPayload(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+
+  const candidates = (() => {
+    if ("active_proposal_id" in data) {
+      return (data as Record<string, unknown>)["active_proposal_id"];
+    }
+    if ("activeProposalId" in data) {
+      return (data as Record<string, unknown>)["activeProposalId"];
+    }
+    return null;
+  })();
+
+  return normalizeProposalId(candidates);
 }
 
 function coerceGeneratedGraph(value: unknown): FeatureGraph | null {
@@ -193,6 +272,57 @@ function coerceGeneratedEdges(value: unknown): FeatureEdge[] {
   }
 
   return edges;
+}
+
+function normalizeProposal(value: unknown): FeatureProposal | null {
+  if (!value || typeof value !== "object") return null;
+
+  const { proposalId, featureId, summary, status, rationale, updatedAt } =
+    value as FeatureProposal;
+
+  if (
+    typeof proposalId !== "string" ||
+    typeof featureId !== "string" ||
+    typeof summary !== "string" ||
+    typeof status !== "string" ||
+    typeof updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  if (!isValidProposalStatus(status)) {
+    return null;
+  }
+
+  const normalized: FeatureProposal = {
+    proposalId: proposalId.trim(),
+    featureId: featureId.trim(),
+    summary: summary.trim(),
+    status,
+    updatedAt,
+  };
+
+  if (typeof rationale === "string" && rationale.trim()) {
+    normalized.rationale = rationale.trim();
+  }
+
+  return normalized;
+}
+
+function isValidProposalStatus(status: string): status is FeatureProposal["status"] {
+  return status === "proposed" || status === "approved" || status === "rejected";
+}
+
+function normalizeProposalId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function getMessagePayload(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const value = (data as Record<string, unknown>).message;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

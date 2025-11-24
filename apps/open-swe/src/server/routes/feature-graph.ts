@@ -16,6 +16,8 @@ import {
 } from "@openswe/shared/constants";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
+  FeatureProposal,
+  FeatureProposalState,
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@openswe/shared/open-swe/manager/types";
@@ -24,6 +26,10 @@ import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/conf
 import { createLogger, LogLevel } from "../../utils/logger.js";
 import { resolveInsideRoot } from "./run.js";
 import { generateFeatureGraphForWorkspace } from "../../graphs/manager/utils/generate-feature-graph.js";
+import {
+  applyFeatureStatus,
+  persistFeatureGraph,
+} from "../../graphs/manager/utils/feature-graph-mutations.js";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 
 const logger = createLogger(LogLevel.INFO, "FeatureGraphRoute");
@@ -39,6 +45,17 @@ type DevelopRequestBody = {
   threadId?: unknown;
   feature_id?: unknown;
   featureId?: unknown;
+};
+
+type ProposalActionRequestBody = {
+  thread_id?: unknown;
+  threadId?: unknown;
+  feature_id?: unknown;
+  featureId?: unknown;
+  proposal_id?: unknown;
+  proposalId?: unknown;
+  action?: unknown;
+  rationale?: unknown;
 };
 
 export function registerFeatureGraphRoute(app: Hono) {
@@ -279,9 +296,209 @@ export function registerFeatureGraphRoute(app: Hono) {
       run_id: run.run_id,
     });
   });
+
+  app.post("/feature-graph/proposal", async (ctx) => {
+    const body = await ctx.req.json<ProposalActionRequestBody>().catch((error) => {
+      logger.error("Invalid JSON payload for feature proposal action", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+
+    const threadId = resolveThreadId(body);
+    const featureId = resolveFeatureId(body);
+    const proposalId = resolveProposalId(body);
+    const action = resolveProposalAction(body);
+    const rationale = resolveRationale(body);
+
+    if (!threadId) {
+      return ctx.json(
+        { error: "thread_id is required" },
+        400 as ContentfulStatusCode,
+      );
+    }
+
+    if (!featureId && !proposalId) {
+      return ctx.json(
+        { error: "feature_id or proposal_id is required" },
+        400 as ContentfulStatusCode,
+      );
+    }
+
+    if (!action) {
+      return ctx.json(
+        { error: "action must be approve, reject, or info" },
+        400 as ContentfulStatusCode,
+      );
+    }
+
+    const client = createLangGraphClient({
+      defaultHeaders:
+        process.env.OPEN_SWE_LOCAL_MODE === "true"
+          ? { [LOCAL_MODE_HEADER]: "true" }
+          : undefined,
+    });
+
+    const managerThreadState = await client.threads
+      .getState<ManagerGraphState>(threadId)
+      .catch((error) => {
+        logger.error("Failed to load manager state for feature proposal", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+
+    if (!managerThreadState?.values) {
+      return ctx.json(
+        { error: "Manager state not found for thread" },
+        404 as ContentfulStatusCode,
+      );
+    }
+
+    const managerState = managerThreadState.values;
+    const proposalState = ensureProposalState(managerState.featureProposals);
+    const featureGraph = coerceFeatureGraph(managerState.featureGraph);
+
+    const resolvedFeatureId = featureId ?? findFeatureIdForProposal(
+      proposalState,
+      proposalId,
+    );
+
+    if (!resolvedFeatureId) {
+      return ctx.json(
+        { error: "Unable to resolve feature for proposal action" },
+        400 as ContentfulStatusCode,
+      );
+    }
+
+    if (!featureGraph) {
+      return ctx.json(
+        { error: "Feature graph not available for thread" },
+        404 as ContentfulStatusCode,
+      );
+    }
+
+    const selectedFeature = featureGraph.getFeature(resolvedFeatureId);
+    if (!selectedFeature) {
+      return ctx.json(
+        { error: "Feature not found in manager state" },
+        404 as ContentfulStatusCode,
+      );
+    }
+
+    let updatedGraph = featureGraph;
+    let updatedProposals = proposalState;
+    let message: string | null = null;
+
+    try {
+      const timestamp = new Date().toISOString();
+      const matchingProposal = proposalState.proposals.find(
+        (proposal) =>
+          proposal.proposalId === proposalId ||
+          proposal.featureId === resolvedFeatureId,
+      );
+
+      switch (action) {
+        case "approve": {
+          const proposal: FeatureProposal = {
+            proposalId: matchingProposal?.proposalId ?? randomUUID(),
+            featureId: resolvedFeatureId,
+            summary:
+              matchingProposal?.summary ??
+              `Approved update for ${resolvedFeatureId}`,
+            status: "approved",
+            rationale,
+            updatedAt: timestamp,
+          };
+
+          updatedProposals = upsertProposal(updatedProposals, proposal);
+          updatedGraph = applyFeatureStatus(updatedGraph, resolvedFeatureId, "active");
+          await persistFeatureGraph(updatedGraph, managerState.workspacePath);
+          message = `Marked ${resolvedFeatureId} as approved`;
+          break;
+        }
+        case "reject": {
+          const proposal: FeatureProposal = {
+            proposalId: matchingProposal?.proposalId ?? randomUUID(),
+            featureId: resolvedFeatureId,
+            summary:
+              matchingProposal?.summary ??
+              `Rejected update for ${resolvedFeatureId}`,
+            status: "rejected",
+            rationale,
+            updatedAt: timestamp,
+          };
+
+          updatedProposals = upsertProposal(updatedProposals, proposal);
+          updatedGraph = applyFeatureStatus(
+            updatedGraph,
+            resolvedFeatureId,
+            "rejected",
+          );
+          await persistFeatureGraph(updatedGraph, managerState.workspacePath);
+          message = `Recorded rejection for ${resolvedFeatureId}`;
+          break;
+        }
+        case "info": {
+          const proposal: FeatureProposal = {
+            proposalId: matchingProposal?.proposalId ?? randomUUID(),
+            featureId: resolvedFeatureId,
+            summary:
+              matchingProposal?.summary ??
+              `Requested more information for ${resolvedFeatureId}`,
+            status: "proposed",
+            rationale,
+            updatedAt: timestamp,
+          };
+
+          updatedProposals = upsertProposal(updatedProposals, proposal);
+          message = `Requested more information for ${resolvedFeatureId}`;
+          break;
+        }
+        default:
+          break;
+      }
+    } catch (error) {
+      logger.error("Failed to process feature proposal action", {
+        action,
+        featureId: resolvedFeatureId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return ctx.json(
+        { error: "Failed to process feature proposal action" },
+        500 as ContentfulStatusCode,
+      );
+    }
+
+    const activeFeatureIds =
+      action === "approve"
+        ? addActiveFeatureId(managerState.activeFeatureIds, resolvedFeatureId)
+        : normalizeFeatureIds(managerState.activeFeatureIds);
+
+    const updatedState: ManagerGraphUpdate = {
+      featureGraph: updatedGraph,
+      featureProposals: updatedProposals,
+      activeFeatureIds,
+    };
+
+    await client.threads.updateState<ManagerGraphState>(threadId, {
+      values: { ...managerState, ...updatedState },
+      asNode: "feature-graph-agent",
+    });
+
+    return ctx.json({
+      featureGraph: updatedGraph.toJSON(),
+      activeFeatureIds,
+      featureProposals: updatedProposals.proposals,
+      activeProposalId: updatedProposals.activeProposalId,
+      message,
+    });
+  });
 }
 
-function resolveThreadId(body: DevelopRequestBody | null): string | null {
+function resolveThreadId(
+  body: DevelopRequestBody | ProposalActionRequestBody | null,
+): string | null {
   const candidate = body?.thread_id ?? body?.threadId;
   if (typeof candidate === "string" && candidate.trim()) {
     return candidate.trim();
@@ -289,12 +506,113 @@ function resolveThreadId(body: DevelopRequestBody | null): string | null {
   return null;
 }
 
-function resolveFeatureId(body: DevelopRequestBody | null): string | null {
+function resolveFeatureId(
+  body: DevelopRequestBody | ProposalActionRequestBody | null,
+): string | null {
   const candidate = body?.feature_id ?? body?.featureId;
   if (typeof candidate === "string" && candidate.trim()) {
     return candidate.trim();
   }
   return null;
+}
+
+function resolveProposalId(body: ProposalActionRequestBody | null): string | null {
+  const candidate = body?.proposal_id ?? body?.proposalId;
+  if (typeof candidate === "string" && candidate.trim()) {
+    return candidate.trim();
+  }
+  return null;
+}
+
+type ProposalAction = "approve" | "reject" | "info";
+
+function resolveProposalAction(
+  body: ProposalActionRequestBody | null,
+): ProposalAction | null {
+  if (body?.action === "approve" || body?.action === "reject") {
+    return body.action;
+  }
+
+  if (body?.action === "info") {
+    return "info";
+  }
+
+  return null;
+}
+
+function resolveRationale(body: ProposalActionRequestBody | null): string | null {
+  const candidate = body?.rationale;
+  if (typeof candidate === "string" && candidate.trim()) {
+    return candidate.trim();
+  }
+  return null;
+}
+
+function ensureProposalState(
+  state: FeatureProposalState | undefined,
+): FeatureProposalState {
+  return state ?? { proposals: [] };
+}
+
+function findFeatureIdForProposal(
+  state: FeatureProposalState,
+  proposalId: string | null,
+): string | null {
+  if (!proposalId) return null;
+  const match = state.proposals.find(
+    (proposal) => proposal.proposalId === proposalId,
+  );
+  return match?.featureId ?? null;
+}
+
+function upsertProposal(
+  state: FeatureProposalState,
+  proposal: FeatureProposal,
+): FeatureProposalState {
+  const proposals = state.proposals.filter(
+    (existing) => existing.proposalId !== proposal.proposalId,
+  );
+  proposals.push(proposal);
+
+  return {
+    proposals,
+    activeProposalId: proposal.proposalId,
+  };
+}
+
+function addActiveFeatureId(
+  existing: string[] | undefined,
+  featureId: string,
+): string[] {
+  const normalizedExisting = normalizeFeatureIds(existing);
+  const trimmedId = featureId.trim();
+  if (!trimmedId) return normalizedExisting;
+
+  const key = trimmedId.toLowerCase();
+  if (normalizedExisting.some((entry) => entry.toLowerCase() === key)) {
+    return normalizedExisting;
+  }
+
+  return [trimmedId, ...normalizedExisting];
+}
+
+function normalizeFeatureIds(value: string[] | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
 }
 
 function buildPlannerRunInput({
