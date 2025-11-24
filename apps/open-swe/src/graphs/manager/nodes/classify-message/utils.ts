@@ -113,7 +113,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
     inputs.plannerStatus !== "not_started";
 
   const routingOptions = [
-    "feature_graph_agent",
+    "feature_graph_orchestrator",
     ...(programmerRunning ? ["update_programmer"] : []),
     ...(plannerRunning ? ["update_planner"] : []),
     ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
