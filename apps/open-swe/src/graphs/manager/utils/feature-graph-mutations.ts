@@ -1,7 +1,8 @@
+import fs from "node:fs/promises";
 import path from "node:path";
-import { writeFeatureGraphFile } from "@openswe/shared/feature-graph/writer";
 import { FeatureGraph } from "@openswe/shared/feature-graph";
-import { FeatureNode } from "@openswe/shared/feature-graph/types";
+import { FeatureGraphFile, FeatureNode, featureGraphFileSchema } from "@openswe/shared/feature-graph/types";
+import { writeFeatureGraphFile } from "@openswe/shared/feature-graph/writer";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { FEATURE_GRAPH_RELATIVE_PATH } from "./feature-graph-path.js";
 
@@ -14,6 +15,43 @@ const cloneNodeWithStatus = (
   ...node,
   status,
 });
+
+const validateGraphFile = (graph: FeatureGraphFile): FeatureGraphFile => {
+  const parsed = featureGraphFileSchema.parse(graph);
+
+  const nodeIds = new Set<string>();
+  for (const node of parsed.nodes) {
+    if (!("id" in node)) continue;
+
+    if (nodeIds.has(node.id)) {
+      throw new Error(`Duplicate feature id detected: ${node.id}`);
+    }
+
+    nodeIds.add(node.id);
+  }
+
+  const edgeKeys = new Set<string>();
+  for (const edge of parsed.edges) {
+    if (!("source" in edge && "target" in edge && "type" in edge)) {
+      continue;
+    }
+
+    const { source, target, type } = edge;
+    if (!nodeIds.has(source) || !nodeIds.has(target)) {
+      throw new Error(
+        `Feature edge references unknown feature: ${source} -> ${target} (${type})`,
+      );
+    }
+
+    const key = `${source}->${target}#${type}`;
+    if (edgeKeys.has(key)) {
+      throw new Error(`Duplicate feature edge detected: ${key}`);
+    }
+    edgeKeys.add(key);
+  }
+
+  return parsed;
+};
 
 export const applyFeatureStatus = (
   graph: FeatureGraph,
@@ -38,7 +76,7 @@ export const applyFeatureStatus = (
   });
 };
 
-export const featureGraphToFile = (graph: FeatureGraph) => {
+export const featureGraphToFile = (graph: FeatureGraph): FeatureGraphFile => {
   const serialized = graph.toJSON();
 
   return {
@@ -55,13 +93,17 @@ export const persistFeatureGraph = async (
 ): Promise<void> => {
   if (!workspacePath) return;
 
-  const graphFile = featureGraphToFile(graph);
+  const graphFile = validateGraphFile(featureGraphToFile(graph));
   const graphPath = path.join(workspacePath, FEATURE_GRAPH_RELATIVE_PATH);
 
   try {
+    await fs.mkdir(path.dirname(graphPath), { recursive: true });
     await writeFeatureGraphFile({
-      graph: graphFile,
-      outPath: graphPath,
+      graphPath,
+      version: graphFile.version,
+      nodes: graphFile.nodes,
+      edges: graphFile.edges,
+      artifacts: graphFile.artifacts,
     });
     logger.info("Persisted feature graph update", { graphPath });
   } catch (error) {
