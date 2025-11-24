@@ -7,14 +7,18 @@ import type {
   ArtifactRef,
   FeatureNode,
 } from "@openswe/shared/feature-graph/types";
+import type { FeatureProposal } from "@openswe/shared/open-swe/manager/types";
 
 import {
   FeatureGraphFetchResult,
+  mapFeatureProposalState,
   mapFeatureGraphPayload,
   normalizeFeatureIds,
 } from "@/lib/feature-graph-payload";
 import {
   fetchFeatureGraph,
+  performFeatureProposalAction,
+  type FeatureProposalAction,
   requestFeatureGraphGeneration,
   startFeatureDevelopmentRun,
 } from "@/services/feature-graph.service";
@@ -42,12 +46,22 @@ export type FeatureRunState = {
   updatedAt: number;
 };
 
+type ProposalActionState = {
+  status: "idle" | "pending" | "error";
+  error?: string | null;
+  message?: string | null;
+  updatedAt: number;
+};
+
 interface FeatureGraphStoreState {
   threadId: string | null;
   graph: FeatureGraph | null;
   features: FeatureNode[];
   featuresById: Record<string, FeatureNode>;
   activeFeatureIds: string[];
+  proposals: FeatureProposal[];
+  activeProposalId: string | null;
+  proposalActions: Record<string, ProposalActionState>;
   selectedFeatureId: string | null;
   testsByFeatureId: Record<string, FeatureResource[]>;
   artifactsByFeatureId: Record<string, FeatureResource[]>;
@@ -62,6 +76,11 @@ interface FeatureGraphStoreState {
   generateGraph: (threadId: string, prompt: string) => Promise<void>;
   requestGraphGeneration: (threadId: string) => Promise<void>;
   startFeatureDevelopment: (featureId: string) => Promise<void>;
+  respondToProposal: (
+    proposalId: string,
+    action: FeatureProposalAction,
+    options?: { rationale?: string },
+  ) => Promise<string | void>;
   setFeatureRunStatus: (
     featureId: string,
     status: FeatureRunStatus,
@@ -92,6 +111,9 @@ const INITIAL_STATE: Omit<
   features: [],
   featuresById: {},
   activeFeatureIds: [],
+  proposals: [],
+  activeProposalId: null,
+  proposalActions: {},
   selectedFeatureId: null,
   testsByFeatureId: {},
   artifactsByFeatureId: {},
@@ -140,6 +162,9 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
           testsByFeatureId: {},
           artifactsByFeatureId: {},
           activeFeatureIds: [],
+          proposals: [],
+          activeProposalId: null,
+          proposalActions: {},
           selectedFeatureId: null,
         });
       }
@@ -290,6 +315,74 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
         }));
       }
     },
+    async respondToProposal(proposalId, action, options) {
+      const { threadId, proposals, proposalActions } = get();
+      if (!threadId || !proposalId) return;
+
+      const target = proposals.find(
+        (proposal) => proposal.proposalId === proposalId,
+      );
+
+      if (!target) return;
+
+      set({
+        proposalActions: {
+          ...proposalActions,
+          [proposalId]: {
+            status: "pending",
+            error: null,
+            message: null,
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      try {
+        const result = await performFeatureProposalAction({
+          threadId,
+          proposalId,
+          featureId: target.featureId,
+          action,
+          rationale: options?.rationale,
+        });
+
+        set((state) => {
+          const nextState = mapFetchResultToState(state, result);
+          return {
+            ...nextState,
+            proposalActions: {
+              ...nextState.proposalActions,
+              [proposalId]: {
+                status: "idle",
+                error: null,
+                message: result.message,
+                updatedAt: Date.now(),
+              },
+            },
+          };
+        });
+
+        return result.message ?? undefined;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to process proposal action";
+
+        set((state) => ({
+          ...state,
+          proposalActions: {
+            ...state.proposalActions,
+            [proposalId]: {
+              status: "error",
+              error: message,
+              updatedAt: Date.now(),
+            },
+          },
+        }));
+        throw new Error(message);
+      }
+    },
     setFeatureRunStatus(featureId, status, options) {
       if (!featureId) return;
 
@@ -370,6 +463,15 @@ function mapFetchResultToState(
   prevState: FeatureGraphStoreState,
   result: FeatureGraphFetchResult,
 ) {
+  const proposalState = mapFeatureProposalState(
+    { proposals: result.proposals, activeProposalId: result.activeProposalId },
+  );
+
+  const proposalActions = pruneProposalActions(
+    prevState.proposalActions,
+    proposalState.proposals,
+  );
+
   if (!result.graph) {
     return {
       ...prevState,
@@ -379,6 +481,9 @@ function mapFetchResultToState(
       testsByFeatureId: {},
       artifactsByFeatureId: {},
       activeFeatureIds: result.activeFeatureIds,
+      proposals: proposalState.proposals,
+      activeProposalId: proposalState.activeProposalId,
+      proposalActions,
       selectedFeatureId: result.activeFeatureIds[0] ?? null,
       isLoading: false,
       isGeneratingGraph: false,
@@ -423,11 +528,25 @@ function mapFetchResultToState(
     testsByFeatureId,
     artifactsByFeatureId,
     activeFeatureIds: result.activeFeatureIds,
+    proposals: proposalState.proposals,
+    activeProposalId: proposalState.activeProposalId,
+    proposalActions,
     selectedFeatureId,
     isLoading: false,
     isGeneratingGraph: false,
     error: null,
   } satisfies Partial<FeatureGraphStoreState>;
+}
+
+function pruneProposalActions(
+  current: Record<string, ProposalActionState>,
+  proposals: FeatureProposal[],
+): Record<string, ProposalActionState> {
+  const activeIds = new Set(proposals.map((proposal) => proposal.proposalId));
+
+  return Object.fromEntries(
+    Object.entries(current).filter(([proposalId]) => activeIds.has(proposalId)),
+  );
 }
 
 function resolveSelectedFeatureId(

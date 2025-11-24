@@ -4,15 +4,22 @@ import { type ReactNode, useCallback, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  Clock3,
   ExternalLink,
   FileText,
+  Info,
   Layers,
   ListChecks,
   Loader2,
   Network,
+  ThumbsDown,
+  ThumbsUp,
+  XCircle,
 } from "lucide-react";
 
 import { useShallow } from "zustand/react/shallow";
+
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { calculateLastActivity } from "@/lib/thread-utils";
 import { cn } from "@/lib/utils";
 import {
   FeatureResource,
@@ -40,9 +48,18 @@ import {
   useFeatureGraphStore,
 } from "@/stores/feature-graph-store";
 import type { FeatureNode } from "@openswe/shared/feature-graph/types";
+import type { FeatureProposal } from "@openswe/shared/open-swe/manager/types";
+import type { FeatureProposalAction } from "@/services/feature-graph.service";
 
 const EMPTY_STATE_MESSAGE =
   "Feature insights will appear once the session resolves relevant features.";
+
+type ProposalActionSnapshot = {
+  status: "idle" | "pending" | "error";
+  error?: string | null;
+  message?: string | null;
+  updatedAt: number;
+};
 
 export function FeatureInsightsPanel({
   onStartPlanner,
@@ -54,6 +71,9 @@ export function FeatureInsightsPanel({
     features,
     featuresById,
     activeFeatureIds,
+    proposals,
+    activeProposalId,
+    proposalActions,
     selectedFeatureId,
     testsByFeatureId,
     artifactsByFeatureId,
@@ -66,12 +86,16 @@ export function FeatureInsightsPanel({
     requestGraphGeneration,
     startFeatureDevelopment,
     selectFeature,
+    respondToProposal,
   } = useFeatureGraphStore(
     useShallow((state) => ({
       graph: state.graph,
       features: state.features,
       featuresById: state.featuresById,
       activeFeatureIds: state.activeFeatureIds,
+      proposals: state.proposals,
+      activeProposalId: state.activeProposalId,
+      proposalActions: state.proposalActions,
       selectedFeatureId: state.selectedFeatureId,
       testsByFeatureId: state.testsByFeatureId,
       artifactsByFeatureId: state.artifactsByFeatureId,
@@ -84,6 +108,7 @@ export function FeatureInsightsPanel({
       requestGraphGeneration: state.requestGraphGeneration,
       startFeatureDevelopment: state.startFeatureDevelopment,
       selectFeature: state.selectFeature,
+      respondToProposal: state.respondToProposal,
     })),
   );
 
@@ -108,6 +133,21 @@ export function FeatureInsightsPanel({
     selectedFeatureId && featureRuns[selectedFeatureId]
       ? featureRuns[selectedFeatureId]
       : undefined;
+
+  const sortedProposals = useMemo(
+    () =>
+      [...proposals].sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [proposals],
+  );
+
+  const pendingProposals = useMemo(
+    () =>
+      sortedProposals.filter((proposal) => proposal.status === "proposed"),
+    [sortedProposals],
+  );
 
   const upstreamDependencies = useMemo(() => {
     if (!graph || !selectedFeature) return [];
@@ -142,6 +182,29 @@ export function FeatureInsightsPanel({
     }
   };
 
+  const handleProposalAction = useCallback(
+    (proposalId: string, action: FeatureProposalAction) => {
+      void respondToProposal(proposalId, action)
+        .then((message) => {
+          const fallback =
+            action === "approve"
+              ? "Proposal approved"
+              : action === "reject"
+                ? "Proposal rejected"
+                : "Requested more information";
+          toast.success(message ?? fallback);
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Failed to update proposal";
+          toast.error(message);
+        });
+    },
+    [respondToProposal],
+  );
+
   const handleStartDevelopment = useCallback(() => {
     if (!selectedFeature) return;
 
@@ -152,7 +215,8 @@ export function FeatureInsightsPanel({
   const hasData =
     features.length > 0 ||
     activeFeatures.length > 0 ||
-    activeFeatureIds.length > 0;
+    activeFeatureIds.length > 0 ||
+    proposals.length > 0;
 
   if (!hasData && !isLoading && !error) {
     return null;
@@ -180,6 +244,16 @@ export function FeatureInsightsPanel({
           onGenerate={handleGenerate}
           isGeneratingGraph={isGeneratingGraph}
         />
+
+        {sortedProposals.length > 0 && (
+          <ProposalSection
+            proposals={sortedProposals}
+            pendingCount={pendingProposals.length}
+            activeProposalId={activeProposalId}
+            proposalActions={proposalActions}
+            onAction={handleProposalAction}
+          />
+        )}
 
         {isLoading && !selectedFeature && <LoadingState />}
 
@@ -260,6 +334,207 @@ export function FeatureInsightsPanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ProposalSection({
+  proposals,
+  pendingCount,
+  activeProposalId,
+  proposalActions,
+  onAction,
+}: {
+  proposals: FeatureProposal[];
+  pendingCount: number;
+  activeProposalId: string | null;
+  proposalActions: Record<string, ProposalActionSnapshot>;
+  onAction: (proposalId: string, action: FeatureProposalAction) => void;
+}) {
+  if (proposals.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border-border/70 bg-muted/30 rounded-md border p-3">
+      <div className="text-muted-foreground flex items-center justify-between text-xs font-semibold uppercase tracking-wide">
+        <div className="flex items-center gap-2">
+          <Info className="size-4" />
+          <span>Feature proposals</span>
+        </div>
+        <span>
+          {pendingCount > 0
+            ? `${pendingCount} pending`
+            : `${proposals.length} total`}
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2">
+        {proposals.map((proposal) => (
+          <ProposalItem
+            key={proposal.proposalId}
+            proposal={proposal}
+            isActive={proposal.proposalId === activeProposalId}
+            actionState={proposalActions[proposal.proposalId]}
+            onAction={onAction}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProposalItem({
+  proposal,
+  isActive,
+  actionState,
+  onAction,
+}: {
+  proposal: FeatureProposal;
+  isActive: boolean;
+  actionState: ProposalActionSnapshot | undefined;
+  onAction: (proposalId: string, action: FeatureProposalAction) => void;
+}) {
+  const isActionPending = actionState?.status === "pending";
+  const hasError = actionState?.status === "error" && actionState.error;
+  const showMessage = actionState?.status === "idle" && actionState.message;
+  const actionsDisabled = isActionPending || proposal.status !== "proposed";
+
+  const renderActionLabel = (
+    label: string,
+    icon: ReactNode,
+    isLoading?: boolean,
+  ) =>
+    isLoading ? (
+      <span className="flex items-center gap-2">
+        <Loader2 className="size-4 animate-spin" />
+        {label}
+      </span>
+    ) : (
+      <span className="flex items-center gap-2">
+        {icon}
+        {label}
+      </span>
+    );
+
+  return (
+    <div className="border-border/60 bg-background/80 rounded-md border p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm leading-tight font-semibold">
+              {proposal.summary}
+            </span>
+            <ProposalStatusBadge
+              status={proposal.status}
+              isActive={isActive}
+            />
+          </div>
+          <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-mono text-[11px]">{proposal.featureId}</span>
+            <span>• Updated {calculateLastActivity(proposal.updatedAt)}</span>
+            {proposal.rationale && (
+              <span className="line-clamp-2">{proposal.rationale}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={actionsDisabled}
+            onClick={() => onAction(proposal.proposalId, "info")}
+          >
+            {renderActionLabel(
+              "More info",
+              <Info className="size-4" />,
+              isActionPending,
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={actionsDisabled}
+            onClick={() => onAction(proposal.proposalId, "reject")}
+          >
+            {renderActionLabel(
+              "Reject",
+              <ThumbsDown className="size-4" />,
+              isActionPending,
+            )}
+          </Button>
+          <Button
+            size="sm"
+            disabled={actionsDisabled}
+            onClick={() => onAction(proposal.proposalId, "approve")}
+          >
+            {renderActionLabel(
+              "Approve",
+              <ThumbsUp className="size-4" />,
+              isActionPending,
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {hasError && (
+        <div className="text-destructive mt-2 text-xs">{actionState?.error}</div>
+      )}
+
+      {showMessage && (
+        <div className="text-muted-foreground mt-2 text-xs">
+          {actionState?.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProposalStatusBadge({
+  status,
+  isActive,
+}: {
+  status: FeatureProposal["status"];
+  isActive: boolean;
+}) {
+  const tone = (() => {
+    switch (status) {
+      case "approved":
+        return {
+          icon: <CheckCircle2 className="size-3" />,
+          className: "bg-emerald-100 text-emerald-800",
+          label: "Approved",
+        };
+      case "rejected":
+        return {
+          icon: <XCircle className="size-3" />,
+          className: "bg-red-100 text-red-800",
+          label: "Rejected",
+        };
+      default:
+        return {
+          icon: <Clock3 className="size-3" />,
+          className: "bg-amber-100 text-amber-800",
+          label: "Pending",
+        };
+    }
+  })();
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+        tone.className,
+        isActive ? "ring-2 ring-offset-1 ring-primary/40" : "",
+      )}
+    >
+      {tone.icon}
+      <span>{tone.label}</span>
+      {isActive && (
+        <span className="text-muted-foreground/80 text-[10px] font-medium">
+          Active
+        </span>
+      )}
+    </span>
   );
 }
 

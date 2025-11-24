@@ -5,6 +5,8 @@ import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { createClient } from "@/providers/client";
 import {
   FeatureGraphFetchResult,
+  mapFeatureGraphPayload,
+  mapFeatureProposalState,
   normalizeFeatureIds,
 } from "@/lib/feature-graph-payload";
 import { coerceFeatureGraph } from "@/lib/coerce-feature-graph";
@@ -29,10 +31,15 @@ export async function fetchFeatureGraph(
   const activeFeatureIds = normalizeFeatureIds(
     thread?.values?.activeFeatureIds,
   );
+  const { proposals, activeProposalId } = mapFeatureProposalState(
+    thread?.values?.featureProposals,
+  );
 
   return {
     graph,
     activeFeatureIds,
+    proposals,
+    activeProposalId,
   };
 }
 
@@ -95,6 +102,57 @@ export async function startFeatureDevelopmentRun(
   }
 
   return { plannerThreadId, runId } satisfies FeatureDevelopmentResponse;
+}
+
+export type FeatureProposalAction = "approve" | "reject" | "info";
+
+export interface FeatureProposalActionResponse extends FeatureGraphFetchResult {
+  message: string | null;
+}
+
+export async function performFeatureProposalAction({
+  threadId,
+  proposalId,
+  featureId,
+  action,
+  rationale,
+}: {
+  threadId: string;
+  proposalId: string;
+  featureId: string;
+  action: FeatureProposalAction;
+  rationale?: string;
+}): Promise<FeatureProposalActionResponse> {
+  const response = await fetch("/api/feature-graph/proposal", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      thread_id: threadId,
+      proposal_id: proposalId,
+      feature_id: featureId,
+      action,
+      rationale,
+    }),
+  });
+
+  const payload: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const message =
+      (payload && typeof (payload as { error?: unknown }).error === "string"
+        ? (payload as { error: string }).error
+        : null) ?? "Failed to process proposal action";
+    throw new Error(message);
+  }
+
+  const result = mapFeatureGraphPayload(payload);
+
+  return {
+    ...result,
+    message: result.message ?? "Proposal updated",
+  } satisfies FeatureProposalActionResponse;
 }
 
 function getApiUrl(): string {
