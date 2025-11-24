@@ -6,6 +6,12 @@ import {
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
 } from "@openswe/shared/constants";
+import {
+  clarifyFeatureDescription,
+  reconcileFeatureGraph,
+  type FeatureGraph,
+  type FeatureNode,
+} from "@openswe/shared/feature-graph";
 import type {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -28,6 +34,19 @@ function resolveThreadId(value: unknown): string | null {
     return value;
   }
   return null;
+}
+
+function getFeatureDependencies(graph: FeatureGraph, featureId: string): FeatureNode[] {
+  const seen = new Set<string>([featureId]);
+  const dependencies: FeatureNode[] = [];
+
+  for (const neighbor of graph.getNeighbors(featureId, "both")) {
+    if (seen.has(neighbor.id)) continue;
+    seen.add(neighbor.id);
+    dependencies.push(neighbor);
+  }
+
+  return dependencies;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -76,11 +95,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const managerState = managerThreadState.values;
     const featureGraph = coerceFeatureGraph(managerState.featureGraph);
+    if (!featureGraph) {
+      return NextResponse.json(
+        { error: "Feature graph not available for thread" },
+        { status: 404 },
+      );
+    }
+
+    const { graph: reconciledGraph, dependencyMap } =
+      reconcileFeatureGraph(featureGraph);
+
     const existingPlannerSession = managerState.plannerSession;
     const plannerThreadId =
       existingPlannerSession?.threadId ?? randomUUID();
 
-    const selectedFeature = featureGraph?.getFeature(featureId);
+    const selectedFeature = reconciledGraph.getFeature(featureId);
 
     if (!selectedFeature) {
       return NextResponse.json(
@@ -89,9 +118,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const featureDependencies = featureGraph
-      ?.getNeighbors(featureId, "both")
-      .filter((neighbor) => neighbor.id !== selectedFeature.id);
+    const featureDependencies = getFeatureDependencies(
+      reconciledGraph,
+      featureId,
+    );
 
     const plannerRunInput: PlannerGraphUpdate = {
       issueId: managerState.issueId,
@@ -103,6 +133,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       activeFeatureIds: [featureId],
       features: [selectedFeature, ...(featureDependencies ?? [])],
       featureDependencies: featureDependencies ?? [],
+      featureDependencyMap: dependencyMap,
+      featureDescription: clarifyFeatureDescription(selectedFeature),
       programmerSession: managerState.programmerSession,
       messages: managerState.messages,
     };
@@ -114,6 +146,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           runId: existingPlannerSession.runId,
         },
         activeFeatureIds: [featureId],
+        featureGraph: reconciledGraph,
       };
 
       await client.threads.updateState<ManagerGraphState>(threadId, {
@@ -159,6 +192,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         runId: run.run_id,
       },
       activeFeatureIds: [featureId],
+      featureGraph: reconciledGraph,
     };
 
     await client.threads.updateState<ManagerGraphState>(threadId, {
