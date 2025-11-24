@@ -183,7 +183,7 @@ const buildPlannerClient = (): Client =>
         : undefined,
   });
 
-type FeaturePlannerValues = {
+export type FeaturePlannerValues = {
   messages?: unknown;
   featureGraph?: unknown;
   activeFeatureIds?: unknown;
@@ -206,7 +206,7 @@ export async function featureGraphOrchestrator(
 
   let plannerValues: FeaturePlannerValues | null = null;
   try {
-    plannerValues = await plannerClient.runs.wait<FeaturePlannerValues>(
+    const plannerResult = await plannerClient.runs.wait(
       null,
       FEATURE_PLANNER_AGENT_ID,
       {
@@ -226,6 +226,8 @@ export async function featureGraphOrchestrator(
         ifNotExists: "create",
       },
     );
+
+    plannerValues = plannerResult as FeaturePlannerValues;
   } catch (error) {
     logger.error("Feature planner agent failed", {
       error: error instanceof Error ? error.message : String(error),

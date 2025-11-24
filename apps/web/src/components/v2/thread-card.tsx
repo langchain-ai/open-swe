@@ -18,6 +18,7 @@ import { TaskPlan } from "@openswe/shared/open-swe/types";
 import { getActivePlanItems } from "@openswe/shared/open-swe/tasks";
 import { InlineMarkdownText } from "../thread/markdown-text";
 import { computeThreadTitle } from "@/lib/thread";
+import { ThreadFlowStage } from "@openswe/shared/open-swe/manager/flow-metadata";
 
 interface ThreadCardProps {
   thread: ThreadMetadata;
@@ -108,6 +109,23 @@ export function ThreadCard({
     }
   };
 
+  const getStageBadgeClass = (status: ThreadFlowStage["status"]) => {
+    switch (status) {
+      case "completed":
+        return "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300";
+      case "running":
+        return "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300";
+      case "ready":
+        return "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300";
+      case "blocked":
+        return "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300";
+      case "error":
+        return "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300";
+      default:
+        return "bg-gray-100 text-gray-700 dark:bg-muted dark:text-muted-foreground";
+    }
+  };
+
   return (
     <Card
       key={thread.id}
@@ -167,6 +185,27 @@ export function ThreadCard({
             </span>
           </div>
         </div>
+        {thread.flowStages?.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {thread.flowStages.map((stage) => (
+              <div
+                key={stage.id}
+                className={cn(
+                  "border-border flex items-center gap-2 rounded-full border px-2 py-1",
+                  getStageBadgeClass(stage.status),
+                )}
+              >
+                <div className="size-2 rounded-full bg-current" />
+                <span className="text-foreground text-xs font-medium">
+                  {stage.label}
+                </span>
+                <span className="text-muted-foreground text-[10px] capitalize">
+                  {stage.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

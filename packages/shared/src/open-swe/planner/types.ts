@@ -72,18 +72,19 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
   ),
   featureDependencyMap: withLangGraph<
     Record<string, string[]>,
-    Record<string, string[]> | undefined,
-    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>
+    Record<string, string[]>,
+    z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>
   >(
-    z.record(z.string(), z.array(z.string())).optional(),
+    z.record(z.string(), z.array(z.string())),
     {
       reducer: {
-        schema: z.record(z.string(), z.array(z.string())).optional(),
+        schema: z.record(z.string(), z.array(z.string())),
         fn: (
-          _state: Record<string, string[]>,
+          state: Record<string, string[]>,
           update: Record<string, string[]> | undefined,
-        ): Record<string, string[]> | undefined => update,
+        ): Record<string, string[]> => update ?? state,
       },
+      default: (): Record<string, string[]> => ({}),
     },
   ),
   featureDescription: withLangGraph(z.string().optional(), {

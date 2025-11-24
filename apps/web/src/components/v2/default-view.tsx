@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Archive, List, ListChecks } from "lucide-react";
+import { Archive, List, ListChecks, Workflow } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { TerminalInput } from "./terminal-input";
 import { RepositorySelect } from "./repository-select";
@@ -76,6 +76,23 @@ function OpenDocumentationButton() {
   );
 }
 
+const THREE_STAGE_FLOW = [
+  {
+    label: "Feature Graph",
+    description:
+      "Clarify the ask, capture requirements, and reconcile dependencies with the openswe-feature-planner agent.",
+  },
+  {
+    label: "Planner",
+    description: "Generate the task graph and plan with the legacy Planner after feature context is ready.",
+  },
+  {
+    label: "Programmer",
+    description:
+      "Execute the plan using the legacy Programmer once the feature graph hands off the right context.",
+  },
+];
+
 interface DefaultViewProps {
   threads: Thread<ManagerGraphState>[];
   threadsLoading: boolean;
@@ -102,15 +119,23 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
     config?.customFramework != null ? !!config.customFramework : false,
   );
 
-  const threadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
-  const displayThreads = threadsMetadata.slice(0, 4);
-  const displayThreadIds = displayThreads.map((thread) => thread.id);
+  const baseThreadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
+  const baseDisplayThreadIds = baseThreadsMetadata
+    .slice(0, 4)
+    .map((thread) => thread.id);
 
   const {
     statusMap,
     taskPlanMap,
     isLoading: statusLoading,
-  } = useThreadsStatus(displayThreadIds, threads);
+  } = useThreadsStatus(baseDisplayThreadIds, threads);
+
+  const threadsMetadata = useMemo(
+    () => threadsToMetadata(threads, { statusMap }),
+    [statusMap, threads],
+  );
+  const displayThreads = threadsMetadata.slice(0, 4);
+  const displayThreadIds = displayThreads.map((thread) => thread.id);
 
   const handleLoadDraft = (content: string) => {
     setDraftToLoad(content);
@@ -148,6 +173,38 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl space-y-6 p-4">
           <ApiKeyBanner />
+          <Card className="border-border bg-card">
+            <CardContent className="flex flex-col gap-3 p-4">
+              <div className="flex items-center gap-2">
+                <div className="bg-primary/10 text-primary flex size-8 items-center justify-center rounded-md">
+                  <Workflow className="size-4" />
+                </div>
+                <div>
+                  <p className="text-foreground text-sm font-semibold">
+                    Feature Graph → Planner → Programmer
+                  </p>
+                  <p className="text-muted-foreground text-xs">
+                    Start a repository task and track the three-stage flow from the homepage.
+                  </p>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {THREE_STAGE_FLOW.map((stage) => (
+                  <div
+                    key={stage.label}
+                    className="border-border bg-muted/40 rounded-md border p-3"
+                  >
+                    <p className="text-foreground text-xs font-semibold">
+                      {stage.label}
+                    </p>
+                    <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
+                      {stage.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
           {/* Terminal Chat Input */}
           <Card
             className={cn(

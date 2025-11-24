@@ -60,6 +60,7 @@ const basePlannerState: PlannerGraphState = {
   messages: [],
   features: [],
   featureDependencies: [],
+  featureDependencyMap: {},
   activeFeatureIds: [],
   issueId: undefined,
   codebaseTree: "",

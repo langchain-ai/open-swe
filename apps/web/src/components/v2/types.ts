@@ -1,5 +1,6 @@
 import { ThreadUIStatus } from "@/lib/schemas/thread-status";
 import { TaskPlan } from "@openswe/shared/open-swe/types";
+import { ThreadFlowStage } from "@openswe/shared/open-swe/manager/flow-metadata";
 
 export interface ErrorState {
   message: string;
@@ -15,6 +16,7 @@ export interface ThreadMetadata {
   branch: string;
   taskPlan?: TaskPlan;
   status: ThreadUIStatus;
+  flowStages?: ThreadFlowStage[];
   pullRequest?: {
     number: number;
     url: string;

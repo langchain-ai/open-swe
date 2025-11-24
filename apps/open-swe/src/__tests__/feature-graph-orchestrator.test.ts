@@ -4,9 +4,15 @@ import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { FeatureGraph } from "@openswe/shared/feature-graph";
 import { featureGraphFileSchema } from "@openswe/shared/feature-graph/types";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
-import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import type {
+  ManagerGraphState,
+  ManagerGraphUpdate,
+} from "@openswe/shared/open-swe/manager/types";
+import type { FeaturePlannerValues } from "../graphs/manager/nodes/feature-graph-orchestrator.js";
 
-const runsWaitMock = jest.fn();
+const runsWaitMock: jest.MockedFunction<
+  (...args: unknown[]) => Promise<FeaturePlannerValues>
+> = jest.fn();
 let featureGraphOrchestrator: typeof import(
   "../graphs/manager/nodes/feature-graph-orchestrator.js"
 )["featureGraphOrchestrator"];
@@ -94,10 +100,10 @@ describe("featureGraphOrchestrator", () => {
       featureGraph: plannerGraph,
       messages: [{ type: "ai", content: "Captured feature update" }],
       activeFeatureIds: ["feature-auth"],
-    });
+    } as FeaturePlannerValues);
 
     const command = await featureGraphOrchestrator(createState(), config);
-    const update = command.update;
+    const update = command.update as ManagerGraphUpdate;
 
     expect(update?.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "active",
