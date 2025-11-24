@@ -96,16 +96,17 @@ interface FeatureGraphStoreState {
 }
 
 const INITIAL_STATE: Omit<
-  FeatureGraphStoreState,
-  | "fetchGraphForThread"
-  | "generateGraph"
-  | "requestGraphGeneration"
-  | "startFeatureDevelopment"
-  | "setFeatureRunStatus"
-  | "selectFeature"
-  | "setActiveFeatureIds"
-  | "clear"
-> = {
+    FeatureGraphStoreState,
+    | "fetchGraphForThread"
+    | "generateGraph"
+    | "requestGraphGeneration"
+    | "startFeatureDevelopment"
+    | "respondToProposal"
+    | "setFeatureRunStatus"
+    | "selectFeature"
+    | "setActiveFeatureIds"
+    | "clear"
+  > = {
   threadId: null,
   graph: null,
   features: [],

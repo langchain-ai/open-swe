@@ -309,7 +309,7 @@ export function registerFeatureGraphRoute(app: Hono) {
     const featureId = resolveFeatureId(body);
     const proposalId = resolveProposalId(body);
     const action = resolveProposalAction(body);
-    const rationale = resolveRationale(body);
+    const rationale = resolveRationale(body) ?? undefined;
 
     if (!threadId) {
       return ctx.json(

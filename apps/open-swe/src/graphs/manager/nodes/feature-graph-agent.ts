@@ -196,6 +196,8 @@ export async function featureGraphAgent(
   const userFacingSummaries: string[] = [];
 
   for (const toolCall of aiMessage.tool_calls ?? []) {
+    const toolCallId = toolCall.id ?? randomUUID();
+
     try {
       switch (toolCall.name) {
         case "propose_feature_change": {
@@ -236,9 +238,7 @@ export async function featureGraphAgent(
           const response =
             args.response ||
             `Proposed update for ${args.featureId}. Awaiting your approval.`;
-          toolMessages.push(
-            recordAction(toolCall.name, toolCall.id, response),
-          );
+          toolMessages.push(recordAction(toolCall.name, toolCallId, response));
           userFacingSummaries.push(response);
           break;
         }
@@ -286,7 +286,7 @@ export async function featureGraphAgent(
           const response = args.response ||
             `Marked ${args.featureId} as approved and ready for planning.`;
           toolMessages.push(
-            recordAction(toolCall.name, toolCall.id, response),
+            recordAction(toolCall.name, toolCallId, response),
           );
           userFacingSummaries.push(response);
           break;
@@ -334,16 +334,14 @@ export async function featureGraphAgent(
           const response =
             args.response ||
             `Logged rejection for ${args.featureId} so we do not plan against it.`;
-          toolMessages.push(
-            recordAction(toolCall.name, toolCall.id, response),
-          );
+          toolMessages.push(recordAction(toolCall.name, toolCallId, response));
           userFacingSummaries.push(response);
           break;
         }
         case "reply_without_change": {
           const args = toolCall.args as z.infer<typeof replySchema>;
           toolMessages.push(
-            recordAction(toolCall.name, toolCall.id, args.response),
+            recordAction(toolCall.name, toolCallId, args.response),
           );
           userFacingSummaries.push(args.response);
           break;
@@ -352,7 +350,7 @@ export async function featureGraphAgent(
           toolMessages.push(
             recordAction(
               toolCall.name,
-              toolCall.id,
+              toolCallId,
               `Unsupported action ${toolCall.name}.`,
             ),
           );
@@ -377,7 +375,7 @@ export async function featureGraphAgent(
       toolMessages.push(
         recordAction(
           toolCall.name,
-          toolCall.id,
+          toolCallId,
           `Could not process ${toolCall.name}: ${errorMessage}`,
         ),
       );

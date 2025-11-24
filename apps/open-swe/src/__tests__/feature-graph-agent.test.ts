@@ -9,18 +9,21 @@ import type {
 } from "@openswe/shared/open-swe/manager/types";
 import * as featureGraphMutations from "../graphs/manager/utils/feature-graph-mutations.js";
 
-const loadModelMock = jest.fn();
-const supportsParallelToolCallsParamMock = jest.fn();
+const loadModelMock: jest.MockedFunction<
+  () => Promise<{ bindTools: jest.Mock }>
+> = jest.fn();
+const supportsParallelToolCallsParamMock: jest.MockedFunction<() => boolean> =
+  jest.fn();
 jest.mock("../graphs/manager/utils/feature-graph-mutations.js", () => {
-  const actual = jest.requireActual(
-    "../graphs/manager/utils/feature-graph-mutations.js",
-  );
+  const actual = jest.requireActual<
+    typeof import("../graphs/manager/utils/feature-graph-mutations.js")
+  >("../graphs/manager/utils/feature-graph-mutations.js");
+
   return { ...actual, persistFeatureGraph: jest.fn() };
 });
-const persistFeatureGraphMock =
-  featureGraphMutations.persistFeatureGraph as jest.MockedFunction<
-    typeof featureGraphMutations.persistFeatureGraph
-  >;
+const persistFeatureGraphMock = jest.mocked(
+  featureGraphMutations.persistFeatureGraph,
+);
 let featureGraphAgent: typeof import("../graphs/manager/nodes/feature-graph-agent.js")[
   "featureGraphAgent"
 ];
@@ -51,9 +54,7 @@ const createState = (
   proposals: FeatureProposalState = { proposals: [] },
 ): ManagerGraphState =>
   ({
-    messages: [
-      new HumanMessage({ content: "Please manage the feature graph." }),
-    ],
+    messages: [new HumanMessage({ content: "Please manage the feature graph." })],
     targetRepository: { owner: "acme", repo: "repo" },
     taskPlan: { tasks: [], activeTaskIndex: 0 },
     branchName: "branch",
@@ -64,7 +65,7 @@ const createState = (
   } as unknown as ManagerGraphState);
 
 const mockModelResponse = (aiMessage: AIMessage) => {
-  const invoke = jest.fn().mockResolvedValue(aiMessage);
+  const invoke = jest.fn(async () => aiMessage);
   const bindTools = jest.fn().mockReturnValue({ invoke });
   loadModelMock.mockResolvedValue({ bindTools });
   supportsParallelToolCallsParamMock.mockReturnValue(false);
@@ -117,6 +118,8 @@ describe("featureGraphAgent", () => {
     expect(proposal?.featureId).toBe("feature-auth");
     expect(proposal?.status).toBe("proposed");
     expect(proposals?.activeProposalId).toBe(proposal?.proposalId);
+
+    expect(persistFeatureGraphMock).toHaveBeenCalled();
 
     const updatedGraph = update.featureGraph;
     expect(updatedGraph?.getFeature("feature-auth")?.status).toBe(
@@ -175,6 +178,8 @@ describe("featureGraphAgent", () => {
     expect(update.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "active",
     );
+
+    expect(persistFeatureGraphMock).toHaveBeenCalled();
   });
 
   it("records rejections while keeping proposals accessible", async () => {
@@ -223,5 +228,7 @@ describe("featureGraphAgent", () => {
     expect(update.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "rejected",
     );
+
+    expect(persistFeatureGraphMock).toHaveBeenCalled();
   });
 });
