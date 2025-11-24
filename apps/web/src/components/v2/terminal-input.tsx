@@ -30,6 +30,7 @@ import { useUser, DEFAULT_USER } from "@/hooks/useUser";
 import { isAllowedUser } from "@/lib/is-allowed-user";
 import { useLocalRepositories } from "@/hooks/useLocalRepositories";
 import { useFeatureGraphStore } from "@/stores/feature-graph-store";
+import { createThreadFlowMetadata } from "@openswe/shared/open-swe/manager/flow-metadata";
 
 interface TerminalInputProps {
   placeholder?: string;
@@ -184,6 +185,9 @@ export function TerminalInput({
           MANAGER_GRAPH_ID,
           {
             input: runInput,
+            metadata: {
+              flow: createThreadFlowMetadata("homepage"),
+            },
             config: {
               recursion_limit: 400,
               configurable: {
