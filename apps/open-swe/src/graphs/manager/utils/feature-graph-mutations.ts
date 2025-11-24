@@ -1,7 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { FeatureGraph } from "@openswe/shared/feature-graph";
-import { FeatureGraphFile, FeatureNode, featureGraphFileSchema } from "@openswe/shared/feature-graph/types";
+import {
+  FeatureDependencyMap,
+  FeatureGraph,
+  reconcileFeatureGraph,
+} from "@openswe/shared/feature-graph";
+import {
+  FeatureGraphFile,
+  FeatureNode,
+  featureGraphFileSchema,
+} from "@openswe/shared/feature-graph/types";
 import { writeFeatureGraphFile } from "@openswe/shared/feature-graph/writer";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { FEATURE_GRAPH_RELATIVE_PATH } from "./feature-graph-path.js";
@@ -85,6 +93,12 @@ export const featureGraphToFile = (graph: FeatureGraph): FeatureGraphFile => {
     edges: serialized.edges,
     ...(serialized.artifacts ? { artifacts: serialized.artifacts } : {}),
   };
+};
+
+export const reconcileFeatureGraphDependencies = (
+  graph: FeatureGraph,
+): { graph: FeatureGraph; dependencyMap: FeatureDependencyMap } => {
+  return reconcileFeatureGraph(graph);
 };
 
 export const persistFeatureGraph = async (

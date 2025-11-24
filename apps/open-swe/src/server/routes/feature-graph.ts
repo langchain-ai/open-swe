@@ -2,7 +2,10 @@ import { randomUUID } from "crypto";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { StreamMode } from "@langchain/langgraph-sdk";
-import { FeatureGraph } from "@openswe/shared/feature-graph/graph";
+import {
+  clarifyFeatureDescription,
+  FeatureGraph,
+} from "@openswe/shared/feature-graph";
 import type {
   ArtifactCollection,
   ArtifactRef,
@@ -29,6 +32,7 @@ import { generateFeatureGraphForWorkspace } from "../../graphs/manager/utils/gen
 import {
   applyFeatureStatus,
   persistFeatureGraph,
+  reconcileFeatureGraphDependencies,
 } from "../../graphs/manager/utils/feature-graph-mutations.js";
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 
@@ -176,7 +180,10 @@ export function registerFeatureGraphRoute(app: Hono) {
       );
     }
 
-    const selectedFeature = featureGraph.getFeature(featureId);
+    const { graph: reconciledGraph, dependencyMap } =
+      reconcileFeatureGraphDependencies(featureGraph);
+
+    const selectedFeature = reconciledGraph.getFeature(featureId);
     if (!selectedFeature) {
       return ctx.json(
         { error: "Feature not found in manager state" },
@@ -184,9 +191,10 @@ export function registerFeatureGraphRoute(app: Hono) {
       );
     }
 
-    const featureDependencies = featureGraph
-      .getNeighbors(featureId, "both")
-      .filter((neighbor) => neighbor.id !== selectedFeature.id);
+    const featureDependencies = getFeatureDependencies(
+      reconciledGraph,
+      featureId,
+    );
 
     const existingPlannerSession = managerThreadState.values.plannerSession;
     const plannerThreadId =
@@ -197,6 +205,8 @@ export function registerFeatureGraphRoute(app: Hono) {
       featureId,
       selectedFeature,
       featureDependencies,
+      dependencyMap,
+      featureDescription: clarifyFeatureDescription(selectedFeature),
     });
 
     if (existingPlannerSession?.threadId && existingPlannerSession?.runId) {
@@ -206,6 +216,7 @@ export function registerFeatureGraphRoute(app: Hono) {
           runId: existingPlannerSession.runId,
         },
         activeFeatureIds: [featureId],
+        featureGraph: reconciledGraph,
       };
 
       await client.threads
@@ -275,6 +286,7 @@ export function registerFeatureGraphRoute(app: Hono) {
         runId: run.run_id,
       },
       activeFeatureIds: [featureId],
+      featureGraph: reconciledGraph,
     };
 
     await client.threads
@@ -615,16 +627,36 @@ function normalizeFeatureIds(value: string[] | undefined): string[] {
   return normalized;
 }
 
+function getFeatureDependencies(
+  graph: FeatureGraph,
+  featureId: string,
+): FeatureNode[] {
+  const seen = new Set<string>([featureId]);
+  const dependencies: FeatureNode[] = [];
+
+  for (const neighbor of graph.getNeighbors(featureId, "both")) {
+    if (seen.has(neighbor.id)) continue;
+    seen.add(neighbor.id);
+    dependencies.push(neighbor);
+  }
+
+  return dependencies;
+}
+
 function buildPlannerRunInput({
   managerState,
   featureId,
   selectedFeature,
   featureDependencies,
+  dependencyMap,
+  featureDescription,
 }: {
   managerState: ManagerGraphState;
   featureId: string;
   selectedFeature: FeatureNode;
   featureDependencies: FeatureNode[];
+  dependencyMap: Record<string, string[]>;
+  featureDescription: string;
 }): PlannerGraphUpdate {
   return {
     issueId: managerState.issueId,
@@ -636,6 +668,8 @@ function buildPlannerRunInput({
     activeFeatureIds: [featureId],
     features: [selectedFeature, ...featureDependencies],
     featureDependencies,
+    featureDependencyMap: dependencyMap,
+    featureDescription,
     programmerSession: managerState.programmerSession,
     messages: managerState.messages,
   } satisfies PlannerGraphUpdate;

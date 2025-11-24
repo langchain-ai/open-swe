@@ -314,6 +314,8 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
             },
           },
         }));
+
+        throw new Error(message);
       }
     },
     async respondToProposal(proposalId, action, options) {

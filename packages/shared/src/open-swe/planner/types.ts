@@ -70,6 +70,28 @@ export const PlannerGraphStateObj = MessagesZodState.extend({
       default: (): FeatureNode[] => [],
     },
   ),
+  featureDependencyMap: withLangGraph<
+    Record<string, string[]>,
+    Record<string, string[]> | undefined,
+    z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodArray<z.ZodString>>>
+  >(
+    z.record(z.string(), z.array(z.string())).optional(),
+    {
+      reducer: {
+        schema: z.record(z.string(), z.array(z.string())).optional(),
+        fn: (
+          _state: Record<string, string[]>,
+          update: Record<string, string[]> | undefined,
+        ): Record<string, string[]> | undefined => update,
+      },
+    },
+  ),
+  featureDescription: withLangGraph(z.string().optional(), {
+    reducer: {
+      schema: z.string().optional(),
+      fn: (_state: string, update: string | undefined): string | undefined => update,
+    },
+  }),
   /**
    * Feature identifiers selected by the manager to scope planning.
    */
