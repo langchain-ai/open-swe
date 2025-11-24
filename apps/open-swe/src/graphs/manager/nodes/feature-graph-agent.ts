@@ -211,6 +211,13 @@ export async function featureGraphAgent(
           };
           updatedProposals = upsertProposal(updatedProposals, proposal);
 
+          logger.info("Recorded feature proposal", {
+            action: toolCall.name,
+            featureId: args.featureId,
+            proposalId,
+            status: proposal.status,
+          });
+
           if (updatedGraph) {
             updatedGraph = applyFeatureStatus(
               updatedGraph,
@@ -218,6 +225,12 @@ export async function featureGraphAgent(
               "proposed",
             );
             await persistFeatureGraph(updatedGraph, state.workspacePath);
+
+            logger.info("Updated feature graph status", {
+              featureId: args.featureId,
+              proposalId,
+              status: "proposed",
+            });
           }
 
           const response =
@@ -248,6 +261,13 @@ export async function featureGraphAgent(
           };
           updatedProposals = upsertProposal(updatedProposals, proposal);
 
+          logger.info("Approved feature proposal", {
+            action: toolCall.name,
+            featureId: args.featureId,
+            proposalId: proposal.proposalId,
+            status: proposal.status,
+          });
+
           if (updatedGraph) {
             updatedGraph = applyFeatureStatus(
               updatedGraph,
@@ -255,6 +275,12 @@ export async function featureGraphAgent(
               "active",
             );
             await persistFeatureGraph(updatedGraph, state.workspacePath);
+
+            logger.info("Activated feature in graph", {
+              featureId: args.featureId,
+              proposalId: proposal.proposalId,
+              status: "active",
+            });
           }
 
           const response = args.response ||
@@ -283,6 +309,13 @@ export async function featureGraphAgent(
           };
           updatedProposals = upsertProposal(updatedProposals, proposal);
 
+          logger.info("Rejected feature proposal", {
+            action: toolCall.name,
+            featureId: args.featureId,
+            proposalId: proposal.proposalId,
+            status: proposal.status,
+          });
+
           if (updatedGraph) {
             updatedGraph = applyFeatureStatus(
               updatedGraph,
@@ -290,6 +323,12 @@ export async function featureGraphAgent(
               "rejected",
             );
             await persistFeatureGraph(updatedGraph, state.workspacePath);
+
+            logger.info("Updated rejected feature in graph", {
+              featureId: args.featureId,
+              proposalId: proposal.proposalId,
+              status: "rejected",
+            });
           }
 
           const response =
@@ -322,8 +361,17 @@ export async function featureGraphAgent(
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error ?? "Unknown error");
+      const toolArgs = toolCall.args as Record<string, unknown> | undefined;
       logger.error("Failed to process feature graph action", {
         action: toolCall.name,
+        featureId:
+          toolArgs && typeof toolArgs.featureId === "string"
+            ? toolArgs.featureId
+            : undefined,
+        proposalId:
+          toolArgs && typeof toolArgs.proposalId === "string"
+            ? toolArgs.proposalId
+            : undefined,
         error: errorMessage,
       });
       toolMessages.push(
