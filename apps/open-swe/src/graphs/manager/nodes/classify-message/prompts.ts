@@ -6,7 +6,7 @@ export const RESUME_AND_UPDATE_PLANNER_ROUTING_OPTION = `- resume_and_update_pla
 
 export const CREATE_NEW_ISSUE_ROUTING_OPTION = `- create_new_issue: Call this route if the user's request should create a new issue, and should be executed independently from the current request. This should only be called if the new request does not depend on the current request.\n`;
 
-export const FEATURE_GRAPH_ROUTING_OPTION = `- feature_graph_agent: Call this route when the user is discussing new feature ideas, approvals, or rejections and you need to update the feature graph before any planning begins.\n`;
+export const FEATURE_GRAPH_ROUTING_OPTION = `- feature_graph_orchestrator: Call this route when the user is discussing new feature ideas, approvals, or rejections and you need to synchronize with the feature planner agent before any planning begins.\n`;
 
 // This should only be included if the task plan exists.
 export const TASK_PLAN_PROMPT = `# Task Plan

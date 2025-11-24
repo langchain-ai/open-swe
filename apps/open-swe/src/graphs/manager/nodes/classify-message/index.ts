@@ -65,7 +65,7 @@ export async function classifyMessage(
   if (isChatSession && graphEditIntent) {
     return new Command({
       update: { workspacePath: state.workspacePath },
-      goto: "feature-graph-agent",
+      goto: "feature-graph-orchestrator",
     });
   }
 
@@ -148,7 +148,7 @@ export async function classifyMessage(
       internal_reasoning?: string;
     };
 
-  if (toolCallArgs.route === "feature_graph_agent") {
+  if (toolCallArgs.route === "feature_graph_orchestrator") {
     const commandUpdate: ManagerGraphUpdate = {
       messages: [response],
       workspacePath: state.workspacePath,
@@ -156,7 +156,7 @@ export async function classifyMessage(
 
     return new Command({
       update: commandUpdate,
-      goto: "feature-graph-agent",
+      goto: "feature-graph-orchestrator",
     });
   }
 
