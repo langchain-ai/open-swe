@@ -10,7 +10,6 @@ import {
   isHumanMessage,
   RemoveMessage,
 } from "@langchain/core/messages";
-import { z } from "zod";
 import {
   loadModel,
   supportsParallelToolCallsParam,
@@ -25,7 +24,6 @@ import {
   extractIssueTitleAndContentFromMessage,
   formatContentForIssueBody,
 } from "../../../../utils/issue-messages.js";
-import { BASE_CLASSIFICATION_SCHEMA } from "./schemas.js";
 import { HumanResponse } from "@langchain/langgraph/prebuilt";
 import {
   OPEN_SWE_STREAM_MODE,
@@ -144,9 +142,11 @@ export async function classifyMessage(
   if (!toolCall) {
     throw new Error("No tool call found.");
   }
-  const toolCallArgs = toolCall.args as z.infer<
-    typeof BASE_CLASSIFICATION_SCHEMA
-  >;
+    const toolCallArgs = toolCall.args as {
+      route: string;
+      response?: string;
+      internal_reasoning?: string;
+    };
 
   if (toolCallArgs.route === "feature_graph_agent") {
     const commandUpdate: ManagerGraphUpdate = {

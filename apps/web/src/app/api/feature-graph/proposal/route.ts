@@ -113,12 +113,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       payload = null;
     }
 
-    if (!upstream.ok) {
-      const message =
-        (payload && typeof payload.error === "string"
-          ? payload.error
-          : rawBody || upstream.statusText || "Failed to process proposal") ??
-        "Failed to process proposal";
+      if (!upstream.ok) {
+        const errorPayload = payload as { error?: unknown } | null;
+        const message =
+          (errorPayload && typeof errorPayload.error === "string"
+            ? errorPayload.error
+            : rawBody || upstream.statusText || "Failed to process proposal") ??
+          "Failed to process proposal";
 
       return NextResponse.json(
         {
