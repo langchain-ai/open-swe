@@ -90,6 +90,11 @@ function getModelPricingPlaceholder(model: string): {
       outputPrice: 15.0,
       cachePrice: 0.3,
     },
+    "anthropic:claude-opus-4-5": {
+      inputPrice: 5.0,
+      outputPrice: 25.0,
+      cachePrice: 0.3,
+    },
 
     // Claude 3.7 models
     "anthropic:claude-3-7-sonnet": {
