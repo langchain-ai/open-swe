@@ -323,7 +323,7 @@ export const GraphConfigurationMetadata: {
   plannerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
+      default: "anthropic:claude-opus-4-5",
       description:
         "The model to use for planning tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -342,7 +342,7 @@ export const GraphConfigurationMetadata: {
   programmerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
+      default: "anthropic:claude-opus-4-5",
       description:
         "The model to use for programming/other advanced technical tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -361,7 +361,7 @@ export const GraphConfigurationMetadata: {
   reviewerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
+      default: "anthropic:claude-opus-4-5",
       description:
         "The model to use for reviewer tasks. This model should be very good at generating code, and have strong context understanding and reasoning capabilities. It will be used for the most complex tasks throughout the agent.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -380,7 +380,7 @@ export const GraphConfigurationMetadata: {
   routerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-3-5-haiku-latest",
+      default: "anthropic:claude-haiku-4-5",
       description:
         "The model to use for routing tasks, and other simple generations. This model should be good at tool calling/structured output.",
       options: MODEL_OPTIONS,
@@ -399,7 +399,7 @@ export const GraphConfigurationMetadata: {
   summarizerModelName: {
     x_open_swe_ui_config: {
       type: "select",
-      default: "anthropic:claude-sonnet-4-0",
+      default: "anthropic:claude-opus-4-5",
       description:
         "The model to use for summarizing the conversation history, or extracting key context from large inputs. This model should have strong context retention/understanding capabilities, and should be good at tool calling/structured output.",
       options: MODEL_OPTIONS_NO_THINKING,
@@ -537,7 +537,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-opus-4-5"
    */
   plannerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.plannerModelName,
@@ -552,7 +552,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-opus-4-5"
    */
   programmerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.programmerModelName,
@@ -567,7 +567,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for programming/other advanced technical tasks.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-opus-4-5"
    */
   reviewerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.reviewerModelName,
@@ -582,7 +582,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for routing tasks.
-   * @default "anthropic:claude-3-5-haiku-latest"
+   * @default "anthropic:claude-haiku-4-5"
    */
   routerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.routerModelName,
@@ -597,7 +597,7 @@ export const GraphConfiguration = z.object({
 
   /**
    * The model ID to use for summarizing the conversation history, or extracting key context from large inputs.
-   * @default "anthropic:claude-sonnet-4-0"
+   * @default "anthropic:claude-opus-4-5"
    */
   summarizerModelName: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.summarizerModelName,

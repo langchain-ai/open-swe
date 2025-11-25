@@ -5,7 +5,7 @@ describe("tokenDataReducer", () => {
   it("should merge objects with the same model string", () => {
     const state: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -22,7 +22,7 @@ describe("tokenDataReducer", () => {
 
     const update: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 25,
         cacheReadInputTokens: 15,
         inputTokens: 75,
@@ -44,10 +44,10 @@ describe("tokenDataReducer", () => {
 
     // Find the merged anthropic model
     const mergedAnthropic = result.find(
-      (data) => data.model === "anthropic:claude-sonnet-4-0",
+      (data) => data.model === "anthropic:claude-sonnet-4-5",
     );
     expect(mergedAnthropic).toEqual({
-      model: "anthropic:claude-sonnet-4-0",
+      model: "anthropic:claude-sonnet-4-5",
       cacheCreationInputTokens: 125, // 100 + 25
       cacheReadInputTokens: 65, // 50 + 15
       inputTokens: 275, // 200 + 75
@@ -82,7 +82,7 @@ describe("tokenDataReducer", () => {
   it("should return update array when state is undefined", () => {
     const update: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -98,7 +98,7 @@ describe("tokenDataReducer", () => {
   it("should handle empty update array", () => {
     const state: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -114,7 +114,7 @@ describe("tokenDataReducer", () => {
   it("should handle multiple updates for the same model", () => {
     const state: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 100,
         cacheReadInputTokens: 50,
         inputTokens: 200,
@@ -124,14 +124,14 @@ describe("tokenDataReducer", () => {
 
     const update: ModelTokenData[] = [
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 25,
         cacheReadInputTokens: 15,
         inputTokens: 75,
         outputTokens: 60,
       },
       {
-        model: "anthropic:claude-sonnet-4-0",
+        model: "anthropic:claude-sonnet-4-5",
         cacheCreationInputTokens: 10,
         cacheReadInputTokens: 5,
         inputTokens: 30,
@@ -143,7 +143,7 @@ describe("tokenDataReducer", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
-      model: "anthropic:claude-sonnet-4-0",
+      model: "anthropic:claude-sonnet-4-5",
       cacheCreationInputTokens: 135, // 100 + 25 + 10
       cacheReadInputTokens: 70, // 50 + 15 + 5
       inputTokens: 305, // 200 + 75 + 30

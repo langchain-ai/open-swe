@@ -9,8 +9,16 @@ export const MODEL_OPTIONS = [
   //   value: "anthropic:extended-thinking:claude-opus-4-0",
   // },
   {
+    label: "Claude Sonnet 4.5",
+    value: "anthropic:claude-sonnet-4-5",
+  },
+  {
     label: "Claude Sonnet 4",
     value: "anthropic:claude-sonnet-4-0",
+  },
+  {
+    label: "Claude Opus 4.5",
+    value: "anthropic:claude-opus-4-5",
   },
   {
     label: "Claude Opus 4.1",
