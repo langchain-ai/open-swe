@@ -400,7 +400,6 @@ export async function featureGraphAgent(
   const updates: ManagerGraphUpdate = {
     messages: [aiMessage, ...toolMessages, ...(responseMessage ? [responseMessage] : [])],
     featureProposals: updatedProposals,
-    workspacePath: state.workspacePath,
     ...(updatedGraph ? { featureGraph: updatedGraph } : {}),
   };
 
