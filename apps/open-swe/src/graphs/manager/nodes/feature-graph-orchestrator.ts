@@ -197,7 +197,6 @@ export async function featureGraphOrchestrator(
   const userMessage = state.messages.findLast(isHumanMessage);
   if (!userMessage || !state.featureGraph) {
     return new Command({
-      update: { workspacePath: state.workspacePath },
       goto: "classify-message",
     });
   }
@@ -234,9 +233,6 @@ export async function featureGraphOrchestrator(
     });
 
     return new Command({
-      update: {
-        workspacePath: state.workspacePath,
-      },
       goto: "classify-message",
     });
   }
@@ -244,14 +240,11 @@ export async function featureGraphOrchestrator(
   if (!plannerValues) {
     logger.warn("Feature planner agent returned no state");
     return new Command({
-      update: { workspacePath: state.workspacePath },
       goto: "classify-message",
     });
   }
 
-  const updates: ManagerGraphUpdate = {
-    workspacePath: state.workspacePath,
-  };
+  const updates: ManagerGraphUpdate = {};
 
   const agentMessages = coerceMessages(plannerValues?.messages);
   const responseMessages = coerceMessages(

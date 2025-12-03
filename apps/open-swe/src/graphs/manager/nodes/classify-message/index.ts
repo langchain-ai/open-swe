@@ -64,7 +64,6 @@ export async function classifyMessage(
 
   if (isChatSession && graphEditIntent) {
     return new Command({
-      update: { workspacePath: state.workspacePath },
       goto: "feature-graph-orchestrator",
     });
   }
