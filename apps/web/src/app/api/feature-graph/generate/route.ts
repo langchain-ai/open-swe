@@ -138,9 +138,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           : undefined,
     });
 
-    const managerState = await client.threads.getState<ManagerGraphState>(
-      threadId,
-    );
+    const managerState = await client.threads
+      .getState<ManagerGraphState>(threadId)
+      .catch((error) => {
+        const status = (error as { status?: number })?.status ?? 500;
+        logger.error("Failed to load manager state for feature graph", {
+          threadId,
+          status,
+          error,
+        });
+
+        const message =
+          status === 404
+            ? "Manager state not found for thread"
+            : "Failed to load manager state";
+
+        return NextResponse.json({ error: message }, { status });
+      });
+
+    if (managerState instanceof NextResponse) {
+      return managerState;
+    }
 
     if (!managerState?.values) {
       return NextResponse.json(
