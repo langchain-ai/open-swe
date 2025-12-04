@@ -30,7 +30,12 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
    * Resolved workspace path inside the container after validation.
    */
-  workspacePath: z.string().optional(),
+  workspacePath: withLangGraph(z.string().optional(), {
+    reducer: {
+      schema: z.string().optional(),
+      fn: (_state, update) => update,
+    },
+  }),
   issueId: z.number().optional(),
   /**
    * The tasks generated for this request.
