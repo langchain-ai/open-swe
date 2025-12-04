@@ -74,8 +74,7 @@ export async function generatePlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<PlannerGraphUpdate> {
-  const workspacePath =
-    state.workspacePath ?? config.configurable?.workspacePath;
+  const workspacePath = state.workspacePath;
   const dependenciesPromise = state.featureDependencies?.length
     ? Promise.resolve(state.featureDependencies)
     : resolveFeatureDependencies({

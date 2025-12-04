@@ -130,8 +130,7 @@ export async function determineNeedsContext(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const workspacePath =
-    state.workspacePath ?? config.configurable?.workspacePath;
+  const workspacePath = state.workspacePath;
   const dependenciesPromise = state.featureDependencies?.length
     ? Promise.resolve(state.featureDependencies)
     : resolveFeatureDependencies({
