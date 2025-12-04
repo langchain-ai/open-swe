@@ -86,9 +86,6 @@ export async function startPlanner(
           recursion_limit: 400,
           configurable: {
             ...getCustomConfigurableFields(config),
-            ...(state.workspacePath
-              ? { workspacePath: state.workspacePath }
-              : {}),
             ...(isLocalMode(config) && {
               [LOCAL_MODE_HEADER]: "true",
             }),

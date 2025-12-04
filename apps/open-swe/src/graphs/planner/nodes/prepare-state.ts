@@ -30,8 +30,7 @@ export async function prepareGraphState(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const workspacePath =
-    state.workspacePath ?? config.configurable?.workspacePath;
+  const workspacePath = state.workspacePath;
   const [features, dependencies] = await Promise.all([
     resolveActiveFeatures({
       workspacePath,
