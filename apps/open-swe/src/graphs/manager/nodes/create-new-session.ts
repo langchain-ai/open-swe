@@ -91,7 +91,6 @@ ${ISSUE_CONTENT_CLOSE_TAG}`,
     targetRepository: state.targetRepository,
     messages: inputMessages,
     branchName: state.branchName ?? "",
-    workspacePath: state.workspacePath,
   };
   await langGraphClient.runs.create(newManagerThreadId, MANAGER_GRAPH_ID, {
     input: {},
