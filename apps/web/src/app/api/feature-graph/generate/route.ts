@@ -231,6 +231,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         featureGraph: graph,
         activeFeatureIds,
       },
+      asNode: "feature-graph-orchestrator",
     });
 
     return NextResponse.json({
