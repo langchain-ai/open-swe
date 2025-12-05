@@ -224,9 +224,19 @@ function summarizeManagerState(managerState: ManagerGraphState | null): {
     missingFields.push("activeFeatureIds");
   }
 
-  const featureGraphPresent = Boolean(featureGraph);
+  const hasListFeaturesFn =
+    featureGraph && typeof (featureGraph as { listFeatures?: unknown }).listFeatures === "function";
+  const featureGraphPresent = Boolean(featureGraph && hasListFeaturesFn);
   const activeFeatureIdsPresent = Boolean(activeFeatureIds);
-  const featureCount = featureGraphPresent ? featureGraph.listFeatures().length : undefined;
+
+  if (featureGraph && !hasListFeaturesFn) {
+    logger.error("Feature graph is present but missing listFeatures function", {
+      featureGraphKeys: Object.keys(featureGraph as Record<string, unknown>),
+    });
+    missingFields.push("featureGraph.listFeatures");
+  }
+
+  const featureCount = featureGraphPresent ? (featureGraph as FeatureGraph).listFeatures().length : undefined;
   const activeCount = Array.isArray(activeFeatureIds) ? activeFeatureIds.length : undefined;
 
   if (featureGraphPresent || activeFeatureIdsPresent) {
