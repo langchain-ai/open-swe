@@ -181,6 +181,8 @@ export type CustomRules = {
   pullRequestFormatting?: string;
 };
 
+export type InteractionPhase = "design" | "planner" | "programmer";
+
 export const GraphAnnotation = MessagesZodState.extend({
   /**
    * The internal messages. These are the messages which are
@@ -921,12 +923,18 @@ export const GraphConfiguration = z.object({
   }),
 });
 
-export type GraphConfig = LangGraphRunnableConfig<
-  z.infer<typeof GraphConfiguration> & {
-    thread_id: string;
-    assistant_id: string;
-  }
->;
+export interface GraphConfig
+  extends LangGraphRunnableConfig<
+    z.infer<typeof GraphConfiguration> & {
+      thread_id: string;
+      assistant_id: string;
+    }
+  > {
+  configurable?: {
+    phase?: InteractionPhase;
+    [key: string]: unknown;
+  };
+}
 
 export interface AgentSession {
   threadId: string;
