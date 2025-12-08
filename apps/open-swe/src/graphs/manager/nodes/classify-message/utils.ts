@@ -1,4 +1,4 @@
-import { TaskPlan } from "@openswe/shared/open-swe/types";
+import { InteractionPhase, TaskPlan } from "@openswe/shared/open-swe/types";
 import {
   AIMessage,
   BaseMessage,
@@ -72,10 +72,12 @@ export function createClassificationPromptAndToolSchema(inputs: {
   taskPlan: TaskPlan;
   proposedPlan?: string[];
   requestSource?: string;
+  phase?: InteractionPhase;
 }): {
   prompt: string;
   schema: z.ZodTypeAny;
 } {
+  const phase = inputs.phase ?? "design";
   const conversationHistoryWithoutLatest = removeLastHumanMessage(
     inputs.messages,
   );
@@ -112,14 +114,55 @@ export function createClassificationPromptAndToolSchema(inputs: {
     inputs.programmerStatus !== "not_started" ||
     inputs.plannerStatus !== "not_started";
 
-  const routingOptions = [
+  const designRoutes = ["feature_graph_orchestrator", "no_op"] as const;
+  const plannerRoutes = [
     "feature_graph_orchestrator",
-    ...(programmerRunning ? ["update_programmer"] : []),
-    ...(plannerRunning ? ["update_planner"] : []),
-    ...(plannerInterrupted ? ["resume_and_update_planner"] : []),
-    ...(showCreateIssueOption ? ["create_new_issue"] : []),
+    "update_planner",
+    "resume_and_update_planner",
+    "create_new_issue",
     "no_op",
-  ];
+  ] as const;
+  const programmerRoutes = [
+    "feature_graph_orchestrator",
+    "update_programmer",
+    "create_new_issue",
+    "no_op",
+  ] as const;
+
+  let allowedRoutes: string[];
+  let phaseInstruction: string;
+
+  switch (phase) {
+    case "planner": {
+      allowedRoutes = [
+        plannerRoutes[0],
+        ...(plannerRunning ? [plannerRoutes[1]] : []),
+        ...(plannerInterrupted ? [plannerRoutes[2]] : []),
+        ...(showCreateIssueOption ? [plannerRoutes[3]] : []),
+        plannerRoutes[4],
+      ];
+      phaseInstruction =
+        "Planner phase: prioritize planning updates or resuming planning threads; keep feature-graph alignment when the request shifts.";
+      break;
+    }
+    case "programmer": {
+      allowedRoutes = [
+        programmerRoutes[0],
+        ...(programmerRunning ? [programmerRoutes[1]] : []),
+        ...(showCreateIssueOption ? [programmerRoutes[2]] : []),
+        programmerRoutes[3],
+      ];
+      phaseInstruction =
+        "Programmer phase: focus on coding updates and ensure routing only supplements the active implementation work.";
+      break;
+    }
+    default: {
+      allowedRoutes = [...designRoutes];
+      phaseInstruction =
+        "Design phase: stay in feature-discovery mode, refining the feature graph before initiating planning or coding.";
+      break;
+    }
+  }
 
   const prompt = CLASSIFICATION_SYSTEM_PROMPT.replaceAll(
     "{PROGRAMMER_STATUS}",
@@ -129,7 +172,7 @@ export function createClassificationPromptAndToolSchema(inputs: {
       "{PLANNER_STATUS}",
       THREAD_STATUS_READABLE_STRING_MAP[inputs.plannerStatus],
     )
-    .replaceAll("{ROUTING_OPTIONS}", routingOptions.join(", "))
+    .replaceAll("{ROUTING_OPTIONS}", allowedRoutes.join(", "))
     .replaceAll(
       "{FEATURE_GRAPH_ROUTING_OPTION}",
       FEATURE_GRAPH_ROUTING_OPTION,
@@ -163,12 +206,17 @@ export function createClassificationPromptAndToolSchema(inputs: {
       inputs.requestSource ?? "no source provided",
     );
 
+  const promptWithPhaseInstruction = prompt.replace(
+    "# Assistant Statuses",
+    `# Phase\n${phaseInstruction}\n\n# Assistant Statuses`,
+  );
+
   const schema = createClassificationSchema(
-    routingOptions as [string, ...string[]],
+    allowedRoutes as [string, ...string[]],
   );
 
   return {
-    prompt,
+    prompt: promptWithPhaseInstruction,
     schema,
   };
 }
