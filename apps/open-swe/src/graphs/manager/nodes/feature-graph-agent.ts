@@ -144,6 +144,39 @@ const formatFeatureCatalog = (
     .join("\n");
 };
 
+const normalizeFeatureIds = (
+  value: string[] | undefined,
+): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+
+  return normalized.length > 0 ? normalized : undefined;
+};
+
+const mergeActiveFeatureIds = (
+  nextIds: string | string[] | undefined,
+  existingIds: string[] | undefined,
+): string[] | undefined => {
+  const combined = [
+    ...(Array.isArray(nextIds) ? nextIds : nextIds ? [nextIds] : []),
+    ...(existingIds ?? []),
+  ];
+
+  return normalizeFeatureIds(combined);
+};
+
 const upsertProposal = (
   state: FeatureProposalState,
   proposal: FeatureProposal,
@@ -237,6 +270,7 @@ export async function featureGraphAgent(
 
   let updatedGraph = state.featureGraph;
   let updatedProposals = proposalState;
+  let updatedActiveFeatureIds = normalizeFeatureIds(state.activeFeatureIds);
   const toolMessages: BaseMessage[] = [];
   const userFacingSummaries: string[] = [];
 
@@ -379,6 +413,11 @@ export async function featureGraphAgent(
             });
           }
 
+          updatedActiveFeatureIds = mergeActiveFeatureIds(
+            args.featureId,
+            updatedActiveFeatureIds ?? state.activeFeatureIds,
+          );
+
           const response = args.response ||
             `Marked ${args.featureId} as approved and ready for planning.`;
           toolMessages.push(
@@ -497,6 +536,9 @@ export async function featureGraphAgent(
     messages: [aiMessage, ...toolMessages, ...(responseMessage ? [responseMessage] : [])],
     featureProposals: updatedProposals,
     ...(updatedGraph ? { featureGraph: updatedGraph } : {}),
+    ...(updatedActiveFeatureIds
+      ? { activeFeatureIds: updatedActiveFeatureIds }
+      : {}),
   };
 
   return new Command({
