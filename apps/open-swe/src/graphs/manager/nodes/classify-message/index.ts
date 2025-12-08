@@ -1,4 +1,4 @@
-import { GraphConfig } from "@openswe/shared/open-swe/types";
+import { GraphConfig, InteractionPhase } from "@openswe/shared/open-swe/types";
 import {
   ManagerGraphState,
   ManagerGraphUpdate,
@@ -40,6 +40,35 @@ import { Client } from "@langchain/langgraph-sdk";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
+function getPhase(
+  config: GraphConfig,
+  userMessage?: HumanMessage,
+): InteractionPhase {
+  const fromConfig = config.configurable?.phase as InteractionPhase | undefined;
+  const fromMsg = userMessage?.additional_kwargs?.phase as InteractionPhase | undefined;
+  const requestSource = userMessage?.additional_kwargs?.requestSource as
+    | string
+    | undefined;
+
+  if (fromConfig) return fromConfig;
+  if (fromMsg) return fromMsg;
+
+  if (requestSource === "planner-tab") return "planner";
+  if (requestSource === "programmer-tab") return "programmer";
+
+  return "design";
+}
+
+function isRealUserMessage(msg: BaseMessage): msg is HumanMessage {
+  return (
+    isHumanMessage(msg) &&
+    (msg.additional_kwargs?.requestSource === "open-swe" ||
+      msg.additional_kwargs?.requestSource === "local-user" ||
+      msg.additional_kwargs?.requestSource === "planner-tab" ||
+      msg.additional_kwargs?.requestSource === "programmer-tab")
+  );
+}
+
 /**
  * Classify the latest human message to determine how to route the request.
  * Requests can be routed to:
@@ -50,10 +79,12 @@ export async function classifyMessage(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const userMessage = state.messages.findLast(isHumanMessage);
+  const userMessage = [...state.messages].reverse().find(isRealUserMessage);
   if (!userMessage) {
-    throw new Error("No human message found.");
+    throw new Error("No human user message found.");
   }
+
+  const phase = getPhase(config, userMessage);
 
   const userMessageContent = getMessageContentString(userMessage.content);
   const requestSource = userMessage.additional_kwargs?.requestSource;
@@ -150,6 +181,7 @@ export async function classifyMessage(
     requestSource: userMessage.additional_kwargs?.requestSource as
       | string
       | undefined,
+    phase,
   });
   const respondAndRouteTool = {
     name: "respond_and_route",
@@ -193,6 +225,26 @@ export async function classifyMessage(
     internal_reasoning?: string;
   };
 
+  logger.info("classifyMessage route", {
+    route: toolCallArgs.route,
+    phase,
+  });
+
+  if (phase === "design") {
+    const allowedDesignRoutes = new Set([
+      "feature_graph_orchestrator",
+      "no_op",
+    ]);
+
+    if (!allowedDesignRoutes.has(toolCallArgs.route)) {
+      throw new Error(
+        `Invalid route ${toolCallArgs.route} for design phase. Expected one of: ${[
+          ...allowedDesignRoutes,
+        ].join(", ")}.`,
+      );
+    }
+  }
+
   const wantsPlanner =
     toolCallArgs.route === "start_planner" ||
     toolCallArgs.route === "start_planner_for_followup";
@@ -217,6 +269,13 @@ export async function classifyMessage(
     const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
     });
+
+    if (phase === "design") {
+      return new Command({
+        update: commandUpdate,
+        goto: END,
+      });
+    }
 
     return new Command({
       update: commandUpdate,
@@ -269,6 +328,12 @@ export async function classifyMessage(
   }
 
   if (!shouldCreateIssue(config)) {
+    if (phase === "design") {
+      throw new Error(
+        `Received planner route ${toolCallArgs.route} in design phase. Planner should be invoked from planner tab (phase="planner").`,
+      );
+    }
+
     const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
     });
