@@ -204,21 +204,21 @@ export type FeaturePlannerValues = {
   response?: unknown;
 };
 
-const buildPlannerInput = (
-  state: ManagerGraphState,
-  userMessage: HumanMessage,
-) => {
+  const buildPlannerInput = (
+    state: ManagerGraphState,
+    userMessage: HumanMessage,
+  ) => {
   const plannerSystemMessage = new SystemMessage({
     content: FEATURE_PLANNER_SYSTEM_PROMPT,
   });
 
-  return {
-    input: {
-      messages: [plannerSystemMessage, ...state.messages],
-      featureGraph: featureGraphToFile(state.featureGraph),
-      activeFeatureIds: state.activeFeatureIds,
-      workspacePath: state.workspacePath,
-      userMessage: getMessageContentString(userMessage.content),
+    return {
+      input: {
+        messages: [plannerSystemMessage, ...state.messages],
+        featureGraph: featureGraphToFile(state.featureGraph!),
+        activeFeatureIds: state.activeFeatureIds,
+        workspacePath: state.workspacePath,
+        userMessage: getMessageContentString(userMessage.content),
       toolingContract: {
         requireStableFeatureId: true,
         requireArtifacts: true,

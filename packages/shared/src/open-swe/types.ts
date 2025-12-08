@@ -114,6 +114,10 @@ export type Task = {
    */
   createdAt: number;
   /**
+   * When the task was last updated
+   */
+  updatedAt?: number | string;
+  /**
    * Whether the task is completed
    */
   completed: boolean;
