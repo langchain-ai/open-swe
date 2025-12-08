@@ -607,15 +607,22 @@ export function ThreadView({
           ? "programmer"
           : undefined;
 
+    const requestSource =
+      selectedTab === "planner"
+        ? "planner-tab"
+        : selectedTab === "programmer"
+          ? "programmer-tab"
+          : "open-swe";
+
     if (trimmed) {
-      const newHumanMessage = new HumanMessage({
-        id: uuidv4(),
-        content: trimmed,
-        additional_kwargs: {
-          ...(phase ? { phase } : {}),
-          requestSource: "open-swe",
-        },
-      });
+        const newHumanMessage = new HumanMessage({
+          id: uuidv4(),
+          content: trimmed,
+          additional_kwargs: {
+            ...(phase ? { phase } : {}),
+            requestSource,
+          },
+        });
       stream.submit(
         {
           messages: [newHumanMessage],
