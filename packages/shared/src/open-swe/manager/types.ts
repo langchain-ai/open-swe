@@ -72,6 +72,15 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    */
   activeFeatureIds: z.array(z.string()).optional(),
   /**
+   * Tracks whether the user has approved the active feature selection.
+   */
+  userHasApprovedFeature: withLangGraph(z.custom<boolean>().optional(), {
+    reducer: {
+      schema: z.custom<boolean>().optional(),
+      fn: (state, update) => update ?? state,
+    },
+  }),
+  /**
    * Tracks feature proposals and their lifecycle state across turns.
    */
   featureProposals: FeatureProposalStateSchema.optional(),
