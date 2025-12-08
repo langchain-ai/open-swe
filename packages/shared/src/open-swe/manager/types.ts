@@ -5,7 +5,12 @@ import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  Object.prototype.toString.call(value) === "[object Object]";
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      (Object.getPrototypeOf(value) === Object.prototype ||
+        Object.getPrototypeOf(value) === null),
+  );
 
 const normalizeJson = <T>(value: T): T =>
   JSON.parse(JSON.stringify(value)) as T;

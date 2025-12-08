@@ -24,6 +24,8 @@ import {
   persistFeatureGraph,
 } from "../utils/feature-graph-mutations.js";
 import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
+import type { FeatureNode } from "@openswe/shared/feature-graph/types";
+import type { FeatureGraphJson } from "@openswe/shared";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
 import { FEATURE_GRAPH_RELATIVE_PATH } from "../utils/feature-graph-path.js";
 
@@ -165,6 +167,46 @@ const normalizeFeatureIds = (
   return normalized.length > 0 ? normalized : undefined;
 };
 
+const deserializeFeatureGraph = (
+  graph: FeatureGraphJson | undefined,
+): FeatureGraph | undefined => {
+  if (!graph) return undefined;
+
+  const nodes = new Map<string, FeatureNode>();
+
+  for (const entry of graph.nodes) {
+    if (Array.isArray(entry) && entry.length >= 2) {
+      const [id, node] = entry;
+      if (typeof id === "string" && node && typeof node === "object") {
+        nodes.set(id, node as FeatureNode);
+      }
+      continue;
+    }
+
+    if (entry && typeof entry === "object" && "id" in entry) {
+      const node = entry as FeatureNode;
+      if (typeof node.id === "string") {
+        nodes.set(node.id, node);
+      }
+    }
+  }
+
+  if (!nodes.size) return undefined;
+
+  const version = typeof graph.version === "number" ? graph.version : 1;
+
+  try {
+    return new FeatureGraph({
+      version,
+      nodes,
+      edges: Array.isArray(graph.edges) ? graph.edges : [],
+      artifacts: graph.artifacts,
+    });
+  } catch {
+    return undefined;
+  }
+};
+
 const mergeActiveFeatureIds = (
   nextIds: string | string[] | undefined,
   existingIds: string[] | undefined,
@@ -216,7 +258,8 @@ export async function featureGraphAgent(
   }
 
   const proposalState = ensureProposalState(state.featureProposals);
-  const systemPrompt = `${FEATURE_AGENT_SYSTEM_PROMPT}\n\n# Current Proposals\n${formatProposals(proposalState)}\n\n# Feature Graph\n${formatFeatureCatalog(state.featureGraph, state.activeFeatureIds)}`;
+  const featureGraph = deserializeFeatureGraph(state.featureGraph);
+  const systemPrompt = `${FEATURE_AGENT_SYSTEM_PROMPT}\n\n# Current Proposals\n${formatProposals(proposalState)}\n\n# Feature Graph\n${formatFeatureCatalog(featureGraph, state.activeFeatureIds)}`;
 
   const tools = [
     {
@@ -268,7 +311,7 @@ export async function featureGraphAgent(
     },
   ]);
 
-  let updatedGraph = state.featureGraph;
+  let updatedGraph = featureGraph;
   let updatedProposals = proposalState;
   let updatedActiveFeatureIds = normalizeFeatureIds(state.activeFeatureIds);
   const toolMessages: BaseMessage[] = [];
@@ -535,7 +578,7 @@ export async function featureGraphAgent(
   const updates: ManagerGraphUpdate = {
     messages: [aiMessage, ...toolMessages, ...(responseMessage ? [responseMessage] : [])],
     featureProposals: updatedProposals,
-    ...(updatedGraph ? { featureGraph: updatedGraph } : {}),
+    ...(updatedGraph ? { featureGraph: updatedGraph.toJSON() } : {}),
     ...(updatedActiveFeatureIds
       ? { activeFeatureIds: updatedActiveFeatureIds }
       : {}),

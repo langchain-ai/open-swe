@@ -678,10 +678,6 @@ function buildPlannerRunInput({
 function coerceFeatureGraph(value: unknown): FeatureGraph | null {
   if (!value) return null;
 
-  if (value instanceof FeatureGraph) {
-    return value;
-  }
-
   const payload = extractGraphPayload(value);
   if (!payload) return null;
 
@@ -707,16 +703,17 @@ type SerializedFeatureGraph = {
 };
 
 function extractGraphPayload(value: unknown): SerializedFeatureGraph | null {
-  if (!value || typeof value !== "object") {
+  if (!isPlainObject(value)) {
     return null;
   }
 
-  if (
-    "data" in value &&
-    typeof (value as { data?: unknown }).data === "object" &&
-    (value as { data?: unknown }).data
-  ) {
-    return (value as { data: SerializedFeatureGraph }).data;
+  if ("data" in value) {
+    const data = (value as { data?: unknown }).data;
+    if (isPlainObject(data)) {
+      return data as SerializedFeatureGraph;
+    }
+
+    return null;
   }
 
   return value as SerializedFeatureGraph;
@@ -880,5 +877,11 @@ function isArtifactRefObject(value: unknown): value is Exclude<ArtifactRef, stri
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype ||
+        Object.getPrototypeOf(value) === null),
+  );
 }
