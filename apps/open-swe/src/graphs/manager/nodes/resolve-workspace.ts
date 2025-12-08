@@ -6,7 +6,11 @@ import {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@openswe/shared/open-swe/manager/types";
-import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
+import {
+  FeatureGraph,
+  listFeaturesFromGraph,
+  loadFeatureGraph,
+} from "@openswe/shared/feature-graph";
 import type { FeatureGraphData } from "@openswe/shared/feature-graph/loader";
 import {
   resolveWorkspacePath,
@@ -64,8 +68,7 @@ const mergeActiveFeatureIds = (
   }
 
   if (collected.size === 0) {
-    const fromGraph = graph
-      .listFeatures()
+    const fromGraph = listFeaturesFromGraph(graph.toJSON())
       .map((feature) => feature.id.trim())
       .filter((id) => id.length > 0);
     fromGraph.forEach((id) => collected.add(id));
@@ -162,7 +165,7 @@ export async function resolveWorkspace(
       );
       logger.info("Loaded feature graph", {
         graphPath: graphSourcePath,
-        featureCount: data.nodes.size,
+        nodeKeys: Array.from(data.nodes.keys()).length,
         edgeCount: data.edges.length,
         version: data.version,
       });

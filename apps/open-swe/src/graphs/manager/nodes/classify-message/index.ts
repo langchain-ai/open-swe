@@ -38,6 +38,7 @@ import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
 import { GraphState } from "@openswe/shared/open-swe/types";
 import { Client } from "@langchain/langgraph-sdk";
 import { shouldCreateIssue } from "../../../../utils/should-create-issue.js";
+import { FeatureGraph, listFeaturesFromGraph } from "@openswe/shared/feature-graph";
 const logger = createLogger(LogLevel.INFO, "ClassifyMessage");
 
 function getPhase(
@@ -125,10 +126,18 @@ export async function classifyMessage(
       .filter(Boolean),
   );
 
-  const activeFeatureNodes = state.featureGraph
-    ?.listFeatures()
-    .filter((node) => node.status?.toLowerCase() === "active")
-    .map((node) => node.id.toLowerCase());
+  const featureGraphData =
+    state.featureGraph instanceof FeatureGraph
+      ? state.featureGraph.toJSON()
+      : state.featureGraph && "nodes" in state.featureGraph
+        ? state.featureGraph
+        : undefined;
+
+  const activeFeatureNodes = featureGraphData
+    ? listFeaturesFromGraph(featureGraphData)
+        .filter((node) => node.status?.toLowerCase() === "active")
+        .map((node) => node.id.toLowerCase())
+    : undefined;
 
   const hasIntersectionWithActiveNodes = Boolean(
     activeFeatureNodes?.some((featureId) => activeFeatureIdSet.has(featureId)),

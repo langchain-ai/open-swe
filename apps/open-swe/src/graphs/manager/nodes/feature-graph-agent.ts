@@ -23,7 +23,11 @@ import {
   createFeatureNode,
   persistFeatureGraph,
 } from "../utils/feature-graph-mutations.js";
-import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
+import {
+  FeatureGraph,
+  listFeaturesFromGraph,
+  loadFeatureGraph,
+} from "@openswe/shared/feature-graph";
 import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 import type { FeatureGraphJson } from "@openswe/shared";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
@@ -137,8 +141,11 @@ const formatFeatureCatalog = (
   if (!featureGraph) return "No feature graph available.";
 
   const activeIds = new Set(activeFeatureIds ?? []);
-  return featureGraph
-    .listFeatures()
+  const features = listFeaturesFromGraph(featureGraph.toJSON(), {
+    activeFeatureIds,
+  });
+
+  return features
     .map((feature) => {
       const activeMarker = activeIds.has(feature.id) ? "(active)" : "";
       return `- ${feature.id} ${activeMarker}: ${feature.name} — ${feature.status}`;
