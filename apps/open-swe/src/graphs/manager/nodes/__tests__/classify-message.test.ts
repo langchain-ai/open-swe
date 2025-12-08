@@ -2,11 +2,20 @@ import { beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { FeatureGraph } from "@openswe/shared/feature-graph";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
-import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
+import type { ManagerGraphState, ManagerGraphUpdate } from "@openswe/shared/open-swe/manager/types";
+import type { createLangGraphClient as createLangGraphClientType } from "../../../../utils/langgraph-client.js";
+import type {
+  loadModel as loadModelType,
+  supportsParallelToolCallsParam as supportsParallelToolCallsParamType,
+} from "../../../../utils/llms/index.js";
 
-const invokeMock = jest.fn();
-const bindToolsMock = jest.fn();
-const loadModelMock = jest.fn();
+const invokeMock = jest.fn<() => Promise<AIMessage>>();
+const bindToolsMock = jest.fn().mockImplementation((_tools, _options) => ({
+  invoke: invokeMock,
+}));
+const loadModelMock = jest.fn<typeof loadModelType>();
+const supportsParallelToolCallsParamMock = jest.fn<typeof supportsParallelToolCallsParamType>();
+const createLangGraphClientMock = jest.fn<typeof createLangGraphClientType>();
 
 let classifyMessage: typeof import("../classify-message/index.js")["classifyMessage"];
 
@@ -72,17 +81,23 @@ const createState = (
 
 describe("classifyMessage", () => {
   beforeAll(async () => {
+    loadModelMock.mockResolvedValue(
+      { bindTools: bindToolsMock } as unknown as Awaited<
+        ReturnType<typeof loadModelType>
+      >,
+    );
+    supportsParallelToolCallsParamMock.mockReturnValue(false);
+    createLangGraphClientMock.mockReturnValue({
+      threads: { get: jest.fn() },
+    } as unknown as ReturnType<typeof createLangGraphClientType>);
+
     await jest.unstable_mockModule("../../../../utils/llms/index.js", () => ({
-      loadModel: loadModelMock.mockResolvedValue({
-        bindTools: bindToolsMock.mockImplementation((_tools, _options) => ({
-          invoke: invokeMock,
-        })),
-      }),
-      supportsParallelToolCallsParam: jest.fn().mockReturnValue(false),
+      loadModel: loadModelMock,
+      supportsParallelToolCallsParam: supportsParallelToolCallsParamMock,
     }));
 
     await jest.unstable_mockModule("../../../../utils/langgraph-client.js", () => ({
-      createLangGraphClient: jest.fn(),
+      createLangGraphClient: createLangGraphClientMock,
     }));
 
     const module = await import("../classify-message/index.js");
@@ -106,9 +121,10 @@ describe("classifyMessage", () => {
 
   it("routes the user back to feature orchestration when approval is missing", async () => {
     const command = await classifyMessage(createState(), config);
+    const commandUpdate = command.update as ManagerGraphUpdate | undefined;
 
     expect(command.goto).toContain("feature-graph-orchestrator");
-    const reminder = command.update?.messages?.[0];
+    const reminder = commandUpdate?.messages?.[0];
     expect(reminder).toBeInstanceOf(AIMessage);
     expect((reminder as AIMessage).content).toContain("approve the active feature");
   });
@@ -121,8 +137,9 @@ describe("classifyMessage", () => {
       }),
       config,
     );
+    const commandUpdate = command.update as ManagerGraphUpdate | undefined;
 
     expect(command.goto).toContain("start-planner");
-    expect(command.update?.userHasApprovedFeature).toBe(true);
+    expect(commandUpdate?.userHasApprovedFeature).toBe(true);
   });
 });
