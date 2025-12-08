@@ -48,6 +48,7 @@ const createEmptyGraph = (): FeatureGraph =>
 const createState = (
   graph = createGraph(),
   proposals: FeatureProposalState = { proposals: [] },
+  activeFeatureIds: string[] = [],
 ): ManagerGraphState =>
   ({
     messages: [new HumanMessage({ content: "Please manage the feature graph." })],
@@ -57,7 +58,7 @@ const createState = (
     autoAcceptPlan: false,
     featureGraph: graph,
     featureProposals: proposals,
-    activeFeatureIds: [],
+    activeFeatureIds,
   } as unknown as ManagerGraphState);
 
 const mockModelResponse = (aiMessage: AIMessage) => {
@@ -206,7 +207,7 @@ describe("featureGraphAgent", () => {
     };
 
     const command = await featureGraphAgent(
-      createState(createGraph(), proposalState),
+      createState(createGraph(), proposalState, ["feature-payments"]),
       config,
     );
     const update = command.update as ManagerGraphUpdate;
@@ -222,6 +223,45 @@ describe("featureGraphAgent", () => {
     expect(update.featureProposals?.activeProposalId).toBe(proposalId);
     expect(update.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "active",
+    );
+    expect(update.activeFeatureIds).toEqual(
+      expect.arrayContaining(["feature-auth", "feature-payments"]),
+    );
+    expect(update.activeFeatureIds?.length).toBe(2);
+  });
+
+  it("normalizes and merges active feature ids on approval", async () => {
+    const aiMessage = new AIMessage({
+      content: "Approved proposal",
+      tool_calls: [
+        {
+          id: "call-2",
+          name: "approve_feature_change",
+          args: {
+            featureId: "feature-auth",
+          },
+          type: "tool_call",
+        },
+      ],
+    });
+    mockModelResponse(aiMessage);
+
+    const command = await featureGraphAgent(
+      createState(
+        createGraph(),
+        { proposals: [] },
+        [" Feature-Auth ", "feature-analytics"],
+      ),
+      config,
+    );
+
+    const update = command.update as ManagerGraphUpdate;
+
+    expect(update.activeFeatureIds).toEqual(
+      expect.arrayContaining(["feature-auth", "feature-analytics"]),
+    );
+    expect(update.activeFeatureIds?.find((id) => id === " Feature-Auth ")).toBe(
+      undefined,
     );
   });
 
