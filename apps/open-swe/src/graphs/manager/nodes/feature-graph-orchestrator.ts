@@ -81,12 +81,13 @@ const isFeatureEdge = (candidate: unknown): candidate is FeatureEdge => {
 
 const coerceFeatureGraph = (value: unknown): FeatureGraph | null => {
   if (!value) return null;
-  if (value instanceof FeatureGraph) return value;
 
   const payload =
     typeof value === "object" && value !== null && "data" in value
       ? (value as { data?: unknown }).data ?? value
       : value;
+
+  if (!isPlainObject(payload)) return null;
 
   const parsed = featureGraphFileSchema.safeParse(payload);
   if (!parsed.success) return null;
@@ -177,9 +178,18 @@ const coerceMessage = (value: unknown): BaseMessage | null => {
         name: candidate.name,
         tool_calls: candidate.tool_calls as AIMessage["tool_calls"],
         additional_kwargs: candidate.additional_kwargs,
-      });
+    });
   }
 };
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (Object.getPrototypeOf(value) === Object.prototype ||
+        Object.getPrototypeOf(value) === null),
+  );
 
 const coerceMessages = (value: unknown): BaseMessage[] => {
   if (!Array.isArray(value)) return [];

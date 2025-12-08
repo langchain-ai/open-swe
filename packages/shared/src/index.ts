@@ -1,2 +1,2 @@
 // no-op file
-export {};
+export type { FeatureGraphJson } from "./feature-graph/list-features.js";

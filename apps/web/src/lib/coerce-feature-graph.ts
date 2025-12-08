@@ -16,10 +16,6 @@ type SerializedFeatureGraph = {
 export function coerceFeatureGraph(value: unknown): FeatureGraph | null {
   if (!value) return null;
 
-  if (isFeatureGraphInstance(value)) {
-    return value;
-  }
-
   const payload = extractGraphPayload(value);
   if (!payload) return null;
 
@@ -43,25 +39,20 @@ export function coerceFeatureGraph(value: unknown): FeatureGraph | null {
 }
 
 function extractGraphPayload(value: unknown): SerializedFeatureGraph | null {
-  if (!value || typeof value !== "object") {
+  if (!isPlainObject(value)) {
     return null;
   }
 
-  if ("data" in value && typeof value.data === "object" && value.data) {
-    return value.data as SerializedFeatureGraph;
+  if ("data" in value) {
+    const data = (value as { data?: unknown }).data;
+    if (isPlainObject(data)) {
+      return data as SerializedFeatureGraph;
+    }
+
+    return null;
   }
 
   return value as SerializedFeatureGraph;
-}
-
-function isFeatureGraphInstance(value: unknown): value is FeatureGraph {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "listFeatures" in value &&
-    typeof (value as FeatureGraph).listFeatures === "function" &&
-    typeof (value as FeatureGraph).listEdges === "function"
-  );
 }
 
 function coerceFeatureNodeMap(value: unknown): Map<string, FeatureNode> | null {
@@ -226,5 +217,11 @@ function coerceArtifactRef(value: unknown): ArtifactRef | null {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  );
 }
