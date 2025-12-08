@@ -169,7 +169,7 @@ export function TerminalInput({
             : []),
           ...contentBlocks,
         ],
-        additional_kwargs: { phase: "design" },
+        additional_kwargs: { phase: "design", requestSource: "open-swe" },
       });
 
       try {
