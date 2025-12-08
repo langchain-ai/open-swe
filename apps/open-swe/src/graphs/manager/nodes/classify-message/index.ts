@@ -5,6 +5,7 @@ import {
 } from "@openswe/shared/open-swe/manager/types";
 import { createLangGraphClient } from "../../../../utils/langgraph-client.js";
 import {
+  AIMessage,
   BaseMessage,
   HumanMessage,
   isHumanMessage,
@@ -67,6 +68,51 @@ export async function classifyMessage(
       goto: "feature-graph-orchestrator",
     });
   }
+
+  const approvalFlagFromMessage =
+    userMessage.additional_kwargs?.userHasApprovedFeature === true;
+  const approvalFlagFromHistory = state.messages.some(
+    (message) =>
+      isHumanMessage(message) &&
+      message.additional_kwargs?.userHasApprovedFeature === true,
+  );
+
+  const activeFeatureIdSet = new Set(
+    (state.activeFeatureIds ?? [])
+      .map((id) => id.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const activeFeatureNodes = state.featureGraph
+    ?.listFeatures()
+    .filter((node) => node.status?.toLowerCase() === "active")
+    .map((node) => node.id.toLowerCase());
+
+  const hasIntersectionWithActiveNodes = Boolean(
+    activeFeatureNodes?.some((featureId) => activeFeatureIdSet.has(featureId)),
+  );
+
+  const explicitApprovalFromContent = /\b(approve|approved|go ahead|consent|proceed)\b/i.test(
+    userMessageContent,
+  );
+
+  const userHasApprovedFeature =
+    approvalFlagFromMessage ||
+    approvalFlagFromHistory ||
+    hasIntersectionWithActiveNodes ||
+    explicitApprovalFromContent ||
+    state.userHasApprovedFeature === true;
+
+  const approvalUpdate: ManagerGraphUpdate = userHasApprovedFeature
+    ? { userHasApprovedFeature: true }
+    : {};
+
+  const withApproval = (
+    update: ManagerGraphUpdate = {},
+  ): ManagerGraphUpdate => ({
+    ...update,
+    ...approvalUpdate,
+  });
 
   let plannerThread: Thread<PlannerGraphState> | undefined;
   let programmerThread: Thread<GraphState> | undefined;
@@ -141,16 +187,36 @@ export async function classifyMessage(
   if (!toolCall) {
     throw new Error("No tool call found.");
   }
-    const toolCallArgs = toolCall.args as {
-      route: string;
-      response?: string;
-      internal_reasoning?: string;
-    };
+  const toolCallArgs = toolCall.args as {
+    route: string;
+    response?: string;
+    internal_reasoning?: string;
+  };
+
+  const wantsPlanner =
+    toolCallArgs.route === "start_planner" ||
+    toolCallArgs.route === "start_planner_for_followup";
+
+  if (isChatSession && wantsPlanner && !userHasApprovedFeature) {
+    const reminderMessage = new AIMessage({
+      content:
+        "Please approve the active feature selection in the feature graph (or confirm here) before I start planning. I'll reopen the feature graph now.",
+    });
+
+    const commandUpdate: ManagerGraphUpdate = withApproval({
+      messages: [reminderMessage],
+    });
+
+    return new Command({
+      update: commandUpdate,
+      goto: "feature-graph-orchestrator",
+    });
+  }
 
   if (toolCallArgs.route === "feature_graph_orchestrator") {
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
-    };
+    });
 
     return new Command({
       update: commandUpdate,
@@ -160,9 +226,9 @@ export async function classifyMessage(
 
   if (toolCallArgs.route === "no_op") {
     // If it's a no_op, just add the message to the state and return.
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
-    };
+    });
     return new Command({
       update: commandUpdate,
       goto: END,
@@ -171,9 +237,9 @@ export async function classifyMessage(
 
   if ((toolCallArgs.route as string) === "create_new_issue") {
     // Route to node which kicks off new manager run, passing in the full conversation history.
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
-    };
+    });
     return new Command({
       update: commandUpdate,
       goto: "create-new-session",
@@ -183,9 +249,9 @@ export async function classifyMessage(
   if (isLocalMode(config)) {
     // In local mode, just route to planner without issue creation
     const newMessages: BaseMessage[] = [response];
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: newMessages,
-    };
+    });
 
     if (
       toolCallArgs.route === "start_planner" ||
@@ -203,9 +269,9 @@ export async function classifyMessage(
   }
 
   if (!shouldCreateIssue(config)) {
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: [response],
-    };
+    });
     if (
       toolCallArgs.route === "start_planner" ||
       toolCallArgs.route === "start_planner_for_followup"
@@ -363,7 +429,7 @@ export async function classifyMessage(
     }
 
     // After creating the new comment, we can add the message to state and end.
-    const commandUpdate: ManagerGraphUpdate = {
+    const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: newMessages,
       ...(newPlannerId && state.plannerSession?.threadId
         ? {
@@ -373,7 +439,7 @@ export async function classifyMessage(
             },
           }
         : {}),
-    };
+    });
     return new Command({
       update: commandUpdate,
       goto,
@@ -382,10 +448,10 @@ export async function classifyMessage(
 
   // Issue has been created, and any missing human messages have been added to it.
 
-  const commandUpdate: ManagerGraphUpdate = {
+  const commandUpdate: ManagerGraphUpdate = withApproval({
     messages: newMessages,
     ...(issueId ? { issueId } : {}),
-  };
+  });
 
   if (
     (toolCallArgs.route as any) === "update_programmer" ||
