@@ -599,16 +599,29 @@ export function ThreadView({
 
   const handleSendMessage = () => {
     const trimmed = chatInput.trim();
+
+    const phase =
+      selectedTab === "planner"
+        ? "planner"
+        : selectedTab === "programmer"
+          ? "programmer"
+          : undefined;
+
     if (trimmed) {
       const newHumanMessage = new HumanMessage({
         id: uuidv4(),
         content: trimmed,
+        additional_kwargs: {
+          ...(phase ? { phase } : {}),
+          requestSource: "open-swe",
+        },
       });
       stream.submit(
         {
           messages: [newHumanMessage],
         },
         {
+          ...(phase ? { config: { configurable: { phase } } } : {}),
           streamResumable: true,
           optimisticValues: (prev) => ({
             ...prev,
