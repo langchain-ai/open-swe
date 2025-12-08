@@ -169,6 +169,7 @@ export function TerminalInput({
             : []),
           ...contentBlocks,
         ],
+        additional_kwargs: { phase: "design" },
       });
 
       try {
@@ -194,6 +195,7 @@ export function TerminalInput({
                 ...defaultConfig,
                 customFramework,
                 workspacePath: workspaceAbsPath,
+                phase: "design",
               },
             },
             ifNotExists: "create",
