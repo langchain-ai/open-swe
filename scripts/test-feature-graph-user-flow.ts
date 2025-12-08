@@ -1,8 +1,13 @@
 import path from "node:path";
 
 import { Client } from "@langchain/langgraph-sdk";
-import { FeatureGraph } from "@openswe/shared/feature-graph/graph";
-import { loadFeatureGraph } from "@openswe/shared/feature-graph/loader";
+import {
+  FeatureGraph,
+  listFeaturesFromGraph,
+  loadFeatureGraph,
+} from "@openswe/shared/feature-graph";
+import type { FeatureGraphData } from "@openswe/shared/feature-graph/loader";
+import type { FeatureGraphJson } from "@openswe/shared";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 import { createLogger, LogLevel } from "@openswe/shared/logger";
 import type { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
@@ -180,7 +185,7 @@ async function loadGraphFile(workspaceAbsPath: string): Promise<GraphFileResult>
   try {
     const data = await loadFeatureGraph(graphPath);
     const graph = new FeatureGraph(data);
-    const nodeCount = graph.listFeatures().length;
+    const nodeCount = listFeaturesFromGraph(graph.toJSON()).length;
     const edgeCount = graph.listEdges().length;
     logger.info("Loaded persisted feature graph", {
       graphPath,
@@ -224,24 +229,25 @@ function summarizeManagerState(managerState: ManagerGraphState | null): {
     missingFields.push("activeFeatureIds");
   }
 
-  const hasListFeaturesFn =
-    featureGraph && typeof (featureGraph as { listFeatures?: unknown }).listFeatures === "function";
-  const featureGraphPresent = Boolean(featureGraph && hasListFeaturesFn);
+  const featureGraphJson: FeatureGraphJson | FeatureGraphData | undefined =
+    featureGraph instanceof FeatureGraph
+      ? featureGraph.toJSON()
+      : featureGraph && "nodes" in (featureGraph as Record<string, unknown>)
+        ? (featureGraph as FeatureGraphJson)
+        : undefined;
+  const featureGraphPresent = Boolean(featureGraphJson);
   const activeFeatureIdsPresent = Boolean(activeFeatureIds);
 
-  if (featureGraph && !hasListFeaturesFn) {
-    logger.error("Feature graph is present but missing listFeatures function", {
-      featureGraphKeys: Object.keys(featureGraph as Record<string, unknown>),
-    });
-    missingFields.push("featureGraph.listFeatures");
-  }
-
-  const featureCount = featureGraphPresent ? (featureGraph as FeatureGraph).listFeatures().length : undefined;
+  const featureCount = featureGraphJson
+    ? listFeaturesFromGraph(featureGraphJson).length
+    : undefined;
   const activeCount = Array.isArray(activeFeatureIds) ? activeFeatureIds.length : undefined;
 
   if (featureGraphPresent || activeFeatureIdsPresent) {
     logger.info("Manager state contains feature graph data", {
-      featureGraphPresent,
+      featureGraphKeys: featureGraphJson
+        ? Object.keys(featureGraphJson as Record<string, unknown>).length
+        : undefined,
       featureCount,
       activeFeatureIdsPresent,
       activeCount,
