@@ -58,6 +58,21 @@ export async function requestFeatureGraphGeneration(
   await resolvedClient.runs.create(threadId, MANAGER_GRAPH_ID, {
     input: {
       action: "generate_feature_graph",
+      messages: [
+        {
+          role: "user",
+          content: "Requesting feature graph generation",
+          additional_kwargs: {
+            phase: "design",
+            requestSource: "open-swe",
+          },
+        },
+      ],
+    },
+    config: {
+      configurable: {
+        phase: "design",
+      },
     },
     ifNotExists: "create",
   });
