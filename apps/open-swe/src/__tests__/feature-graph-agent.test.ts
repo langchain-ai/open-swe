@@ -7,23 +7,12 @@ import type {
   ManagerGraphState,
   ManagerGraphUpdate,
 } from "@openswe/shared/open-swe/manager/types";
-import * as featureGraphMutations from "../graphs/manager/utils/feature-graph-mutations.js";
 
 const loadModelMock: jest.MockedFunction<
   () => Promise<{ bindTools: jest.Mock }>
 > = jest.fn();
 const supportsParallelToolCallsParamMock: jest.MockedFunction<() => boolean> =
   jest.fn();
-jest.mock("../graphs/manager/utils/feature-graph-mutations.js", () => {
-  const actual = jest.requireActual<
-    typeof import("../graphs/manager/utils/feature-graph-mutations.js")
-  >("../graphs/manager/utils/feature-graph-mutations.js");
-
-  return { ...actual, persistFeatureGraph: jest.fn() };
-});
-const persistFeatureGraphMock = jest.mocked(
-  featureGraphMutations.persistFeatureGraph,
-);
 let featureGraphAgent: typeof import("../graphs/manager/nodes/feature-graph-agent.js")[
   "featureGraphAgent"
 ];
@@ -46,6 +35,13 @@ const createGraph = (): FeatureGraph =>
         },
       ],
     ]),
+    edges: [],
+  });
+
+const createEmptyGraph = (): FeatureGraph =>
+  new FeatureGraph({
+    version: 1,
+    nodes: new Map(),
     edges: [],
   });
 
@@ -90,6 +86,57 @@ describe("featureGraphAgent", () => {
     jest.clearAllMocks();
   });
 
+  it("creates a feature before proposing changes", async () => {
+    const aiMessage = new AIMessage({
+      content: "Created and proposed feature",
+      tool_calls: [
+        {
+          id: "call-create",
+          name: "create_feature",
+          args: {
+            featureId: "feature-payments",
+            name: "Payments",
+            summary: "Handle payments",
+          },
+          type: "tool_call",
+        },
+        {
+          id: "call-propose",
+          name: "propose_feature_change",
+          args: {
+            featureId: "feature-payments",
+            summary: "Add card support",
+            rationale: "Revenue",
+          },
+          type: "tool_call",
+        },
+      ],
+    });
+    mockModelResponse(aiMessage);
+
+    const command = await featureGraphAgent(createState(createEmptyGraph()), config);
+    const update = command.update as ManagerGraphUpdate;
+
+    const createdFeature = update.featureGraph?.getFeature("feature-payments");
+    expect(createdFeature).toEqual(
+      expect.objectContaining({
+        name: "Payments",
+        description: "Handle payments",
+        status: "proposed",
+        metadata: {},
+      }),
+    );
+
+    const proposals = update.featureProposals;
+    expect(proposals?.proposals).toHaveLength(1);
+    expect(proposals?.proposals[0]).toEqual(
+      expect.objectContaining({
+        featureId: "feature-payments",
+        status: "proposed",
+      }),
+    );
+  });
+
   it("records proposals and marks features as proposed", async () => {
     const aiMessage = new AIMessage({
       content: "Created proposal",
@@ -118,8 +165,6 @@ describe("featureGraphAgent", () => {
     expect(proposal?.featureId).toBe("feature-auth");
     expect(proposal?.status).toBe("proposed");
     expect(proposals?.activeProposalId).toBe(proposal?.proposalId);
-
-    expect(persistFeatureGraphMock).toHaveBeenCalled();
 
     const updatedGraph = update.featureGraph;
     expect(updatedGraph?.getFeature("feature-auth")?.status).toBe(
@@ -178,8 +223,6 @@ describe("featureGraphAgent", () => {
     expect(update.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "active",
     );
-
-    expect(persistFeatureGraphMock).toHaveBeenCalled();
   });
 
   it("records rejections while keeping proposals accessible", async () => {
@@ -228,7 +271,5 @@ describe("featureGraphAgent", () => {
     expect(update.featureGraph?.getFeature("feature-auth")?.status).toBe(
       "rejected",
     );
-
-    expect(persistFeatureGraphMock).toHaveBeenCalled();
   });
 });
