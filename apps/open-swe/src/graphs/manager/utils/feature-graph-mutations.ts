@@ -61,6 +61,38 @@ const validateGraphFile = (graph: FeatureGraphFile): FeatureGraphFile => {
   return parsed;
 };
 
+export const createFeatureNode = async (
+  graph: FeatureGraph,
+  feature: { id: string; name: string; summary: string },
+  workspacePath: string | undefined,
+): Promise<FeatureGraph> => {
+  if (graph.hasFeature(feature.id)) {
+    throw new Error(`Feature ${feature.id} already exists in the graph`);
+  }
+
+  const serialized = graph.toJSON();
+  const nodes = new Map(serialized.nodes);
+  const newNode: FeatureNode = {
+    id: feature.id,
+    name: feature.name,
+    description: feature.summary,
+    status: "inactive",
+    metadata: {},
+  };
+  nodes.set(feature.id, newNode);
+
+  const updatedGraph = new FeatureGraph({
+    version: serialized.version,
+    nodes,
+    edges: serialized.edges,
+    artifacts: serialized.artifacts,
+  });
+
+  await persistFeatureGraph(updatedGraph, workspacePath);
+
+  return updatedGraph;
+};
+
 export const applyFeatureStatus = (
   graph: FeatureGraph,
   featureId: string,

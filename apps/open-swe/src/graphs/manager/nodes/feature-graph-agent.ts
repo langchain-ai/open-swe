@@ -19,6 +19,7 @@ import { z } from "zod";
 import { getMessageContentString } from "@openswe/shared/messages";
 import {
   applyFeatureStatus,
+  createFeatureNode,
   persistFeatureGraph,
 } from "../utils/feature-graph-mutations.js";
 import { FeatureGraph } from "@openswe/shared/feature-graph";
@@ -30,8 +31,15 @@ const FEATURE_AGENT_SYSTEM_PROMPT = `You are the dedicated feature-graph concier
 - Maintain an explicit propose/approve/reject loop with the user instead of jumping into planning.
 - Persist proposal state across turns so the user can approve or reject later.
 - Only mutate the feature graph through the provided tools; summarize every mutation in your response.
+- Use the create_feature tool to add new features before proposing updates for them.
 - When proposing, explain the next approval step. When approving or rejecting, confirm the status change.
 - If the feature graph is missing, ask for the workspace to be resolved or a graph to be generated.`;
+
+const createFeatureSchema = z.object({
+  featureId: z.string(),
+  name: z.string(),
+  summary: z.string(),
+});
 
 const proposeSchema = z.object({
   featureId: z.string(),
@@ -147,6 +155,11 @@ export async function featureGraphAgent(
 
   const tools = [
     {
+      name: "create_feature",
+      description: "Add a new feature node to the feature graph before proposing changes.",
+      schema: createFeatureSchema,
+    },
+    {
       name: "propose_feature_change",
       description:
         "Propose a new or updated feature definition in the graph and request approval.",
@@ -200,6 +213,27 @@ export async function featureGraphAgent(
 
     try {
       switch (toolCall.name) {
+        case "create_feature": {
+          const args = toolCall.args as z.infer<typeof createFeatureSchema>;
+          if (!updatedGraph) {
+            throw new Error("No feature graph available to create a feature.");
+          }
+
+          updatedGraph = await createFeatureNode(
+            updatedGraph,
+            {
+              id: args.featureId,
+              name: args.name,
+              summary: args.summary,
+            },
+            state.workspacePath,
+          );
+
+          const response = `Added ${args.name} (${args.featureId}) to the feature graph.`;
+          toolMessages.push(recordAction(toolCall.name, toolCallId, response));
+          userFacingSummaries.push(response);
+          break;
+        }
         case "propose_feature_change": {
           const args = toolCall.args as z.infer<typeof proposeSchema>;
           const proposalId = randomUUID();
@@ -221,6 +255,12 @@ export async function featureGraphAgent(
           });
 
           if (updatedGraph) {
+            if (!updatedGraph.hasFeature(args.featureId)) {
+              throw new Error(
+                `Feature ${args.featureId} does not exist; create it before proposing changes.`,
+              );
+            }
+
             updatedGraph = applyFeatureStatus(
               updatedGraph,
               args.featureId,
