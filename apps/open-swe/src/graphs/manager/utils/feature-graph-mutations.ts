@@ -101,12 +101,21 @@ export const applyFeatureStatus = (
   const serialized = graph.toJSON();
   const nodes = new Map(serialized.nodes);
   const node = nodes.get(featureId);
+  const nextStatus = status || "proposed";
 
-  if (!node) {
-    throw new Error(`Feature ${featureId} not found in feature graph`);
+  if (node) {
+    nodes.set(featureId, cloneNodeWithStatus(node, nextStatus));
+  } else {
+    const newNode: FeatureNode = {
+      id: featureId,
+      name: featureId,
+      description: featureId,
+      status: nextStatus,
+      metadata: {},
+    };
+
+    nodes.set(featureId, newNode);
   }
-
-  nodes.set(featureId, cloneNodeWithStatus(node, status));
 
   return new FeatureGraph({
     version: serialized.version,
