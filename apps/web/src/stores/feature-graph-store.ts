@@ -15,6 +15,7 @@ import {
   mapFeatureGraphPayload,
   normalizeFeatureIds,
 } from "@/lib/feature-graph-payload";
+import { coerceFeatureGraph } from "@/lib/coerce-feature-graph";
 import {
   fetchFeatureGraph,
   performFeatureProposalAction,
@@ -466,6 +467,7 @@ function mapFetchResultToState(
   prevState: FeatureGraphStoreState,
   result: FeatureGraphFetchResult,
 ) {
+  const { graph, features } = resolveGraphAndFeatures(result.graph);
   const proposalState = mapFeatureProposalState(
     { proposals: result.proposals, activeProposalId: result.activeProposalId },
   );
@@ -475,7 +477,7 @@ function mapFetchResultToState(
     proposalState.proposals,
   );
 
-  if (!result.graph) {
+  if (!graph && features.length === 0) {
     return {
       ...prevState,
       graph: null,
@@ -494,7 +496,6 @@ function mapFetchResultToState(
     } satisfies Partial<FeatureGraphStoreState>;
   }
 
-  const features = result.graph.listFeatures();
   const featuresById: Record<string, FeatureNode> = {};
   for (const feature of features) {
     featuresById[feature.id] = feature;
@@ -504,11 +505,14 @@ function mapFetchResultToState(
   const artifactsByFeatureId: Record<string, FeatureResource[]> = {};
 
   for (const feature of features) {
-    testsByFeatureId[feature.id] = dedupeResources(
-      testsForFeature(result.graph, feature.id).map((ref, index) =>
-        normalizeArtifactRef(ref, `Test ${index + 1}`),
-      ),
-    );
+    testsByFeatureId[feature.id] =
+      graph === null
+        ? []
+        : dedupeResources(
+            testsForFeature(graph, feature.id).map((ref, index) =>
+              normalizeArtifactRef(ref, `Test ${index + 1}`),
+            ),
+          );
 
     artifactsByFeatureId[feature.id] = dedupeResources(
       collectFeatureArtifacts(feature.artifacts).map((ref, index) =>
@@ -525,7 +529,7 @@ function mapFetchResultToState(
 
   return {
     threadId: prevState.threadId,
-    graph: result.graph,
+    graph,
     features,
     featuresById,
     testsByFeatureId,
@@ -539,6 +543,92 @@ function mapFetchResultToState(
     isGeneratingGraph: false,
     error: null,
   } satisfies Partial<FeatureGraphStoreState>;
+}
+
+function resolveGraphAndFeatures(graph: FeatureGraph | null) {
+  const coercedGraph = coerceFeatureGraph(graph);
+  const features = listFeaturesSafely(coercedGraph) ?? listSerializedFeatures(graph);
+
+  return {
+    graph: coercedGraph,
+    features,
+  };
+}
+
+function listFeaturesSafely(graph: FeatureGraph | null): FeatureNode[] | null {
+  if (!graph || typeof graph.listFeatures !== "function") return null;
+
+  try {
+    return graph.listFeatures();
+  } catch {
+    return null;
+  }
+}
+
+function listSerializedFeatures(graph: unknown): FeatureNode[] {
+  if (!graph || typeof graph !== "object") return [];
+
+  const nodes = (graph as { nodes?: unknown }).nodes;
+  const candidates: unknown[] = [];
+
+  if (nodes instanceof Map) {
+    candidates.push(...nodes.values());
+  } else if (Array.isArray(nodes)) {
+    for (const entry of nodes) {
+      if (Array.isArray(entry) && entry.length >= 2) {
+        candidates.push(entry[1]);
+        continue;
+      }
+
+      candidates.push(entry);
+    }
+  } else if (nodes && typeof nodes === "object") {
+    candidates.push(...Object.values(nodes));
+  }
+
+  const features: FeatureNode[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+
+    const feature = candidate as FeatureNode;
+    if (
+      typeof feature.id !== "string" ||
+      typeof feature.name !== "string" ||
+      typeof feature.description !== "string" ||
+      typeof feature.status !== "string"
+    ) {
+      continue;
+    }
+
+    const normalized: FeatureNode = {
+      id: feature.id,
+      name: feature.name,
+      description: feature.description,
+      status: feature.status,
+    };
+
+    if ("group" in feature && typeof feature.group === "string") {
+      normalized.group = feature.group;
+    }
+
+    if (
+      "metadata" in feature &&
+      feature.metadata &&
+      typeof feature.metadata === "object" &&
+      !Array.isArray(feature.metadata)
+    ) {
+      normalized.metadata = feature.metadata as Record<string, unknown>;
+    }
+
+    if ("artifacts" in feature) {
+      normalized.artifacts = feature.artifacts;
+    }
+
+    features.push(normalized);
+  }
+
+  return features;
 }
 
 function pruneProposalActions(
