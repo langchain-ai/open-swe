@@ -1,10 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
 import { START } from "@langchain/langgraph/web";
 import { Client, StreamMode, ThreadState } from "@langchain/langgraph-sdk";
-import { OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
+import { MANAGER_GRAPH_ID, OPEN_SWE_STREAM_MODE } from "@openswe/shared/constants";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { PlannerGraphState } from "@openswe/shared/open-swe/planner/types";
-import { AgentSession, GraphConfig, GraphState } from "@openswe/shared/open-swe/types";
+import {
+  AgentSession,
+  GraphConfig,
+  GraphState,
+  InteractionPhase,
+} from "@openswe/shared/open-swe/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 
 export async function createNewSession(
@@ -20,6 +25,24 @@ export async function createNewSession(
   const newThreadId = uuidv4();
   const nextNode = inputs.threadState.next[0] ?? START;
 
+  const threadPhase =
+    inputs.threadConfig?.configurable?.phase ??
+    (inputs.threadConfig as
+      | (GraphConfig & {
+          metadata?: { configurable?: { phase?: InteractionPhase } };
+        })
+      | undefined)?.metadata?.configurable?.phase ??
+    (inputs.threadState.metadata as
+      | { configurable?: { phase?: InteractionPhase } }
+      | undefined)?.configurable?.phase;
+
+  const configurable = {
+    ...getCustomConfigurableFields(inputs.threadConfig),
+    ...(inputs.graphId === MANAGER_GRAPH_ID && threadPhase
+      ? { phase: threadPhase }
+      : {}),
+  } satisfies GraphConfig["configurable"];
+
   const run = await client.runs.create(newThreadId, inputs.graphId, {
     command: {
       update: inputs.threadState.values,
@@ -30,7 +53,7 @@ export async function createNewSession(
     streamResumable: true,
     config: {
       recursion_limit: 400,
-      configurable: getCustomConfigurableFields(inputs.threadConfig),
+      configurable,
     },
   });
   return {
