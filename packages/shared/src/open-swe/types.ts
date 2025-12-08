@@ -656,6 +656,19 @@ export const GraphConfigurationMetadata: {
       type: "hidden",
     },
   },
+  phase: {
+    x_open_swe_ui_config: {
+      type: "select",
+      default: "design",
+      description:
+        "Current interaction phase for routing messages in the manager graph.",
+      options: [
+        { label: "Design", value: "design" },
+        { label: "Planner", value: "planner" },
+        { label: "Programmer", value: "programmer" },
+      ],
+    },
+  },
 };
 
 export const GraphConfiguration = z.object({
@@ -677,6 +690,12 @@ export const GraphConfiguration = z.object({
    */
   run_id: withLangGraph(z.string().optional(), {
     metadata: GraphConfigurationMetadata.run_id,
+  }),
+  /**
+   * Current interaction phase.
+   */
+  phase: withLangGraph(z.enum(["design", "planner", "programmer"]).optional(), {
+    metadata: GraphConfigurationMetadata.phase,
   }),
   /**
    * The maximum number of context gathering actions to take during planning.
@@ -923,18 +942,11 @@ export const GraphConfiguration = z.object({
   }),
 });
 
-export interface GraphConfig
-  extends LangGraphRunnableConfig<
-    z.infer<typeof GraphConfiguration> & {
-      thread_id: string;
-      assistant_id: string;
-    }
-  > {
-  configurable?: {
-    phase?: InteractionPhase;
-    [key: string]: unknown;
-  };
-}
+export type GraphConfig = LangGraphRunnableConfig<
+  z.infer<typeof GraphConfiguration> & {
+    assistant_id?: string;
+  }
+>;
 
 export interface AgentSession {
   threadId: string;
