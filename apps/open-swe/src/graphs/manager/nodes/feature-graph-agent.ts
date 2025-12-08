@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { Command, END } from "@langchain/langgraph";
 import { GraphConfig } from "@openswe/shared/open-swe/types";
 import {
@@ -22,8 +23,9 @@ import {
   createFeatureNode,
   persistFeatureGraph,
 } from "../utils/feature-graph-mutations.js";
-import { FeatureGraph } from "@openswe/shared/feature-graph";
+import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
 import { createLogger, LogLevel } from "../../../utils/logger.js";
+import { FEATURE_GRAPH_RELATIVE_PATH } from "../utils/feature-graph-path.js";
 
 const logger = createLogger(LogLevel.INFO, "FeatureGraphAgent");
 
@@ -81,6 +83,36 @@ const replySchema = z.object({
 const ensureProposalState = (
   state: FeatureProposalState | undefined,
 ): FeatureProposalState => state ?? { proposals: [] };
+
+const initializeFeatureGraph = async (
+  workspacePath: string | undefined,
+): Promise<FeatureGraph | undefined> => {
+  if (!workspacePath) return undefined;
+
+  const graphPath = path.join(workspacePath, FEATURE_GRAPH_RELATIVE_PATH);
+
+  try {
+    const data = await loadFeatureGraph(graphPath);
+    logger.info("Loaded feature graph from disk", { graphPath });
+    return new FeatureGraph(data);
+  } catch (error) {
+    logger.warn("Falling back to an empty feature graph", {
+      graphPath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    const emptyGraph = new FeatureGraph({
+      version: 1,
+      nodes: new Map(),
+      edges: [],
+      artifacts: [],
+    });
+
+    await persistFeatureGraph(emptyGraph, workspacePath);
+
+    return emptyGraph;
+  }
+};
 
 const formatProposals = (state: FeatureProposalState): string => {
   if (!state.proposals.length) {
@@ -215,8 +247,15 @@ export async function featureGraphAgent(
       switch (toolCall.name) {
         case "create_feature": {
           const args = toolCall.args as z.infer<typeof createFeatureSchema>;
+
           if (!updatedGraph) {
-            throw new Error("No feature graph available to create a feature.");
+            updatedGraph = await initializeFeatureGraph(state.workspacePath);
+
+            if (!updatedGraph) {
+              throw new Error(
+                "Workspace path is not set; cannot initialize feature graph.",
+              );
+            }
           }
 
           updatedGraph = await createFeatureNode(
@@ -254,11 +293,24 @@ export async function featureGraphAgent(
             status: proposal.status,
           });
 
+          let creationSummary: string | undefined;
+
+          if (!updatedGraph) {
+            updatedGraph = await initializeFeatureGraph(state.workspacePath);
+          }
+
           if (updatedGraph) {
             if (!updatedGraph.hasFeature(args.featureId)) {
-              throw new Error(
-                `Feature ${args.featureId} does not exist; create it before proposing changes.`,
+              updatedGraph = await createFeatureNode(
+                updatedGraph,
+                {
+                  id: args.featureId,
+                  name: args.featureId,
+                  summary: args.summary,
+                },
+                state.workspacePath,
               );
+              creationSummary = `Initialized ${args.featureId} in the feature graph.`;
             }
 
             updatedGraph = applyFeatureStatus(
@@ -275,9 +327,13 @@ export async function featureGraphAgent(
             });
           }
 
-          const response =
+          const response = [
+            creationSummary,
             args.response ||
-            `Proposed update for ${args.featureId}. Awaiting your approval.`;
+              `Proposed update for ${args.featureId}. Awaiting your approval.`,
+          ]
+            .filter(Boolean)
+            .join(" ");
           toolMessages.push(recordAction(toolCall.name, toolCallId, response));
           userFacingSummaries.push(response);
           break;
