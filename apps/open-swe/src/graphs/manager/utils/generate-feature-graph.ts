@@ -1,7 +1,10 @@
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { FeatureGraph, loadFeatureGraph } from "@openswe/shared/feature-graph";
+import {
+  listFeaturesFromGraph,
+  loadFeatureGraph,
+} from "@openswe/shared/feature-graph";
 import { FeatureGraphData } from "@openswe/shared/feature-graph/loader";
 import {
   FeatureGraphFile,
@@ -63,7 +66,6 @@ type WorkspaceContext = {
 type GenerationResult = {
   graphData: FeatureGraphData;
   graphFile: FeatureGraphFile;
-  featureGraph: FeatureGraph;
   activeFeatureIds: string[];
 };
 
@@ -212,8 +214,9 @@ async function loadExistingGraph(graphPath: string): Promise<GenerationResult | 
   }
 
   const graphData = await loadFeatureGraph(graphPath);
-  const featureGraph = new FeatureGraph(graphData);
-  const activeFeatureIds = featureGraph.listFeatures().map((node) => node.id);
+  const activeFeatureIds = listFeaturesFromGraph(graphData, {
+    activeFeatureIds: graphData.nodes.keys(),
+  }).map((node) => node.id);
   const graphFile: FeatureGraphFile = {
     version: graphData.version,
     nodes: Array.from(graphData.nodes.values()),
@@ -226,7 +229,7 @@ async function loadExistingGraph(graphPath: string): Promise<GenerationResult | 
     featureCount: activeFeatureIds.length,
   });
 
-  return { graphData, graphFile, featureGraph, activeFeatureIds };
+  return { graphData, graphFile, activeFeatureIds };
 }
 
 export async function generateFeatureGraphForWorkspace({
@@ -291,8 +294,9 @@ export async function generateFeatureGraphForWorkspace({
   });
 
   const graphData = await loadFeatureGraph(graphPath);
-  const featureGraph = new FeatureGraph(graphData);
-  const activeFeatureIds = featureGraph.listFeatures().map((node) => node.id);
+  const activeFeatureIds = listFeaturesFromGraph(graphData, {
+    activeFeatureIds: graphData.nodes.keys(),
+  }).map((node) => node.id);
 
   logger.info("Generated feature graph", {
     workspacePath,
@@ -300,5 +304,5 @@ export async function generateFeatureGraphForWorkspace({
     featureCount: activeFeatureIds.length,
   });
 
-  return { graphData, graphFile, featureGraph, activeFeatureIds };
+  return { graphData, graphFile, activeFeatureIds };
 }
