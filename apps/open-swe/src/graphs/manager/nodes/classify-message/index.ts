@@ -62,10 +62,13 @@ function getPhase(
 function isRealUserMessage(msg: BaseMessage): msg is HumanMessage {
   return (
     isHumanMessage(msg) &&
-    (msg.additional_kwargs?.requestSource === "open-swe" ||
+    ((msg.additional_kwargs?.requestSource === "open-swe" ||
       msg.additional_kwargs?.requestSource === "local-user" ||
       msg.additional_kwargs?.requestSource === "planner-tab" ||
-      msg.additional_kwargs?.requestSource === "programmer-tab")
+      msg.additional_kwargs?.requestSource === "programmer-tab") ||
+      (!msg.additional_kwargs?.requestSource &&
+        !msg.additional_kwargs?.issueId &&
+        !msg.additional_kwargs?.issueCommentId))
   );
 }
 
@@ -79,7 +82,15 @@ export async function classifyMessage(
   state: ManagerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
-  const userMessage = [...state.messages].reverse().find(isRealUserMessage);
+  const reversedMessages = [...state.messages].reverse();
+  const userMessage =
+    reversedMessages.find(isRealUserMessage) ??
+    reversedMessages.find(
+      (message): message is HumanMessage =>
+        isHumanMessage(message) &&
+        !message.additional_kwargs?.issueId &&
+        !message.additional_kwargs?.issueCommentId,
+    );
   if (!userMessage) {
     throw new Error("No human user message found.");
   }
