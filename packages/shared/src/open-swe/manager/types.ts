@@ -1,8 +1,19 @@
 import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
-import type { FeatureGraph } from "../../feature-graph/graph.js";
+import type { FeatureGraphJson } from "../../feature-graph/list-features.js";
 import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Object.prototype.toString.call(value) === "[object Object]";
+
+const normalizeJson = <T>(value: T): T =>
+  JSON.parse(JSON.stringify(value)) as T;
+
+const isIterable = (value: unknown): value is Iterable<unknown> =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as Iterable<unknown>)[Symbol.iterator] === "function";
 
 export const FeatureProposalSchema = z.object({
   proposalId: z.string(),
@@ -66,11 +77,43 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
   /**
    * Handle to the feature graph declared within the target workspace.
    */
-  featureGraph: z.custom<FeatureGraph>().optional(),
+  featureGraph: withLangGraph<
+    FeatureGraphJson | undefined,
+    FeatureGraphJson | undefined,
+    z.ZodType<FeatureGraphJson | undefined>
+  >(z.custom<FeatureGraphJson>((value) => isPlainObject(value)).optional(), {
+    reducer: {
+      schema: z.custom<FeatureGraphJson | undefined>((value) =>
+        value === undefined || isPlainObject(value),
+      ),
+      fn: (state, update) => {
+        if (!update) return state;
+        if (!isPlainObject(update)) return state;
+        return normalizeJson(update);
+      },
+    },
+  }),
   /**
    * Feature identifiers that should be considered active for the current run.
    */
-  activeFeatureIds: z.array(z.string()).optional(),
+  activeFeatureIds: withLangGraph(z.array(z.string()).optional(), {
+    reducer: {
+      schema: z.custom<Iterable<unknown> | undefined>(),
+      fn: (state, update) => {
+        if (update === undefined || update === null) return state;
+        if (!isIterable(update) || typeof update === "string") return state;
+
+        const normalized: string[] = [];
+        for (const value of update) {
+          if (typeof value === "string") {
+            normalized.push(value);
+          }
+        }
+
+        return normalized;
+      },
+    },
+  }),
   /**
    * Tracks whether the user has approved the active feature selection.
    */
