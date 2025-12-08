@@ -1,6 +1,10 @@
 import { describe, expect, it, beforeAll, beforeEach, jest } from "@jest/globals";
 import { END } from "@langchain/langgraph";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  HumanMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
 import { FeatureGraph } from "@openswe/shared/feature-graph";
 import { featureGraphFileSchema } from "@openswe/shared/feature-graph/types";
 import type { GraphConfig } from "@openswe/shared/open-swe/types";
@@ -16,6 +20,7 @@ const runsWaitMock: jest.MockedFunction<
 let featureGraphOrchestrator: typeof import(
   "../graphs/manager/nodes/feature-graph-orchestrator.js"
 )["featureGraphOrchestrator"];
+let featurePlannerSystemPrompt: string;
 
 const config = {
   configurable: { workspacePath: "/tmp/workspace" },
@@ -61,9 +66,13 @@ describe("featureGraphOrchestrator", () => {
         },
       })),
     }));
-    ({ featureGraphOrchestrator } = await import(
-      "../graphs/manager/nodes/feature-graph-orchestrator.js"
-    ));
+    const orchestratorModule = await import(
+      "../graphs/manager/nodes/feature-graph-orchestrator.js",
+    );
+    ({
+      featureGraphOrchestrator,
+      FEATURE_PLANNER_SYSTEM_PROMPT: featurePlannerSystemPrompt,
+    } = orchestratorModule);
   });
 
   beforeEach(() => {
@@ -111,5 +120,42 @@ describe("featureGraphOrchestrator", () => {
     expect(update?.activeFeatureIds).toEqual(["feature-auth"]);
     expect(update?.messages?.[0]).toBeInstanceOf(AIMessage);
     expect(command.goto).toContain(END);
+  });
+
+  it("prepends the planner contract system prompt to the conversation", async () => {
+    runsWaitMock.mockResolvedValueOnce({} as FeaturePlannerValues);
+
+    await featureGraphOrchestrator(createState(), config);
+
+    const plannerCall = runsWaitMock.mock.calls[0]?.[2] as
+      | { input?: Record<string, unknown> }
+      | undefined;
+    const messages = plannerCall?.input?.messages as unknown[];
+
+    expect(Array.isArray(messages)).toBe(true);
+    const [systemMessage] = messages as unknown[];
+    expect(systemMessage).toBeInstanceOf(SystemMessage);
+    expect((systemMessage as SystemMessage).content).toContain(
+      featurePlannerSystemPrompt,
+    );
+  });
+
+  it("shares tool deferral and artifact guidance with the planner", async () => {
+    runsWaitMock.mockResolvedValueOnce({} as FeaturePlannerValues);
+
+    await featureGraphOrchestrator(createState(), config);
+
+    const plannerCall = runsWaitMock.mock.calls[0]?.[2] as
+      | { input?: Record<string, unknown> }
+      | undefined;
+
+    expect(plannerCall?.input?.toolingContract).toEqual(
+      expect.objectContaining({
+        requireStableFeatureId: true,
+        requireArtifacts: true,
+        artifactGuidance: expect.stringContaining("artifacts"),
+        deferToolCallsUntilClarified: true,
+      }),
+    );
   });
 });

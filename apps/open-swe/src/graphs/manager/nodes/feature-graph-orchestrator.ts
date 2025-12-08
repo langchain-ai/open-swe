@@ -32,6 +32,20 @@ const FEATURE_PLANNER_API_URL =
   process.env.OPEN_SWE_FEATURE_PLANNER_URL ??
   "http://localhost/openswe-feature-planner";
 
+export const FEATURE_PLANNER_SYSTEM_PROMPT = `You are the Open SWE feature planning collaborator. Follow this contract:
+
+- Clarify requirements through multiple turns before proposing feature graph changes. Ask targeted questions about scale/size, hardware constraints, data sources and availability, latency/service expectations, and evaluation/metrics.
+- Do not call create_feature or propose_feature_change until the user has answered your clarifying questions and confirmed the direction.
+- Every tool payload must include a stable feature_id, a concise name, a clear description of scope, and artifacts that describe expected outputs (docs, diagrams, metrics, or other deliverables). Avoid renaming feature_id values once chosen.
+- After each decision, summarize the current understanding and confirm with the user before proceeding.
+- Avoid monologue proposals. Before suggesting even small increments, ask 1–3 short questions to validate alignment.
+
+Example dialog:
+User: "Add anomaly detection"
+Assistant: "Thanks for the goal! A couple of quick scoping questions before I touch the graph: (1) What data source and volume should we monitor? (2) What latency/SLA and hardware budget should we assume? (3) How will we measure success (e.g., precision/recall thresholds)?"
+User: "Kafka stream ~50k events/min, GPU ok, p99 < 500ms, measure precision/recall"
+Assistant: "Great. I'll avoid create_feature or propose_feature_change until you confirm. Tentative plan: feature_id 'feature-anomaly-detection' with a design doc + latency/metrics artifacts. Should I proceed?"`;
+
 const logger = createLogger(LogLevel.INFO, "FeatureGraphOrchestrator");
 
 const normalizeFeatureIds = (
@@ -190,6 +204,32 @@ export type FeaturePlannerValues = {
   response?: unknown;
 };
 
+const buildPlannerInput = (
+  state: ManagerGraphState,
+  userMessage: HumanMessage,
+) => {
+  const plannerSystemMessage = new SystemMessage({
+    content: FEATURE_PLANNER_SYSTEM_PROMPT,
+  });
+
+  return {
+    input: {
+      messages: [plannerSystemMessage, ...state.messages],
+      featureGraph: featureGraphToFile(state.featureGraph),
+      activeFeatureIds: state.activeFeatureIds,
+      workspacePath: state.workspacePath,
+      userMessage: getMessageContentString(userMessage.content),
+      toolingContract: {
+        requireStableFeatureId: true,
+        requireArtifacts: true,
+        artifactGuidance:
+          "Include artifacts (docs, diagrams, metrics, or other deliverables) with each feature update and keep feature_id stable.",
+        deferToolCallsUntilClarified: true,
+      },
+    },
+  } as const;
+};
+
 export async function featureGraphOrchestrator(
   state: ManagerGraphState,
   config: GraphConfig,
@@ -205,17 +245,13 @@ export async function featureGraphOrchestrator(
 
   let plannerValues: FeaturePlannerValues | null = null;
   try {
+    const plannerInput = buildPlannerInput(state, userMessage);
+
     const plannerResult = await plannerClient.runs.wait(
       null,
       FEATURE_PLANNER_AGENT_ID,
       {
-        input: {
-          messages: state.messages,
-          featureGraph: featureGraphToFile(state.featureGraph),
-          activeFeatureIds: state.activeFeatureIds,
-          workspacePath: state.workspacePath,
-          userMessage: getMessageContentString(userMessage.content),
-        },
+        ...plannerInput,
         config: {
           configurable: {
             ...(config.configurable ?? {}),
