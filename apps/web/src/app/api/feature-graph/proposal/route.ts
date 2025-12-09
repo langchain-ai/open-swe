@@ -3,22 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 
 function resolveApiUrl(): string {
-  const apiUrl =
-    process.env.LANGGRAPH_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "";
-
-  if (!apiUrl) {
-    throw new Error(
-      "LangGraph API URL is not configured. Set LANGGRAPH_API_URL or NEXT_PUBLIC_API_URL.",
-    );
-  }
-
-  try {
-    return new URL(apiUrl).toString();
-  } catch (error) {
-    throw new Error(
-      `Invalid LangGraph API URL: ${apiUrl}. ${(error as Error)?.message ?? ""}`.trim(),
-    );
-  }
+  return (
+    process.env.LANGGRAPH_API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:2024"
+  );
 }
 
 function resolveThreadId(value: unknown): string | null {
@@ -103,28 +92,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       headers[LOCAL_MODE_HEADER] = "true";
     }
 
-    let upstream: Response;
-
-    try {
-      upstream = await fetch(`${resolveApiUrl()}/feature-graph/proposal`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          thread_id: threadId,
-          feature_id: featureId,
-          proposal_id: proposalId,
-          action,
-          rationale,
-        }),
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? `LangGraph backend is unreachable: ${error.message}`
-          : "LangGraph backend is unreachable";
-
-      return NextResponse.json({ error: message }, { status: 503 });
-    }
+    const upstream = await fetch(`${resolveApiUrl()}/feature-graph/proposal`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        thread_id: threadId,
+        feature_id: featureId,
+        proposal_id: proposalId,
+        action,
+        rationale,
+      }),
+    });
 
     const rawBody = await upstream.text();
     let payload: unknown = null;
