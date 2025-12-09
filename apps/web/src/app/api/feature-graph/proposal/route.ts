@@ -2,27 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { LOCAL_MODE_HEADER } from "@openswe/shared/constants";
 
-class ApiConfigError extends Error {}
-class ServiceUnavailableError extends Error {}
-
 function resolveApiUrl(): string {
-  const apiUrl =
-    process.env.LANGGRAPH_API_URL?.trim() ??
-    process.env.NEXT_PUBLIC_API_URL?.trim();
-
-  if (!apiUrl) {
-    throw new ApiConfigError(
-      "LangGraph API URL not configured. Set LANGGRAPH_API_URL or NEXT_PUBLIC_API_URL.",
-    );
-  }
-
-  try {
-    new URL(apiUrl);
-  } catch {
-    throw new ApiConfigError(`Invalid LangGraph API URL: ${apiUrl}`);
-  }
-
-  return apiUrl;
+  return (
+    process.env.LANGGRAPH_API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:2024"
+  );
 }
 
 function resolveThreadId(value: unknown): string | null {
@@ -117,12 +102,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         action,
         rationale,
       }),
-    }).catch((error) => {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Failed to reach LangGraph API";
-      throw new ServiceUnavailableError(message);
     });
 
     const rawBody = await upstream.text();
@@ -134,13 +113,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       payload = null;
     }
 
-    if (!upstream.ok) {
-      const errorPayload = payload as { error?: unknown } | null;
-      const message =
-        (errorPayload && typeof errorPayload.error === "string"
-          ? errorPayload.error
-          : rawBody || upstream.statusText || "Failed to process proposal") ??
-        "Failed to process proposal";
+      if (!upstream.ok) {
+        const errorPayload = payload as { error?: unknown } | null;
+        const message =
+          (errorPayload && typeof errorPayload.error === "string"
+            ? errorPayload.error
+            : rawBody || upstream.statusText || "Failed to process proposal") ??
+          "Failed to process proposal";
 
       return NextResponse.json(
         {
@@ -156,14 +135,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(payload ?? {});
   } catch (error) {
-    if (error instanceof ApiConfigError) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    if (error instanceof ServiceUnavailableError) {
-      return NextResponse.json({ error: error.message }, { status: 503 });
-    }
-
     const message =
       error instanceof Error ? error.message : "Failed to process proposal";
     return NextResponse.json({ error: message }, { status: 500 });

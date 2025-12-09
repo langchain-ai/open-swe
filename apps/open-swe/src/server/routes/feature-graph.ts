@@ -14,7 +14,6 @@ import type {
 } from "@openswe/shared/feature-graph/types";
 import {
   LOCAL_MODE_HEADER,
-  MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
 } from "@openswe/shared/constants";
@@ -38,72 +37,6 @@ import {
 import { createLangGraphClient } from "../../utils/langgraph-client.js";
 
 const logger = createLogger(LogLevel.INFO, "FeatureGraphRoute");
-
-async function startFeatureGraphGeneration(client: ReturnType<typeof createLangGraphClient>, threadId: string) {
-  await client.runs.create(threadId, MANAGER_GRAPH_ID, {
-    input: {
-      action: "generate_feature_graph",
-      messages: [
-        {
-          role: "user",
-          content: "Requesting feature graph generation",
-          additional_kwargs: {
-            phase: "design",
-            requestSource: "open-swe",
-          },
-        },
-      ],
-    },
-    config: { configurable: { phase: "design" } },
-    ifNotExists: "create",
-  });
-}
-
-async function pollForFeatureGraph({
-  client,
-  threadId,
-  attempts = 5,
-  delayMs = 1000,
-}: {
-  client: ReturnType<typeof createLangGraphClient>;
-  threadId: string;
-  attempts?: number;
-  delayMs?: number;
-}): Promise<{
-  featureGraph: FeatureGraph | null;
-  managerState: ManagerGraphState | null;
-  metadata: { configurable?: Record<string, unknown> } | undefined;
-}> {
-  let latestState: ManagerGraphState | null = null;
-  let latestMetadata: { configurable?: Record<string, unknown> } | undefined;
-
-  for (let index = 0; index < attempts; index += 1) {
-    const threadState = await client.threads
-      .getState<ManagerGraphState>(threadId)
-      .catch((error) => {
-        logger.error("Failed to poll manager state for feature graph", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return null;
-      });
-
-    const featureGraph = coerceFeatureGraph(threadState?.values?.featureGraph);
-    if (threadState?.values && featureGraph) {
-      return {
-        featureGraph,
-        managerState: threadState.values,
-        metadata: threadState.metadata,
-      };
-    }
-
-    latestState = threadState?.values ?? latestState;
-    latestMetadata = threadState?.metadata ?? latestMetadata;
-
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
-  return { featureGraph: null, managerState: latestState, metadata: latestMetadata };
-}
 
 type GenerateRequestBody = {
   workspaceAbsPath?: unknown;
@@ -239,52 +172,21 @@ export function registerFeatureGraphRoute(app: Hono) {
       );
     }
 
-    let managerState = managerThreadState.values;
-    let managerMetadata = managerThreadState.metadata;
-    let featureGraph = coerceFeatureGraph(managerState.featureGraph);
-
+    const featureGraph = coerceFeatureGraph(managerThreadState.values.featureGraph);
     if (!featureGraph) {
-      logger.info("Feature graph missing; triggering generation run", { threadId });
-      await startFeatureGraphGeneration(client, threadId).catch((error) => {
-        logger.error("Failed to start feature graph generation", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return null;
-      });
-
-      const refreshedState = await pollForFeatureGraph({ client, threadId });
-      featureGraph = refreshedState.featureGraph;
-      managerState = refreshedState.managerState ?? managerState;
-      managerMetadata = refreshedState.metadata ?? managerMetadata;
-
-      if (!featureGraph || !managerState) {
-        return ctx.json(
-          { error: "Feature graph could not be generated for thread" },
-          500 as ContentfulStatusCode,
-        );
-      }
+      return ctx.json(
+        { error: "Feature graph not available for thread" },
+        404 as ContentfulStatusCode,
+      );
     }
 
     const { graph: reconciledGraph, dependencyMap } =
       reconcileFeatureGraphDependencies(featureGraph);
 
-    let selectedFeature = reconciledGraph.getFeature(featureId);
-    if (!selectedFeature) {
-      const refreshedState = await pollForFeatureGraph({ client, threadId });
-      if (refreshedState.featureGraph && refreshedState.managerState) {
-        managerState = refreshedState.managerState;
-        managerMetadata = refreshedState.metadata;
-        ({ graph: reconciledGraph, dependencyMap } =
-          reconcileFeatureGraphDependencies(refreshedState.featureGraph));
-        selectedFeature = reconciledGraph.getFeature(featureId);
-      }
-    }
-
+    const selectedFeature = reconciledGraph.getFeature(featureId);
     if (!selectedFeature) {
       return ctx.json(
-        {
-          error: `Feature ${featureId} not found in feature graph after reconciliation`,
-        },
+        { error: "Feature not found in manager state" },
         404 as ContentfulStatusCode,
       );
     }
@@ -294,12 +196,12 @@ export function registerFeatureGraphRoute(app: Hono) {
       featureId,
     );
 
-    const existingPlannerSession = managerState.plannerSession;
+    const existingPlannerSession = managerThreadState.values.plannerSession;
     const plannerThreadId =
       existingPlannerSession?.threadId ?? randomUUID();
 
     const plannerRunInput = buildPlannerRunInput({
-      managerState,
+      managerState: managerThreadState.values,
       featureId,
       selectedFeature,
       featureDependencies,
@@ -325,7 +227,7 @@ export function registerFeatureGraphRoute(app: Hono) {
       await client.threads
         .updateState<ManagerGraphState>(threadId, {
           values: {
-            ...managerState,
+            ...managerThreadState.values,
             ...updatedManagerState,
           },
           asNode: "start-planner",
@@ -339,7 +241,7 @@ export function registerFeatureGraphRoute(app: Hono) {
       await client.threads
         .patchState(threadId, {
           configurable: {
-            ...(managerMetadata?.configurable ?? {}),
+            ...(managerThreadState.metadata?.configurable ?? {}),
             ...runIdentifiers,
           },
         })
@@ -358,12 +260,12 @@ export function registerFeatureGraphRoute(app: Hono) {
     let run;
     const plannerRunConfigurable = {
       ...getCustomConfigurableFields({
-        configurable: (managerMetadata?.configurable ?? {}) as
+        configurable: (managerThreadState.metadata?.configurable ?? {}) as
           | GraphConfig["configurable"]
           | undefined,
       } as GraphConfig),
-      ...(managerState.workspacePath
-        ? { workspacePath: managerState.workspacePath }
+      ...(managerThreadState.values.workspacePath
+        ? { workspacePath: managerThreadState.values.workspacePath }
         : {}),
       ...(process.env.OPEN_SWE_LOCAL_MODE === "true"
         ? { [LOCAL_MODE_HEADER]: "true" }
@@ -416,7 +318,7 @@ export function registerFeatureGraphRoute(app: Hono) {
     await client.threads
       .updateState<ManagerGraphState>(threadId, {
         values: {
-          ...managerState,
+          ...managerThreadState.values,
           ...updatedManagerState,
         },
         asNode: "start-planner",
@@ -430,7 +332,7 @@ export function registerFeatureGraphRoute(app: Hono) {
     await client.threads
       .patchState(threadId, {
         configurable: {
-          ...(managerMetadata?.configurable ?? {}),
+          ...(managerThreadState.metadata?.configurable ?? {}),
           ...runIdentifiers,
         },
       })
