@@ -245,6 +245,15 @@ export async function classifyMessage(
     internal_reasoning?: string;
   };
 
+  const safeResponse = new AIMessage({
+    content: toolCallArgs.response ?? "",
+    additional_kwargs: {
+      route: toolCallArgs.route,
+      internal_reasoning: toolCallArgs.internal_reasoning,
+      phase,
+    },
+  });
+
   logger.info("classifyMessage route", {
     route: toolCallArgs.route,
     phase,
@@ -287,7 +296,7 @@ export async function classifyMessage(
 
   if (toolCallArgs.route === "feature_graph_orchestrator") {
     const commandUpdate: ManagerGraphUpdate = withApproval({
-      messages: [response],
+      messages: [safeResponse],
     });
 
     if (phase === "design") {
@@ -306,7 +315,7 @@ export async function classifyMessage(
   if (toolCallArgs.route === "no_op") {
     // If it's a no_op, just add the message to the state and return.
     const commandUpdate: ManagerGraphUpdate = withApproval({
-      messages: [response],
+      messages: [safeResponse],
     });
     return new Command({
       update: commandUpdate,
@@ -317,7 +326,7 @@ export async function classifyMessage(
   if ((toolCallArgs.route as string) === "create_new_issue") {
     // Route to node which kicks off new manager run, passing in the full conversation history.
     const commandUpdate: ManagerGraphUpdate = withApproval({
-      messages: [response],
+      messages: [safeResponse],
     });
     return new Command({
       update: commandUpdate,
@@ -327,7 +336,7 @@ export async function classifyMessage(
 
   if (isLocalMode(config)) {
     // In local mode, just route to planner without issue creation
-    const newMessages: BaseMessage[] = [response];
+    const newMessages: BaseMessage[] = [safeResponse];
     const commandUpdate: ManagerGraphUpdate = withApproval({
       messages: newMessages,
     });
@@ -355,7 +364,7 @@ export async function classifyMessage(
     }
 
     const commandUpdate: ManagerGraphUpdate = withApproval({
-      messages: [response],
+      messages: [safeResponse],
     });
     if (
       toolCallArgs.route === "start_planner" ||
@@ -389,7 +398,7 @@ export async function classifyMessage(
   const issueService = getIssueService(config);
   let issueId = state.issueId;
 
-  const newMessages: BaseMessage[] = [response];
+  const newMessages: BaseMessage[] = [safeResponse];
 
   // If it's not a no_op, ensure there is an issue with the user's request.
   if (!issueId) {
