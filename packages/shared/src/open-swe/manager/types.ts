@@ -1,19 +1,8 @@
 import { MessagesZodState } from "@langchain/langgraph";
 import { TargetRepository, TaskPlan, AgentSession } from "../types.js";
-import type { FeatureGraphJson } from "../../feature-graph/list-features.js";
+import { FeatureGraph } from "../../feature-graph/graph.js";
 import { z } from "zod";
 import { withLangGraph } from "@langchain/langgraph/zod";
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  Boolean(
-    value &&
-      typeof value === "object" &&
-      (Object.getPrototypeOf(value) === Object.prototype ||
-        Object.getPrototypeOf(value) === null),
-  );
-
-const normalizeJson = <T>(value: T): T =>
-  JSON.parse(JSON.stringify(value)) as T;
 
 const isIterable = (value: unknown): value is Iterable<unknown> =>
   typeof value === "object" &&
@@ -83,18 +72,18 @@ export const ManagerGraphStateObj = MessagesZodState.extend({
    * Handle to the feature graph declared within the target workspace.
    */
   featureGraph: withLangGraph<
-    FeatureGraphJson | undefined,
-    FeatureGraphJson | undefined,
-    z.ZodType<FeatureGraphJson | undefined>
-  >(z.custom<FeatureGraphJson>((value) => isPlainObject(value)).optional(), {
+    FeatureGraph | undefined,
+    FeatureGraph | undefined,
+    z.ZodType<FeatureGraph | undefined>
+  >(z.custom<FeatureGraph>((value) => value instanceof FeatureGraph).optional(), {
     reducer: {
-      schema: z.custom<FeatureGraphJson | undefined>((value) =>
-        value === undefined || isPlainObject(value),
+      schema: z.custom<FeatureGraph | undefined>((value) =>
+        value === undefined || value instanceof FeatureGraph,
       ),
       fn: (state, update) => {
         if (!update) return state;
-        if (!isPlainObject(update)) return state;
-        return normalizeJson(update);
+        if (!(update instanceof FeatureGraph)) return state;
+        return update;
       },
     },
   }),

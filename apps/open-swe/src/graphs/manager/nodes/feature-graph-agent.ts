@@ -175,9 +175,11 @@ const normalizeFeatureIds = (
 };
 
 const deserializeFeatureGraph = (
-  graph: FeatureGraphJson | undefined,
+  graph: FeatureGraph | FeatureGraphJson | undefined,
 ): FeatureGraph | undefined => {
   if (!graph) return undefined;
+
+  if (graph instanceof FeatureGraph) return graph;
 
   const nodes = new Map<string, FeatureNode>();
 
@@ -585,7 +587,7 @@ export async function featureGraphAgent(
   const updates: ManagerGraphUpdate = {
     messages: [aiMessage, ...toolMessages, ...(responseMessage ? [responseMessage] : [])],
     featureProposals: updatedProposals,
-    ...(updatedGraph ? { featureGraph: updatedGraph.toJSON() } : {}),
+    ...(updatedGraph ? { featureGraph: updatedGraph } : {}),
     ...(updatedActiveFeatureIds
       ? { activeFeatureIds: updatedActiveFeatureIds }
       : {}),
