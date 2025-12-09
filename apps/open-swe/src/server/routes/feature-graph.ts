@@ -225,6 +225,14 @@ export function registerFeatureGraphRoute(app: Hono) {
             ...managerThreadState.values,
             ...updatedManagerState,
           },
+          metadata: {
+            ...managerThreadState.metadata,
+            configurable: {
+              ...(managerThreadState.metadata?.configurable ?? {}),
+              run_id: existingPlannerSession.runId,
+              thread_id: plannerThreadId,
+            },
+          },
           asNode: "start-planner",
         })
         .catch((error) => {
@@ -283,6 +291,11 @@ export function registerFeatureGraphRoute(app: Hono) {
       );
     }
 
+    const runIdentifiers = {
+      run_id: run.run_id,
+      thread_id: plannerThreadId,
+    };
+
     const updatedManagerState: ManagerGraphUpdate = {
       plannerSession: {
         threadId: plannerThreadId,
@@ -297,6 +310,13 @@ export function registerFeatureGraphRoute(app: Hono) {
         values: {
           ...managerThreadState.values,
           ...updatedManagerState,
+        },
+        metadata: {
+          ...managerThreadState.metadata,
+          configurable: {
+            ...(managerThreadState.metadata?.configurable ?? {}),
+            ...runIdentifiers,
+          },
         },
         asNode: "start-planner",
       })
