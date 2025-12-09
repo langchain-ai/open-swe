@@ -10,27 +10,12 @@ import { mapFeatureGraphPayload } from "@/lib/feature-graph-payload";
 
 const logger = createLogger(LogLevel.INFO, "FeatureGraphGenerateRoute");
 
-class ApiConfigError extends Error {}
-class ServiceUnavailableError extends Error {}
-
 function resolveApiUrl(): string {
-  const apiUrl =
-    process.env.LANGGRAPH_API_URL?.trim() ??
-    process.env.NEXT_PUBLIC_API_URL?.trim();
-
-  if (!apiUrl) {
-    throw new ApiConfigError(
-      "LangGraph API URL not configured. Set LANGGRAPH_API_URL or NEXT_PUBLIC_API_URL.",
-    );
-  }
-
-  try {
-    new URL(apiUrl);
-  } catch {
-    throw new ApiConfigError(`Invalid LangGraph API URL: ${apiUrl}`);
-  }
-
-  return apiUrl;
+  return (
+    process.env.LANGGRAPH_API_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://localhost:2024"
+  );
 }
 
 function resolveThreadId(value: unknown): string | null {
@@ -86,12 +71,6 @@ async function requestGraphGeneration({
       prompt,
       configurable,
     }),
-  }).catch((error) => {
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : "Failed to reach LangGraph API";
-    throw new ServiceUnavailableError(message);
   });
 
   const rawBody = await response.text();
@@ -159,27 +138,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           : undefined,
     });
 
-    let managerThreadState: Awaited<ReturnType<typeof client.threads.getState<ManagerGraphState>>> | null =
-      null;
-    try {
-      managerThreadState = await client.threads.getState<ManagerGraphState>(threadId);
-    } catch (error) {
-      const status = (error as { status?: number })?.status;
-      const message =
-        status === 404
-          ? "Manager state not found for thread"
-          : `LangGraph backend unreachable: ${
-              (error as { message?: string })?.message ?? "Unknown error"
-            }`;
+    const managerState = await client.threads
+      .getState<ManagerGraphState>(threadId)
+      .catch((error) => {
+        const status = (error as { status?: number })?.status ?? 500;
+        logger.error("Failed to load manager state for feature graph", {
+          threadId,
+          status,
+          error,
+        });
 
-      if (status === 404) {
-        return NextResponse.json({ error: message }, { status: 404 });
-      }
+        const message =
+          status === 404
+            ? "Manager state not found for thread"
+            : "Failed to load manager state";
 
-      throw new ServiceUnavailableError(message);
+        return NextResponse.json({ error: message }, { status });
+      });
+
+    if (managerState instanceof NextResponse) {
+      return managerState;
     }
 
-    if (!managerThreadState?.values) {
+    if (!managerState?.values) {
       return NextResponse.json(
         { error: "Manager state not found for thread" },
         { status: 404 },
@@ -187,8 +168,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const workspaceAbsPath =
-      managerThreadState.values.workspaceAbsPath ??
-      managerThreadState.values.workspacePath;
+      managerState.values.workspaceAbsPath ?? managerState.values.workspacePath;
     if (!workspaceAbsPath) {
       return NextResponse.json(
         { error: "Workspace path unavailable for this thread" },
@@ -198,7 +178,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const configurableFields =
       getCustomConfigurableFields({
-        configurable: managerThreadState.metadata
+        configurable: managerState.metadata
           ?.configurable as GraphConfig["configurable"],
       } as GraphConfig) ?? {};
 
@@ -247,7 +227,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     await client.threads.updateState<ManagerGraphState>(threadId, {
       values: {
-        ...managerThreadState.values,
+        ...managerState.values,
         featureGraph: graph,
         activeFeatureIds,
       },
@@ -259,16 +239,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       activeFeatureIds,
     });
   } catch (error) {
-    if (error instanceof ApiConfigError) {
-      logger.error("Feature graph generation configuration error", { error });
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    if (error instanceof ServiceUnavailableError) {
-      logger.error("LangGraph backend unavailable for feature graph", { error });
-      return NextResponse.json({ error: error.message }, { status: 503 });
-    }
-
     const message =
       error instanceof Error
         ? error.message
