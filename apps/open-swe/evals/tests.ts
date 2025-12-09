@@ -1,6 +1,6 @@
-// TODO: Add ruff promise and the mypy promise to the tests.
 import { Sandbox } from "@daytonaio/sdk";
 import { createLogger, LogLevel } from "../src/utils/logger.js";
+import { TIMEOUT_SEC } from "@openswe/shared/constants";
 import {
   ExecOptions,
   RuffResult,
@@ -127,6 +127,79 @@ export const runMyPyTypeCheck = async (
       mypyScore: 0,
       error: error as Error,
       issues: [],
+    };
+  }
+};
+
+/**
+ * Run LangGraph evaluation script
+ */
+export const runLangGraphEvaluation = async (
+  sandbox: Sandbox,
+  args: ExecOptions,
+): Promise<{ langGraphScore: number; explanation: string; error?: Error }> => {
+  logger.info("Running LangGraph evaluation...");
+
+  try {
+    const execution = await sandbox.process.executeCommand(
+      args.command,
+      args.workingDir,
+      args.env,
+      TIMEOUT_SEC * 3,
+    );
+
+    logger.info("LangGraph evaluation execution completed", {
+      exitCode: execution.exitCode,
+      outputLength: execution.result?.length || 0,
+      output:
+        execution.result?.substring(0, 1000) +
+        (execution.result?.length > 1000 ? "..." : ""),
+    });
+
+    if (execution.exitCode === 0) {
+      const outputLines = execution.result.trim().split("\n");
+      const scoreStr = outputLines[0];
+      const explanation = outputLines.slice(1).join(" ");
+
+      const score = parseFloat(scoreStr);
+      if (isNaN(score)) {
+        logger.warn("Could not parse LangGraph evaluation score", {
+          output: execution.result,
+        });
+        return {
+          langGraphScore: 0,
+          explanation: "Failed to parse evaluation score",
+          error: new Error(`Invalid score format: ${scoreStr}`),
+        };
+      }
+
+      logger.info("LangGraph evaluation completed successfully", {
+        score,
+        explanation,
+      });
+
+      return {
+        langGraphScore: score,
+        explanation,
+      };
+    } else {
+      logger.error("LangGraph evaluation failed", {
+        exitCode: execution.exitCode,
+        output: execution.result,
+      });
+
+      return {
+        langGraphScore: 0,
+        explanation: "LangGraph evaluation failed",
+        error: new Error(execution.result || "Unknown evaluation error"),
+      };
+    }
+  } catch (error) {
+    logger.error("Error running LangGraph evaluation", { error });
+    return {
+      langGraphScore: 0,
+      explanation: "Error running LangGraph evaluation",
+      error: error as Error,
     };
   }
 };
