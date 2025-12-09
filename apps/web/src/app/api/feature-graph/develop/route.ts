@@ -140,6 +140,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     };
 
     if (existingPlannerSession?.threadId && existingPlannerSession?.runId) {
+      const runIdentifiers = {
+        run_id: existingPlannerSession.runId,
+        thread_id: plannerThreadId,
+      } as const;
+
       const updatedManagerState: ManagerGraphUpdate = {
         plannerSession: {
           threadId: plannerThreadId,
@@ -157,34 +162,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         asNode: "start-planner",
       });
 
+      await client.threads.patchState(threadId, {
+        configurable: {
+          ...(managerThreadState.metadata?.configurable ?? {}),
+          ...runIdentifiers,
+        },
+      });
+
       return NextResponse.json({
         planner_thread_id: plannerThreadId,
         run_id: existingPlannerSession.runId,
       });
     }
 
+    const plannerRunConfigurable = {
+      ...getCustomConfigurableFields({
+        configurable: (managerThreadState.metadata?.configurable ?? {}) as
+          | GraphConfig["configurable"]
+          | undefined,
+      } as GraphConfig),
+      ...(managerState.workspacePath
+        ? { workspacePath: managerState.workspacePath }
+        : {}),
+      ...(process.env.OPEN_SWE_LOCAL_MODE === "true"
+        ? { [LOCAL_MODE_HEADER]: "true" }
+        : {}),
+      thread_id: plannerThreadId,
+    } satisfies Record<string, unknown>;
+
     const run = await client.runs.create(plannerThreadId, PLANNER_GRAPH_ID, {
       input: plannerRunInput,
       config: {
         recursion_limit: 400,
-        configurable: {
-          ...getCustomConfigurableFields({
-            configurable: (managerThreadState.metadata?.configurable ?? {}) as
-              | GraphConfig["configurable"]
-              | undefined,
-          } as GraphConfig),
-          ...(managerState.workspacePath
-            ? { workspacePath: managerState.workspacePath }
-            : {}),
-          ...(process.env.OPEN_SWE_LOCAL_MODE === "true"
-            ? { [LOCAL_MODE_HEADER]: "true" }
-            : {}),
-        },
+        configurable: plannerRunConfigurable,
       },
       ifNotExists: "create",
       streamResumable: true,
       streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
     });
+
+    const runIdentifiers = {
+      run_id: run.run_id,
+      thread_id: plannerThreadId,
+    } as const;
 
     const updatedManagerState: ManagerGraphUpdate = {
       plannerSession: {
@@ -201,6 +221,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ...updatedManagerState,
       },
       asNode: "start-planner",
+    });
+
+    await client.threads.patchState(threadId, {
+      configurable: {
+        ...(managerThreadState.metadata?.configurable ?? {}),
+        ...runIdentifiers,
+      },
     });
 
     return NextResponse.json({
