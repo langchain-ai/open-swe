@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Client, StreamMode } from "@langchain/langgraph-sdk";
 import {
   LOCAL_MODE_HEADER,
+  MANAGER_GRAPH_ID,
   OPEN_SWE_STREAM_MODE,
   PLANNER_GRAPH_ID,
 } from "@openswe/shared/constants";
@@ -21,12 +22,32 @@ import type { GraphConfig } from "@openswe/shared/open-swe/types";
 import { getCustomConfigurableFields } from "@openswe/shared/open-swe/utils/config";
 import { coerceFeatureGraph } from "@/lib/coerce-feature-graph";
 
+type ResolvedFeatureGraph = {
+  featureGraph: FeatureGraph;
+  managerState: ManagerGraphState;
+};
+
+class ApiConfigError extends Error {}
+class ServiceUnavailableError extends Error {}
+
 function resolveApiUrl(): string {
-  return (
-    process.env.LANGGRAPH_API_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:2024"
-  );
+  const apiUrl =
+    process.env.LANGGRAPH_API_URL?.trim() ??
+    process.env.NEXT_PUBLIC_API_URL?.trim();
+
+  if (!apiUrl) {
+    throw new ApiConfigError(
+      "LangGraph API URL not configured. Set LANGGRAPH_API_URL or NEXT_PUBLIC_API_URL.",
+    );
+  }
+
+  try {
+    new URL(apiUrl);
+  } catch {
+    throw new ApiConfigError(`Invalid LangGraph API URL: ${apiUrl}`);
+  }
+
+  return apiUrl;
 }
 
 function resolveThreadId(value: unknown): string | null {
@@ -47,6 +68,98 @@ function getFeatureDependencies(graph: FeatureGraph, featureId: string): Feature
   }
 
   return dependencies;
+}
+
+async function startFeatureGraphGeneration({
+  client,
+  threadId,
+}: {
+  client: Client;
+  threadId: string;
+}) {
+  await client.runs.create(threadId, MANAGER_GRAPH_ID, {
+    input: {
+      action: "generate_feature_graph",
+      messages: [
+        {
+          role: "user",
+          content: "Requesting feature graph generation",
+          additional_kwargs: {
+            phase: "design",
+            requestSource: "open-swe",
+          },
+        },
+      ],
+    },
+    config: {
+      configurable: {
+        phase: "design",
+      },
+    },
+    ifNotExists: "create",
+  });
+}
+
+async function waitForFeatureGraph({
+  client,
+  threadId,
+  attempts = 5,
+  delayMs = 1000,
+}: {
+  client: Client;
+  threadId: string;
+  attempts?: number;
+  delayMs?: number;
+}): Promise<ResolvedFeatureGraph | null> {
+  for (let index = 0; index < attempts; index += 1) {
+    const managerThreadState = await client.threads
+      .getState<ManagerGraphState>(threadId)
+      .catch(() => null);
+
+    const featureGraph = coerceFeatureGraph(managerThreadState?.values?.featureGraph);
+    if (managerThreadState?.values && featureGraph) {
+      return {
+        featureGraph,
+        managerState: managerThreadState.values,
+      } satisfies ResolvedFeatureGraph;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  return null;
+}
+
+async function ensureFeatureGraph({
+  client,
+  threadId,
+  managerState,
+}: {
+  client: Client;
+  threadId: string;
+  managerState: ManagerGraphState;
+}): Promise<ResolvedFeatureGraph> {
+  const existingGraph = coerceFeatureGraph(managerState.featureGraph);
+  if (existingGraph) {
+    return { featureGraph: existingGraph, managerState } satisfies ResolvedFeatureGraph;
+  }
+
+  try {
+    await startFeatureGraphGeneration({ client, threadId });
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Failed to initiate feature graph generation";
+    throw new ServiceUnavailableError(message);
+  }
+
+  const refreshed = await waitForFeatureGraph({ client, threadId });
+  if (!refreshed) {
+    throw new Error("Feature graph could not be generated for thread");
+  }
+
+  return refreshed;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -83,8 +196,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           : undefined,
     });
 
-    const managerThreadState =
-      await client.threads.getState<ManagerGraphState>(threadId);
+    const managerThreadState = await client.threads
+      .getState<ManagerGraphState>(threadId)
+      .catch((error) => {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "LangGraph backend unreachable";
+        throw new ServiceUnavailableError(
+          `LangGraph backend unreachable: ${message}`,
+        );
+      });
 
     if (!managerThreadState?.values) {
       return NextResponse.json(
@@ -93,27 +215,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const managerState = managerThreadState.values;
-    const featureGraph = coerceFeatureGraph(managerState.featureGraph);
-    if (!featureGraph) {
-      return NextResponse.json(
-        { error: "Feature graph not available for thread" },
-        { status: 404 },
-      );
-    }
+    const { featureGraph, managerState } = await ensureFeatureGraph({
+      client,
+      threadId,
+      managerState: managerThreadState.values,
+    });
 
-    const { graph: reconciledGraph, dependencyMap } =
+    let { graph: reconciledGraph, dependencyMap } =
       reconcileFeatureGraph(featureGraph);
 
     const existingPlannerSession = managerState.plannerSession;
     const plannerThreadId =
       existingPlannerSession?.threadId ?? randomUUID();
 
-    const selectedFeature = reconciledGraph.getFeature(featureId);
+    let selectedFeature = reconciledGraph.getFeature(featureId);
+
+    if (!selectedFeature) {
+      const refreshedState = await client.threads
+        .getState<ManagerGraphState>(threadId)
+        .catch(() => null);
+      const refreshedGraph = coerceFeatureGraph(
+        refreshedState?.values?.featureGraph,
+      );
+
+      if (refreshedGraph && refreshedState?.values) {
+        ({ graph: reconciledGraph, dependencyMap } =
+          reconcileFeatureGraph(refreshedGraph));
+        selectedFeature = reconciledGraph.getFeature(featureId);
+      }
+    }
 
     if (!selectedFeature) {
       return NextResponse.json(
-        { error: "Feature not found in manager state" },
+        {
+          error: `Feature ${featureId} not found in feature graph after reconciliation`,
+        },
         { status: 404 },
       );
     }
@@ -190,16 +326,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       thread_id: plannerThreadId,
     } satisfies Record<string, unknown>;
 
-    const run = await client.runs.create(plannerThreadId, PLANNER_GRAPH_ID, {
-      input: plannerRunInput,
-      config: {
-        recursion_limit: 400,
-        configurable: plannerRunConfigurable,
-      },
-      ifNotExists: "create",
-      streamResumable: true,
-      streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
-    });
+    const run = await client.runs
+      .create(plannerThreadId, PLANNER_GRAPH_ID, {
+        input: plannerRunInput,
+        config: {
+          recursion_limit: 400,
+          configurable: plannerRunConfigurable,
+        },
+        ifNotExists: "create",
+        streamResumable: true,
+        streamMode: OPEN_SWE_STREAM_MODE as StreamMode[],
+      })
+      .catch((error) => {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "Failed to start planner run";
+        throw new Error(`Failed to start planner run: ${message}`);
+      });
 
     const runIdentifiers = {
       run_id: run.run_id,
@@ -235,6 +379,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       run_id: run.run_id,
     });
   } catch (error) {
+    if (error instanceof ApiConfigError) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (error instanceof ServiceUnavailableError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+
     const message =
       error instanceof Error ? error.message : "Failed to start feature run";
     return NextResponse.json({ error: message }, { status: 500 });
