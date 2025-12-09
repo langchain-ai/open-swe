@@ -241,20 +241,6 @@ export function registerFeatureGraphRoute(app: Hono) {
           });
         });
 
-      await client.threads
-        .patchState(threadId, {
-          configurable: {
-            ...(managerThreadState.metadata?.configurable ?? {}),
-            run_id: existingPlannerSession.runId,
-            thread_id: plannerThreadId,
-          },
-        })
-        .catch((error) => {
-          logger.error("Failed to update manager metadata after feature develop", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-
       return ctx.json({
         planner_thread_id: plannerThreadId,
         run_id: existingPlannerSession.runId,
@@ -336,19 +322,6 @@ export function registerFeatureGraphRoute(app: Hono) {
       })
       .catch((error) => {
         logger.error("Failed to update manager state after feature develop", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-
-    await client.threads
-      .patchState(threadId, {
-        configurable: {
-          ...(managerThreadState.metadata?.configurable ?? {}),
-          ...runIdentifiers,
-        },
-      })
-      .catch((error) => {
-        logger.error("Failed to update manager metadata after feature develop", {
           error: error instanceof Error ? error.message : String(error),
         });
       });
