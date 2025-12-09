@@ -11,11 +11,22 @@ import { mapFeatureGraphPayload } from "@/lib/feature-graph-payload";
 const logger = createLogger(LogLevel.INFO, "FeatureGraphGenerateRoute");
 
 function resolveApiUrl(): string {
-  return (
-    process.env.LANGGRAPH_API_URL ??
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:2024"
-  );
+  const apiUrl =
+    process.env.LANGGRAPH_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "";
+
+  if (!apiUrl) {
+    throw new Error(
+      "LangGraph API URL is not configured. Set LANGGRAPH_API_URL or NEXT_PUBLIC_API_URL.",
+    );
+  }
+
+  try {
+    return new URL(apiUrl).toString();
+  } catch (error) {
+    throw new Error(
+      `Invalid LangGraph API URL: ${apiUrl}. ${(error as Error)?.message ?? ""}`.trim(),
+    );
+  }
 }
 
 function resolveThreadId(value: unknown): string | null {
@@ -63,15 +74,32 @@ async function requestGraphGeneration({
     configurablePresent: Boolean(configurable),
   });
 
-  const response = await fetch(`${resolveApiUrl()}/feature-graph/generate`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      workspaceAbsPath,
-      prompt,
-      configurable,
-    }),
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${resolveApiUrl()}/feature-graph/generate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        workspaceAbsPath,
+        prompt,
+        configurable,
+      }),
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? `LangGraph backend is unreachable: ${error.message}`
+        : "LangGraph backend is unreachable";
+
+    return {
+      ok: false,
+      status: 503,
+      payload: null,
+      message,
+      rawBody: undefined,
+    };
+  }
 
   const rawBody = await response.text();
   let payload: unknown = null;
@@ -130,30 +158,42 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const client = new Client({
-      apiUrl: resolveApiUrl(),
-      defaultHeaders:
-        process.env.OPEN_SWE_LOCAL_MODE === "true"
-          ? { [LOCAL_MODE_HEADER]: "true" }
-          : undefined,
-    });
+    let client: Client;
+
+    try {
+      client = new Client({
+        apiUrl: resolveApiUrl(),
+        defaultHeaders:
+          process.env.OPEN_SWE_LOCAL_MODE === "true"
+            ? { [LOCAL_MODE_HEADER]: "true" }
+            : undefined,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "LangGraph API URL is not configured correctly";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
 
     const managerState = await client.threads
       .getState<ManagerGraphState>(threadId)
       .catch((error) => {
-        const status = (error as { status?: number })?.status ?? 500;
+        const status = (error as { status?: number })?.status;
         logger.error("Failed to load manager state for feature graph", {
           threadId,
-          status,
+          status: status ?? 503,
           error,
         });
 
         const message =
           status === 404
             ? "Manager state not found for thread"
-            : "Failed to load manager state";
+            : status
+              ? "Failed to load manager state"
+              : "LangGraph backend is unreachable";
 
-        return NextResponse.json({ error: message }, { status });
+        return NextResponse.json({ error: message }, { status: status ?? 503 });
       });
 
     if (managerState instanceof NextResponse) {
