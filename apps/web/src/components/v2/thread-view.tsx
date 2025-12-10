@@ -635,7 +635,7 @@ export function ThreadView({
     }
   };
 
-  const cancelRun = useCallback(async () => {
+  const cancelRun = useCallback(async (runId?: string) => {
     if (isCancellingManagerRun) return;
 
     const threadId = displayThread.id;
@@ -646,26 +646,64 @@ export function ThreadView({
 
     setIsCancellingManagerRun(true);
 
-    const resolveActiveRunId = async () => {
-      if (managerRunId) return managerRunId;
-
-      try {
-        const runs = await stream.client?.runs.list(threadId, {
-          status: "running",
-          limit: 1,
-        });
-
-        return runs?.[0]?.run_id;
-      } catch {
-        return undefined;
+    const resolveActiveRun = async () => {
+      if (runId && threadId) {
+        return { runId, threadId };
       }
+
+      if (managerRunId) {
+        return { runId: managerRunId, threadId };
+      }
+
+      if (plannerSession?.runId && plannerSession.threadId) {
+        return {
+          runId: plannerSession.runId,
+          threadId: plannerSession.threadId,
+        };
+      }
+
+      const activeStatuses = new Set(["running", "queued", "starting"]);
+
+      const findActiveRun = async (targetThreadId: string) => {
+        try {
+          const runs = await stream.client?.runs.list(targetThreadId, {
+            limit: 5,
+          });
+
+          const activeRun = runs?.find(
+            (run) => run?.status && activeStatuses.has(run.status),
+          );
+
+          return activeRun?.run_id;
+        } catch {
+          return undefined;
+        }
+      };
+
+      const managerActiveRunId = await findActiveRun(threadId);
+      if (managerActiveRunId) {
+        return { runId: managerActiveRunId, threadId };
+      }
+
+      if (plannerSession?.threadId) {
+        const plannerActiveRunId = await findActiveRun(plannerSession.threadId);
+
+        if (plannerActiveRunId) {
+          return {
+            runId: plannerActiveRunId,
+            threadId: plannerSession.threadId,
+          };
+        }
+      }
+
+      return undefined;
     };
 
     try {
-      const activeRunId = await resolveActiveRunId();
+      const activeRun = await resolveActiveRun();
 
-      if (activeRunId) {
-        await stream.client?.runs.cancel(threadId, activeRunId);
+      if (activeRun) {
+        await stream.client?.runs.cancel(activeRun.threadId, activeRun.runId);
       }
     } catch {
       // no-op
@@ -684,6 +722,8 @@ export function ThreadView({
     isCancellingManagerRun,
     managerRunId,
     mutateThreadStatus,
+    plannerSession?.runId,
+    plannerSession?.threadId,
     stream,
   ]);
 
