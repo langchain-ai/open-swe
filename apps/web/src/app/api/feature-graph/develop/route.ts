@@ -178,7 +178,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ...managerState,
           ...updatedManagerState,
         },
-        metadata: { configurable: managerConfigurable },
         asNode: "start-planner",
       });
 
@@ -221,12 +220,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       values: {
         ...managerState,
         ...updatedManagerState,
-      },
-      metadata: {
-        configurable: {
-          ...(managerThreadState.metadata?.configurable ?? {}),
-          ...runIdentifiers,
-        },
       },
       asNode: "start-planner",
     });
