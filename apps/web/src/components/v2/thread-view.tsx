@@ -674,11 +674,6 @@ export function ThreadView({
   const shouldDisableManagerInput =
     stream.isLoading || plannerStream.isLoading || programmerStream.isLoading;
 
-  const shouldShowPlannerCancelButton =
-    selectedTab === "planner" &&
-    plannerDisplayStream.isLoading &&
-    !isPlannerRunError;
-
   const featurePlannerThreadId = selectedFeatureRunState?.threadId ?? undefined;
   const featurePlannerRunId = selectedFeatureRunState?.runId ?? undefined;
   const hasFeaturePlannerRun = Boolean(
@@ -700,6 +695,11 @@ export function ThreadView({
   const setPlannerDisplayCustomEvents = hasFeaturePlannerRun
     ? setSelectedFeatureRunEvents
     : setCustomPlannerNodeEvents;
+
+  const shouldShowPlannerCancelButton =
+    selectedTab === "planner" &&
+    plannerDisplayStream.isLoading &&
+    !isPlannerRunError;
 
   const handleRetryPlannerRun = useCallback(async () => {
     if (!selectedFeatureId || isRetryingFeatureRun) return;
