@@ -139,7 +139,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       messages: managerState.messages,
     };
 
-    const plannerRunConfigurable = {
+    const plannerRunConfigurableBase = {
       ...getCustomConfigurableFields({
         configurable: (managerThreadState.metadata?.configurable ?? {}) as
           | GraphConfig["configurable"]
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       input: plannerRunInput,
       config: {
         recursion_limit: 400,
-        configurable: plannerRunConfigurable,
+        configurable: plannerRunConfigurableBase,
       },
       ifNotExists: "create",
       streamResumable: true,
@@ -205,6 +205,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const runIdentifiers = {
       run_id: run.run_id,
       thread_id: plannerThreadId,
+    } satisfies Record<string, unknown>;
+
+    const plannerRunConfigurable = {
+      ...plannerRunConfigurableBase,
+      ...runIdentifiers,
     } satisfies Record<string, unknown>;
 
     const updatedManagerState: ManagerGraphUpdate = {
@@ -229,6 +234,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ...(managerThreadState.metadata?.configurable ?? {}),
         ...runIdentifiers,
       },
+    });
+
+    await client.threads.patchState(plannerThreadId, {
+      configurable: plannerRunConfigurable,
     });
 
     return NextResponse.json({
