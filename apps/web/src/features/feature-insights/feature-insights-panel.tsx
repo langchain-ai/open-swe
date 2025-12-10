@@ -209,7 +209,22 @@ export function FeatureInsightsPanel({
     if (!selectedFeature) return;
 
     onStartPlanner?.();
-    void startFeatureDevelopment(selectedFeature.id);
+    void startFeatureDevelopment(selectedFeature.id).catch((error) => {
+      const baseMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to start feature development";
+
+      const normalized = baseMessage.toLowerCase();
+      const isThreadBusy =
+        normalized.includes("busy") || normalized.includes("running");
+
+      const message = isThreadBusy
+        ? `${baseMessage}. Cancel or finish the current design run in the Planner tab, then try again.`
+        : baseMessage;
+
+      toast.error(message);
+    });
   }, [onStartPlanner, selectedFeature, startFeatureDevelopment]);
 
   const hasData =
@@ -687,6 +702,8 @@ function FeatureDevelopmentPanel({
 }) {
   const status = runState?.status ?? "idle";
   const isRunning = status === "running" || status === "starting";
+  const isBlocked = status === "error";
+  const isDisabled = isRunning || isBlocked;
 
   return (
     <div className="border-border/70 bg-muted/20 rounded-md border p-3">
@@ -705,7 +722,7 @@ function FeatureDevelopmentPanel({
         <Button
           size="sm"
           onClick={onStart}
-          disabled={isRunning}
+          disabled={isDisabled}
           variant={status === "error" ? "destructive" : "default"}
         >
           {isRunning ? (

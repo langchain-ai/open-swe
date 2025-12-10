@@ -296,10 +296,17 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
           },
         }));
       } catch (error) {
-        const message =
+        const baseMessage =
           error instanceof Error
             ? error.message
             : "Failed to start feature development";
+        const normalized = baseMessage.toLowerCase();
+        const isThreadBusy =
+          normalized.includes("busy") || normalized.includes("running");
+
+        const message = isThreadBusy
+          ? `${baseMessage}. Open the Planner tab to finish or cancel the current design run before retrying.`
+          : baseMessage;
 
         set((state) => ({
           ...state,
