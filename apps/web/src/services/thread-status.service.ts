@@ -66,6 +66,22 @@ function areAllPlanItemsCompleted(taskPlan: TaskPlan): boolean {
   return activePlanItems.every((planItem) => planItem.completed);
 }
 
+async function getActiveManagerRunId(
+  client: Client,
+  threadId: string,
+): Promise<string> {
+  try {
+    const runs = await client.runs.list(threadId, {
+      status: "running",
+      limit: 1,
+    });
+
+    return runs?.[0]?.run_id ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export class StatusResolver {
   resolve(
     manager: StatusResult,
@@ -313,11 +329,15 @@ async function checkLastKnownGraph(
       const managerThread = await client.threads.get<ManagerGraphState>(
         lastState.threadId,
       );
+      const managerStatusValue = mapLangGraphToUIStatus(managerThread.status);
       const managerStatus: StatusResult = {
         graph: "manager",
-        runId: "",
+        runId:
+          managerStatusValue === "running"
+            ? await getActiveManagerRunId(client, lastState.threadId)
+            : lastState.runId,
         threadId: lastState.threadId,
-        status: mapLangGraphToUIStatus(managerThread.status),
+        status: managerStatusValue,
       };
 
       if (
@@ -349,11 +369,15 @@ async function performFullStatusCheck(
     managerThread = await client.threads.get<ManagerGraphState>(threadId);
   }
 
+  const managerStatusValue = mapLangGraphToUIStatus(managerThread.status);
   const managerStatus: StatusResult = {
     graph: "manager",
-    runId: "",
+    runId:
+      managerStatusValue === "running"
+        ? await getActiveManagerRunId(client, threadId)
+        : "",
     threadId,
-    status: mapLangGraphToUIStatus(managerThread.status),
+    status: managerStatusValue,
   };
 
   // If manager is running or has error, return immediately without checking sub-sessions

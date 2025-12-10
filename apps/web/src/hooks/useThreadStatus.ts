@@ -18,6 +18,7 @@ interface ThreadStatusResult {
   taskPlan?: TaskPlan;
   isLoading: boolean;
   error: Error | null;
+  runId?: string;
   mutate: () => void;
 }
 
@@ -54,6 +55,7 @@ export function useThreadStatus(
 
   return {
     status: data?.status || "idle",
+    runId: data?.runId,
     taskPlan: data?.taskPlan,
     isLoading,
     error: data?.error ?? error,

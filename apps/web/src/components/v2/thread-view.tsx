@@ -119,11 +119,16 @@ export function ThreadView({
   const [optimisticMessage, setOptimisticMessage] =
     useState<HumanMessageSDK | null>(null);
   const [isRetryingFeatureRun, setIsRetryingFeatureRun] = useState(false);
+  const [isCancellingManagerRun, setIsCancellingManagerRun] = useState(false);
 
-  const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
-    useThreadStatus(displayThread.id, {
-      useTaskPlanConfig: true,
-    });
+  const {
+    status: realTimeStatus,
+    taskPlan: realTimeTaskPlan,
+    runId: managerRunId,
+    mutate: mutateThreadStatus,
+  } = useThreadStatus(displayThread.id, {
+    useTaskPlanConfig: true,
+  });
 
   const [errorState, setErrorState] = useState<ErrorState | null>(null);
 
@@ -608,10 +613,57 @@ export function ThreadView({
     }
   };
 
-  const cancelRun = () => {
-    // TODO: ideally this calls stream.client.runs.cancel(threadId, runId)
-    stream.stop();
-  };
+  const cancelRun = useCallback(async () => {
+    if (isCancellingManagerRun) return;
+
+    const threadId = displayThread.id;
+    if (!threadId) {
+      stream.stop();
+      return;
+    }
+
+    setIsCancellingManagerRun(true);
+
+    const resolveActiveRunId = async () => {
+      if (managerRunId) return managerRunId;
+
+      try {
+        const runs = await stream.client?.runs.list(threadId, {
+          status: "running",
+          limit: 1,
+        });
+
+        return runs?.[0]?.run_id;
+      } catch {
+        return undefined;
+      }
+    };
+
+    try {
+      const activeRunId = await resolveActiveRunId();
+
+      if (activeRunId) {
+        await stream.client?.runs.cancel(threadId, activeRunId);
+      }
+    } catch {
+      // no-op
+    } finally {
+      stream.stop();
+      try {
+        await fetchFeatureGraphForThreadRef.current(threadId, { force: true });
+      } catch {
+        // no-op
+      }
+      void mutateThreadStatus();
+      setIsCancellingManagerRun(false);
+    }
+  }, [
+    displayThread.id,
+    isCancellingManagerRun,
+    managerRunId,
+    mutateThreadStatus,
+    stream,
+  ]);
 
   const handleSendMessage = () => {
     const trimmed = chatInput.trim();
@@ -805,6 +857,24 @@ export function ThreadView({
                 )}
 
                 <div className="ml-auto flex items-center justify-center gap-2">
+                  {stream.isLoading && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={cancelRun}
+                      disabled={isCancellingManagerRun}
+                    >
+                      {isCancellingManagerRun ? (
+                        <>
+                          <RotateCcw className="mr-2 size-4 animate-spin" />
+                          Cancelling...
+                        </>
+                      ) : (
+                        "Cancel / Finalize design"
+                      )}
+                    </Button>
+                  )}
+
                   {shouldShowPlannerCancelButton && (
                     <CancelStreamButton
                       stream={plannerDisplayStream}
