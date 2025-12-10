@@ -55,7 +55,7 @@ export async function requestFeatureGraphGeneration(
 
   const resolvedClient = client ?? createClient(getApiUrl());
 
-  await resolvedClient.runs.create(threadId, MANAGER_GRAPH_ID, {
+  const run = await resolvedClient.runs.create(threadId, MANAGER_GRAPH_ID, {
     input: {
       action: "generate_feature_graph",
       messages: [
@@ -72,9 +72,18 @@ export async function requestFeatureGraphGeneration(
     config: {
       configurable: {
         phase: "design",
+        thread_id: threadId,
       },
     },
     ifNotExists: "create",
+  });
+
+  await resolvedClient.threads.patchState(threadId, {
+    configurable: {
+      phase: "design",
+      thread_id: threadId,
+      run_id: run.run_id,
+    },
   });
 }
 
