@@ -70,7 +70,7 @@ interface ManagerChatProps {
   setChatInput: (input: string) => void;
   handleSendMessage: () => void;
   isLoading: boolean;
-  cancelRun: () => void;
+  cancelRun: (runId?: string) => void;
   errorState?: ErrorState | null;
   // Restart-run controls
   canRestartRun?: boolean;
