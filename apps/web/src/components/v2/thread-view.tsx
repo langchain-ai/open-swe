@@ -64,6 +64,24 @@ type ThreadTab = "feature-graph" | "planner" | "programmer";
 const isThreadTab = (value: string): value is ThreadTab =>
   value === "planner" || value === "programmer" || value === "feature-graph";
 
+export const shouldAutoGenerateFeatureGraph = ({
+  plannerIsLoading,
+  programmerIsLoading,
+  hasPlannerSession,
+  hasProgrammerSession,
+}: {
+  plannerIsLoading: boolean;
+  programmerIsLoading: boolean;
+  hasPlannerSession: boolean;
+  hasProgrammerSession: boolean;
+}) =>
+  !(
+    plannerIsLoading ||
+    programmerIsLoading ||
+    hasPlannerSession ||
+    hasProgrammerSession
+  );
+
 interface ThreadViewProps {
   stream: ReturnType<typeof useStream<ManagerGraphState>>;
   displayThread: ThreadMetadata;
@@ -120,6 +138,8 @@ export function ThreadView({
     useState<HumanMessageSDK | null>(null);
   const [isRetryingFeatureRun, setIsRetryingFeatureRun] = useState(false);
   const [isCancellingManagerRun, setIsCancellingManagerRun] = useState(false);
+  const [pendingFeatureGraphPrompt, setPendingFeatureGraphPrompt] =
+    useState<string | null>(null);
 
   const {
     status: realTimeStatus,
@@ -197,12 +217,14 @@ export function ThreadView({
     featureRuns,
     setFeatureRunStatus,
     startFeatureDevelopment,
+    isGeneratingGraph,
   } = useFeatureGraphStore(
     useShallow((state) => ({
       selectedFeatureId: state.selectedFeatureId,
       featureRuns: state.featureRuns,
       setFeatureRunStatus: state.setFeatureRunStatus,
       startFeatureDevelopment: state.startFeatureDevelopment,
+      isGeneratingGraph: state.isGeneratingGraph,
     })),
   );
   const [featureRunEvents, setFeatureRunEvents] = useState<
@@ -665,6 +687,41 @@ export function ThreadView({
     stream,
   ]);
 
+  const hasPlannerSession = Boolean(
+    plannerSession?.runId && plannerSession?.threadId,
+  );
+
+  const hasProgrammerSession = Boolean(
+    programmerSession?.runId && programmerSession?.threadId,
+  );
+
+  const allowAutoFeatureGraphGeneration = useMemo(
+    () =>
+      shouldAutoGenerateFeatureGraph({
+        plannerIsLoading: plannerStream.isLoading,
+        programmerIsLoading: programmerStream.isLoading,
+        hasPlannerSession,
+        hasProgrammerSession,
+      }),
+    [
+      hasPlannerSession,
+      hasProgrammerSession,
+      plannerStream.isLoading,
+      programmerStream.isLoading,
+    ],
+  );
+
+  const handleGenerateFeatureGraph = useCallback(() => {
+    if (!displayThread.id || !pendingFeatureGraphPrompt) return;
+
+    void generateFeatureGraph(displayThread.id, pendingFeatureGraphPrompt);
+    setPendingFeatureGraphPrompt(null);
+  }, [
+    displayThread.id,
+    generateFeatureGraph,
+    pendingFeatureGraphPrompt,
+  ]);
+
   const handleSendMessage = () => {
     const trimmed = chatInput.trim();
 
@@ -683,14 +740,14 @@ export function ThreadView({
           : "open-swe";
 
     if (trimmed) {
-        const newHumanMessage = new HumanMessage({
-          id: uuidv4(),
-          content: trimmed,
-          additional_kwargs: {
-            ...(phase ? { phase } : {}),
-            requestSource,
-          },
-        });
+      const newHumanMessage = new HumanMessage({
+        id: uuidv4(),
+        content: trimmed,
+        additional_kwargs: {
+          ...(phase ? { phase } : {}),
+          requestSource,
+        },
+      });
       stream.submit(
         {
           messages: [newHumanMessage],
@@ -704,8 +761,11 @@ export function ThreadView({
           }),
         },
       );
-      if (displayThread.id) {
+      setPendingFeatureGraphPrompt(trimmed);
+
+      if (displayThread.id && allowAutoFeatureGraphGeneration) {
         void generateFeatureGraph(displayThread.id, trimmed);
+        setPendingFeatureGraphPrompt(null);
       }
       setChatInput("");
     }
@@ -725,6 +785,11 @@ export function ThreadView({
 
   const shouldDisableManagerInput =
     stream.isLoading || plannerStream.isLoading || programmerStream.isLoading;
+
+  const shouldShowGenerateFeatureGraphButton =
+    !allowAutoFeatureGraphGeneration &&
+    Boolean(displayThread.id) &&
+    Boolean(pendingFeatureGraphPrompt);
 
   const featurePlannerThreadId = selectedFeatureRunState?.threadId ?? undefined;
   const featurePlannerRunId = selectedFeatureRunState?.runId ?? undefined;
@@ -856,11 +921,11 @@ export function ThreadView({
                   />
                 )}
 
-                <div className="ml-auto flex items-center justify-center gap-2">
-                  {stream.isLoading && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
+                  <div className="ml-auto flex items-center justify-center gap-2">
+                    {stream.isLoading && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
                       onClick={cancelRun}
                       disabled={isCancellingManagerRun}
                     >
@@ -893,6 +958,23 @@ export function ThreadView({
                         streamName="Programmer"
                       />
                     )}
+                  {shouldShowGenerateFeatureGraphButton && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleGenerateFeatureGraph}
+                      disabled={isGeneratingGraph}
+                    >
+                      {isGeneratingGraph ? (
+                        <>
+                          <RotateCcw className="mr-2 size-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate feature graph"
+                      )}
+                    </Button>
+                  )}
                   <TokenUsage
                     tokenData={joinTokenData(
                       plannerStream.values.tokenData,
