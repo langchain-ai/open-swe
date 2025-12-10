@@ -151,6 +151,12 @@ export async function interruptProposedPlan(
   state: PlannerGraphState,
   config: GraphConfig,
 ): Promise<Command> {
+  const plannerRunId = config.configurable?.run_id;
+
+  if (!plannerRunId) {
+    throw new Error("Planner run_id not found in configuration.");
+  }
+
   const { proposedPlan } = state;
   if (!proposedPlan.length) {
     throw new Error("No proposed plan found.");
@@ -233,7 +239,7 @@ export async function interruptProposedPlan(
           planTitle: state.proposedPlanTitle,
           planItems,
           interruptType: "accept",
-          runId: (config.configurable?.run_id as string | undefined) ?? "",
+          runId: plannerRunId,
         }),
       ],
     });
@@ -349,7 +355,7 @@ export async function interruptProposedPlan(
         planTitle: state.proposedPlanTitle,
         planItems,
         interruptType: humanResponse.type,
-        runId: (config.configurable?.run_id as string | undefined) ?? "",
+        runId: plannerRunId,
       }),
     ],
   });
