@@ -4,7 +4,13 @@ import { v4 as uuidv4 } from "uuid";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Clock } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Clock,
+  GitBranch,
+  RotateCcw,
+} from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { useShallow } from "zustand/react/shallow";
@@ -112,6 +118,7 @@ export function ThreadView({
   const [programmerTaskPlan, setProgrammerTaskPlan] = useState<TaskPlan>();
   const [optimisticMessage, setOptimisticMessage] =
     useState<HumanMessageSDK | null>(null);
+  const [isRetryingFeatureRun, setIsRetryingFeatureRun] = useState(false);
 
   const { status: realTimeStatus, taskPlan: realTimeTaskPlan } =
     useThreadStatus(displayThread.id, {
@@ -180,14 +187,19 @@ export function ThreadView({
   const [customProgrammerNodeEvents, setCustomProgrammerNodeEvents] = useState<
     CustomNodeEvent[]
   >([]);
-  const { selectedFeatureId, featureRuns, setFeatureRunStatus } =
-    useFeatureGraphStore(
-      useShallow((state) => ({
-        selectedFeatureId: state.selectedFeatureId,
-        featureRuns: state.featureRuns,
-        setFeatureRunStatus: state.setFeatureRunStatus,
-      })),
-    );
+  const {
+    selectedFeatureId,
+    featureRuns,
+    setFeatureRunStatus,
+    startFeatureDevelopment,
+  } = useFeatureGraphStore(
+    useShallow((state) => ({
+      selectedFeatureId: state.selectedFeatureId,
+      featureRuns: state.featureRuns,
+      setFeatureRunStatus: state.setFeatureRunStatus,
+      startFeatureDevelopment: state.startFeatureDevelopment,
+    })),
+  );
   const [featureRunEvents, setFeatureRunEvents] = useState<
     Record<string, CustomNodeEvent[]>
   >({});
@@ -224,6 +236,10 @@ export function ThreadView({
     selectedFeatureId && featureRuns[selectedFeatureId]
       ? featureRuns[selectedFeatureId]
       : undefined;
+  const isPlannerRunError = selectedFeatureRunState?.status === "error";
+  const plannerRunErrorMessage =
+    selectedFeatureRunState?.error ??
+    "Feature development run encountered an error.";
 
   const fetchFeatureGraphForThread = useFeatureGraphStore(
     (state) => state.fetchGraphForThread,
@@ -658,6 +674,11 @@ export function ThreadView({
   const shouldDisableManagerInput =
     stream.isLoading || plannerStream.isLoading || programmerStream.isLoading;
 
+  const shouldShowPlannerCancelButton =
+    selectedTab === "planner" &&
+    plannerDisplayStream.isLoading &&
+    !isPlannerRunError;
+
   const featurePlannerThreadId = selectedFeatureRunState?.threadId ?? undefined;
   const featurePlannerRunId = selectedFeatureRunState?.runId ?? undefined;
   const hasFeaturePlannerRun = Boolean(
@@ -679,6 +700,23 @@ export function ThreadView({
   const setPlannerDisplayCustomEvents = hasFeaturePlannerRun
     ? setSelectedFeatureRunEvents
     : setCustomPlannerNodeEvents;
+
+  const handleRetryPlannerRun = useCallback(async () => {
+    if (!selectedFeatureId || isRetryingFeatureRun) return;
+
+    setIsRetryingFeatureRun(true);
+    try {
+      await startFeatureDevelopment(selectedFeatureId);
+    } catch {
+      // no-op
+    } finally {
+      setIsRetryingFeatureRun(false);
+    }
+  }, [
+    isRetryingFeatureRun,
+    selectedFeatureId,
+    startFeatureDevelopment,
+  ]);
 
   return (
     <div className="bg-background flex h-screen flex-1 flex-col">
@@ -767,7 +805,7 @@ export function ThreadView({
                 )}
 
                 <div className="ml-auto flex items-center justify-center gap-2">
-                  {selectedTab === "planner" && plannerDisplayStream.isLoading && (
+                  {shouldShowPlannerCancelButton && (
                     <CancelStreamButton
                       stream={plannerDisplayStream}
                       threadId={plannerDisplayThreadId}
@@ -819,7 +857,32 @@ export function ThreadView({
                         className="scrollbar-pretty-auto h-full"
                         content={
                           <>
-                            {plannerDisplayRunId && plannerDisplayThreadId ? (
+                            {isPlannerRunError ? (
+                              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                                <AlertTriangle className="text-destructive size-6" />
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium">
+                                    Feature planner run failed
+                                  </p>
+                                  <p className="text-muted-foreground text-sm">
+                                    {plannerRunErrorMessage}
+                                  </p>
+                                </div>
+                                {selectedFeatureId ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleRetryPlannerRun}
+                                    disabled={isRetryingFeatureRun}
+                                  >
+                                    <RotateCcw className="mr-2 size-4" />
+                                    {isRetryingFeatureRun
+                                      ? "Retrying..."
+                                      : "Retry run"}
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : plannerDisplayRunId && plannerDisplayThreadId ? (
                               <div className="scrollbar-pretty-auto overflow-y-auto px-2">
                                 <ActionsRenderer<PlannerGraphState>
                                   runId={plannerDisplayRunId}
