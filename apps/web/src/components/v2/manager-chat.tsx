@@ -281,7 +281,7 @@ export function ManagerChat({
             <TooltipIconButton
               className="size-8 rounded-full border border-white/20 transition-all duration-200 hover:border-white/30 disabled:border-transparent"
               variant="destructive"
-              onClick={cancelRun}
+              onClick={() => cancelRun()}
               tooltip="Cancel run"
             >
               <Loader2 className="size-4 animate-spin" />

@@ -961,12 +961,12 @@ export function ThreadView({
                   />
                 )}
 
-                  <div className="ml-auto flex items-center justify-center gap-2">
-                    {stream.isLoading && (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                      onClick={cancelRun}
+                <div className="ml-auto flex items-center justify-center gap-2">
+                  {stream.isLoading && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => cancelRun()}
                       disabled={isCancellingManagerRun}
                     >
                       {isCancellingManagerRun ? (
