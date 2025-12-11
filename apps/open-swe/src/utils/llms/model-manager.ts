@@ -47,6 +47,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "bedrock",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -74,7 +75,7 @@ const THINKING_BUDGET_TOKENS = 5000;
 const providerToApiKey = (
   providerName: string,
   apiKeys: Record<string, string>,
-): string => {
+): string | { accessKeyId: string; secretAccessKey: string; region: string } => {
   switch (providerName) {
     case "openai":
       return apiKeys.openaiApiKey;
@@ -82,6 +83,15 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "bedrock":
+      if (!apiKeys.awsAccessKeyId || !apiKeys.awsSecretAccessKey || !apiKeys.awsRegion) {
+        throw new Error("AWS Bedrock requires awsAccessKeyId, awsSecretAccessKey, and awsRegion");
+      }
+      return {
+        accessKeyId: apiKeys.awsAccessKeyId,
+        secretAccessKey: apiKeys.awsSecretAccessKey,
+        region: apiKeys.awsRegion,
+      };
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -112,7 +122,7 @@ export class ModelManager {
   private getUserApiKey(
     graphConfig: GraphConfig,
     provider: Provider,
-  ): string | null {
+  ): string | { accessKeyId: string; secretAccessKey: string; region: string } | null {
     const userLogin = (graphConfig.configurable as any)?.langgraph_auth_user
       ?.display_name;
     const secretsEncryptionKey = process.env.SECRETS_ENCRYPTION_KEY;
@@ -138,8 +148,24 @@ export class ModelManager {
 
     const missingProviderKeyMessage = `No API key found for provider: ${provider}. Please add one in the settings page.`;
 
+    if (provider === "bedrock") {
+      const accessKeyId = apiKeys.awsAccessKeyId ? decryptSecret(apiKeys.awsAccessKeyId, secretsEncryptionKey) : null;
+      const secretAccessKey = apiKeys.awsSecretAccessKey ? decryptSecret(apiKeys.awsSecretAccessKey, secretsEncryptionKey) : null;
+      const region = apiKeys.awsRegion ? decryptSecret(apiKeys.awsRegion, secretsEncryptionKey) : null;
+      
+      if (!accessKeyId || !secretAccessKey || !region) {
+        throw new Error("AWS Bedrock credentials (access key, secret key, and region) are required. Please add them in the settings page.");
+      }
+      
+      return {
+        accessKeyId,
+        secretAccessKey,
+        region,
+      };
+    }
+
     const providerApiKey = providerToApiKey(provider, apiKeys);
-    if (!providerApiKey) {
+    if (!providerApiKey || typeof providerApiKey !== 'string') {
       throw new Error(missingProviderKeyMessage);
     }
 
@@ -176,12 +202,22 @@ export class ModelManager {
       finalMaxTokens = finalMaxTokens > 8_192 ? 8_192 : finalMaxTokens;
     }
 
-    const apiKey = this.getUserApiKey(graphConfig, provider);
+    const apiKeyOrCredentials = this.getUserApiKey(graphConfig, provider);
 
     const modelOptions: InitChatModelArgs = {
       modelProvider: provider,
       max_retries: MAX_RETRIES,
-      ...(apiKey ? { apiKey } : {}),
+      ...(apiKeyOrCredentials 
+        ? (typeof apiKeyOrCredentials === 'string' 
+          ? { apiKey: apiKeyOrCredentials } 
+          : { 
+              credentials: {
+                accessKeyId: apiKeyOrCredentials.accessKeyId,
+                secretAccessKey: apiKeyOrCredentials.secretAccessKey,
+              },
+              region: apiKeyOrCredentials.region,
+            })
+        : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -398,6 +434,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5-codex",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      bedrock: {
+        [LLMTask.PLANNER]: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        [LLMTask.PROGRAMMER]: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        [LLMTask.REVIEWER]: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        [LLMTask.ROUTER]: "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        [LLMTask.SUMMARIZER]: "us.anthropic.claude-sonnet-4-20250514-v1:0",
       },
     };
 

@@ -92,6 +92,26 @@ export const MODEL_OPTIONS = [
     label: "Gemini 2.5 Flash",
     value: "google-genai:gemini-2.5-flash",
   },
+  {
+    label: "Claude Sonnet 4 (Bedrock)",
+    value: "bedrock:us.anthropic.claude-sonnet-4-20250514-v1:0",
+  },
+  {
+    label: "Claude Opus 4.1 (Bedrock)",
+    value: "bedrock:us.anthropic.claude-opus-4-1-20250805-v1:0",
+  },
+  {
+    label: "Claude Opus 4 (Bedrock)",
+    value: "bedrock:us.anthropic.claude-opus-4-20250514-v1:0",
+  },
+  {
+    label: "Claude 3.7 Sonnet (Bedrock)",
+    value: "bedrock:us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+  },
+  {
+    label: "Claude 3.5 Haiku (Bedrock)",
+    value: "bedrock:us.anthropic.claude-3-5-haiku-20241022-v1:0",
+  },
 ];
 
 export const MODEL_OPTIONS_NO_THINKING = MODEL_OPTIONS.filter(
