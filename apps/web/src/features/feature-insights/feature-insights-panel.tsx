@@ -47,10 +47,9 @@ import {
   FeatureRunStatus,
   useFeatureGraphStore,
 } from "@/stores/feature-graph-store";
-import type { FeatureEdge, FeatureNode } from "@openswe/shared/feature-graph/types";
+import type { FeatureNode } from "@openswe/shared/feature-graph/types";
 import type { FeatureProposal } from "@openswe/shared/open-swe/manager/types";
 import type { FeatureProposalAction } from "@/services/feature-graph.service";
-import { FeatureGraphCanvas } from "./feature-graph-canvas";
 
 const EMPTY_STATE_MESSAGE =
   "Feature insights will appear once the session resolves relevant features.";
@@ -234,11 +233,6 @@ export function FeatureInsightsPanel({
     activeFeatureIds.length > 0 ||
     proposals.length > 0;
 
-  const edges: FeatureEdge[] = useMemo(
-    () => graph?.listEdges?.() ?? [],
-    [graph],
-  );
-
   if (!hasData && !isLoading && !error) {
     return null;
   }
@@ -264,14 +258,6 @@ export function FeatureInsightsPanel({
           onRetry={handleRetry}
           onGenerate={handleGenerate}
           isGeneratingGraph={isGeneratingGraph}
-        />
-
-        <FeatureGraphCanvas
-          features={features}
-          edges={edges}
-          selectedId={selectedFeatureId}
-          activeIds={activeFeatureIds}
-          onSelect={selectFeature}
         />
 
         {sortedProposals.length > 0 && (
