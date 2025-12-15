@@ -33,6 +33,7 @@ import NextLink from "next/link";
 import { OpenSWELogo } from "../icons/openswe-logo";
 import { OpenSWEIcon } from "../icons/openswe-icon";
 import { DEFAULT_CONFIG_KEY, useConfigStore } from "@/hooks/useConfigStore";
+import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
 function OpenSettingsButton() {
   return (
@@ -118,6 +119,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
   const [customFramework, setCustomFramework] = useState(
     config?.customFramework != null ? !!config.customFramework : false,
   );
+  const [mode, setMode] = useState<"chat" | "design">("chat");
 
   const baseThreadsMetadata = useMemo(() => threadsToMetadata(threads), [threads]);
   const baseDisplayThreadIds = baseThreadsMetadata
@@ -221,7 +223,19 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                 onRemove={removeBlock}
               />
               <div className="space-y-3">
-                <RepositorySelect />
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <RepositorySelect />
+                  <Tabs
+                    value={mode}
+                    onValueChange={(value) => setMode(value as "chat" | "design")}
+                    className="sm:self-start"
+                  >
+                    <TabsList className="grid w-full grid-cols-2 sm:w-[220px]">
+                      <TabsTrigger value="chat">Build</TabsTrigger>
+                      <TabsTrigger value="design">Design</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
                 <TerminalInput
                   placeholder="Describe your coding task or ask a question..."
                   apiUrl={apiUrl}
@@ -236,6 +250,7 @@ export function DefaultView({ threads, threadsLoading }: DefaultViewProps) {
                   setAutoAcceptPlan={setAutoAccept}
                   customFramework={customFramework}
                   setCustomFramework={setCustomFramework}
+                  mode={mode}
                 />
                 <div className="flex items-center gap-2">
                   <TooltipIconButton
