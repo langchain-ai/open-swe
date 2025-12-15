@@ -47,7 +47,6 @@ interface TerminalInputProps {
   draftToLoad?: string;
   customFramework: boolean;
   setCustomFramework: Dispatch<SetStateAction<boolean>>;
-  mode: "chat" | "design";
 }
 
 const MISSING_API_KEYS_TOAST_CONTENT = (
@@ -83,7 +82,6 @@ export function TerminalInput({
   draftToLoad,
   customFramework,
   setCustomFramework,
-  mode,
 }: TerminalInputProps) {
   const { push } = useRouter();
   const { message, setMessage, clearCurrentDraft } = useDraftStorage();
@@ -96,7 +94,6 @@ export function TerminalInput({
   const generateFeatureGraph = useFeatureGraphStore(
     (state) => state.generateGraph,
   );
-  const isDesignMode = mode === "design";
 
   const workspaceAbsPath = useMemo(() => {
     if (!selectedRepository) {
@@ -164,7 +161,6 @@ export function TerminalInput({
     const trimmedMessage = message.trim();
 
     if (trimmedMessage.length > 0 || contentBlocks.length > 0) {
-      const phase = isDesignMode ? "design" : defaultConfig?.phase;
       const newHumanMessage = new HumanMessage({
         id: uuidv4(),
         content: [
@@ -173,10 +169,7 @@ export function TerminalInput({
             : []),
           ...contentBlocks,
         ],
-        additional_kwargs: {
-          ...(phase ? { phase } : {}),
-          requestSource: "open-swe",
-        },
+        additional_kwargs: { phase: "design", requestSource: "open-swe" },
       });
 
       try {
@@ -202,7 +195,7 @@ export function TerminalInput({
                 ...defaultConfig,
                 customFramework,
                 workspacePath: workspaceAbsPath,
-                ...(phase ? { phase } : {}),
+                phase: "design",
               },
             },
             ifNotExists: "create",
@@ -225,13 +218,15 @@ export function TerminalInput({
             JSON.stringify(initialMessageData),
           );
         } catch (error) {
-          if (error instanceof Error) {
-            toast.error(error.message);
-          }
+          // If sessionStorage fails, continue without optimistic rendering
+          console.error(
+            "Failed to store initial message in sessionStorage:",
+            error,
+          );
         }
 
-        push(isDesignMode ? `/design/${newThreadId}` : `/chat/${newThreadId}`);
-        if (isDesignMode && trimmedMessage) {
+        push(`/chat/${newThreadId}`);
+        if (trimmedMessage) {
           void generateFeatureGraph(newThreadId, trimmedMessage);
         }
         clearCurrentDraft();
