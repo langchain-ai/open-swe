@@ -19,6 +19,7 @@ export const OPEN_SWE_V2_GRAPH_ID = "open-swe-v2";
 export const MANAGER_GRAPH_ID = "manager";
 export const PLANNER_GRAPH_ID = "planner";
 export const PROGRAMMER_GRAPH_ID = "programmer";
+export const DESIGN_GRAPH_ID = "design";
 
 export const DEFAULT_MCP_SERVERS = {
   "langgraph-docs-mcp": {

@@ -3,7 +3,8 @@
   "graphs": {
     "programmer": "./apps/open-swe/src/graphs/programmer/index.ts:graph",
     "planner": "./apps/open-swe/src/graphs/planner/index.ts:graph",
-    "manager": "./apps/open-swe/src/graphs/manager/index.ts:graph"
+    "manager": "./apps/open-swe/src/graphs/manager/index.ts:graph",
+    "design": "./apps/open-swe/src/graphs/design/index.ts:graph"
   },
   "env": "./apps/open-swe/.env",
   "dependencies": ["./apps/open-swe"],

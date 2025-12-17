@@ -56,6 +56,8 @@ type ProposalActionState = {
 
 interface FeatureGraphStoreState {
   threadId: string | null;
+  /** Optional design thread ID for isolated feature design */
+  designThreadId: string | null;
   graph: FeatureGraph | null;
   features: FeatureNode[];
   featuresById: Record<string, FeatureNode>;
@@ -77,6 +79,14 @@ interface FeatureGraphStoreState {
   generateGraph: (threadId: string, prompt: string) => Promise<void>;
   requestGraphGeneration: (threadId: string) => Promise<void>;
   startFeatureDevelopment: (featureId: string) => Promise<void>;
+  /**
+   * Start development via an isolated design thread.
+   * This creates a new planner thread to avoid "thread busy" errors.
+   */
+  startDesignDevelopment: (featureIds: string[], designThreadId: string) => Promise<{
+    plannerThreadId: string;
+    runId: string;
+  }>;
   respondToProposal: (
     proposalId: string,
     action: FeatureProposalAction,
@@ -93,6 +103,7 @@ interface FeatureGraphStoreState {
   ) => void;
   selectFeature: (featureId: string | null) => void;
   setActiveFeatureIds: (featureIds?: string[] | null) => void;
+  setDesignThreadId: (designThreadId: string | null) => void;
   clear: () => void;
 }
 
@@ -102,13 +113,16 @@ const INITIAL_STATE: Omit<
     | "generateGraph"
     | "requestGraphGeneration"
     | "startFeatureDevelopment"
+    | "startDesignDevelopment"
     | "respondToProposal"
     | "setFeatureRunStatus"
     | "selectFeature"
     | "setActiveFeatureIds"
+    | "setDesignThreadId"
     | "clear"
   > = {
   threadId: null,
+  designThreadId: null,
   graph: null,
   features: [],
   featuresById: {},
@@ -463,6 +477,102 @@ export const useFeatureGraphStore = create<FeatureGraphStoreState>(
         activeFeatureIds: normalized,
         selectedFeatureId: nextSelection,
       });
+    },
+    setDesignThreadId(designThreadId) {
+      set({ designThreadId });
+    },
+    async startDesignDevelopment(featureIds, designThreadId) {
+      if (!featureIds.length || !designThreadId) {
+        throw new Error("Feature IDs and design thread ID are required");
+      }
+
+      // Mark features as starting
+      const nextRunStates: Record<string, FeatureRunState> = {};
+      for (const featureId of featureIds) {
+        nextRunStates[featureId] = {
+          threadId: null,
+          runId: null,
+          status: "starting",
+          error: null,
+          updatedAt: Date.now(),
+        };
+      }
+
+      set((state) => ({
+        ...state,
+        featureRuns: {
+          ...state.featureRuns,
+          ...nextRunStates,
+        },
+      }));
+
+      try {
+        const response = await fetch("/api/design/handoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            design_thread_id: designThreadId,
+            feature_ids: featureIds,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error ?? "Failed to start development from design");
+        }
+
+        const data = await response.json();
+        const plannerThreadId = data.planner_thread_id;
+        const runId = data.run_id;
+
+        // Update all features as running
+        const runningStates: Record<string, FeatureRunState> = {};
+        for (const featureId of featureIds) {
+          runningStates[featureId] = {
+            threadId: plannerThreadId,
+            runId,
+            status: "running",
+            error: null,
+            updatedAt: Date.now(),
+          };
+        }
+
+        set((state) => ({
+          ...state,
+          featureRuns: {
+            ...state.featureRuns,
+            ...runningStates,
+          },
+        }));
+
+        return { plannerThreadId, runId };
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : "Failed to start development from design";
+
+        // Update all features as errored
+        const errorStates: Record<string, FeatureRunState> = {};
+        for (const featureId of featureIds) {
+          errorStates[featureId] = {
+            threadId: null,
+            runId: null,
+            status: "error",
+            error: message,
+            updatedAt: Date.now(),
+          };
+        }
+
+        set((state) => ({
+          ...state,
+          featureRuns: {
+            ...state.featureRuns,
+            ...errorStates,
+          },
+        }));
+
+        throw new Error(message);
+      }
     },
     clear() {
       set({ ...INITIAL_STATE });
