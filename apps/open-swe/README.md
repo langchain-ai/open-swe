@@ -4,7 +4,7 @@ The core LangGraph agent application that powers Open SWE's autonomous code unde
 
 ## Documentation
 
-For detailed setup and usage information, see the [development setup documentation](https://docs.langchain.com/labs/swe/setup/development).
+For detailed setup and usage information, see the [development setup documentation](https://github.com/langchain-ai/open-swe/blob/main/apps/docs/setup/development.mdx).
 
 ## Development
 

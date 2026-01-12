@@ -53,7 +53,7 @@ function OpenSettingsButton() {
   );
 }
 
-const DOCUMENTATION_URL = "https://docs.langchain.com/labs/swe";
+const DOCUMENTATION_URL = "https://github.com/langchain-ai/open-swe/tree/main/apps/docs";
 
 function OpenDocumentationButton() {
   return (
