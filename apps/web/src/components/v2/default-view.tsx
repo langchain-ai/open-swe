@@ -30,7 +30,7 @@ import { Thread } from "@langchain/langgraph-sdk";
 import { ManagerGraphState } from "@openswe/shared/open-swe/manager/types";
 import { useState, useMemo } from "react";
 import { threadsToMetadata } from "@/lib/thread-utils";
-import { BookOpen, Settings } from "lucide-react";
+import { Settings, BookOpen } from "lucide-react";
 import NextLink from "next/link";
 import { OpenSWELogo } from "../icons/openswe-logo";
 import { OpenSWEIcon } from "../icons/openswe-icon";
