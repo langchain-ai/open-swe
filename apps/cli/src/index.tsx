@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import React, { useState, useEffect } from "react";
 import { render, Box, Text, useInput } from "ink";
 import { Command } from "commander";
@@ -43,7 +42,7 @@ program
 process.env.OPEN_SWE_LOCAL_MODE = "true";
 
 // eslint-disable-next-line no-unused-vars
-export const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
+const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
   onSubmit,
 }) => {
   const [input, setInput] = useState("");
@@ -76,7 +75,7 @@ export const CustomInput: React.FC<{ onSubmit: (value: string) => void }> = ({
   );
 };
 
-export const App: React.FC = () => {
+const App: React.FC = () => {
   const [hasStartedChat, setHasStartedChat] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
