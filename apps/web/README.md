@@ -4,7 +4,7 @@ The Next.js web interface for Open SWE, providing a user-friendly chat interface
 
 ## Documentation
 
-For detailed usage information, see the [UI documentation](https://docs.langchain.com/labs/swe/usage/ui).
+For detailed usage information, see the [UI documentation](https://github.com/langchain-ai/open-swe/blob/main/apps/docs/usage/ui.mdx).
 
 ## Development
 

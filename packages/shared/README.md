@@ -4,7 +4,7 @@ Shared utilities and types package for Open SWE, providing common functionality 
 
 ## Documentation
 
-For information about the monorepo structure and shared packages, see the [monorepo documentation](https://docs.langchain.com/labs/swe/setup/monorepo).
+For information about the monorepo structure and shared packages, see the [monorepo documentation](https://github.com/langchain-ai/open-swe/blob/main/apps/docs/setup/monorepo.mdx).
 
 ## Development
 

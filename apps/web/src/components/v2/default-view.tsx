@@ -1,4 +1,5 @@
 "use client";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Archive, Eye, EyeOff, List, ListChecks } from "lucide-react";
@@ -53,7 +54,8 @@ function OpenSettingsButton() {
   );
 }
 
-const DOCUMENTATION_URL = "https://docs.langchain.com/labs/swe";
+const DOCUMENTATION_URL =
+  "https://github.com/langchain-ai/open-swe/tree/main/apps/docs";
 
 function OpenDocumentationButton() {
   return (
