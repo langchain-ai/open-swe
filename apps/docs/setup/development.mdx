@@ -140,6 +140,41 @@ Before starting, ensure you have the following installed:
 
   </Step>
 
+  <Step title="Daytona Sandbox Setup">
+    <Note>
+    Open SWE uses Daytona for sandboxed code execution. You need to create a snapshot in your Daytona account before running the agent.
+    </Note>
+
+    #### Prerequisites
+    1. Create account at [daytona.io](https://daytona.io)
+    2. Get API key from dashboard
+    3. Set `DAYTONA_API_KEY` in `.env`
+
+    #### Create Snapshot
+    1. Log into [Daytona Platform](https://app.daytona.io)
+    2. Navigate to Snapshots
+    3. Create new snapshot with:
+      - Name: `open-swe-vcpu2-mem4-disk5`
+      - Image: `daytonaio/langchain-open-swe:0.1.0`
+      - Resources: 2 vCPU, 4GB RAM, 5GB disk
+
+    <Tip>
+    The snapshot name and image must match the values in `/packages/shared/src/constants.ts`.
+    </Tip>
+
+    #### Troubleshooting
+
+    If you see "Failed to create sandbox environment":
+    - Verify snapshot exists with correct name
+    - Check API key is set
+    - Ensure account has sufficient resources
+
+    If agent commands fail in sandbox:
+    - Verify snapshot uses the correct image
+    - Recreate snapshot if needed
+    ```
+  </Step>
+
   <Step title="Create GitHub App">
     <Note>
     You'll need to create a **GitHub App** (not a GitHub OAuth App). These are different types of applications with different capabilities. Consider creating separate GitHub apps for development and production environments.
