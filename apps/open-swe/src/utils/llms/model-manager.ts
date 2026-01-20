@@ -47,6 +47,10 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "moonshot-ai",
+  "deepseek",
+  "qwen",
+  "z-ai",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -71,6 +75,41 @@ export const DEFAULT_MODEL_MANAGER_CONFIG: ModelManagerConfig = {
 const MAX_RETRIES = 3;
 const THINKING_BUDGET_TOKENS = 5000;
 
+// Helper function to get base URL for OpenAI-compatible providers
+const getProviderBaseUrl = (provider: Provider, graphConfig?: GraphConfig): string | undefined => {
+  switch (provider) {
+    case "deepseek":
+      return "https://api.deepseek.com/v1";
+    case "moonshot-ai":
+      return "https://api.moonshot.cn/v1";
+    case "qwen":
+      // Use international endpoint if configured, otherwise use China region
+      const useInternational = process.env.QWEN_USE_INTERNATIONAL === "true" || 
+                              graphConfig?.configurable?.qwenUseInternational;
+      return useInternational 
+        ? "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" 
+        : "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    case "z-ai":
+      return "https://api.z.ai/api/paas/v4/";
+    default:
+      return undefined;
+  }
+};
+
+// Helper function to get the actual provider to use with LangChain
+const getLangChainProvider = (provider: Provider): "openai" | "deepseek" | Provider => {
+  switch (provider) {
+    case "deepseek":
+      return "deepseek"; // Use dedicated DeepSeek package
+    case "moonshot-ai":
+    case "qwen":
+    case "z-ai":
+      return "openai"; // These providers use OpenAI-compatible APIs
+    default:
+      return provider;
+  }
+};
+
 const providerToApiKey = (
   providerName: string,
   apiKeys: Record<string, string>,
@@ -82,6 +121,14 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "moonshot-ai":
+      return apiKeys.moonshotApiKey;
+    case "deepseek":
+      return apiKeys.deepseekApiKey;
+    case "qwen":
+      return apiKeys.qwenApiKey;
+    case "z-ai":
+      return apiKeys.zaiApiKey;
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -90,6 +137,34 @@ const providerToApiKey = (
 export class ModelManager {
   private config: ModelManagerConfig;
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+  // WeakMap to track original providers for model instances to prevent provider confusion
+  private originalProviders: WeakMap<ConfigurableModel, Provider> = new WeakMap();
+
+  /**
+   * Infer the original provider from baseUrl during deserialization
+   */
+  private inferProviderFromBaseUrl(baseUrl?: string): Provider | null {
+    if (!baseUrl) return null;
+    
+    if (baseUrl.includes("api.deepseek.com")) return "deepseek";
+    if (baseUrl.includes("api.moonshot.cn")) return "moonshot-ai";
+    if (baseUrl.includes("dashscope.aliyuncs.com")) return "qwen";
+    
+    return null;
+  }
+
+  /**
+   * Get the original provider for a model instance, with fallback to inference from baseUrl
+   */
+  private getOriginalProvider(model: ConfigurableModel): Provider | null {
+    // First try to get from WeakMap
+    const storedProvider = this.originalProviders.get(model);
+    if (storedProvider) return storedProvider;
+    
+    // Fallback: infer from baseUrl if available in model configuration
+    const baseUrl = model._defaultConfig?.baseUrl;
+    return this.inferProviderFromBaseUrl(baseUrl);
+  }
 
   constructor(config: Partial<ModelManagerConfig> = {}) {
     this.config = { ...DEFAULT_MODEL_MANAGER_CONFIG, ...config };
@@ -177,11 +252,14 @@ export class ModelManager {
     }
 
     const apiKey = this.getUserApiKey(graphConfig, provider);
+    const langchainProvider = getLangChainProvider(provider);
+    const baseUrl = getProviderBaseUrl(provider, graphConfig);
 
     const modelOptions: InitChatModelArgs = {
-      modelProvider: provider,
+      modelProvider: langchainProvider,
       max_retries: MAX_RETRIES,
       ...(apiKey ? { apiKey } : {}),
+      ...(baseUrl && (langchainProvider === "openai" || langchainProvider === "deepseek") ? { baseUrl } : {}),
       ...(thinkingModel && provider === "anthropic"
         ? {
             thinking: { budget_tokens: thinkingBudgetTokens, type: "enabled" },
@@ -198,12 +276,19 @@ export class ModelManager {
             }),
     };
 
-    logger.debug("Initializing model", {
-      provider,
+    logger.info("Initializing model", {
+      originalProvider: provider,
+      langchainProvider,
       modelName,
+      baseUrl,
     });
 
-    return await initChatModel(modelName, modelOptions);
+    const model = await initChatModel(modelName, modelOptions);
+    
+    // Store the original provider for this model instance to prevent confusion on re-initialization
+    this.originalProviders.set(model, provider);
+    
+    return model;
   }
 
   public getModelConfigs(
@@ -218,7 +303,9 @@ export class ModelManager {
     let selectedModelConfig: ModelLoadConfig | null = null;
 
     if (defaultConfig) {
-      const provider = defaultConfig.modelProvider as Provider;
+      // Use original provider instead of the potentially mapped "openai" provider
+      const originalProvider = this.getOriginalProvider(selectedModel);
+      const provider = originalProvider || (defaultConfig.modelProvider as Provider);
       const modelName = defaultConfig.model;
 
       if (provider && modelName) {
@@ -398,6 +485,27 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5-codex",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      "moonshot-ai": {
+        [LLMTask.PLANNER]: "kimi-k2-0711-preview",
+        [LLMTask.PROGRAMMER]: "kimi-k2-0711-preview",
+        [LLMTask.REVIEWER]: "kimi-k2-0711-preview",
+        [LLMTask.ROUTER]: "kimi-k2-0711-preview",
+        [LLMTask.SUMMARIZER]: "kimi-k2-0711-preview",
+      },
+      deepseek: {
+        [LLMTask.PLANNER]: "deepseek-reasoner",
+        [LLMTask.PROGRAMMER]: "deepseek-chat",
+        [LLMTask.REVIEWER]: "deepseek-chat",
+        [LLMTask.ROUTER]: "deepseek-chat",
+        [LLMTask.SUMMARIZER]: "deepseek-chat",
+      },
+      qwen: {
+        [LLMTask.PLANNER]: "qwen-plus",
+        [LLMTask.PROGRAMMER]: "qwen3-coder-plus",
+        [LLMTask.REVIEWER]: "qwen-plus",
+        [LLMTask.ROUTER]: "qwen-plus",
+        [LLMTask.SUMMARIZER]: "qwen-plus",
       },
     };
 
