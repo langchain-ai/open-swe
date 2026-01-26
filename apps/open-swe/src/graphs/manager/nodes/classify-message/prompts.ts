@@ -73,8 +73,8 @@ Your documentation is available at: https://github.com/langchain-ai/open-swe/tre
 You can be invoked by both the web app, or by adding a label to a GitHub issue. These label options are:
 - \`open-swe\` - trigger a standard Open SWE task. It will interrupt after generating a plan, and the user must approve it before it can continue. Uses Claude Opus 4.5 for all LLM requests.
 - \`open-swe-auto\` - trigger an 'auto' Open SWE task. It will not interrupt after generating a plan, and instead it will auto-approve the plan, and continue to the programming step without user approval. Uses Claude Opus 4.5 for all LLM requests.
-- \`open-swe-max\` - this label acts the same as \`open-swe\`, except it uses a larger, more powerful model for the planning and programming steps: Claude Opus 4.1. It still uses Claude Opus 4.5 for the reviewer step.
-- \`open-swe-max-auto\` - this label acts the same as \`open-swe-auto\`, except it uses a larger, more powerful model for the planning and programming steps: Claude Opus 4.1. It still uses Claude Opus 4.5 for the reviewer step.
+- \`open-swe-max\` - **DEPRECATED** - this label uses Claude Opus 4.1 for planning and programming. Users should use \`open-swe\` instead, which now uses the more advanced Claude Opus 4.5.
+- \`open-swe-max-auto\` - **DEPRECATED** - this label uses Claude Opus 4.1 for planning and programming with auto-approval. Users should use \`open-swe-auto\` instead, which now uses the more advanced Claude Opus 4.5.
 
 Only provide this information if requested by the user.
 For example, if the user asks what you can do, you should provide the above information in your response.

@@ -56,11 +56,11 @@ Although Open SWE allows you to select any model from Anthropic, OpenAI and Goog
 - Faster execution
 - Cost-effective
 
-**`open-swe-max`**: Uses Claude Opus 4 (only for the planning and code writing agents)
+**`open-swe-max`** (Deprecated): Uses Claude Opus 4.1 (only for the planning and code writing agents)
 
-- For complex tasks requiring advanced reasoning
-- Higher quality output for challenging problems
-- More expensive but better for difficult tasks
+- **This label is deprecated** - use `open-swe` instead, which now uses Claude Opus 4.5 by default
+- The max label uses an outdated model configuration
+- For complex tasks, the default `open-swe` label with Opus 4.5 provides better performance
 
 ### Auto vs Manual Labels
 
@@ -72,10 +72,10 @@ If you're running Open SWE against an open-ended or very complex task, you may w
 
 ## Label Reference
 
-- `open-swe`: Manual mode with Sonnet 4
-- `open-swe-auto`: Auto mode with Sonnet 4
-- `open-swe-max`: Manual mode with Opus 4.1
-- `open-swe-max-auto`: Auto mode with Opus 4.1
+- `open-swe`: Manual mode with Opus 4.5
+- `open-swe-auto`: Auto mode with Opus 4.5
+- `open-swe-max`: **[DEPRECATED]** Manual mode with Opus 4.1 - use `open-swe` instead
+- `open-swe-max-auto`: **[DEPRECATED]** Auto mode with Opus 4.1 - use `open-swe-auto` instead
 
 <Note>
   In development environments, append `-dev` to all labels (e.g.,

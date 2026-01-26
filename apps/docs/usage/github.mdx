@@ -31,13 +31,15 @@ Open SWE supports three types of labels that control how the agent operates:
 - Provides faster turnaround for straightforward requests
 - Best for simple changes or when you trust the agent to proceed autonomously
 
-**Max Mode (`open-swe-max` and `open-swe-max-auto`)**
+**Max Mode (`open-swe-max` and `open-swe-max-auto`) - DEPRECATED**
 
-- Uses Claude Opus 4.1 for both planning and programming tasks
-- Provides enhanced performance and reasoning capabilities for complex problems
-- `open-swe-max`: Requires manual plan approval with premium model performance
-- `open-swe-max-auto`: Combines automatic execution with premium model capabilities
-- Ideal for challenging tasks that benefit from the most advanced AI reasoning
+<Warning>
+  These labels are **deprecated**. Please use `open-swe` or `open-swe-auto` instead, which now use Claude Opus 4.5 by default for better performance.
+</Warning>
+
+- Uses Claude Opus 4.1 for both planning and programming tasks (outdated model configuration)
+- The standard `open-swe` labels now provide better performance with Claude Opus 4.5
+- These labels are maintained for backward compatibility but will be removed in a future release
 
 <Note>
   In development environments, the labels are `open-swe-dev`,

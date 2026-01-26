@@ -50,6 +50,18 @@ class IssueWebhookHandler extends WebhookHandlerBase {
       },
     );
 
+    // Add deprecation warning for max labels
+    if (isMaxLabel) {
+      this.logger.warn(
+        `The '${payload.label.name}' label is deprecated. The 'open-swe-max' and 'open-swe-max-auto' labels use Claude Opus 4.1, which is an outdated model configuration. Please use the standard 'open-swe' or 'open-swe-auto' labels instead, which now use Claude Opus 4.5 by default for better performance.`,
+        {
+          issueNumber: payload.issue.number,
+          deprecatedLabel: payload.label.name,
+          suggestedLabel: isAutoAcceptLabel ? "open-swe-auto" : "open-swe",
+        },
+      );
+    }
+
     try {
       const context = await this.setupWebhookContext(payload);
       if (!context) {
