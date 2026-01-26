@@ -10,11 +10,6 @@
   <h1>Open SWE - An Open-Source Asynchronous Coding Agent</h1>
 </div>
 
-> [!WARNING]
-> **⚠️ DEPRECATION NOTICE**
-> 
-> This repository is no longer actively maintained and will not receive further updates. The project has been deprecated and users are advised to seek alternative solutions for their coding agent needs.
-
 Open SWE is an open-source cloud-based asynchronous coding agent built with [LangGraph](https://docs.langchain.com/oss/javascript/langgraph/overview). It autonomously understands codebases, plans solutions, and executes code changes across entire repositories—from initial planning to opening pull requests.
 
 > [!TIP]
