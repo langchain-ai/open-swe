@@ -28,6 +28,7 @@
     "@langchain/anthropic": "^0.3.26",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",
+    "@langchain/deepseek": "^0.2.1",
     "@langchain/google-genai": "^0.2.9",
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
