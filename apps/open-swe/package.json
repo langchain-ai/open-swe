@@ -26,6 +26,7 @@
   "dependencies": {
     "@daytonaio/sdk": "^0.25.5",
     "@langchain/anthropic": "^0.3.26",
+    "@langchain/aws": "^0.1.14",
     "@langchain/community": "^0.3.47",
     "@langchain/core": "^0.3.65",
     "@langchain/google-genai": "^0.2.9",
