@@ -1,4 +1,6 @@
 {
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.12",
   "graphs": {
     "agent": "agent.server:get_agent"
   },
