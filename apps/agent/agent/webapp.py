@@ -26,9 +26,7 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
-LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY") or os.environ.get(
-    "LANGSMITH_API_KEY_PROD", ""
-)
+LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
 LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
 
 GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
