@@ -50,3 +50,16 @@ credentials.json
 
 # Test traces
 apps/cli/test_traces/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+uv.lock
+
+# 
