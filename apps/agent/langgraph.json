@@ -1,0 +1,11 @@
+{
+  "graphs": {
+    "agent": "agent.server:get_agent"
+  },
+  "dependencies": ["."],
+  "http": {
+    "app": "agent.webapp:app"
+  },
+  "env": ".env"
+  
+}
