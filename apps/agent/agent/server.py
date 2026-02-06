@@ -6,19 +6,16 @@
 import logging
 import os
 import warnings
-from collections.abc import Sequence
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from langchain.agents.middleware import AgentState, after_agent, after_model, before_model
-from langchain.agents.middleware.types import AgentMiddleware
-from langchain.tools import BaseTool
-from langchain_core.language_models import BaseChatModel
 from langgraph.config import get_config, get_store
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 
@@ -30,12 +27,11 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.sandbox import SandboxBackendProtocol
-from deepagents_cli.agent import get_system_prompt
-from deepagents_cli.config import config, settings
-from deepagents_cli.tools import fetch_url, http_request, web_search
 
 # Local import for encryption
 from .encryption import decrypt_token
+from .prompt import construct_system_prompt
+from .tools import fetch_url, http_request
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -87,69 +83,6 @@ def _create_langsmith_sandbox(
         template_image=template_image,
     )
 
-
-def create_server_agent(
-    model: str | BaseChatModel | None,
-    assistant_id: str,
-    *,
-    tools: list[BaseTool] | None = None,
-    sandbox: SandboxBackendProtocol | None = None,
-    sandbox_type: str | None = None,
-    system_prompt: str | None = None,
-    auto_approve: bool = True,  # noqa: ARG001 - Always True for Open SWE
-    working_dir: str | None = None,
-    middleware: Sequence[AgentMiddleware] = (),
-) -> Pregel:
-    """Create a server-mode agent for Open SWE.
-
-    This creates an agent configured for server/cloud deployment with sandbox
-    support and custom middleware. Always runs with auto_approve=True.
-
-    Args:
-        model: LLM model to use. Can be None for introspection-only mode.
-        assistant_id: Agent identifier for memory/state storage
-        tools: Additional tools to provide to agent
-        sandbox: Optional sandbox backend for remote execution (e.g., LangSmithBackend).
-        sandbox_type: Type of sandbox provider ("langsmith").
-                     Used for system prompt generation.
-        system_prompt: Override the default system prompt. If None, generates one
-                      based on sandbox_type and assistant_id.
-        working_dir: Override the default working directory (e.g., cloned repo path).
-                    Used in system prompt to tell the agent where to operate.
-        middleware: Sequence of middleware to apply to the agent.
-
-    Returns:
-        Configured LangGraph Pregel instance ready for execution
-    """
-    agent_tools = tools or []
-
-    # Get or use custom system prompt
-    if system_prompt is None:
-        if sandbox_type is not None:
-            system_prompt = get_system_prompt(
-                assistant_id=assistant_id,
-                sandbox_type=sandbox_type,
-                working_dir=working_dir,
-            )
-        else:
-            # Only happens when thread_id is None / not actually running
-            system_prompt = ""
-
-    return create_deep_agent(
-        model=model,
-        system_prompt=system_prompt,
-        tools=agent_tools,
-        backend=sandbox,
-        middleware=middleware,
-        interrupt_on={},  # Always auto-approve for Open SWE
-    ).with_config(config)
-
-
-tools = [http_request, fetch_url]
-if settings.has_tavily:
-    tools.append(web_search)
-
-from langgraph_sdk import get_client
 
 client = get_client()
 
@@ -867,10 +800,15 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
+DEFAULT_RECURSION_LIMIT = 1_000
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
     logger.info("get_agent called for thread %s", thread_id)
+
+    config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
     repo_config = config["configurable"].get("repo", {})
     repo_owner = repo_config.get("owner")
@@ -883,14 +821,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
-        return create_server_agent(
-            model=None,
-            assistant_id="agent",
-            tools=tools,
-            sandbox=None,
-            sandbox_type=None,
-            auto_approve=True,
-        )
+        return create_deep_agent(
+            system_prompt="",
+            tools=[],
+        ).with_config(config)
 
     sandbox_id = await _get_sandbox_id_from_metadata(thread_id)
 
@@ -938,14 +872,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(
-                _create_langsmith_sandbox, sandbox_id
-            )
+            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
-            logger.warning(
-                "Failed to connect to existing sandbox %s, creating new one", sandbox_id
-            )
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             # Reset sandbox_id and create a new sandbox
             await client.threads.update(
                 thread_id=thread_id,
@@ -962,9 +892,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 )
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(
-                    thread_id=thread_id, metadata={"sandbox_id": None}
-                )
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
 
         thread = await client.threads.get(thread_id=thread_id)
@@ -983,17 +911,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     _SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    return create_server_agent(
-        model=None,
-        assistant_id="agent",
-        tools=tools,
-        sandbox=sandbox_backend,
-        sandbox_type="langsmith",
-        auto_approve=True,
-        working_dir=repo_dir,
+    return create_deep_agent(
+        model=None,  # TODO: Actually pass a model here
+        system_prompt=construct_system_prompt(repo_dir),
+        tools=[http_request, fetch_url],
+        backend=sandbox_backend,
         middleware=[
             check_message_queue_before_model,
             post_to_linear_after_model,
             open_pr_if_needed,
         ],
-    )
+    ).with_config(config)
