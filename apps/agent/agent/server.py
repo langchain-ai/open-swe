@@ -864,7 +864,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 
         try:
-            sandbox_cm = create_sandbox_async("langsmith", cleanup=False)
+            sandbox_cm = create_sandbox_async("langsmith")
             sandbox_backend = await sandbox_cm.__aenter__()
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
@@ -898,7 +898,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
-            sandbox_cm = create_sandbox_async("langsmith", sandbox_id=sandbox_id, cleanup=False)
+            sandbox_cm = create_sandbox_async("langsmith", sandbox_id=sandbox_id)
             sandbox_backend = await sandbox_cm.__aenter__()
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
