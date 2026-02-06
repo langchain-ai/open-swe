@@ -60,6 +60,5 @@ __pycache__/
 .Python
 *.egg-info/
 .eggs/
-uv.lock
 
 # 
