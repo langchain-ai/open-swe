@@ -42,9 +42,21 @@ from deepagents_cli.tools import fetch_url, http_request, web_search
 from .encryption import decrypt_token
 
 
+def _get_langsmith_api_key() -> str | None:
+    """Get LangSmith API key from environment.
+
+    Checks LANGSMITH_API_KEY first, then falls back to LANGSMITH_API_KEY_PROD
+    for LangGraph Cloud deployments where LANGSMITH_API_KEY is reserved.
+    """
+    return os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGSMITH_API_KEY_PROD")
+
+
 @asynccontextmanager
 async def create_sandbox_async(provider: str, **kwargs):
     """Async wrapper around create_sandbox for compatibility."""
+    # For langsmith provider, pass the API key explicitly
+    if provider == "langsmith" and "api_key" not in kwargs:
+        kwargs["api_key"] = _get_langsmith_api_key()
     with create_sandbox(provider, **kwargs) as sandbox:
         yield sandbox
 
