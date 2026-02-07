@@ -29,6 +29,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.sandbox import SandboxBackendProtocol
 
 # Local import for encryption
+from langchain_anthropic import ChatAnthropic
 from .encryption import decrypt_token
 from .prompt import construct_system_prompt
 from .tools import fetch_url, http_request
@@ -912,7 +913,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=None,  # TODO: Actually pass a model here
+        model=ChatAnthropic(
+            model="claude-opus-4-6", max_tokens=20_000
+        ),  # TODO: Actually pass a model here
         system_prompt=construct_system_prompt(repo_dir),
         tools=[http_request, fetch_url],
         backend=sandbox_backend,
