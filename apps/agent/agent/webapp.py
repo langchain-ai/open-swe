@@ -552,13 +552,23 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "When you're done, commit and push your changes."
     )
 
+    identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
+    linear_project_id = ""
+    linear_issue_number = ""
+    if identifier and "-" in identifier:
+        parts = identifier.split("-", 1)
+        linear_project_id = parts[0]
+        linear_issue_number = parts[1]
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "linear_issue": {
             "id": issue_id,
             "title": title,
             "url": full_issue.get("url", "") or issue_data.get("url", ""),
-            "identifier": full_issue.get("identifier", "") or issue_data.get("identifier", ""),
+            "identifier": identifier,
+            "linear_project_id": linear_project_id,
+            "linear_issue_number": linear_issue_number,
         },
     }
     if github_token:
