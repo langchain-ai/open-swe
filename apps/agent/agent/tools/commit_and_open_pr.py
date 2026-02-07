@@ -22,7 +22,9 @@ def commit_and_open_pr(
 
     The PR title MUST follow this exact format:
 
-        <type>: <short description> [closes <PROJECT_ID>-<ISSUE_NUMBER>]
+        <type>: <short lowercase description> [closes <PROJECT_ID>-<ISSUE_NUMBER>]
+
+    The description MUST be entirely lowercase (no capital letters).
 
     Where <type> is one of:
     - fix:   for bug fixes

@@ -64,7 +64,7 @@ When you have completed your implementation, follow these steps in order:
    **Commit message**: Should be concise and focus on the "why" rather than the "what". If not provided, the PR title is used.
 
 
-   
+
 
 Always call `commit_and_open_pr` as the final step once your implementation is complete and code quality checks pass.
 
