@@ -53,7 +53,7 @@
     "@eslint/js": "^9.19.0",
     "@jest/globals": "^29.7.0",
     "@langchain/langgraph-cli": "^0.0.47",
-    "@tsconfig/recommended": "^1.0.8",
+    "@tsconfig/recommended": "^1.0.13",
     "@types/bcrypt": "^6.0.0",
     "@types/commander": "^2.12.5",
     "@types/jest": "^29.5.0",

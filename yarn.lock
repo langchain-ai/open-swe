@@ -4437,7 +4437,7 @@ __metadata:
     "@langchain/core": ^0.3.65
     "@langchain/langgraph-cli": ^0.0.47
     "@openswe/shared": "*"
-    "@tsconfig/recommended": ^1.0.8
+    "@tsconfig/recommended": ^1.0.13
     "@types/jest": ^29.5.0
     "@types/node": ^22.13.5
     deepagents: 0.0.0-rc.2
@@ -4480,7 +4480,7 @@ __metadata:
     "@octokit/rest": ^22.0.0
     "@octokit/webhooks": ^14.0.2
     "@openswe/shared": "*"
-    "@tsconfig/recommended": ^1.0.8
+    "@tsconfig/recommended": ^1.0.13
     "@types/bcrypt": ^6.0.0
     "@types/commander": ^2.12.5
     "@types/jest": ^29.5.0
@@ -4520,7 +4520,7 @@ __metadata:
     "@eslint/js": ^9.19.0
     "@langchain/langgraph-sdk": ^0.0.95
     "@openswe/shared": "*"
-    "@tsconfig/recommended": ^1.0.8
+    "@tsconfig/recommended": ^1.0.13
     "@types/node": ^24.1.0
     "@types/react": ^19.1.8
     "@types/uuid": ^10.0.0
@@ -4563,7 +4563,7 @@ __metadata:
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
     "@octokit/types": ^12.0.0
-    "@tsconfig/recommended": ^1.0.8
+    "@tsconfig/recommended": ^1.0.13
     "@types/jest": ^29.5.0
     "@types/jsonwebtoken": ^9.0.10
     "@types/node": ^22.13.5
@@ -6999,10 +6999,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tsconfig/recommended@npm:^1.0.8":
-  version: 1.0.10
-  resolution: "@tsconfig/recommended@npm:1.0.10"
-  checksum: f79184fc035b6440cb416af816a86287d94b608f97129b66cd5de48cc89c0678101a5732f6f06319d85efa71ff75c24e646164052418b37e917791f28a041af2
+"@tsconfig/recommended@npm:^1.0.13":
+  version: 1.0.13
+  resolution: "@tsconfig/recommended@npm:1.0.13"
+  checksum: 03af3ce6b4a493ed9daea50dc7c334a9b3d04bf5f3fdbd6b5d0550efffaabb12e0ad7b249d93bd9f5102b8dccd3266af48949ec2ac2e9990580c692e1158db95
   languageName: node
   linkType: hard
 
