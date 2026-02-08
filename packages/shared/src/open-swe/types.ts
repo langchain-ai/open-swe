@@ -640,9 +640,16 @@ export const GraphConfiguration = z.object({
   /**
    * User defined API keys to use
    */
-  apiKeys: withLangGraph(z.record(z.string(), z.string()).optional(), {
-    metadata: GraphConfigurationMetadata.apiKeys,
-  }),
+  apiKeys: withLangGraph(
+    z
+      .object({
+        openrouter: z.array(z.string()).optional(),
+      })
+      .optional(),
+    {
+      metadata: GraphConfigurationMetadata.apiKeys,
+    },
+  ),
   /**
    * The user's GitHub access token. To be used in requests to get information about the user.
    */

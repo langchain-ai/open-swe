@@ -281,11 +281,13 @@ async function createToolsAndPrompt(
 
   return {
     providerTools: {
+      openrouter: [],
       anthropic: anthropicModelTools,
       openai: nonAnthropicModelTools,
       "google-genai": nonAnthropicModelTools,
     },
     providerMessages: {
+      openrouter: [],
       anthropic: anthropicMessages,
       openai: nonAnthropicMessages,
       "google-genai": nonAnthropicMessages,

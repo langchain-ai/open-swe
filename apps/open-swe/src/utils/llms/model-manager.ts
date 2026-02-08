@@ -47,6 +47,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "openrouter",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -73,15 +74,21 @@ const THINKING_BUDGET_TOKENS = 5000;
 
 const providerToApiKey = (
   providerName: string,
-  apiKeys: Record<string, string>,
+  apiKeys: Record<string, string | string[]>,
 ): string => {
   switch (providerName) {
     case "openai":
-      return apiKeys.openaiApiKey;
+      return apiKeys.openaiApiKey as string;
     case "anthropic":
-      return apiKeys.anthropicApiKey;
+      return apiKeys.anthropicApiKey as string;
     case "google-genai":
-      return apiKeys.googleApiKey;
+      return apiKeys.googleApiKey as string;
+    case "openrouter":
+      const openRouterKeys = apiKeys.openrouter as string[];
+      if (!openRouterKeys || openRouterKeys.length === 0) {
+        throw new Error("No OpenRouter API keys provided.");
+      }
+      return openRouterKeys[0];
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -202,6 +209,17 @@ export class ModelManager {
       provider,
       modelName,
     });
+
+    if (provider === "openrouter") {
+      const { ChatOpenRouter } = await import("./chat-openrouter.js");
+      return new ChatOpenRouter({
+        modelName,
+        temperature: temperature ?? 0,
+        maxTokens: finalMaxTokens,
+        graphConfig,
+        task: (graphConfig.configurable as any).task,
+      });
+    }
 
     return await initChatModel(modelName, modelOptions);
   }
@@ -398,6 +416,13 @@ export class ModelManager {
         [LLMTask.REVIEWER]: "gpt-5-codex",
         [LLMTask.ROUTER]: "gpt-5-nano",
         [LLMTask.SUMMARIZER]: "gpt-5-mini",
+      },
+      openrouter: {
+        [LLMTask.PLANNER]: "openrouter/anthropic/claude-3-haiku",
+        [LLMTask.PROGRAMMER]: "openrouter/anthropic/claude-3-haiku",
+        [LLMTask.REVIEWER]: "openrouter/anthropic/claude-3-haiku",
+        [LLMTask.ROUTER]: "openrouter/anthropic/claude-3-haiku",
+        [LLMTask.SUMMARIZER]: "openrouter/anthropic/claude-3-haiku",
       },
     };
 
