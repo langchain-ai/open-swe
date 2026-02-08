@@ -3405,22 +3405,22 @@ __metadata:
   linkType: hard
 
 "@langchain/core@npm:^0.3.65":
-  version: 0.3.65
-  resolution: "@langchain/core@npm:0.3.65"
+  version: 0.3.80
+  resolution: "@langchain/core@npm:0.3.80"
   dependencies:
     "@cfworker/json-schema": ^4.0.2
     ansi-styles: ^5.0.0
     camelcase: 6
     decamelize: 1.2.0
     js-tiktoken: ^1.0.12
-    langsmith: ^0.3.46
+    langsmith: ^0.3.67
     mustache: ^4.2.0
     p-queue: ^6.6.2
     p-retry: 4
     uuid: ^10.0.0
     zod: ^3.25.32
     zod-to-json-schema: ^3.22.3
-  checksum: f01f63ac59f555851d02953152fd92fb2c200502688a49c7caa2dd9549a4fe125c0c6525faaeeeb3e138c1434ccd72ee482eda5bef8e568b866a9d41c259bf08
+  checksum: b11dbcfff1f63b2db55d655867440cd69bd6bd4f21c7b0167e5eae2dcea37195a8243db93e024c8e3cddac5ac11e8771cf38b032788210eb28204e955424ea61
   languageName: node
   linkType: hard
 
@@ -3481,6 +3481,17 @@ __metadata:
   peerDependencies:
     "@langchain/core": ">=0.2.31 <0.4.0"
   checksum: 1a2427fde5b1e0372603d25d749279fee4648b230d4258674ac0771f10d3e7ba79554c7ee9e1acdae2b08190a1dc7505a31f3f807c7a20572cb7fa5572875619
+  languageName: node
+  linkType: hard
+
+"@langchain/langgraph-checkpoint@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "@langchain/langgraph-checkpoint@npm:1.0.0"
+  dependencies:
+    uuid: ^10.0.0
+  peerDependencies:
+    "@langchain/core": ^1.0.1
+  checksum: 0e85633bd7975230b61ba709e30da7b74e542efe4b37f105b17ef0e1dde658d24851fa37d0850442e8aa934c6bf0cb3e85cfa98d9064e406ff9f3888ebfc3505
   languageName: node
   linkType: hard
 
@@ -3594,6 +3605,25 @@ __metadata:
     zod-to-json-schema:
       optional: true
   checksum: ad29fbbcdf1411ad65a1fe79c439380bf0c70aa82aab776b13d1a9ccf52501bebbf3f1b7c759c96a8972a3715f26c99cca6484b53d4d023da964284124e9eb8e
+  languageName: node
+  linkType: hard
+
+"@langchain/langgraph@npm:^1.1.2":
+  version: 1.1.4
+  resolution: "@langchain/langgraph@npm:1.1.4"
+  dependencies:
+    "@langchain/langgraph-checkpoint": ^1.0.0
+    "@langchain/langgraph-sdk": ~1.6.0
+    "@standard-schema/spec": 1.1.0
+    uuid: ^10.0.0
+  peerDependencies:
+    "@langchain/core": ^1.1.16
+    zod: ^3.25.32 || ^4.2.0
+    zod-to-json-schema: ^3.x
+  peerDependenciesMeta:
+    zod-to-json-schema:
+      optional: true
+  checksum: cbe9f89a6ca487713d454551cf3678d4cda57b0cda1947822fee3ed9451604a8ce8a362b9ad4ce4ed10600e493a4fb09aa250ffb895fefb2cb3021315dc1976d
   languageName: node
   linkType: hard
 
@@ -4544,7 +4574,7 @@ __metadata:
     hono: ^4.11.7
     jest: ^29.7.0
     jsonwebtoken: ^9.0.2
-    langchain: ^0.3.26
+    langchain: ^1.2.18
     langsmith: ^0.3.29
     prettier: ^3.5.2
     ts-jest: ^29.1.0
@@ -6681,6 +6711,13 @@ __metadata:
   version: 3.1.2
   resolution: "@socket.io/component-emitter@npm:3.1.2"
   checksum: 89888f00699eb34e3070624eb7b8161fa29f064aeb1389a48f02195d55dd7c52a504e52160016859f6d6dffddd54324623cdd47fd34b3d46f9ed96c18c456edc
+  languageName: node
+  linkType: hard
+
+"@standard-schema/spec@npm:1.1.0":
+  version: 1.1.0
+  resolution: "@standard-schema/spec@npm:1.1.0"
+  checksum: 6245ebef5e698bb04752a22e996a7cc40406a404d9f68a9d4e1a7a10f2422da287247508e7b495a2f32bb38f3d57b4daf2c9ab4bf22d9bca13e20a3dc5ec575e
   languageName: node
   linkType: hard
 
@@ -14669,7 +14706,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"langchain@npm:>=0.2.3 <0.3.0 || >=0.3.4 <0.4.0, langchain@npm:^0.3.26":
+"langchain@npm:>=0.2.3 <0.3.0 || >=0.3.4 <0.4.0":
   version: 0.3.30
   resolution: "langchain@npm:0.3.30"
   dependencies:
@@ -14739,6 +14776,21 @@ __metadata:
     typeorm:
       optional: true
   checksum: 113096ff92d07cbdf0a85e7f117df78b8171144a315eeca31c6db847879a05aa4428401ff67659bfd7ededfda6644c1f9bd5c6f9449c167395253ee39c9643d0
+  languageName: node
+  linkType: hard
+
+"langchain@npm:^1.2.18":
+  version: 1.2.18
+  resolution: "langchain@npm:1.2.18"
+  dependencies:
+    "@langchain/langgraph": ^1.1.2
+    "@langchain/langgraph-checkpoint": ^1.0.0
+    langsmith: ">=0.4.0 <1.0.0"
+    uuid: ^10.0.0
+    zod: ^3.25.76 || ^4
+  peerDependencies:
+    "@langchain/core": 1.1.19
+  checksum: 480c0efaf9149fe1df3d1a67ee21bf96243b7bdc6ecc2632b7093915d1e107d2a0d8a67e8eb73908261b264b1f8a13be0d0727247eada3d9e59cd62f286bd3c3
   languageName: node
   linkType: hard
 

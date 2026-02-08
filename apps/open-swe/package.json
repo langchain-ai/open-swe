@@ -43,7 +43,7 @@
     "diff": "^8.0.3",
     "hono": "^4.11.7",
     "jsonwebtoken": "^9.0.2",
-    "langchain": "^0.3.26",
+    "langchain": "^1.2.18",
     "langsmith": "^0.3.29",
     "uuid": "^11.0.5",
     "zod": "^3.25.32"
