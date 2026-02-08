@@ -1,5 +1,8 @@
 name: Deploy LangGraph
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["main"]
