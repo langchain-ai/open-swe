@@ -24,7 +24,7 @@ jobs:
         node-version: [18.x, 20.x]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Enable Corepack
         run: corepack enable
       - name: Use Node.js ${{ matrix.node-version }}
