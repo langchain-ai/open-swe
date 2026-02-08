@@ -31,7 +31,7 @@
     "@langchain/google-genai": "^0.2.9",
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
-    "@langchain/mcp-adapters": "^0.5.2",
+    "@langchain/mcp-adapters": "^1.1.2",
     "@langchain/openai": "^0.5.10",
     "@mendable/firecrawl-js": "^1.29.1",
     "@octokit/app": "^16.0.1",
