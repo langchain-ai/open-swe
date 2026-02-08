@@ -30,9 +30,10 @@ from deepagents.backends.sandbox import SandboxBackendProtocol
 
 # Local import for encryption
 from langchain_anthropic import ChatAnthropic
+
 from .encryption import decrypt_token
 from .prompt import construct_system_prompt
-from .tools import fetch_url, http_request
+from .tools import commit_and_open_pr, fetch_url, http_request
 
 
 def _get_langsmith_api_key() -> str | None:
@@ -456,6 +457,28 @@ async def post_to_linear_after_model(  # noqa: PLR0911, PLR0912
     return None
 
 
+def _extract_pr_params_from_messages(messages: list) -> dict[str, str] | None:
+    """Extract PR title/body/commit_message from the last commit_and_open_pr tool result."""
+    for msg in reversed(messages):
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+            name = msg.get("name", "")
+        else:
+            content = getattr(msg, "content", "")
+            name = getattr(msg, "name", "")
+
+        if name == "commit_and_open_pr" and content:
+            import json as _json
+
+            try:
+                parsed = _json.loads(content) if isinstance(content, str) else content
+                if isinstance(parsed, dict) and "title" in parsed:
+                    return parsed
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
 @after_agent
 async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
     state: AgentState,
@@ -465,7 +488,6 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
     logger.info("After-agent middleware started")
     pr_url = None
     pr_number = None
-    pr_title = "feat: Open SWE PR"
 
     try:
         config = get_config()
@@ -484,6 +506,21 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
 
         linear_issue = configurable.get("linear_issue", {})
         linear_issue_id = linear_issue.get("id")
+
+        pr_params = _extract_pr_params_from_messages(messages)
+
+        if not pr_params:
+            logger.info("No commit_and_open_pr tool call found, skipping PR creation")
+            if linear_issue_id and last_message_content:
+                comment = f""" **Agent Response**
+
+{last_message_content}"""
+                await comment_on_linear_issue(linear_issue_id, comment)
+            return None
+
+        pr_title = pr_params.get("title", "feat: Open SWE PR")
+        pr_body = pr_params.get("body", "Automated PR created by Open SWE agent.")
+        commit_message = pr_params.get("commit_message", pr_title)
 
         if not thread_id:
             if linear_issue_id and last_message_content:
@@ -564,8 +601,9 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
 
         await asyncio.to_thread(sandbox_backend.execute, f"cd {repo_dir} && git add -A")
 
+        safe_commit_msg = commit_message.replace("'", "'\\''")
         await asyncio.to_thread(
-            sandbox_backend.execute, f'cd {repo_dir} && git commit -m "feat: Open SWE PR"'
+            sandbox_backend.execute, f"cd {repo_dir} && git commit -m '{safe_commit_msg}'"
         )
 
         encrypted_token = configurable.get("github_token_encrypted")
@@ -579,7 +617,6 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
             if remote_result.exit_code == 0:
                 remote_url = remote_result.output.strip()
                 if "github.com" in remote_url and "@" not in remote_url:
-                    # Convert https://github.com/owner/repo.git to https://git:token@github.com/owner/repo.git
                     auth_url = remote_url.replace("https://", f"https://git:{github_token}@")
                     await asyncio.to_thread(
                         sandbox_backend.execute,
@@ -590,12 +627,8 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
                         sandbox_backend.execute, f"cd {repo_dir} && git push origin {target_branch}"
                     )
 
-            # Get default branch from GitHub API (most reliable method)
             base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
-
-            pr_title = "feat: Open SWE PR"
-            pr_body = "Automated PR created by Open SWE agent."
 
             pr_url, pr_number = await create_github_pr(
                 repo_owner=repo_owner,
@@ -911,13 +944,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     _SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
+    linear_issue = config["configurable"].get("linear_issue", {})
+    linear_project_id = linear_issue.get("linear_project_id", "")
+    linear_issue_number = linear_issue.get("linear_issue_number", "")
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=ChatAnthropic(
-            model="claude-opus-4-6", max_tokens=20_000
-        ),  # TODO: Actually pass a model here
-        system_prompt=construct_system_prompt(repo_dir),
-        tools=[http_request, fetch_url],
+        model=ChatAnthropic(model="claude-opus-4-6", max_tokens=20_000),
+        system_prompt=construct_system_prompt(
+            repo_dir,
+            linear_project_id=linear_project_id,
+            linear_issue_number=linear_issue_number,
+        ),
+        tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,
         middleware=[
             check_message_queue_before_model,
