@@ -26,10 +26,10 @@ jobs:
       - uses: actions/checkout@v6
       - name: Enable Corepack
         run: corepack enable
-      - name: Use Node.js 18.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v6
         with:
-          node-version: 18.x
+          node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
@@ -43,10 +43,10 @@ jobs:
       - uses: actions/checkout@v6
       - name: Enable Corepack
         run: corepack enable
-      - name: Use Node.js 18.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v6
         with:
-          node-version: 18.x
+          node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
@@ -60,10 +60,10 @@ jobs:
       - uses: actions/checkout@v6
       - name: Enable Corepack
         run: corepack enable
-      - name: Use Node.js 18.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v6
         with:
-          node-version: 18.x
+          node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
@@ -101,10 +101,10 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
         working-directory: .
-      - name: Use Node.js 18.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v6
         with:
-          node-version: 18.x
+          node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
         run: yarn install --immutable --mode=skip-build
