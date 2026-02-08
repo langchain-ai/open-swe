@@ -28,7 +28,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
     "@eslint/js": "^9.19.0",
-    "@tsconfig/recommended": "^1.0.8",
+    "@tsconfig/recommended": "^1.0.13",
     "@types/node": "^24.1.0",
     "@types/react": "^19.1.8",
     "@types/uuid": "^10.0.0",
