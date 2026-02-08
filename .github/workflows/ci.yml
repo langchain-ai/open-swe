@@ -27,7 +27,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 18.x
           cache: "yarn"
@@ -44,7 +44,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 18.x
           cache: "yarn"
@@ -61,7 +61,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 18.x
           cache: "yarn"
@@ -102,7 +102,7 @@ jobs:
         run: corepack enable
         working-directory: .
       - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v6
         with:
           node-version: 18.x
           cache: "yarn"
