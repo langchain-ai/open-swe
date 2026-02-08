@@ -20,7 +20,7 @@
     "test:single": "NODE_OPTIONS=--experimental-vm-modules yarn run jest --config jest.config.js --testTimeout 100000"
   },
   "dependencies": {
-    "@langchain/core": "^0.3.65",
+    "@langchain/core": "^0.3.80",
     "@langchain/langgraph": "^0.3.8",
     "@langchain/langgraph-sdk": "^0.0.95",
     "@octokit/rest": "^22.0.0",

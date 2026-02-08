@@ -2581,16 +2581,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@isaacs/brace-expansion@npm:^5.0.0":
-  version: 5.0.0
-  resolution: "@isaacs/brace-expansion@npm:5.0.0"
-  dependencies:
-    "@isaacs/balanced-match": ^4.0.1
-  checksum: d7a3b8b0ddbf0ccd8eeb1300e29dd0a0c02147e823d8138f248375a365682360620895c66d113e05ee02389318c654379b0e538b996345b83c914941786705b1
-  languageName: node
-  linkType: hard
-
-"@isaacs/brace-expansion@npm:^5.0.1":
+"@isaacs/brace-expansion@npm:^5.0.0, @isaacs/brace-expansion@npm:^5.0.1":
   version: 5.0.1
   resolution: "@isaacs/brace-expansion@npm:5.0.1"
   dependencies:
@@ -3964,10 +3955,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@next/env@npm:15.5.9":
-  version: 15.5.9
-  resolution: "@next/env@npm:15.5.9"
-  checksum: b7c5e0509c1b2ef6d249bd0f17b9383539bd2b16a8c56f590275bddead6e0ef59a70475f579db1062f14a58fc8da869eb048244c1f2418f5148ce249bb50c6b7
+"@next/env@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/env@npm:15.5.12"
+  checksum: 54d9e97f29f2ee571d4806a353047149c95d1b3bab003cdd6ebf844edf691363444b980f82961af0b185684320c9c1a628f282e8a1d19da06ade4dc417c7a3e0
   languageName: node
   linkType: hard
 
@@ -3980,58 +3971,58 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@next/swc-darwin-arm64@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-darwin-arm64@npm:15.5.7"
+"@next/swc-darwin-arm64@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-darwin-arm64@npm:15.5.12"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@next/swc-darwin-x64@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-darwin-x64@npm:15.5.7"
+"@next/swc-darwin-x64@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-darwin-x64@npm:15.5.12"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@next/swc-linux-arm64-gnu@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-linux-arm64-gnu@npm:15.5.7"
+"@next/swc-linux-arm64-gnu@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-linux-arm64-gnu@npm:15.5.12"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@next/swc-linux-arm64-musl@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-linux-arm64-musl@npm:15.5.7"
+"@next/swc-linux-arm64-musl@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-linux-arm64-musl@npm:15.5.12"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
-"@next/swc-linux-x64-gnu@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-linux-x64-gnu@npm:15.5.7"
+"@next/swc-linux-x64-gnu@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-linux-x64-gnu@npm:15.5.12"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"@next/swc-linux-x64-musl@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-linux-x64-musl@npm:15.5.7"
+"@next/swc-linux-x64-musl@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-linux-x64-musl@npm:15.5.12"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"@next/swc-win32-arm64-msvc@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-win32-arm64-msvc@npm:15.5.7"
+"@next/swc-win32-arm64-msvc@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-win32-arm64-msvc@npm:15.5.12"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
-"@next/swc-win32-x64-msvc@npm:15.5.7":
-  version: 15.5.7
-  resolution: "@next/swc-win32-x64-msvc@npm:15.5.7"
+"@next/swc-win32-x64-msvc@npm:15.5.12":
+  version: 15.5.12
+  resolution: "@next/swc-win32-x64-msvc@npm:15.5.12"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
@@ -4434,7 +4425,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/core": ^0.3.65
+    "@langchain/core": ^0.3.80
     "@langchain/langgraph-cli": ^0.0.47
     "@openswe/shared": "*"
     "@tsconfig/recommended": ^1.0.13
@@ -4467,7 +4458,7 @@ __metadata:
     "@jest/globals": ^29.7.0
     "@langchain/anthropic": ^0.3.26
     "@langchain/community": ^0.3.47
-    "@langchain/core": ^0.3.65
+    "@langchain/core": ^0.3.80
     "@langchain/google-genai": ^0.2.9
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-cli": ^0.0.47
@@ -4488,14 +4479,14 @@ __metadata:
     "@types/node": ^22.13.5
     bcrypt: ^6.0.0
     commander: ^14.0.0
-    diff: ^8.0.1
+    diff: ^8.0.3
     dotenv: ^16.4.7
     eslint: ^9.19.0
     eslint-config-prettier: ^8.8.0
     eslint-plugin-import: ^2.27.5
     eslint-plugin-no-instanceof: ^1.0.1
     eslint-plugin-prettier: ^4.2.1
-    hono: ^4.10.3
+    hono: ^4.11.7
     jest: ^29.7.0
     jsonwebtoken: ^9.0.2
     langchain: ^0.3.26
@@ -4558,7 +4549,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/core": ^0.3.65
+    "@langchain/core": ^0.3.80
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/rest": ^22.0.0
@@ -4588,7 +4579,7 @@ __metadata:
   resolution: "@openswe/web@workspace:apps/web"
   dependencies:
     "@eslint/js": ^9.19.0
-    "@langchain/core": ^0.3.65
+    "@langchain/core": ^0.3.80
     "@langchain/langgraph": ^0.3.8
     "@langchain/langgraph-sdk": ^0.0.95
     "@octokit/app": ^16.0.1
@@ -4634,9 +4625,9 @@ __metadata:
     jsonwebtoken: ^9.0.2
     katex: ^0.16.21
     langgraph-nextjs-api-passthrough: ^0.1.4
-    lodash: ^4.17.21
+    lodash: ^4.17.23
     lucide-react: ^0.532.0
-    next: ^15.5.9
+    next: ^15.5.10
     next-themes: ^0.4.4
     nuqs: ^2.4.1
     postcss: ^8.5.3
@@ -5991,15 +5982,16 @@ __metadata:
   linkType: hard
 
 "@smithy/config-resolver@npm:^4.1.4":
-  version: 4.1.4
-  resolution: "@smithy/config-resolver@npm:4.1.4"
+  version: 4.4.6
+  resolution: "@smithy/config-resolver@npm:4.4.6"
   dependencies:
-    "@smithy/node-config-provider": ^4.1.3
-    "@smithy/types": ^4.3.1
-    "@smithy/util-config-provider": ^4.0.0
-    "@smithy/util-middleware": ^4.0.4
+    "@smithy/node-config-provider": ^4.3.8
+    "@smithy/types": ^4.12.0
+    "@smithy/util-config-provider": ^4.2.0
+    "@smithy/util-endpoints": ^3.2.8
+    "@smithy/util-middleware": ^4.2.8
     tslib: ^2.6.2
-  checksum: d3c3b7017377ae30839d3bc684fca7ff58c41c2ca71dd067931aff61f0c570b09cf35e47fde660488c7e1ecc8e1abf720bd41f380b9a91ea302fbd7c7f1b85fb
+  checksum: ffb98899d0343a16692e0bab514719b88d3f97a696489eabaa1c7e52d534083dac440e51dbf8cadf7193e9fabddd7244e77e32d03f905a1469c3d8113fa02a6c
   languageName: node
   linkType: hard
 
@@ -6252,6 +6244,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@smithy/node-config-provider@npm:^4.3.8":
+  version: 4.3.8
+  resolution: "@smithy/node-config-provider@npm:4.3.8"
+  dependencies:
+    "@smithy/property-provider": ^4.2.8
+    "@smithy/shared-ini-file-loader": ^4.4.3
+    "@smithy/types": ^4.12.0
+    tslib: ^2.6.2
+  checksum: 98682d2c0235f041e7545ab7c5e9432a0d6307461042c21aa5cff2be5cebe5402a35de6a559c1a5a3b884c940d5d52679618552b422e393953ba2dc8a00e0fbb
+  languageName: node
+  linkType: hard
+
 "@smithy/node-http-handler@npm:^4.1.0":
   version: 4.1.0
   resolution: "@smithy/node-http-handler@npm:4.1.0"
@@ -6272,6 +6276,16 @@ __metadata:
     "@smithy/types": ^4.3.1
     tslib: ^2.6.2
   checksum: 1cd552792897e43c1d4cf91edac0956a8a8d6a7ba588e46532644ae5aca535ec0fb33e3aa71c73f325632b72cd1b8f26732525a6723f74c54238026432b0118e
+  languageName: node
+  linkType: hard
+
+"@smithy/property-provider@npm:^4.2.8":
+  version: 4.2.8
+  resolution: "@smithy/property-provider@npm:4.2.8"
+  dependencies:
+    "@smithy/types": ^4.12.0
+    tslib: ^2.6.2
+  checksum: 6a19b5e44ceb37a85999796dfa73ce7d82653c1db0cfe332786e202b7333f988dc5e65902c0492dc37d48f4c48ccf35fc4fa92cdf1ca9e8f24d2d1d6206e3dd5
   languageName: node
   linkType: hard
 
@@ -6325,6 +6339,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@smithy/shared-ini-file-loader@npm:^4.4.3":
+  version: 4.4.3
+  resolution: "@smithy/shared-ini-file-loader@npm:4.4.3"
+  dependencies:
+    "@smithy/types": ^4.12.0
+    tslib: ^2.6.2
+  checksum: bda50324b855b8994029a47d256a70bb25f886759d5826e88479bb169f17d8d6c44570b762ea15b38fb29818ea6294fddc15027552efd9e2ef81c5465430afd2
+  languageName: node
+  linkType: hard
+
 "@smithy/signature-v4@npm:^5.1.2":
   version: 5.1.2
   resolution: "@smithy/signature-v4@npm:5.1.2"
@@ -6353,6 +6377,15 @@ __metadata:
     "@smithy/util-stream": ^4.2.3
     tslib: ^2.6.2
   checksum: b436203434e0f6fef3b7d0b0f1c806fb1d7ad0e168db45cd9ccfd012a49c7953721e1d6d6d4b98a703e1256b82abbdcd49283316a14666fb5e2482a4dc3c412f
+  languageName: node
+  linkType: hard
+
+"@smithy/types@npm:^4.12.0":
+  version: 4.12.0
+  resolution: "@smithy/types@npm:4.12.0"
+  dependencies:
+    tslib: ^2.6.2
+  checksum: bd74ef4dba3683f75531650c8dbba018b05fae70e69f0f427136aef3df13a525521a85053b676a5985a11d8273d06eb12bec867c4221eb5a5b2b4eb6a3706dc4
   languageName: node
   linkType: hard
 
@@ -6434,6 +6467,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@smithy/util-config-provider@npm:^4.2.0":
+  version: 4.2.0
+  resolution: "@smithy/util-config-provider@npm:4.2.0"
+  dependencies:
+    tslib: ^2.6.2
+  checksum: 7ff1cb4c11f779021e0e96edfd619d375297420b3eed6998e8dc2f2409895b74e803e8147045b80432d1784da35d2963d941785083343e8333d0f6308ff36fe3
+  languageName: node
+  linkType: hard
+
 "@smithy/util-defaults-mode-browser@npm:^4.0.23":
   version: 4.0.24
   resolution: "@smithy/util-defaults-mode-browser@npm:4.0.24"
@@ -6473,6 +6515,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@smithy/util-endpoints@npm:^3.2.8":
+  version: 3.2.8
+  resolution: "@smithy/util-endpoints@npm:3.2.8"
+  dependencies:
+    "@smithy/node-config-provider": ^4.3.8
+    "@smithy/types": ^4.12.0
+    tslib: ^2.6.2
+  checksum: d50a189c86b18737e513fa20ce46e3c472d87518e377a04683d7997059270f57c8dec80d5e4e0acb0251cd4b3c9a8d8ed1b9cbdd2ed25ada86ffb59a9cadff5b
+  languageName: node
+  linkType: hard
+
 "@smithy/util-hex-encoding@npm:^4.0.0":
   version: 4.0.0
   resolution: "@smithy/util-hex-encoding@npm:4.0.0"
@@ -6489,6 +6542,16 @@ __metadata:
     "@smithy/types": ^4.3.1
     tslib: ^2.6.2
   checksum: 6cfdec16f03cc963e78d888a0ef349c0d80645775e9933a88c4615fbd5a683a8230997f89372e2597bd956bc05df5adc41de6524fa8c0cc93fb7150d6530a03b
+  languageName: node
+  linkType: hard
+
+"@smithy/util-middleware@npm:^4.2.8":
+  version: 4.2.8
+  resolution: "@smithy/util-middleware@npm:4.2.8"
+  dependencies:
+    "@smithy/types": ^4.12.0
+    tslib: ^2.6.2
+  checksum: bc6b1f549d5e6faced387b2158c56f8b59937853987dbddd0b49da82cc2e97630d718b30c426fd77ecf882ff151c330428e25e2780407aeefbfcfd3c5e2c9a71
   languageName: node
   linkType: hard
 
@@ -10146,14 +10209,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"diff@npm:^8.0.1":
-  version: 8.0.2
-  resolution: "diff@npm:8.0.2"
-  checksum: 0d5556beff9aa688117ef79b1c88eb663df9959bc59946122330932c01e8db5529f914dcc87bf00fd1fecbca75731e6be7c8fabe1e34e10d6557e0536b7c856c
-  languageName: node
-  linkType: hard
-
-"diff@npm:^8.0.2":
+"diff@npm:^8.0.2, diff@npm:^8.0.3":
   version: 8.0.3
   resolution: "diff@npm:8.0.3"
   checksum: 397f6f7a93d8622e8748805ebaad35dfbbdd0a5fe03722b0905aee2662b1ccf82728f90e9f975a20e8406b1df46c28bd1958b42fc5cb03fb202d4cb93251e15d
@@ -12715,14 +12771,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.10.3":
-  version: 4.10.8
-  resolution: "hono@npm:4.10.8"
-  checksum: a5ad59882354b5bb6bb03097cb7630194cf459f2fcbda98fbea846b76e40a0fcd8f1434a1f7f102a1d5f6b6dee36001881aaff95143d9c43553376fb6cef0ff8
-  languageName: node
-  linkType: hard
-
-"hono@npm:^4.11.4":
+"hono@npm:^4.11.4, hono@npm:^4.11.7":
   version: 4.11.8
   resolution: "hono@npm:4.11.8"
   checksum: 94e34704d94e6144b0f6f37ae5aa5b80ec2a48baa479075d4c94ab02870d9674def7c1657e84d325bb37cd062d607535e0ee99500b5c158d2c5646633e3815ce
@@ -14893,6 +14942,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lodash@npm:^4.17.23":
+  version: 4.17.23
+  resolution: "lodash@npm:4.17.23"
+  checksum: 7daad39758a72872e94651630fbb54ba76868f904211089721a64516ce865506a759d9ad3d8ff22a2a49a50a09db5d27c36f22762d21766e47e3ba918d6d7bab
+  languageName: node
+  linkType: hard
+
 "log-symbols@npm:^6.0.0":
   version: 6.0.0
   resolution: "log-symbols@npm:6.0.0"
@@ -16272,19 +16328,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"next@npm:^15.5.9":
-  version: 15.5.9
-  resolution: "next@npm:15.5.9"
+"next@npm:^15.5.10":
+  version: 15.5.12
+  resolution: "next@npm:15.5.12"
   dependencies:
-    "@next/env": 15.5.9
-    "@next/swc-darwin-arm64": 15.5.7
-    "@next/swc-darwin-x64": 15.5.7
-    "@next/swc-linux-arm64-gnu": 15.5.7
-    "@next/swc-linux-arm64-musl": 15.5.7
-    "@next/swc-linux-x64-gnu": 15.5.7
-    "@next/swc-linux-x64-musl": 15.5.7
-    "@next/swc-win32-arm64-msvc": 15.5.7
-    "@next/swc-win32-x64-msvc": 15.5.7
+    "@next/env": 15.5.12
+    "@next/swc-darwin-arm64": 15.5.12
+    "@next/swc-darwin-x64": 15.5.12
+    "@next/swc-linux-arm64-gnu": 15.5.12
+    "@next/swc-linux-arm64-musl": 15.5.12
+    "@next/swc-linux-x64-gnu": 15.5.12
+    "@next/swc-linux-x64-musl": 15.5.12
+    "@next/swc-win32-arm64-msvc": 15.5.12
+    "@next/swc-win32-x64-msvc": 15.5.12
     "@swc/helpers": 0.5.15
     caniuse-lite: ^1.0.30001579
     postcss: 8.4.31
@@ -16327,7 +16383,7 @@ __metadata:
       optional: true
   bin:
     next: dist/bin/next
-  checksum: ad59f966a28cff60051740391cee8b2d7974283a4f85fb644c38c211f5a294c9bc90479adec25adaec8a89205c4d36cbc8cfc5362d90665da7905b017ab61d44
+  checksum: 9deec1039e169ca994874a7ae089fff42f22b9561ade0ca5335ad3fa29d0876c92f1d754b779c067d2db2ccadf1bb77466d928fbee71421c660f0dcb5796bdbd
   languageName: node
   linkType: hard
 
@@ -17737,16 +17793,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"qs@npm:^6.14.0, qs@npm:~6.14.0":
-  version: 6.14.0
-  resolution: "qs@npm:6.14.0"
-  dependencies:
-    side-channel: ^1.1.0
-  checksum: 189b52ad4e9a0da1a16aff4c58b2a554a8dad9bd7e287c7da7446059b49ca2e33a49e570480e8be406b87fccebf134f51c373cbce36c8c83859efa0c9b71d635
-  languageName: node
-  linkType: hard
-
-"qs@npm:^6.14.1":
+"qs@npm:^6.14.0, qs@npm:^6.14.1, qs@npm:~6.14.0":
   version: 6.14.1
   resolution: "qs@npm:6.14.1"
   dependencies:

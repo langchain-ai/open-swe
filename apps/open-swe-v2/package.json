@@ -23,7 +23,7 @@
     "postinstall": "turbo build"
   },
   "dependencies": {
-    "@langchain/core": "^0.3.65",
+    "@langchain/core": "^0.3.80",
     "@openswe/shared": "*",
     "deepagents": "0.0.0-rc.2"
   },
