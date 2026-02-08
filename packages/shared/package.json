@@ -46,7 +46,7 @@
     "prettier": "^3.5.2",
     "ts-jest": "^29.1.0",
     "typescript": "~5.7.2",
-    "typescript-eslint": "^8.22.0"
+    "typescript-eslint": "^8.54.0"
   },
   "packageManager": "yarn@3.5.1",
   "main": "dist/index.js",
