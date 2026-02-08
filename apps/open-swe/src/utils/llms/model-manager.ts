@@ -23,6 +23,13 @@ export interface CircuitBreakerState {
   openedAt?: number;
 }
 
+export interface ApiKeyRotationState {
+  keys: string[];
+  currentIndex: number;
+  lastUsedTime: number;
+  cooldownUntil: number;
+}
+
 interface ModelLoadConfig {
   provider: Provider;
   modelName: string;
@@ -47,6 +54,7 @@ export const PROVIDER_FALLBACK_ORDER = [
   "openai",
   "anthropic",
   "google-genai",
+  "openrouter",
 ] as const;
 export type Provider = (typeof PROVIDER_FALLBACK_ORDER)[number];
 
@@ -82,6 +90,8 @@ const providerToApiKey = (
       return apiKeys.anthropicApiKey;
     case "google-genai":
       return apiKeys.googleApiKey;
+    case "openrouter":
+      return apiKeys.openrouterApiKey;
     default:
       throw new Error(`Unknown provider: ${providerName}`);
   }
@@ -90,6 +100,9 @@ const providerToApiKey = (
 export class ModelManager {
   private config: ModelManagerConfig;
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+  private apiKeys: Map<Provider, ApiKeyRotationState> = new Map();
+  // Store the last reset time for daily rotation
+  private lastDailyReset: Map<Provider, number> = new Map();
 
   constructor(config: Partial<ModelManagerConfig> = {}) {
     this.config = { ...DEFAULT_MODEL_MANAGER_CONFIG, ...config };
