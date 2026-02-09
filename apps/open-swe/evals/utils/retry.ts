@@ -3,7 +3,7 @@ import { createLogger, LogLevel } from "../../src/utils/logger.js";
 const logger = createLogger(LogLevel.DEBUG, "Retry");
 
 const RETRY_CONFIG = {
-  maxRetries: 5,
+  maxRetries: 15,
   baseDelay: 1000,
   maxDelay: 30000,
   backoffMultiplier: 2,
