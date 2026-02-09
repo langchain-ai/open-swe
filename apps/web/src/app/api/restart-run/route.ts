@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 import { v4 as uuidv4 } from "uuid";
 import {
   GITHUB_TOKEN_COOKIE,
@@ -70,13 +69,6 @@ async function createNewSession(
 ): Promise<AgentSession> {
   const newThreadId = uuidv4();
   const hasNext = inputs.threadState.next.length > 0;
-
-  console.log("\n\nCONFIG");
-  console.dir(getCustomConfigurableFields(inputs.threadConfig), {
-    depth: null,
-  });
-  console.log("\n\nCONFIGURABLE");
-  console.dir(inputs.threadConfig.configurable, { depth: null });
 
   const run = await client.runs.create(newThreadId, inputs.graphId, {
     command: {
