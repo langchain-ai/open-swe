@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    # Core deepagents CLI - points to branch with LangSmith sandbox and working_dir support
-    "deepagents-cli @ git+https://github.com/langchain-ai/deepagents.git@master#subdirectory=libs/cli",
+    # Core deepagents library
+    "deepagents>=0.3.12",
     # FastAPI for webhook handling
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
@@ -19,7 +19,7 @@ dependencies = [
     "cryptography>=41.0.0",
     # LangGraph SDK for thread management
     "langgraph-sdk>=0.1.0",
-    # LangChain dependencies (will be pulled in by deepagents-cli but listing for clarity)
+    # LangChain dependencies (will be pulled in by deepagents but listing for clarity)
     "langchain>=0.2.0",
     "langgraph>=0.2.0",
     "markdownify>=1.2.2",
