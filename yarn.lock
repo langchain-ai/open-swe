@@ -4571,11 +4571,11 @@ __metadata:
     eslint-plugin-import: ^2.27.5
     eslint-plugin-no-instanceof: ^1.0.1
     eslint-plugin-prettier: ^4.2.1
-    hono: ^4.11.7
+    hono: ^4.11.9
     jest: ^29.7.0
     jsonwebtoken: ^9.0.2
     langchain: ^1.2.18
-    langsmith: ^0.3.29
+    langsmith: ^0.4.6
     prettier: ^3.5.2
     ts-jest: ^29.1.0
     tsx: ^4.20.3
@@ -12921,10 +12921,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"hono@npm:^4.11.4, hono@npm:^4.11.7":
+"hono@npm:^4.11.4":
   version: 4.11.8
   resolution: "hono@npm:4.11.8"
   checksum: 94e34704d94e6144b0f6f37ae5aa5b80ec2a48baa479075d4c94ab02870d9674def7c1657e84d325bb37cd062d607535e0ee99500b5c158d2c5646633e3815ce
+  languageName: node
+  linkType: hard
+
+"hono@npm:^4.11.9":
+  version: 4.11.9
+  resolution: "hono@npm:4.11.9"
+  checksum: 9a030deebd01410e0f9a99190cfd5f3e4d5e7c454caafccf78ec4f739002ae30d5656af771cde729d65e701736635e978d17261b1b1fe893f99c17fc3fb2595e
   languageName: node
   linkType: hard
 
