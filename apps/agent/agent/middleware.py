@@ -45,9 +45,7 @@ def _extract_tool_name(request: ToolCallRequest | None) -> str | None:
     return None
 
 
-def _to_error_payload(
-    e: Exception, request: ToolCallRequest | None = None
-) -> dict[str, str]:
+def _to_error_payload(e: Exception, request: ToolCallRequest | None = None) -> dict[str, str]:
     data: dict[str, str] = {
         "error": str(e),
         "error_type": e.__class__.__name__,
