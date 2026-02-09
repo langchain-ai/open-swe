@@ -78,7 +78,7 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return handler(request)
-        except Exception as e:  # noqa: BLE001
+        except: 
             logger.exception("Error during tool call handling; request=%r", request)
             data = _to_error_payload(e, request)
             return ToolMessage(
@@ -94,7 +94,7 @@ class ToolErrorMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         try:
             return await handler(request)
-        except Exception as e:  # noqa: BLE001
+        except:  
             logger.exception("Error during tool call handling; request=%r", request)
             data = _to_error_payload(e, request)
             return ToolMessage(
