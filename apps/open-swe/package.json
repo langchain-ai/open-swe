@@ -41,10 +41,10 @@
     "@openswe/shared": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.3",
-    "hono": "^4.11.7",
+    "hono": "^4.11.9",
     "jsonwebtoken": "^9.0.2",
     "langchain": "^1.2.18",
-    "langsmith": "^0.3.29",
+    "langsmith": "^0.4.6",
     "uuid": "^11.0.5",
     "zod": "^3.25.32"
   },
