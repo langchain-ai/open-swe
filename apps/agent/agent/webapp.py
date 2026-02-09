@@ -71,7 +71,7 @@ def get_service_jwt_token_for_user(
 
 LINEAR_TEAM_TO_REPO: dict[str, dict[str, str]] = {
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
-    "Yogesh-dev": {"owner": "aran-yogesh", "name": "nimedge"},
+    "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
 }
 
 
