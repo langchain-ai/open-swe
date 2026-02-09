@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     # Core deepagents library
-    "deepagents @ git+https://github.com/langchain-ai/deepagents.git@master#subdirectory=libs/deepagents",
+    "deepagents>=0.3.12",
     # FastAPI for webhook handling
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",

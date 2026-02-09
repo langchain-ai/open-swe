@@ -347,13 +347,17 @@ wheels = [
 [[package]]
 name = "deepagents"
 version = "0.3.12"
-source = { git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=master#21e715054ea5cf48cab05319b2116509fbacd899" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
     { name = "langchain-anthropic" },
     { name = "langchain-core" },
     { name = "langchain-google-genai" },
     { name = "wcmatch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c0/0b/9d3512327d48e619567797dffb34c356b2e0c7b0aa505fd3aaef342903d3/deepagents-0.3.12.tar.gz", hash = "sha256:ab2d7e7c47040d364a20cc19cc775294c1e942456652d6c12e0f21011068633c", size = 77962, upload-time = "2026-02-06T21:20:43.511Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/0a/2b8542a19bb22cf49827a38d04e045c6dba97d03dddc721d3ed2e7be0e5e/deepagents-0.3.12-py3-none-any.whl", hash = "sha256:42e707a1be48db3bc445fbe3243b6dc19333565cac4eab8cdc0e37d780c6cfe7", size = 88553, upload-time = "2026-02-06T21:20:42.575Z" },
 ]
 
 [[package]]
@@ -1039,7 +1043,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
-    { name = "deepagents", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=master" },
+    { name = "deepagents", specifier = ">=0.3.12" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langchain", specifier = ">=0.2.0" },
