@@ -20,8 +20,8 @@ dependencies = [
     # LangGraph SDK for thread management
     "langgraph-sdk>=0.1.0",
     # LangChain dependencies (will be pulled in by deepagents but listing for clarity)
-    "langchain>=0.2.0",
-    "langgraph>=0.2.0",
+    "langchain>=1.2.9",
+    "langgraph>=1.0.8",
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.12",
