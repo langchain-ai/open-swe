@@ -31,7 +31,7 @@ from deepagents import create_deep_agent
 from langchain_anthropic import ChatAnthropic
 
 from .encryption import decrypt_token
-from .middleware import ErrorNormalizationMiddleware
+from .middleware import ToolErrorMiddleware
 from .prompt import construct_system_prompt
 from .protocol import SandboxBackendProtocol
 from .tools import commit_and_open_pr, fetch_url, http_request
@@ -960,7 +960,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,
         middleware=[
-            ErrorNormalizationMiddleware(),
+            ToolErrorMiddleware(),
             check_message_queue_before_model,
             post_to_linear_after_model,
             open_pr_if_needed,

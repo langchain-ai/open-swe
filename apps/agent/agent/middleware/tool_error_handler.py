@@ -1,4 +1,4 @@
-"""Error normalization middleware for tool and model calls.
+"""Tool error handling middleware.
 
 Wraps all tool calls in try/except so that unhandled exceptions are
 returned as error ToolMessages instead of crashing the agent run.
@@ -13,8 +13,6 @@ from collections.abc import Awaitable, Callable
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
-    ModelRequest,
-    ModelResponse,
 )
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
@@ -63,15 +61,12 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     return None
 
 
-class ErrorNormalizationMiddleware(AgentMiddleware):
+class ToolErrorMiddleware(AgentMiddleware):
     """Normalize tool execution errors into predictable payloads.
 
     Catches any exception thrown during a tool call and converts it into
     a ToolMessage with status="error" so the LLM can see the failure and
     self-correct, rather than crashing the entire agent run.
-
-    Model call errors (invalid API key, rate limit, etc.) are logged but
-    re-raised so they surface to the caller.
     """
 
     state_schema = AgentState
@@ -107,14 +102,3 @@ class ErrorNormalizationMiddleware(AgentMiddleware):
                 tool_call_id=_get_tool_call_id(request),
                 status="error",
             )
-
-    async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
-    ) -> ModelResponse:
-        try:
-            return await handler(request)
-        except Exception:
-            logger.exception("Error during model invocation")
-            raise
