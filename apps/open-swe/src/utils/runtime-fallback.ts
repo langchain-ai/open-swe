@@ -99,7 +99,25 @@ export class FallbackRunnable<
       this.getPrimaryModel(),
     );
 
+    // Check if we have any fallback options available
+    if (modelConfigs.length === 0) {
+      throw new Error(
+        `No models available for task ${this.task}. No providers have valid API keys configured.`,
+      );
+    }
+
+    if (modelConfigs.length === 1) {
+      logger.info(
+        `No fallback providers available for task ${this.task} - only primary model has API key configured`,
+      );
+    } else {
+      logger.debug(
+        `${modelConfigs.length} models available for task ${this.task} (including fallbacks)`,
+      );
+    }
+
     let lastError: Error | undefined;
+    let primaryModelFailed = false;
 
     for (let i = 0; i < modelConfigs.length; i++) {
       const modelConfig = modelConfigs[i];
@@ -179,12 +197,28 @@ export class FallbackRunnable<
         );
         lastError = error instanceof Error ? error : new Error(String(error));
         this.modelManager.recordFailure(modelKey);
+
+        // Mark if the primary model failed
+        if (i === 0) {
+          primaryModelFailed = true;
+        }
+
+        // If primary model failed and no fallbacks available, throw immediately with clear message
+        if (primaryModelFailed && modelConfigs.length === 1) {
+          throw new Error(
+            `Primary model failed for task ${this.task} and no fallback providers have API keys configured. Error: ${lastError?.message}`,
+          );
+        }
       }
     }
 
-    throw new Error(
-      `All fallback models exhausted for task ${this.task}. Last error: ${lastError?.message}`,
-    );
+    // Provide more descriptive error message based on the situation
+    const errorMessage =
+      modelConfigs.length === 1
+        ? `Model failed for task ${this.task} with no fallback options available (no other providers have API keys configured). Error: ${lastError?.message}`
+        : `All ${modelConfigs.length} fallback models exhausted for task ${this.task}. Last error: ${lastError?.message}`;
+
+    throw new Error(errorMessage);
   }
 
   bindTools(
