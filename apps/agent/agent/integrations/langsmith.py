@@ -19,8 +19,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-if TYPE_CHECKING:
-    from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
 
 
 
