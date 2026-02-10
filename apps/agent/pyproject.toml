@@ -28,7 +28,6 @@ dependencies = [
     # LangSmith SDK for sandbox management
     "langsmith>=0.7.1",
 ]
-]
 
 [project.optional-dependencies]
 dev = [
