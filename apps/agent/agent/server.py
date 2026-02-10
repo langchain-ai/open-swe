@@ -34,7 +34,7 @@ from .middleware import (
     post_to_linear_after_model,
 )
 from .prompt import construct_system_prompt
-from .protocol import SandboxBackendProtocol
+from deepagents.backends.protocol import SandboxBackendProtocol
 from .tools import commit_and_open_pr, fetch_url, http_request
 
 
@@ -75,7 +75,7 @@ def _create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    from deepagents_cli.integrations.langsmith import LangSmithProvider
+    from .integrations.langsmith import LangSmithProvider
 
     api_key = _get_langsmith_api_key()
     template_name, template_image = _get_sandbox_template_config()

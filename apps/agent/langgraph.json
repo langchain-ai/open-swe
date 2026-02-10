@@ -4,7 +4,7 @@
   "graphs": {
     "agent": "agent.server:get_agent"
   },
-  "dependencies": ["."],
+  "dependencies": [".", "../../../deepagents/libs/deepagents"],
   "http": {
     "app": "agent.webapp:app"
   },
