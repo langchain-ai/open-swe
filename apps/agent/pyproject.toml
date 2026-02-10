@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     # Core deepagents library
-    "deepagents>=0.3.12",
+    "deepagents>=0.4.0",
     # FastAPI for webhook handling
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
@@ -25,6 +25,9 @@ dependencies = [
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.12",
+    # LangSmith SDK for sandbox management
+    "langsmith>=0.7.1",
+]
 ]
 
 [project.optional-dependencies]
