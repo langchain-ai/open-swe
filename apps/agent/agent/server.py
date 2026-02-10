@@ -6,7 +6,6 @@
 import logging
 import os
 import warnings
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -95,184 +94,7 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-# HTTP status codes
-HTTP_CREATED = 201
-HTTP_UNPROCESSABLE_ENTITY = 422
-
-# Message count thresholds
-_SANDBOX_BACKENDS: dict[str, Any] = {}
-
-import httpx
-
-LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
-
-
-async def create_github_pr(
-    repo_owner: str,
-    repo_name: str,
-    github_token: str,
-    title: str,
-    head_branch: str,
-    base_branch: str,
-    body: str,
-) -> tuple[str | None, int | None]:
-    """Create a GitHub pull request via the API.
-
-    Args:
-        repo_owner: Repository owner (e.g., "langchain-ai")
-        repo_name: Repository name (e.g., "deepagents")
-        github_token: GitHub access token
-        title: PR title
-        head_branch: Source branch name
-        base_branch: Target branch name
-        body: PR description
-
-    Returns:
-        Tuple of (pr_url, pr_number) if successful, (None, None) otherwise
-    """
-    pr_payload = {
-        "title": title,
-        "head": head_branch,
-        "base": base_branch,
-        "body": body,
-    }
-
-    logger.info(
-        "Creating PR: head=%s, base=%s, repo=%s/%s",
-        head_branch,
-        base_branch,
-        repo_owner,
-        repo_name,
-    )
-
-    try:
-        async with httpx.AsyncClient() as http_client:
-            pr_response = await http_client.post(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}/pulls",
-                headers={
-                    "Authorization": f"Bearer {github_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json=pr_payload,
-            )
-
-            pr_data = pr_response.json()
-
-            if pr_response.status_code == HTTP_CREATED:
-                pr_url = pr_data.get("html_url")
-                pr_number = pr_data.get("number")
-                logger.info("PR created successfully: %s", pr_url)
-                return pr_url, pr_number
-
-            if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
-                logger.error("GitHub API validation error (422): %s", pr_data.get("message"))
-            else:
-                logger.error(
-                    "GitHub API error (%s): %s",
-                    pr_response.status_code,
-                    pr_data.get("message"),
-                )
-
-            if "errors" in pr_data:
-                logger.error("GitHub API errors detail: %s", pr_data.get("errors"))
-
-            return None, None
-
-    except httpx.HTTPError:
-        logger.exception("Failed to create PR via GitHub API")
-        return None, None
-
-
-async def get_github_default_branch(
-    repo_owner: str,
-    repo_name: str,
-    github_token: str,
-) -> str:
-    """Get the default branch of a GitHub repository via the API.
-
-    Args:
-        repo_owner: Repository owner (e.g., "langchain-ai")
-        repo_name: Repository name (e.g., "deepagents")
-        github_token: GitHub access token
-
-    Returns:
-        The default branch name (e.g., "main" or "master")
-    """
-    try:
-        async with httpx.AsyncClient() as http_client:
-            response = await http_client.get(
-                f"https://api.github.com/repos/{repo_owner}/{repo_name}",
-                headers={
-                    "Authorization": f"Bearer {github_token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-            )
-
-            if response.status_code == 200:  # noqa: PLR2004
-                repo_data = response.json()
-                default_branch = repo_data.get("default_branch", "main")
-                logger.debug("Got default branch from GitHub API: %s", default_branch)
-                return default_branch
-
-            logger.warning(
-                "Failed to get repo info from GitHub API (%s), falling back to 'main'",
-                response.status_code,
-            )
-            return "main"
-
-    except httpx.HTTPError:
-        logger.exception("Failed to get default branch from GitHub API, falling back to 'main'")
-        return "main"
-
-
-async def comment_on_linear_issue(issue_id: str, comment_body: str) -> bool:
-    """Add a comment to a Linear issue.
-
-    Args:
-        issue_id: The Linear issue ID
-        comment_body: The comment text
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    import httpx
-
-    url = "https://api.linear.app/graphql"
-
-    mutation = """
-    mutation CommentCreate($issueId: String!, $body: String!) {
-        commentCreate(input: { issueId: $issueId, body: $body }) {
-            success
-            comment {
-                id
-            }
-        }
-    }
-    """
-
-    async with httpx.AsyncClient() as http_client:
-        try:
-            response = await http_client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"issueId": issue_id, "body": comment_body},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("commentCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
+from .utils.sandbox_state import SANDBOX_BACKENDS
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -532,7 +354,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 logger.exception("Failed to pull repo in existing sandbox")
                 raise
 
-    _SANDBOX_BACKENDS[thread_id] = sandbox_backend
+    SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")

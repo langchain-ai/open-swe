@@ -13,6 +13,7 @@ from langchain.agents.middleware import after_model
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from ..utils.linear import comment_on_linear_issue
 from .check_message_queue import LinearNotifyState
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,6 @@ async def post_to_linear_after_model(  # noqa: PLR0911, PLR0912
     - The AI response has text content (not just tool calls)
     - The message hasn't already been sent (tracked via linear_messages_sent_count)
     """
-    from ..server import comment_on_linear_issue
-
     try:
         config = get_config()
         configurable = config.get("configurable", {})

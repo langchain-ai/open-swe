@@ -17,6 +17,11 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from ..encryption import decrypt_token
+from ..utils.github import create_github_pr, get_github_default_branch
+from ..utils.linear import comment_on_linear_issue
+from ..utils.sandbox_state import SANDBOX_BACKENDS
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,19 +46,11 @@ def _extract_pr_params_from_messages(messages: list) -> dict[str, str] | None:
 
 
 @after_agent
-async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
+async def open_pr_if_needed(
     state: AgentState,
-    runtime: Runtime,  # noqa: ARG001
+    runtime: Runtime,
 ) -> dict[str, Any] | None:
     """Middleware that commits/pushes changes and comments on Linear after agent runs."""
-    from ..encryption import decrypt_token
-    from ..server import (
-        _SANDBOX_BACKENDS,
-        comment_on_linear_issue,
-        create_github_pr,
-        get_github_default_branch,
-    )
-
     logger.info("After-agent middleware started")
     pr_url = None
     pr_number = None
@@ -103,7 +100,7 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
         repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
-        sandbox_backend = _SANDBOX_BACKENDS.get(thread_id)
+        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
 
         repo_dir = f"/workspace/{repo_name}"
 
@@ -214,7 +211,7 @@ async def open_pr_if_needed(  # noqa: PLR0912, PLR0915
 
         if linear_issue_id and last_message_content:
             if pr_url:
-                comment = f"""✅ **Pull Request Created**
+                comment = f"""**Pull Request Created**
 
 I've created a pull request to address this issue:
 
@@ -226,7 +223,7 @@ I've created a pull request to address this issue:
 
 {last_message_content}"""
             else:
-                comment = f"""🤖 **Agent Response**
+                comment = f""" **Agent Response**
 
 {last_message_content}"""
             await comment_on_linear_issue(linear_issue_id, comment)
@@ -241,7 +238,7 @@ I've created a pull request to address this issue:
             linear_issue = configurable.get("linear_issue", {})
             linear_issue_id = linear_issue.get("id")
             if linear_issue_id:
-                error_comment = f"""❌ **Agent Error**
+                error_comment = f""" **Agent Error**
 
 An error occurred while processing this issue:
 
