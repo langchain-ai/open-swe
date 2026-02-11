@@ -16,11 +16,11 @@ from deepagents.backends.protocol import (
     FileDownloadResponse,
     FileUploadResponse,
     SandboxBackendProtocol,
+    WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
 
 from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
-
 
 
 class SandboxProvider(ABC):
@@ -81,6 +81,19 @@ class LangSmithBackend(BaseSandbox):
             exit_code=result.exit_code,
             truncated=False,
         )
+
+    def write(self, file_path: str, content: str) -> WriteResult:
+        """Write content using the LangSmith SDK to avoid ARG_MAX.
+
+        BaseSandbox.write() sends the full content in a shell command, which
+        can exceed ARG_MAX for large content. This override uses the SDK's
+        native write(), which sends content in the HTTP body.
+        """
+        try:
+            self._sandbox.write(file_path, content.encode("utf-8"))
+            return WriteResult(path=file_path, files_update=None)
+        except Exception as e:
+            return WriteResult(error=f"Failed to write file '{file_path}': {e}")
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download multiple files from the LangSmith sandbox."""
@@ -160,7 +173,7 @@ class LangSmithProvider(SandboxProvider):
                 result = sandbox.run("echo ready", timeout=5)
                 if result.exit_code == 0:
                     break
-            except Exception:  
+            except Exception:
                 pass
             time.sleep(2)
         else:
@@ -171,7 +184,7 @@ class LangSmithProvider(SandboxProvider):
 
         return LangSmithBackend(sandbox)
 
-    def delete(self, *, sandbox_id: str, **kwargs: Any) -> None: 
+    def delete(self, *, sandbox_id: str, **kwargs: Any) -> None:
         """Delete a LangSmith sandbox."""
         self._client.delete_sandbox(sandbox_id)
 

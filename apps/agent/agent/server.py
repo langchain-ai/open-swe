@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
+from deepagents.backends.protocol import SandboxBackendProtocol
 
 # Local import for encryption
 from langchain_anthropic import ChatAnthropic
@@ -34,7 +35,6 @@ from .middleware import (
     post_to_linear_after_model,
 )
 from .prompt import construct_system_prompt
-from deepagents.backends.protocol import SandboxBackendProtocol
 from .tools import commit_and_open_pr, fetch_url, http_request
 
 
