@@ -1,5 +1,24 @@
+import asyncio
 import logging
 from typing import Any
+
+from langgraph.config import get_config
+
+from ..encryption import decrypt_token
+from ..utils.github import (
+    create_github_pr,
+    get_github_default_branch,
+    git_add_all,
+    git_checkout_branch,
+    git_commit,
+    git_config_user,
+    git_current_branch,
+    git_fetch_origin,
+    git_has_uncommitted_changes,
+    git_has_unpushed_commits,
+    git_push,
+)
+from ..utils.sandbox_state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +104,105 @@ def commit_and_open_pr(
         commit_message: Optional git commit message. If not provided, the PR title is used.
 
     Returns:
-        Dictionary with the result of the operation including PR URL if successful.
+        Dictionary containing:
+        - success: Whether the operation completed successfully
+        - error: Error string if something failed, otherwise None
+        - pr_url: URL of the created PR if successful, otherwise None
     """
-    return {
-        "title": title,
-        "body": body,
-        "commit_message": commit_message or title,
-    }
+    try:
+        config = get_config()
+        configurable = config.get("configurable", {})
+        thread_id = configurable.get("thread_id")
+        if not thread_id:
+            return {"success": False, "error": "Missing thread_id in config", "pr_url": None}
+
+        repo_config = configurable.get("repo", {})
+        repo_owner = repo_config.get("owner")
+        repo_name = repo_config.get("name")
+        if not repo_owner or not repo_name:
+            return {
+                "success": False,
+                "error": "Missing repo owner/name in config",
+                "pr_url": None,
+            }
+
+        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+        if not sandbox_backend:
+            return {"success": False, "error": "Missing sandbox backend", "pr_url": None}
+
+        repo_dir = f"/workspace/{repo_name}"
+
+        has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
+        git_fetch_origin(sandbox_backend, repo_dir)
+        has_unpushed_commits = git_has_unpushed_commits(sandbox_backend, repo_dir)
+
+        if not (has_uncommitted_changes or has_unpushed_commits):
+            return {"success": False, "error": "No changes detected", "pr_url": None}
+
+        current_branch = git_current_branch(sandbox_backend, repo_dir)
+        target_branch = f"open-swe/{thread_id}"
+        if current_branch != target_branch:
+            if not git_checkout_branch(sandbox_backend, repo_dir, target_branch):
+                return {
+                    "success": False,
+                    "error": f"Failed to checkout branch {target_branch}",
+                    "pr_url": None,
+                }
+
+        git_config_user(
+            sandbox_backend,
+            repo_dir,
+            "Open SWE[bot]",
+            "Open SWE@users.noreply.github.com",
+        )
+        git_add_all(sandbox_backend, repo_dir)
+
+        commit_msg = commit_message or title
+        if has_uncommitted_changes:
+            commit_result = git_commit(sandbox_backend, repo_dir, commit_msg)
+            if commit_result.exit_code != 0:
+                return {
+                    "success": False,
+                    "error": f"Git commit failed: {commit_result.output.strip()}",
+                    "pr_url": None,
+                }
+
+        encrypted_token = configurable.get("github_token_encrypted")
+        github_token = decrypt_token(encrypted_token) if encrypted_token else None
+        if not github_token:
+            return {"success": False, "error": "Missing GitHub token", "pr_url": None}
+
+        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        if push_result.exit_code != 0:
+            return {
+                "success": False,
+                "error": f"Git push failed: {push_result.output.strip()}",
+                "pr_url": None,
+            }
+
+        base_branch = asyncio.run(
+            get_github_default_branch(repo_owner, repo_name, github_token)
+        )
+        pr_url, _pr_number = asyncio.run(
+            create_github_pr(
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                github_token=github_token,
+                title=title,
+                head_branch=target_branch,
+                base_branch=base_branch,
+                body=body,
+            )
+        )
+
+        if not pr_url:
+            return {
+                "success": False,
+                "error": "Failed to create GitHub PR",
+                "pr_url": None,
+            }
+
+        return {"success": True, "error": None, "pr_url": pr_url}
+    except Exception as e:
+        logger.exception("commit_and_open_pr failed")
+        return {"success": False, "error": f"{type(e).__name__}: {e}", "pr_url": None}
