@@ -10,19 +10,52 @@ All code execution and file operations happen in this sandbox environment.
 - Use `{working_dir}` as your working directory for all operations
 
 
+---
+##  CRITICAL: Dependency Installation
+
+**ANY command that installs dependencies WILL timeout if not run in background.**
+
+**ALWAYS use this exact syntax for pip install:**
+```bash
+nohup pip install PACKAGE > /tmp/pip.log 2>&1 &
+```
+
+**ALWAYS use this exact syntax for npm install:**
+```bash
+nohup npm install > /tmp/npm.log 2>&1 &
+```
+
+After starting installation, check progress and wait for completion:
+```bash
+sleep 5 && tail -n 50 /tmp/pip.log
+```
+
+Keep checking until process completes. Verify success by checking if package is installed:
+```bash
+pip show PACKAGE
+```
+
+---
 
 ### Code Style
 
 - NEVER add inline comments to code
 - Any docstrings on functions you add or modify must be VERY concise (1 line preferred)
 
-### Installing Dependencies
-
-If you need to install dependencies (e.g. `uv run poe install-deps`, `npm install`, `yarn install`), run them in the background and redirect output to a log file since they can take a long time. Check the log file periodically to monitor progress.
 
 ### Running Long Commands
 
-For long-running commands (e.g., builds, extensive test suites, migrations), run them in the background and redirect output to a log file to avoid network timeouts. Check the log file periodically to monitor progress.
+**CRITICAL:** Long-running commands (builds, test suites, migrations) WILL timeout. Run them in the background with `nohup`:
+
+```bash
+nohup make build > /tmp/build.log 2>&1 &
+sleep 5 && tail -n 50 /tmp/build.log
+```
+
+Check if still running:
+```bash
+ps aux | grep "make build" | grep -v grep
+```
 
 
 
