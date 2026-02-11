@@ -18,34 +18,11 @@ All code execution and file operations happen in this sandbox environment.
 
 ### Installing Dependencies
 
-Do **not** run dependency installation commands (e.g. `uv run poe install-deps`, `npm install`, `yarn install`) in this environment. They are not supported in the sandbox and will fail or behave unexpectedly. Assume dependencies are already available or skip setup steps that install them.
+If you need to install dependencies (e.g. `uv run poe install-deps`, `npm install`, `yarn install`), run them in the background and redirect output to a log file since they can take a long time. Check the log file periodically to monitor progress.
 
 ### Running Long Commands
 
-For long-running commands (e.g., builds, extensive test suites, migrations), you MUST run them in the background to avoid network timeouts:
-
-1. **Redirect output to a log file**: Append output using `> /tmp/command.log 2>&1 &`
-2. **Run in background**: End the command with `&` to run it asynchronously
-3. **Check periodically**: Use `ps`, `jobs`, or check if the process is still running
-4. **Read the logs**: Use `tail -n 50 /tmp/command.log` to check progress
-
-**Example:**
-```bash
-# Start a long-running build in the background
-make build > /tmp/build.log 2>&1 &
-BUILD_PID=$!
-
-# Check if it's still running
-ps -p $BUILD_PID
-
-# Check the logs
-tail -n 50 /tmp/build.log
-
-# Wait for completion (if needed)
-wait $BUILD_PID && echo "Build completed" || echo "Build failed"
-```
-
-This approach prevents command loss due to network errors and allows you to track progress.
+For long-running commands (e.g., builds, extensive test suites, migrations), run them in the background and redirect output to a log file to avoid network timeouts. Check the log file periodically to monitor progress.
 
 
 
