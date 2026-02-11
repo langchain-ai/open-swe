@@ -25,6 +25,8 @@ dependencies = [
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.12",
+    # LangSmith SDK for sandbox management
+    "langsmith>=0.7.1",
 ]
 
 [project.optional-dependencies]
