@@ -108,8 +108,7 @@ I've created a pull request to address this issue:
 {pr_url}
 
 ---
-
-🤖 **Agent Response**
+ **Agent Response**
 
 {last_message_content}"""
                 elif error:
@@ -119,7 +118,7 @@ I've created a pull request to address this issue:
 
 ---
 
-🤖 **Agent Response**
+**Agent Response**
 
 {last_message_content}"""
                 else:
