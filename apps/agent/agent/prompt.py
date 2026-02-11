@@ -18,10 +18,7 @@ All code execution and file operations happen in this sandbox environment.
 
 ### Installing Dependencies
 
-If the repository needs dependency installation, run:
-```
-uv run poe install-deps
-```
+Do **not** run dependency installation commands (e.g. `uv run poe install-deps`, `npm install`, `yarn install`) in this environment. They are not supported in the sandbox and will fail or behave unexpectedly. Assume dependencies are already available or skip setup steps that install them.
 
 
 
