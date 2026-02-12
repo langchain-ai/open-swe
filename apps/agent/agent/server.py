@@ -179,6 +179,28 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                 logger.exception("Failed to execute git pull")
                 raise
     else:
+        # If the path exists but is not a git repo, remove it before cloning.
+        try:
+            dir_exists = await loop.run_in_executor(
+                None, sandbox_backend.execute, f"test -d {repo_dir} && echo exists"
+            )
+        except Exception:
+            logger.exception("Failed to check repo directory existence")
+            raise
+
+        if dir_exists.exit_code == 0 and "exists" in dir_exists.output:
+            logger.warning(
+                "Repo directory %s exists but is not a git repo. Removing before clone.",
+                repo_dir,
+            )
+            try:
+                await loop.run_in_executor(
+                    None, sandbox_backend.execute, f"rm -rf {repo_dir}"
+                )
+            except Exception:
+                logger.exception("Failed to remove non-git repo directory")
+                raise
+
         logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
         clone_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
         try:
@@ -191,9 +213,29 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
             raise
 
         if result.exit_code != 0:
-            msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
-            logger.error(msg)
-            raise RuntimeError(msg)
+            # Retry once if the directory was created between checks.
+            if "already exists" in (result.output or ""):
+                logger.warning(
+                    "Clone failed because %s exists; removing and retrying once.",
+                    repo_dir,
+                )
+                try:
+                    await loop.run_in_executor(
+                        None, sandbox_backend.execute, f"rm -rf {repo_dir}"
+                    )
+                    result = await loop.run_in_executor(
+                        None,
+                        sandbox_backend.execute,
+                        f"git clone {clone_url} {repo_dir}",
+                    )
+                except Exception:
+                    logger.exception("Failed to retry git clone")
+                    raise
+
+            if result.exit_code != 0:
+                msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
+                logger.error(msg)
+                raise RuntimeError(msg)
 
         clean_url = f"https://github.com/{owner}/{repo}.git"
         try:
