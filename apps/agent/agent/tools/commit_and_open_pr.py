@@ -3,7 +3,6 @@ import logging
 from typing import Any
 
 from langgraph.config import get_config
-from langgraph_sdk import get_client
 
 from ..encryption import decrypt_token
 from ..server import _create_langsmith_sandbox
@@ -23,7 +22,6 @@ from ..utils.github import (
 from ..utils.sandbox_state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
-client = get_client()
 
 
 def commit_and_open_pr(
@@ -131,10 +129,7 @@ def commit_and_open_pr(
 
         sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
         if not sandbox_backend:
-
-            loop = asyncio.get_event_loop()
-            thread = loop.run_until_complete(client.threads.get(thread_id=thread_id))
-            sandbox_id = thread.get("metadata", {}).get("sandbox_id")
+            sandbox_id = configurable.get("sandbox_id")
 
             if not sandbox_id:
                 return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
@@ -142,7 +137,6 @@ def commit_and_open_pr(
             # Connect to existing sandbox
             sandbox_backend = _create_langsmith_sandbox(sandbox_id)
             SANDBOX_BACKENDS[thread_id] = sandbox_backend
-            logger.info("Fetched sandbox %s for thread %s", sandbox_id, thread_id)
 
         repo_dir = f"/workspace/{repo_name}"
 
