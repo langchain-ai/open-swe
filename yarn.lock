@@ -4582,7 +4582,7 @@ __metadata:
     turbo: ^2.5.0
     typescript: ~5.7.2
     typescript-eslint: ^8.54.0
-    uuid: ^11.0.5
+    uuid: ^13.0.0
     vitest: ^3.2.3
     zod: ^3.25.32
   languageName: unknown
@@ -4614,7 +4614,7 @@ __metadata:
     react: ^19.1.0
     tsx: ^4.20.3
     typescript: ^5.8.3
-    uuid: ^10.0.0
+    uuid: ^13.0.0
   languageName: unknown
   linkType: soft
 
@@ -4736,7 +4736,7 @@ __metadata:
     typescript: ~5.7.2
     typescript-eslint: ^8.54.0
     use-stick-to-bottom: ^1.0.46
-    uuid: ^11.1.0
+    uuid: ^13.0.0
     zod: ^3.25.32
     zustand: ^5.0.11
   languageName: unknown
@@ -21247,12 +21247,21 @@ __metadata:
   languageName: node
   linkType: hard
 
-"uuid@npm:^11.0.5, uuid@npm:^11.1.0":
+"uuid@npm:^11.1.0":
   version: 11.1.0
   resolution: "uuid@npm:11.1.0"
   bin:
     uuid: dist/esm/bin/uuid
   checksum: 840f19758543c4631e58a29439e51b5b669d5f34b4dd2700b6a1d15c5708c7a6e0c3e2c8c4a2eae761a3a7caa7e9884d00c86c02622ba91137bd3deade6b4b4a
+  languageName: node
+  linkType: hard
+
+"uuid@npm:^13.0.0":
+  version: 13.0.0
+  resolution: "uuid@npm:13.0.0"
+  bin:
+    uuid: dist-node/bin/uuid
+  checksum: 7510ee1ab371be5339ef26ff8cabc2f4a2c60640ff880652968f758072f53bd4f4af1c8b0e671a8c9bb29ef926a24dec3ef0e3861d78183b39291a85743a9f96
   languageName: node
   linkType: hard
 
