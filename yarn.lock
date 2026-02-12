@@ -4735,7 +4735,7 @@ __metadata:
     tailwindcss-animate: ^1.0.7
     typescript: ~5.7.2
     typescript-eslint: ^8.54.0
-    use-stick-to-bottom: ^1.0.46
+    use-stick-to-bottom: ^1.1.3
     uuid: ^11.1.0
     zod: ^3.25.32
     zustand: ^5.0.11
@@ -21199,12 +21199,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"use-stick-to-bottom@npm:^1.0.46":
-  version: 1.1.1
-  resolution: "use-stick-to-bottom@npm:1.1.1"
+"use-stick-to-bottom@npm:^1.1.3":
+  version: 1.1.3
+  resolution: "use-stick-to-bottom@npm:1.1.3"
   peerDependencies:
     react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
-  checksum: 6c86085c67ea02e3becf30cc3e270514d74b099deb2ca673221777c23f6ccb6cf8802cdac495268f70665dd9c300f826686690f7f31d071c5965aa8b7d6e584d
+  checksum: be7a69b20f4a98c860bffcc63d7e0da3870ee6b0682edd6552c9bf3b6a2d3cb4f5dd6adaa1b549cf753201d34d60471166b351005cd25788fb183a0a3087f3fa
   languageName: node
   linkType: hard
 
