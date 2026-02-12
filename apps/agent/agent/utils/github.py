@@ -1,8 +1,10 @@
-"""GitHub API utilities."""
+"""GitHub API and git utilities."""
 
 from __future__ import annotations
 
 import logging
+import shlex
+from typing import Any
 
 import httpx
 
@@ -11,6 +13,97 @@ logger = logging.getLogger(__name__)
 # HTTP status codes
 HTTP_CREATED = 201
 HTTP_UNPROCESSABLE_ENTITY = 422
+
+
+def _run_git(sandbox_backend: Any, repo_dir: str, command: str) -> Any:
+    """Run a git command in the sandbox repo directory."""
+    return sandbox_backend.execute(f"cd {repo_dir} && {command}")
+
+
+def git_has_uncommitted_changes(sandbox_backend: Any, repo_dir: str) -> bool:
+    """Check whether the repo has uncommitted changes."""
+    result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
+    return result.exit_code == 0 and bool(result.output.strip())
+
+
+def git_fetch_origin(sandbox_backend: Any, repo_dir: str) -> Any:
+    """Fetch latest from origin (best-effort)."""
+    return _run_git(sandbox_backend, repo_dir, "git fetch origin 2>/dev/null || true")
+
+
+def git_has_unpushed_commits(sandbox_backend: Any, repo_dir: str) -> bool:
+    """Check whether there are commits not pushed to upstream."""
+    git_log_cmd = (
+        "git log --oneline @{upstream}..HEAD 2>/dev/null "
+        "|| git log --oneline origin/HEAD..HEAD 2>/dev/null || echo ''"
+    )
+    result = _run_git(sandbox_backend, repo_dir, git_log_cmd)
+    return result.exit_code == 0 and bool(result.output.strip())
+
+
+def git_current_branch(sandbox_backend: Any, repo_dir: str) -> str:
+    """Get the current git branch name."""
+    result = _run_git(sandbox_backend, repo_dir, "git rev-parse --abbrev-ref HEAD")
+    return result.output.strip() if result.exit_code == 0 else ""
+
+
+def git_checkout_branch(sandbox_backend: Any, repo_dir: str, branch: str) -> bool:
+    """Checkout branch, creating it if needed."""
+    safe_branch = shlex.quote(branch)
+    checkout_result = _run_git(
+        sandbox_backend, repo_dir, f"git checkout -b {safe_branch}"
+    )
+    if checkout_result.exit_code == 0:
+        return True
+    fallback = _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
+    return fallback.exit_code == 0
+
+
+def git_config_user(
+    sandbox_backend: Any,
+    repo_dir: str,
+    name: str,
+    email: str,
+) -> None:
+    """Configure git user name and email."""
+    safe_name = shlex.quote(name)
+    safe_email = shlex.quote(email)
+    _run_git(sandbox_backend, repo_dir, f"git config user.name {safe_name}")
+    _run_git(sandbox_backend, repo_dir, f"git config user.email {safe_email}")
+
+
+def git_add_all(sandbox_backend: Any, repo_dir: str) -> Any:
+    """Stage all changes."""
+    return _run_git(sandbox_backend, repo_dir, "git add -A")
+
+
+def git_commit(sandbox_backend: Any, repo_dir: str, message: str) -> Any:
+    """Commit staged changes with the given message."""
+    safe_message = shlex.quote(message)
+    return _run_git(sandbox_backend, repo_dir, f"git commit -m {safe_message}")
+
+
+def git_get_remote_url(sandbox_backend: Any, repo_dir: str) -> str | None:
+    """Get the origin remote URL."""
+    result = _run_git(sandbox_backend, repo_dir, "git remote get-url origin")
+    if result.exit_code != 0:
+        return None
+    return result.output.strip()
+
+
+def git_push(
+    sandbox_backend: Any,
+    repo_dir: str,
+    branch: str,
+    github_token: str | None = None,
+) -> Any:
+    """Push the branch to origin, using a token if needed."""
+    safe_branch = shlex.quote(branch)
+    remote_url = git_get_remote_url(sandbox_backend, repo_dir)
+    if remote_url and "github.com" in remote_url and "@" not in remote_url and github_token:
+        auth_url = remote_url.replace("https://", f"https://git:{github_token}@")
+        return _run_git(sandbox_backend, repo_dir, f"git push {auth_url} {safe_branch}")
+    return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
 
 
 async def create_github_pr(
