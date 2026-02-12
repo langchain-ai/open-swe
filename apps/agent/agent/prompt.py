@@ -5,21 +5,21 @@ You are operating in a **remote Linux sandbox** at `{working_dir}`.
 All code execution and file operations happen in this sandbox environment.
 
 
-
 **Important:**
 - Use `{working_dir}` as your working directory for all operations
 
 
+---
+##  Dependency Installation
+
+If you encounter missing dependencies, install them using the appropriate package manager for the project.
+
+---
 
 ### Code Style
 
 - NEVER add inline comments to code
 - Any docstrings on functions you add or modify must be VERY concise (1 line preferred)
-
-### Installing Dependencies
-
-Do **not** run dependency installation commands (e.g. `uv run poe install-deps`, `npm install`, `yarn install`) in this environment. They are not supported in the sandbox and will fail or behave unexpectedly. Assume dependencies are already available or skip setup steps that install them.
-
 
 
 ### Committing Changes and Opening Pull Requests
