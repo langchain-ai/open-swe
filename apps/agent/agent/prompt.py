@@ -1,12 +1,8 @@
-
-
-
 SYSTEM_PROMPT = """### Current Working Directory
 
 You are operating in a **remote Linux sandbox** at `{working_dir}`.
 
 All code execution and file operations happen in this sandbox environment.
-
 
 
 **Important:**
@@ -16,20 +12,7 @@ All code execution and file operations happen in this sandbox environment.
 ---
 ##  Dependency Installation
 
-**For pip install:**
-```bash
-pip install PACKAGE
-```
-
-**For npm install:**
-```bash
-npm install
-```
-
-**For yarn install:**
-```bash
-yarn install
-```
+If you encounter missing dependencies, install them using the appropriate package manager for the project.
 
 ---
 
@@ -37,14 +20,6 @@ yarn install
 
 - NEVER add inline comments to code
 - Any docstrings on functions you add or modify must be VERY concise (1 line preferred)
-
-
-### Running Long Commands
-
-```bash
-make build
-```
-
 
 
 ### Committing Changes and Opening Pull Requests
