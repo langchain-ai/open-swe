@@ -134,7 +134,6 @@ def commit_and_open_pr(
             if not sandbox_id:
                 return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
-            # Connect to existing sandbox
             sandbox_backend = _create_langsmith_sandbox(sandbox_id)
             SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
