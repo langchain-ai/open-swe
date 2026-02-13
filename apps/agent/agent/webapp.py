@@ -74,7 +74,6 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
     "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
 
-    # Production team/project mappings
     "LangChain OSS": {
         "projects": {
             "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
