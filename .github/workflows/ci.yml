@@ -83,6 +83,7 @@ jobs:
   check-spelling:
     name: Check code spelling
     runs-on: ubuntu-latest
+    if: hashFiles('apps/open-swe/package.json') != ''
     steps:
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@v2
@@ -93,6 +94,7 @@ jobs:
   dev-server-check:
     name: Check dev server startup
     runs-on: ubuntu-latest
+    if: hashFiles('apps/open-swe/package.json') != ''
     defaults:
       run:
         working-directory: apps/open-swe

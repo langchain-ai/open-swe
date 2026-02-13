@@ -69,10 +69,57 @@ def get_service_jwt_token_for_user(
     return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
 
 
-LINEAR_TEAM_TO_REPO: dict[str, dict[str, str]] = {
+LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
     "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
+
+    "LangChain OSS": {
+        "projects": {
+            "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
+            "langchain": {"owner": "langchain-ai", "name": "langchain"},
+        }
+    },
+    "Applied AI": {
+        "projects": {
+            "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
+        }
+    },
+    "Docs": {
+        "default": {"owner": "langchain-ai", "name": "docs"}
+    },
 }
+
+
+def get_repo_config_from_team_mapping(
+    team_identifier: str, project_name: str = ""
+) -> dict[str, str]:
+    """
+    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+
+    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
+
+    Args:
+        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
+        project_name: Name of the project (e.g., "deepagents")
+
+    Returns:
+        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
+    """
+    if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
+        return {"owner": "langchain-ai", "name": "langchainplus"}
+
+    config = LINEAR_TEAM_TO_REPO[team_identifier]
+
+    if "owner" in config and "name" in config:
+        return config
+
+    if "projects" in config and project_name:
+        return config["projects"].get(project_name)
+
+    if "default" in config:
+        return config["default"]
+
+    return {"owner": "langchain-ai", "name": "langchainplus"}
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
@@ -714,27 +761,23 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         return {"status": "ignored", "reason": "No issue data in comment"}
 
     team = issue.get("team", {})
-    team_id = team.get("id", "") if team else ""
     team_name = team.get("name", "") if team else ""
+    project = issue.get("project")
+    project_name = project.get("name", "") if project else ""
 
-    repo_config = None
-    if team_id and team_id in LINEAR_TEAM_TO_REPO:
-        repo_config = LINEAR_TEAM_TO_REPO[team_id]
-    elif team_name and team_name in LINEAR_TEAM_TO_REPO:
-        repo_config = LINEAR_TEAM_TO_REPO[team_name]
+    team_identifier = team_name.strip() if team_name else ""
+    project_key = project_name.strip() if project_name else ""
 
-    if not repo_config:
-        for label in issue.get("labels", []):
-            label_name = label.get("name", "")
-            if label_name.startswith("repo:"):
-                repo_ref = label_name[5:]  # Remove "repo:" prefix
-                if "/" in repo_ref:
-                    owner, name = repo_ref.split("/", 1)
-                    repo_config = {"owner": owner, "name": name}
-                    break
+    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
 
-    if not repo_config:
-        repo_config = {"owner": "langchain-ai", "name": "langchainplus"}
+    logger.debug(
+        "Team/project lookup result",
+        extra={
+            "team_name": team_identifier,
+            "project_name": project_key,
+            "repo_config": repo_config,
+        },
+    )
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
