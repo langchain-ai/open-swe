@@ -69,10 +69,70 @@ def get_service_jwt_token_for_user(
     return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
 
 
-LINEAR_TEAM_TO_REPO: dict[str, dict[str, str]] = {
+LINEAR_TEAM_TO_REPO: dict[str, dict[str, any]] = {
+    # Test workspaces (legacy format for backward compatibility)
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
     "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
+
+    # Production team/project mappings
+    "LangChain OSS": {
+        "projects": {
+            "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
+            "langchain": {"owner": "langchain-ai", "name": "langchain"},
+        }
+    },
+    "Applied AI": {
+        "projects": {
+            "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
+        }
+    },
+    "Docs": {
+        "default": {"owner": "langchain-ai", "name": "docs"}
+    },
 }
+
+
+def get_repo_config_from_team_mapping(
+    team_name: str, team_id: str, project_name: str = ""
+) -> dict[str, str] | None:
+    """
+    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+
+    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
+
+    Args:
+        team_name: Name of the team (e.g., "LangChain OSS")
+        team_id: ID of the team
+        project_name: Name of the project (e.g., "deepagents")
+
+    Returns:
+        Repository config dict with 'owner' and 'name' keys, or None if not found
+    """
+    # Try team_id first
+    if team_id and team_id in LINEAR_TEAM_TO_REPO:
+        config = LINEAR_TEAM_TO_REPO[team_id]
+        # Legacy flat format: team_id maps directly to repo config
+        if "owner" in config and "name" in config:
+            return config
+        # New nested format: team_id maps to structure with projects
+        if "projects" in config and project_name:
+            return config["projects"].get(project_name)
+        if "default" in config:
+            return config["default"]
+
+    # Try team_name
+    if team_name and team_name in LINEAR_TEAM_TO_REPO:
+        config = LINEAR_TEAM_TO_REPO[team_name]
+        # Legacy flat format: team_name maps directly to repo config
+        if "owner" in config and "name" in config:
+            return config
+        # New nested format: team_name maps to structure with projects
+        if "projects" in config and project_name:
+            return config["projects"].get(project_name)
+        if "default" in config:
+            return config["default"]
+
+    return None
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
@@ -723,24 +783,21 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     elif isinstance(project, str):
         project_name = project
 
-    repo_config = None
-    if team_id and team_id in LINEAR_TEAM_TO_REPO:
-        repo_config = LINEAR_TEAM_TO_REPO[team_id]
-    elif team_name and team_name in LINEAR_TEAM_TO_REPO:
-        repo_config = LINEAR_TEAM_TO_REPO[team_name]
+    # Look up repository configuration from team/project mapping
+    team_key = team_name.strip() if team_name else ""
+    project_key = project_name.strip() if project_name else ""
 
-    if not repo_config:
-        team_key = team_name.strip()
-        project_key = project_name.strip() if project_name else ""
-        if team_key == "LangChain OSS" and project_key:
-            if project_key == "deepagents":
-                repo_config = {"owner": "langchain-ai", "name": "deepagents"}
-            elif project_key == "langchain":
-                repo_config = {"owner": "langchain-ai", "name": "langchain"}
-        elif team_key == "Applied AI" and project_key == "GTM Engineering":
-            repo_config = {"owner": "langchain-ai", "name": "ai-sdr"}
-        elif team_key == "Docs":
-            repo_config = {"owner": "langchain-ai", "name": "docs"}
+    repo_config = get_repo_config_from_team_mapping(team_key, team_id, project_key)
+
+    logger.debug(
+        "Team/project lookup result",
+        extra={
+            "team_name": team_key,
+            "team_id": team_id,
+            "project_name": project_key,
+            "repo_config": repo_config,
+        },
+    )
 
     if not repo_config:
         for label in issue.get("labels", []):
