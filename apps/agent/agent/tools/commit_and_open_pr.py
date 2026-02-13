@@ -5,7 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..encryption import decrypt_token
-from ..server import _create_langsmith_sandbox
+from ..integrations.langsmith import _create_langsmith_sandbox
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
