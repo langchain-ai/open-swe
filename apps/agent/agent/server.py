@@ -36,7 +36,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
-from .utils.sandbox import _create_langsmith_sandbox
+from .integrations.langsmith import _create_langsmith_sandbox
 
 
 client = get_client()
