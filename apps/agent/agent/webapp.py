@@ -110,15 +110,12 @@ def get_repo_config_from_team_mapping(
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
-    # Legacy flat format: team maps directly to repo config
     if "owner" in config and "name" in config:
         return config
 
-    # New nested format: team maps to structure with projects
     if "projects" in config and project_name:
         return config["projects"].get(project_name)
 
-    # Team has default repo (no project needed)
     if "default" in config:
         return config["default"]
 
