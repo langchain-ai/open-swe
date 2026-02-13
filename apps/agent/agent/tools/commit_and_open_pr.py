@@ -5,6 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..encryption import decrypt_token
+from ..utils.sandbox import _create_langsmith_sandbox
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -132,9 +133,6 @@ def commit_and_open_pr(
 
             if not sandbox_id:
                 return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
-
-            # Import here to avoid circular import with server.py
-            from ..server import _create_langsmith_sandbox
 
             sandbox_backend = _create_langsmith_sandbox(sandbox_id)
             SANDBOX_BACKENDS[thread_id] = sandbox_backend
