@@ -1,0 +1,69 @@
+[project]
+name = "open-swe-agent"
+version = "0.1.0"
+description = "Open SWE Agent - Python agent for automating software engineering tasks"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    # Core deepagents library
+    "deepagents>=0.4.0",
+    # FastAPI for webhook handling
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    # HTTP client
+    "httpx>=0.25.0",
+    # JWT for service authentication
+    "PyJWT>=2.8.0",
+    # Encryption
+    "cryptography>=41.0.0",
+    # LangGraph SDK for thread management
+    "langgraph-sdk>=0.1.0",
+    # LangChain dependencies (will be pulled in by deepagents but listing for clarity)
+    "langchain>=1.2.9",
+    "langgraph>=1.0.8",
+    "markdownify>=1.2.2",
+    "langchain-anthropic>1.1.0",
+    "langgraph-cli[inmem]>=0.4.12",
+    # LangSmith SDK for sandbox management
+    "langsmith>=0.7.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

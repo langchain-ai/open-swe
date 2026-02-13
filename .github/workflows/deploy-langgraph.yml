@@ -45,7 +45,7 @@ jobs:
 
         env:
           CONTROL_PLANE_HOST: ${{ secrets.CONTROL_PLANE_HOST }}
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_API_KEY_PROD: ${{ secrets.LANGSMITH_API_KEY_PROD }}
           INTEGRATION_ID: ${{ secrets.INTEGRATION_ID }}
           DEPLOYMENT_ID: ${{ secrets.DEPLOYMENT_ID }}
         timeout-minutes: 35
