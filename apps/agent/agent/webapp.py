@@ -69,7 +69,7 @@ def get_service_jwt_token_for_user(
     return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
 
 
-LINEAR_TEAM_TO_REPO: dict[str, dict[str, any]] = {
+LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     # Test workspaces (legacy format for backward compatibility)
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
     "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
