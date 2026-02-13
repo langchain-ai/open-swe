@@ -765,7 +765,6 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     project = issue.get("project")
     project_name = project.get("name", "") if project else ""
 
-    # Look up repository configuration from team/project mapping
     team_identifier = team_name.strip() if team_name else ""
     project_key = project_name.strip() if project_name else ""
 
