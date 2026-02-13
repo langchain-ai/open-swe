@@ -716,12 +716,31 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     team = issue.get("team", {})
     team_id = team.get("id", "") if team else ""
     team_name = team.get("name", "") if team else ""
+    project = issue.get("project", {}) if issue else {}
+    project_name = ""
+    if isinstance(project, dict):
+        project_name = project.get("name", "") or ""
+    elif isinstance(project, str):
+        project_name = project
 
     repo_config = None
     if team_id and team_id in LINEAR_TEAM_TO_REPO:
         repo_config = LINEAR_TEAM_TO_REPO[team_id]
     elif team_name and team_name in LINEAR_TEAM_TO_REPO:
         repo_config = LINEAR_TEAM_TO_REPO[team_name]
+
+    if not repo_config:
+        team_key = team_name.strip()
+        project_key = project_name.strip() if project_name else ""
+        if team_key == "LangChain OSS" and project_key:
+            if project_key == "deepagents":
+                repo_config = {"owner": "langchain-ai", "name": "deepagents"}
+            elif project_key == "langchain":
+                repo_config = {"owner": "langchain-ai", "name": "langchain"}
+        elif team_key == "Applied AI" and project_key == "GTM Engineering":
+            repo_config = {"owner": "langchain-ai", "name": "ai-sdr"}
+        elif team_key == "Docs":
+            repo_config = {"owner": "langchain-ai", "name": "docs"}
 
     if not repo_config:
         for label in issue.get("labels", []):
