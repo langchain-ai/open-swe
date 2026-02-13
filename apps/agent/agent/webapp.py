@@ -93,46 +93,38 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
 
 
 def get_repo_config_from_team_mapping(
-    team_name: str, team_id: str, project_name: str = ""
-) -> dict[str, str]:
+    team_identifier: str, project_name: str = ""
+) -> dict[str, str] | None:
     """
     Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
 
     Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
 
     Args:
-        team_name: Name of the team (e.g., "LangChain OSS")
-        team_id: ID of the team
+        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
         project_name: Name of the project (e.g., "deepagents")
 
     Returns:
         Repository config dict with 'owner' and 'name' keys, or None if not found
     """
-    # Try team_id first
-    if team_id and team_id in LINEAR_TEAM_TO_REPO:
-        config = LINEAR_TEAM_TO_REPO[team_id]
-        # Legacy flat format: team_id maps directly to repo config
-        if "owner" in config and "name" in config:
-            return config
-        # New nested format: team_id maps to structure with projects
-        if "projects" in config and project_name:
-            return config["projects"].get(project_name)
-        if "default" in config:
-            return config["default"]
+    if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
+        return None
 
-    # Try team_name
-    if team_name and team_name in LINEAR_TEAM_TO_REPO:
-        config = LINEAR_TEAM_TO_REPO[team_name]
-        # Legacy flat format: team_name maps directly to repo config
-        if "owner" in config and "name" in config:
-            return config
-        # New nested format: team_name maps to structure with projects
-        if "projects" in config and project_name:
-            return config["projects"].get(project_name)
-        if "default" in config:
-            return config["default"]
+    config = LINEAR_TEAM_TO_REPO[team_identifier]
 
-    return {"owner": "langchain-ai", "name": "langchainplus"}
+    # Legacy flat format: team maps directly to repo config
+    if "owner" in config and "name" in config:
+        return config
+
+    # New nested format: team maps to structure with projects
+    if "projects" in config and project_name:
+        return config["projects"].get(project_name)
+
+    # Team has default repo (no project needed)
+    if "default" in config:
+        return config["default"]
+
+    return None
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
@@ -774,26 +766,20 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         return {"status": "ignored", "reason": "No issue data in comment"}
 
     team = issue.get("team", {})
-    team_id = team.get("id", "") if team else ""
     team_name = team.get("name", "") if team else ""
-    project = issue.get("project", {}) if issue else {}
-    project_name = ""
-    if isinstance(project, dict):
-        project_name = project.get("name", "") or ""
-    elif isinstance(project, str):
-        project_name = project
+    project = issue.get("project")
+    project_name = project.get("name", "") if project else ""
 
     # Look up repository configuration from team/project mapping
-    team_key = team_name.strip() if team_name else ""
+    team_identifier = team_name.strip() if team_name else ""
     project_key = project_name.strip() if project_name else ""
 
-    repo_config = get_repo_config_from_team_mapping(team_key, team_id, project_key)
+    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
 
     logger.debug(
         "Team/project lookup result",
         extra={
-            "team_name": team_key,
-            "team_id": team_id,
+            "team_name": team_identifier,
             "project_name": project_key,
             "repo_config": repo_config,
         },
