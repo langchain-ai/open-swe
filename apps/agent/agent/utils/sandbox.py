@@ -4,6 +4,8 @@ import os
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from ..integrations.langsmith import LangSmithProvider
+
 
 def _get_langsmith_api_key() -> str | None:
     """Get LangSmith API key from environment.
@@ -42,8 +44,6 @@ def _create_langsmith_sandbox(
     Returns:
         SandboxBackendProtocol instance
     """
-    from ..integrations.langsmith import LangSmithProvider
-
     api_key = _get_langsmith_api_key()
     template_name, template_image = _get_sandbox_template_config()
 
