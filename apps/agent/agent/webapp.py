@@ -94,7 +94,7 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
 
 def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
-) -> dict[str, str] | None:
+) -> dict[str, str]:
     """
     Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
 
@@ -105,10 +105,10 @@ def get_repo_config_from_team_mapping(
         project_name: Name of the project (e.g., "deepagents")
 
     Returns:
-        Repository config dict with 'owner' and 'name' keys, or None if not found
+        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
     """
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return None
+        return {"owner": "langchain-ai", "name": "langchainplus"}
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
@@ -124,7 +124,7 @@ def get_repo_config_from_team_mapping(
     if "default" in config:
         return config["default"]
 
-    return None
+    return {"owner": "langchain-ai", "name": "langchainplus"}
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
@@ -784,19 +784,6 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
             "repo_config": repo_config,
         },
     )
-
-    if not repo_config:
-        for label in issue.get("labels", []):
-            label_name = label.get("name", "")
-            if label_name.startswith("repo:"):
-                repo_ref = label_name[5:]  # Remove "repo:" prefix
-                if "/" in repo_ref:
-                    owner, name = repo_ref.split("/", 1)
-                    repo_config = {"owner": owner, "name": name}
-                    break
-
-    if not repo_config:
-        repo_config = {"owner": "langchain-ai", "name": "langchainplus"}
 
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
