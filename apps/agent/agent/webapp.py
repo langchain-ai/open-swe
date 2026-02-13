@@ -94,7 +94,7 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
 
 def get_repo_config_from_team_mapping(
     team_name: str, team_id: str, project_name: str = ""
-) -> dict[str, str] | None:
+) -> dict[str, str]:
     """
     Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
 
