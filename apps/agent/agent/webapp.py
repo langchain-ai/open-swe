@@ -132,7 +132,7 @@ def get_repo_config_from_team_mapping(
         if "default" in config:
             return config["default"]
 
-    return None
+    return {"owner": "langchain-ai", "name": "langchainplus"}
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
