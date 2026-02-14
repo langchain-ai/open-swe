@@ -46,6 +46,12 @@ SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.sandbox_state import SANDBOX_BACKENDS
+from .utils.github import (
+    git_has_uncommitted_changes,
+    is_valid_git_repo,
+    remove_directory,
+    repo_directory_exists,
+)
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -76,44 +82,54 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     repo_dir = f"/workspace/{repo}"
 
-    logger.debug("Checking if repo already exists at %s", repo_dir)
-    try:
-        check_result = await loop.run_in_executor(
-            None, sandbox_backend.execute, f"test -d {repo_dir}/.git && echo exists"
-        )
-        logger.debug(
-            "Check result: exit_code=%s, output=%s",
-            check_result.exit_code,
-            check_result.output[:200] if check_result.output else "",
-        )
-    except Exception:
-        logger.exception("Failed to execute check command in sandbox")
-        raise
+    # Check if directory exists
+    logger.debug("Checking if repo directory exists at %s", repo_dir)
+    dir_exists = await loop.run_in_executor(None, repo_directory_exists, sandbox_backend, repo_dir)
 
-    if check_result.exit_code == 0 and "exists" in check_result.output:
-        logger.info("Repo already exists at %s, pulling latest changes", repo_dir)
-        try:
-            status_result = await loop.run_in_executor(
-                None, sandbox_backend.execute, f"cd {repo_dir} && git status --porcelain"
+    if dir_exists:
+        is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
+
+        if not is_git_repo:
+            # Directory exists but is not a valid git repo - remove and clone
+            logger.warning("Directory exists but is not a valid git repo at %s, removing", repo_dir)
+            try:
+                removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
+                if not removed:
+                    msg = f"Failed to remove invalid directory at {repo_dir}"
+                    logger.error(msg)
+                    raise RuntimeError(msg)
+                logger.info("Removed invalid directory, will clone fresh repo")
+            except Exception:
+                logger.exception("Failed to remove invalid directory")
+                raise
+            # Fall through to clone below
+        else:
+            # Valid git repo exists, check for uncommitted changes
+            logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
+            has_changes = await loop.run_in_executor(
+                None, git_has_uncommitted_changes, sandbox_backend, repo_dir
             )
-            logger.debug("Git status result: exit_code=%s", status_result.exit_code)
-        except Exception:
-            logger.exception("Failed to get git status")
-            raise
 
-        # CRITICAL: Ensure remote URL doesn't contain token (clean up from previous runs)
-        clean_url = f"https://github.com/{owner}/{repo}.git"
-        try:
-            await loop.run_in_executor(
-                None,
-                sandbox_backend.execute,
-                f"cd {repo_dir} && git remote set-url origin {clean_url}",
-            )
-        except Exception:
-            logger.exception("Failed to set remote URL")
-            raise
+            if has_changes:
+                logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
+                return repo_dir
 
-        if status_result.exit_code == 0 and not status_result.output.strip():
+            # No uncommitted changes, safe to pull
+            logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
+
+            # CRITICAL: Ensure remote URL doesn't contain token (clean up from previous runs)
+            clean_url = f"https://github.com/{owner}/{repo}.git"
+            try:
+                await loop.run_in_executor(
+                    None,
+                    sandbox_backend.execute,
+                    f"cd {repo_dir} && git remote set-url origin {clean_url}",
+                )
+            except Exception:
+                logger.exception("Failed to set remote URL")
+                raise
+
+            # Pull with authenticated URL
             auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
             try:
                 pull_result = await loop.run_in_executor(
@@ -129,35 +145,40 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
             except Exception:
                 logger.exception("Failed to execute git pull")
                 raise
-    else:
-        logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
-        clone_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
-        try:
-            result = await loop.run_in_executor(
-                None, sandbox_backend.execute, f"git clone {clone_url} {repo_dir}"
-            )
-            logger.debug("Git clone result: exit_code=%s", result.exit_code)
-        except Exception:
-            logger.exception("Failed to execute git clone")
-            raise
 
-        if result.exit_code != 0:
-            msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
-            logger.error(msg)
-            raise RuntimeError(msg)
+            logger.info("Repo updated at %s", repo_dir)
+            return repo_dir
 
-        clean_url = f"https://github.com/{owner}/{repo}.git"
-        try:
-            await loop.run_in_executor(
-                None,
-                sandbox_backend.execute,
-                f"cd {repo_dir} && git remote set-url origin {clean_url}",
-            )
-        except Exception:
-            logger.exception("Failed to set remote URL after clone")
-            raise
+    # Directory doesn't exist or was removed - clone it
+    logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
+    clone_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
+    try:
+        result = await loop.run_in_executor(
+            None, sandbox_backend.execute, f"git clone {clone_url} {repo_dir}"
+        )
+        logger.debug("Git clone result: exit_code=%s", result.exit_code)
+    except Exception:
+        logger.exception("Failed to execute git clone")
+        raise
 
-    logger.info("Repo setup complete at %s", repo_dir)
+    if result.exit_code != 0:
+        msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
+        logger.error(msg)
+        raise RuntimeError(msg)
+
+    # Clean up the remote URL to remove token
+    clean_url = f"https://github.com/{owner}/{repo}.git"
+    try:
+        await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"cd {repo_dir} && git remote set-url origin {clean_url}",
+        )
+    except Exception:
+        logger.exception("Failed to set remote URL after clone")
+        raise
+
+    logger.info("Repo cloned successfully at %s", repo_dir)
     return repo_dir
 
 
