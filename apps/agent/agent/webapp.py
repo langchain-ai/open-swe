@@ -71,7 +71,13 @@ def get_service_jwt_token_for_user(
 
 LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
-    "Yogesh-dev": {"owner": "aran-yogesh", "name": "TalkBack"},
+    "Yogesh-dev": {
+        "projects": {
+            "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
+            "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
+        },
+        "default": {"owner": "aran-yogesh", "name": "TalkBack"}  # Fallback for issues without project
+    },
 
     "LangChain OSS": {
         "projects": {
@@ -324,6 +330,15 @@ async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
             title
             description
             url
+            project {
+                id
+                name
+            }
+            team {
+                id
+                name
+                key
+            }
             comments {
                 nodes {
                     id
@@ -760,9 +775,16 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.debug("Ignoring webhook: no issue data in comment")
         return {"status": "ignored", "reason": "No issue data in comment"}
 
-    team = issue.get("team", {})
+    # Fetch full issue details to get project info (webhook doesn't include it)
+    issue_id = issue.get("id", "")
+    full_issue = await fetch_linear_issue_details(issue_id)
+    if not full_issue:
+        logger.warning("Failed to fetch full issue details, using webhook data")
+        full_issue = issue
+
+    team = full_issue.get("team", {})
     team_name = team.get("name", "") if team else ""
-    project = issue.get("project")
+    project = full_issue.get("project")
     project_name = project.get("name", "") if project else ""
 
     team_identifier = team_name.strip() if team_name else ""
