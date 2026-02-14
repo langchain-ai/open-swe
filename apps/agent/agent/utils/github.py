@@ -20,6 +20,28 @@ def _run_git(sandbox_backend: Any, repo_dir: str, command: str) -> Any:
     return sandbox_backend.execute(f"cd {repo_dir} && {command}")
 
 
+def repo_directory_exists(sandbox_backend: Any, repo_dir: str) -> bool:
+    """Check if repository directory exists."""
+    safe_repo_dir = shlex.quote(repo_dir)
+    result = sandbox_backend.execute(f"test -d {safe_repo_dir} && echo exists")
+    return result.exit_code == 0 and "exists" in result.output
+
+
+def is_valid_git_repo(sandbox_backend: Any, repo_dir: str) -> bool:
+    """Check if directory is a valid git repository."""
+    git_dir = f"{repo_dir}/.git"
+    safe_git_dir = shlex.quote(git_dir)
+    result = sandbox_backend.execute(f"test -d {safe_git_dir} && echo exists")
+    return result.exit_code == 0 and "exists" in result.output
+
+
+def remove_directory(sandbox_backend: Any, repo_dir: str) -> bool:
+    """Remove a directory and all its contents."""
+    safe_repo_dir = shlex.quote(repo_dir)
+    result = sandbox_backend.execute(f"rm -rf {safe_repo_dir}")
+    return result.exit_code == 0
+
+
 def git_has_uncommitted_changes(sandbox_backend: Any, repo_dir: str) -> bool:
     """Check whether the repo has uncommitted changes."""
     result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
