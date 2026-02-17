@@ -80,11 +80,12 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         raise ValueError(msg)
 
     repo_dir = f"/workspace/{repo}"
+    auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
+    clean_url = f"https://github.com/{owner}/{repo}.git"
 
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
     if not is_git_repo:
-        # Directory missing or not a valid git repo - remove and clone
         logger.warning(
             "Repo directory missing or not a valid git repo at %s, removing", repo_dir
         )
@@ -98,9 +99,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to remove invalid directory")
             raise
-        # Fall through to clone below
     else:
-        # Valid git repo exists, check for uncommitted changes
         logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
         has_changes = await loop.run_in_executor(
             None, git_has_uncommitted_changes, sandbox_backend, repo_dir
@@ -110,13 +109,8 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
             logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
             return repo_dir
 
-        # No uncommitted changes, safe to pull
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
 
-        auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
-        clean_url = f"https://github.com/{owner}/{repo}.git"
-
-        # Set authenticated URL for private repos, then restore clean URL.
         try:
             await loop.run_in_executor(
                 None,
@@ -150,12 +144,10 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         logger.info("Repo updated at %s", repo_dir)
         return repo_dir
 
-    # Directory doesn't exist or was removed - clone it
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
-    clone_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
     try:
         result = await loop.run_in_executor(
-            None, sandbox_backend.execute, f"git clone {clone_url} {repo_dir}"
+            None, sandbox_backend.execute, f"git clone {auth_url} {repo_dir}"
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
@@ -167,8 +159,6 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         logger.error(msg)
         raise RuntimeError(msg)
 
-    # Clean up the remote URL to remove token
-    clean_url = f"https://github.com/{owner}/{repo}.git"
     try:
         await loop.run_in_executor(
             None,
