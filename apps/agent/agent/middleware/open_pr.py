@@ -16,6 +16,7 @@ from typing import Any
 from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
 from ..encryption import decrypt_token
 from ..utils.github import (
@@ -32,9 +33,9 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
-from ..utils.sandbox_state import SANDBOX_BACKENDS
 
 logger = logging.getLogger(__name__)
+client = get_client()
 
 
 def _extract_pr_params_from_messages(messages: list) -> dict[str, Any] | None:
@@ -144,17 +145,27 @@ I've created a pull request to address this issue:
         repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
-        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-
         repo_dir = f"/workspace/{repo_name}"
 
-        if not sandbox_backend or not repo_dir:
+        if not repo_dir:
             if linear_issue_id and last_message_content:
                 comment = f"""🤖 **Agent Response**
 
 {last_message_content}"""
                 await comment_on_linear_issue(linear_issue_id, comment)
             return None
+
+        thread = await client.threads.get(thread_id=thread_id)
+        sandbox_id = thread.get("metadata", {}).get("sandbox_id")
+        if not sandbox_id:
+            if linear_issue_id and last_message_content:
+                comment = f"""🤖 **Agent Response**
+
+{last_message_content}"""
+                await comment_on_linear_issue(linear_issue_id, comment)
+            return None
+
+        sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
 
         has_uncommitted_changes = await asyncio.to_thread(
             git_has_uncommitted_changes, sandbox_backend, repo_dir

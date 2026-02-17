@@ -45,7 +45,6 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.sandbox_state import SANDBOX_BACKENDS
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -304,8 +303,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             except Exception:
                 logger.exception("Failed to pull repo in existing sandbox")
                 raise
-
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
