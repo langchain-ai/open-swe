@@ -575,6 +575,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     bot_message_prefixes = (
         "🔐 **GitHub Authentication Required**",
         "✅ **Pull Request Created**",
+        "✅ **Pull Request Updated**",
+        "**Pull Request Created**",
+        "**Pull Request Updated**",
         "🤖 **Agent Response**",
         "❌ **Agent Error**",
     )
@@ -759,6 +762,9 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     bot_message_prefixes = [
         "🔐 **GitHub Authentication Required**",
         "✅ **Pull Request Created**",
+        "✅ **Pull Request Updated**",
+        "**Pull Request Created**",
+        "**Pull Request Updated**",
         "🤖 **Agent Response**",
         "❌ **Agent Error**",
     ]
