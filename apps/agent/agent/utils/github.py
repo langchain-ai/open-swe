@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import shlex
-from typing import Any
 
 import httpx
+from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -15,23 +15,46 @@ HTTP_CREATED = 201
 HTTP_UNPROCESSABLE_ENTITY = 422
 
 
-def _run_git(sandbox_backend: Any, repo_dir: str, command: str) -> Any:
+def _run_git(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str, command: str
+) -> ExecuteResponse:
     """Run a git command in the sandbox repo directory."""
     return sandbox_backend.execute(f"cd {repo_dir} && {command}")
 
 
-def git_has_uncommitted_changes(sandbox_backend: Any, repo_dir: str) -> bool:
+def is_valid_git_repo(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
+    """Check if directory is a valid git repository."""
+    git_dir = f"{repo_dir}/.git"
+    safe_git_dir = shlex.quote(git_dir)
+    result = sandbox_backend.execute(f"test -d {safe_git_dir} && echo exists")
+    return result.exit_code == 0 and "exists" in result.output
+
+
+def remove_directory(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
+    """Remove a directory and all its contents."""
+    safe_repo_dir = shlex.quote(repo_dir)
+    result = sandbox_backend.execute(f"rm -rf {safe_repo_dir}")
+    return result.exit_code == 0
+
+
+def git_has_uncommitted_changes(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str
+) -> bool:
     """Check whether the repo has uncommitted changes."""
     result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
     return result.exit_code == 0 and bool(result.output.strip())
 
 
-def git_fetch_origin(sandbox_backend: Any, repo_dir: str) -> Any:
+def git_fetch_origin(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str
+) -> ExecuteResponse:
     """Fetch latest from origin (best-effort)."""
     return _run_git(sandbox_backend, repo_dir, "git fetch origin 2>/dev/null || true")
 
 
-def git_has_unpushed_commits(sandbox_backend: Any, repo_dir: str) -> bool:
+def git_has_unpushed_commits(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str
+) -> bool:
     """Check whether there are commits not pushed to upstream."""
     git_log_cmd = (
         "git log --oneline @{upstream}..HEAD 2>/dev/null "
@@ -41,13 +64,15 @@ def git_has_unpushed_commits(sandbox_backend: Any, repo_dir: str) -> bool:
     return result.exit_code == 0 and bool(result.output.strip())
 
 
-def git_current_branch(sandbox_backend: Any, repo_dir: str) -> str:
+def git_current_branch(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> str:
     """Get the current git branch name."""
     result = _run_git(sandbox_backend, repo_dir, "git rev-parse --abbrev-ref HEAD")
     return result.output.strip() if result.exit_code == 0 else ""
 
 
-def git_checkout_branch(sandbox_backend: Any, repo_dir: str, branch: str) -> bool:
+def git_checkout_branch(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str, branch: str
+) -> bool:
     """Checkout branch, creating it if needed."""
     safe_branch = shlex.quote(branch)
     checkout_result = _run_git(
@@ -60,7 +85,7 @@ def git_checkout_branch(sandbox_backend: Any, repo_dir: str, branch: str) -> boo
 
 
 def git_config_user(
-    sandbox_backend: Any,
+    sandbox_backend: SandboxBackendProtocol,
     repo_dir: str,
     name: str,
     email: str,
@@ -72,18 +97,24 @@ def git_config_user(
     _run_git(sandbox_backend, repo_dir, f"git config user.email {safe_email}")
 
 
-def git_add_all(sandbox_backend: Any, repo_dir: str) -> Any:
+def git_add_all(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str
+) -> ExecuteResponse:
     """Stage all changes."""
     return _run_git(sandbox_backend, repo_dir, "git add -A")
 
 
-def git_commit(sandbox_backend: Any, repo_dir: str, message: str) -> Any:
+def git_commit(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str, message: str
+) -> ExecuteResponse:
     """Commit staged changes with the given message."""
     safe_message = shlex.quote(message)
     return _run_git(sandbox_backend, repo_dir, f"git commit -m {safe_message}")
 
 
-def git_get_remote_url(sandbox_backend: Any, repo_dir: str) -> str | None:
+def git_get_remote_url(
+    sandbox_backend: SandboxBackendProtocol, repo_dir: str
+) -> str | None:
     """Get the origin remote URL."""
     result = _run_git(sandbox_backend, repo_dir, "git remote get-url origin")
     if result.exit_code != 0:
@@ -92,11 +123,11 @@ def git_get_remote_url(sandbox_backend: Any, repo_dir: str) -> str | None:
 
 
 def git_push(
-    sandbox_backend: Any,
+    sandbox_backend: SandboxBackendProtocol,
     repo_dir: str,
     branch: str,
     github_token: str | None = None,
-) -> Any:
+) -> ExecuteResponse:
     """Push the branch to origin, using a token if needed."""
     safe_branch = shlex.quote(branch)
     remote_url = git_get_remote_url(sandbox_backend, repo_dir)
