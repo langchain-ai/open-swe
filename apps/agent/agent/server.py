@@ -50,7 +50,6 @@ from .utils.github import (
     git_has_uncommitted_changes,
     is_valid_git_repo,
     remove_directory,
-    repo_directory_exists,
 )
 
 
@@ -82,43 +81,62 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     repo_dir = f"/workspace/{repo}"
 
-    # Check if directory exists
-    logger.debug("Checking if repo directory exists at %s", repo_dir)
-    dir_exists = await loop.run_in_executor(None, repo_directory_exists, sandbox_backend, repo_dir)
+    is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
-    if dir_exists:
-        is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
+    if not is_git_repo:
+        # Directory missing or not a valid git repo - remove and clone
+        logger.warning(
+            "Repo directory missing or not a valid git repo at %s, removing", repo_dir
+        )
+        try:
+            removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
+            if not removed:
+                msg = f"Failed to remove invalid directory at {repo_dir}"
+                logger.error(msg)
+                raise RuntimeError(msg)
+            logger.info("Removed invalid directory, will clone fresh repo")
+        except Exception:
+            logger.exception("Failed to remove invalid directory")
+            raise
+        # Fall through to clone below
+    else:
+        # Valid git repo exists, check for uncommitted changes
+        logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
+        has_changes = await loop.run_in_executor(
+            None, git_has_uncommitted_changes, sandbox_backend, repo_dir
+        )
 
-        if not is_git_repo:
-            # Directory exists but is not a valid git repo - remove and clone
-            logger.warning("Directory exists but is not a valid git repo at %s, removing", repo_dir)
-            try:
-                removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
-                if not removed:
-                    msg = f"Failed to remove invalid directory at {repo_dir}"
-                    logger.error(msg)
-                    raise RuntimeError(msg)
-                logger.info("Removed invalid directory, will clone fresh repo")
-            except Exception:
-                logger.exception("Failed to remove invalid directory")
-                raise
-            # Fall through to clone below
-        else:
-            # Valid git repo exists, check for uncommitted changes
-            logger.info("Repo exists at %s, checking for uncommitted changes", repo_dir)
-            has_changes = await loop.run_in_executor(
-                None, git_has_uncommitted_changes, sandbox_backend, repo_dir
+        if has_changes:
+            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
+            return repo_dir
+
+        # No uncommitted changes, safe to pull
+        logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
+
+        auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
+        clean_url = f"https://github.com/{owner}/{repo}.git"
+
+        # Set authenticated URL for private repos, then restore clean URL.
+        try:
+            await loop.run_in_executor(
+                None,
+                sandbox_backend.execute,
+                f"cd {repo_dir} && git remote set-url origin {auth_url}",
             )
-
-            if has_changes:
-                logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
-                return repo_dir
-
-            # No uncommitted changes, safe to pull
-            logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
-
-            # CRITICAL: Ensure remote URL doesn't contain token (clean up from previous runs)
-            clean_url = f"https://github.com/{owner}/{repo}.git"
+            pull_result = await loop.run_in_executor(
+                None, sandbox_backend.execute, f"cd {repo_dir} && git pull origin"
+            )
+            logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
+            if pull_result.exit_code != 0:
+                logger.warning(
+                    "Git pull failed with exit code %s: %s",
+                    pull_result.exit_code,
+                    pull_result.output[:200] if pull_result.output else "",
+                )
+        except Exception:
+            logger.exception("Failed to execute git pull")
+            raise
+        finally:
             try:
                 await loop.run_in_executor(
                     None,
@@ -126,28 +144,11 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                     f"cd {repo_dir} && git remote set-url origin {clean_url}",
                 )
             except Exception:
-                logger.exception("Failed to set remote URL")
+                logger.exception("Failed to restore clean remote URL")
                 raise
 
-            # Pull with authenticated URL
-            auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
-            try:
-                pull_result = await loop.run_in_executor(
-                    None, sandbox_backend.execute, f"cd {repo_dir} && git pull {auth_url}"
-                )
-                logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
-                if pull_result.exit_code != 0:
-                    logger.warning(
-                        "Git pull failed with exit code %s: %s",
-                        pull_result.exit_code,
-                        pull_result.output[:200] if pull_result.output else "",
-                    )
-            except Exception:
-                logger.exception("Failed to execute git pull")
-                raise
-
-            logger.info("Repo updated at %s", repo_dir)
-            return repo_dir
+        logger.info("Repo updated at %s", repo_dir)
+        return repo_dir
 
     # Directory doesn't exist or was removed - clone it
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
