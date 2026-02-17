@@ -109,6 +109,7 @@ def commit_and_open_pr(
         - success: Whether the operation completed successfully
         - error: Error string if something failed, otherwise None
         - pr_url: URL of the created PR if successful, otherwise None
+        - pr_existing: Whether a PR already existed for this branch
     """
     try:
         config = get_config()
@@ -190,7 +191,7 @@ def commit_and_open_pr(
         base_branch = asyncio.run(
             get_github_default_branch(repo_owner, repo_name, github_token)
         )
-        pr_url, _pr_number = asyncio.run(
+        pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
@@ -207,9 +208,15 @@ def commit_and_open_pr(
                 "success": False,
                 "error": "Failed to create GitHub PR",
                 "pr_url": None,
+                "pr_existing": False,
             }
 
-        return {"success": True, "error": None, "pr_url": pr_url}
+        return {
+            "success": True,
+            "error": None,
+            "pr_url": pr_url,
+            "pr_existing": pr_existing,
+        }
     except Exception as e:
         logger.exception("commit_and_open_pr failed")
         return {"success": False, "error": f"{type(e).__name__}: {e}", "pr_url": None}

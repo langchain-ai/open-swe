@@ -98,12 +98,15 @@ async def open_pr_if_needed(
 
         if "success" in pr_payload:
             pr_url = pr_payload.get("pr_url")
+            pr_existing = bool(pr_payload.get("pr_existing", False))
             error = pr_payload.get("error")
             if linear_issue_id and last_message_content:
                 if pr_url:
-                    comment = f"""**Pull Request Created**
+                    header = "Pull Request Updated" if pr_existing else "Pull Request Created"
+                    action = "updated the existing" if pr_existing else "created a"
+                    comment = f"""**{header}**
 
-I've created a pull request to address this issue:
+I've {action} pull request to address this issue:
 
 {pr_url}
 
@@ -212,7 +215,7 @@ I've created a pull request to address this issue:
             base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
 
-            pr_url, pr_number = await create_github_pr(
+            pr_url, pr_number, pr_existing = await create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
@@ -227,9 +230,11 @@ I've created a pull request to address this issue:
 
         if linear_issue_id and last_message_content:
             if pr_url:
-                comment = f"""**Pull Request Created**
+                header = "Pull Request Updated" if pr_existing else "Pull Request Created"
+                action = "updated the existing" if pr_existing else "created a"
+                comment = f"""**{header}**
 
-I've created a pull request to address this issue:
+I've {action} pull request to address this issue:
 
 **[PR #{pr_number}: {pr_title}]({pr_url})**
 
