@@ -223,13 +223,29 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             tools=[],
         ).with_config(config)
 
+    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     sandbox_id = await _get_sandbox_id_from_metadata(thread_id)
 
-    if sandbox_id == SANDBOX_CREATING:
+    if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
         logger.info("Sandbox creation in progress, waiting...")
         sandbox_id = await _wait_for_sandbox_id(thread_id)
 
-    if sandbox_id is None:
+    if sandbox_backend:
+        logger.info("Using cached sandbox backend for thread %s", thread_id)
+        thread = await client.threads.get(thread_id=thread_id)
+        repo_dir = thread.get("metadata", {}).get("repo_dir")
+
+        if repo_owner and repo_name:
+            logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
+            try:
+                repo_dir = await _clone_or_pull_repo_in_sandbox(
+                    sandbox_backend, repo_owner, repo_name, github_token
+                )
+            except Exception:
+                logger.exception("Failed to pull repo in cached sandbox")
+                raise
+
+    elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 

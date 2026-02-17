@@ -5,7 +5,6 @@ from typing import Any
 from langgraph.config import get_config
 
 from ..encryption import decrypt_token
-from ..integrations.langsmith import _create_langsmith_sandbox
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -19,7 +18,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
 
@@ -128,15 +127,9 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+        sandbox_backend = get_sandbox_backend_sync(thread_id)
         if not sandbox_backend:
-            sandbox_id = configurable.get("sandbox_id")
-
-            if not sandbox_id:
-                return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
-
-            sandbox_backend = _create_langsmith_sandbox(sandbox_id)
-            SANDBOX_BACKENDS[thread_id] = sandbox_backend
+            return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
         repo_dir = f"/workspace/{repo_name}"
 

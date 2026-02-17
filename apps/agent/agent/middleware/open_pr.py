@@ -32,7 +32,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ I've {action} pull request to address this issue:
         repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
-        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+        sandbox_backend = await get_sandbox_backend(thread_id) if thread_id else None
 
         repo_dir = f"/workspace/{repo_name}"
 
