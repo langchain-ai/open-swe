@@ -6,25 +6,24 @@ import asyncio
 import logging
 from typing import Any
 
-from langgraph_sdk import get_client
+from langgraph.config import get_config
 
 from ..integrations.langsmith import _create_langsmith_sandbox
 
 logger = logging.getLogger(__name__)
-client = get_client()
 
 # Thread ID -> SandboxBackend mapping, shared between server.py and middleware
 SANDBOX_BACKENDS: dict[str, Any] = {}
 
 
-async def _get_sandbox_id_from_metadata(thread_id: str) -> str | None:
+async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
     """Fetch sandbox_id from thread metadata."""
     try:
-        thread = await client.threads.get(thread_id=thread_id)
+        config = get_config()
     except Exception:
-        logger.exception("Failed to fetch thread metadata for sandbox")
+        logger.exception("Failed to read thread metadata for sandbox")
         return None
-    return thread.get("metadata", {}).get("sandbox_id")
+    return config.get("metadata", {}).get("sandbox_id")
 
 
 async def get_sandbox_backend(thread_id: str) -> Any | None:
@@ -33,9 +32,9 @@ async def get_sandbox_backend(thread_id: str) -> Any | None:
     if sandbox_backend:
         return sandbox_backend
 
-    sandbox_id = await _get_sandbox_id_from_metadata(thread_id)
+    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
     if not sandbox_id:
-        return None
+        raise ValueError(f"Missing sandbox_id in thread metadata for {thread_id}")
 
     sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
     SANDBOX_BACKENDS[thread_id] = sandbox_backend

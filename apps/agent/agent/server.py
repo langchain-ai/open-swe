@@ -9,6 +9,7 @@ import warnings
 
 logger = logging.getLogger(__name__)
 
+from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph.pregel import Pregel
 from langgraph_sdk import get_client
@@ -45,7 +46,7 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.sandbox_state import SANDBOX_BACKENDS
+from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -161,12 +162,6 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     return repo_dir
 
 
-async def _get_sandbox_id_from_metadata(thread_id: str) -> str | None:
-    """Get sandbox_id from thread metadata."""
-    thread = await client.threads.get(thread_id=thread_id)
-    return thread.get("metadata", {}).get("sandbox_id")
-
-
 async def _wait_for_sandbox_id(thread_id: str) -> str:
     """Wait for sandbox_id to be set in thread metadata.
 
@@ -178,7 +173,7 @@ async def _wait_for_sandbox_id(thread_id: str) -> str:
     """
     elapsed = 0.0
     while elapsed < SANDBOX_CREATION_TIMEOUT:
-        sandbox_id = await _get_sandbox_id_from_metadata(thread_id)
+        sandbox_id = await get_sandbox_id_from_metadata(thread_id)
         if sandbox_id is not None and sandbox_id != SANDBOX_CREATING:
             return sandbox_id
         await asyncio.sleep(SANDBOX_POLL_INTERVAL)
@@ -224,7 +219,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         ).with_config(config)
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
-    sandbox_id = await _get_sandbox_id_from_metadata(thread_id)
+    sandbox_id = await get_sandbox_id_from_metadata(thread_id)
 
     if sandbox_id == SANDBOX_CREATING and not sandbox_backend:
         logger.info("Sandbox creation in progress, waiting...")
@@ -232,8 +227,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     if sandbox_backend:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
-        thread = await client.threads.get(thread_id=thread_id)
-        repo_dir = thread.get("metadata", {}).get("repo_dir")
+        metadata = get_config().get("metadata", {})
+        repo_dir = metadata.get("repo_dir")
 
         if repo_owner and repo_name:
             logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
@@ -308,8 +303,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
 
-        thread = await client.threads.get(thread_id=thread_id)
-        repo_dir = thread.get("metadata", {}).get("repo_dir")
+        metadata = get_config().get("metadata", {})
+        repo_dir = metadata.get("repo_dir")
 
         if repo_owner and repo_name:
             logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)

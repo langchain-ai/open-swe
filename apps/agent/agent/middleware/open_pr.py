@@ -136,12 +136,7 @@ I've {action} pull request to address this issue:
         commit_message = pr_payload.get("commit_message", pr_title)
 
         if not thread_id:
-            if linear_issue_id and last_message_content:
-                comment = f"""🤖 **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
-            return None
+            raise ValueError("Missing thread_id in middleware config")
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
