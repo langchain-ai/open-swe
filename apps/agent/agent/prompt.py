@@ -7,6 +7,8 @@ All code execution and file operations happen in this sandbox environment.
 
 **Important:**
 - Use `{working_dir}` as your working directory for all operations
+- The `execute` tool enforces a 5-minute timeout by default (`timeout 300s`)
+- If a command times out and needs longer, rerun it by explicitly appending `timeout Ns`
 
 
 ---
