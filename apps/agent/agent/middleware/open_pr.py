@@ -32,7 +32,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
-from ..utils.sandbox_state import SANDBOX_BACKENDS
+from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
@@ -141,13 +141,13 @@ I've {action} pull request to address this issue:
 
 {last_message_content}"""
                 await comment_on_linear_issue(linear_issue_id, comment)
-            return None
+            raise ValueError("No thread_id found in config")
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
-        sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+        sandbox_backend = await get_sandbox_backend(thread_id)
 
         repo_dir = f"/workspace/{repo_name}"
 
