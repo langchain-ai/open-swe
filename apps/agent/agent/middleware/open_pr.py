@@ -136,13 +136,18 @@ I've {action} pull request to address this issue:
         commit_message = pr_payload.get("commit_message", pr_title)
 
         if not thread_id:
-            raise ValueError("Missing thread_id in middleware config")
+            if linear_issue_id and last_message_content:
+                comment = f"""🤖 **Agent Response**
+
+{last_message_content}"""
+                await comment_on_linear_issue(linear_issue_id, comment)
+            raise ValueError("threadId not found")
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
         repo_name = repo_config.get("name")
 
-        sandbox_backend = await get_sandbox_backend(thread_id) if thread_id else None
+        sandbox_backend = await get_sandbox_backend(thread_id)
 
         repo_dir = f"/workspace/{repo_name}"
 
