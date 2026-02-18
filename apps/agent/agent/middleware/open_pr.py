@@ -141,7 +141,7 @@ I've {action} pull request to address this issue:
 
 {last_message_content}"""
                 await comment_on_linear_issue(linear_issue_id, comment)
-            raise ValueError("threadId not found")
+            raise ValueError("No thread_id found in config")
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
