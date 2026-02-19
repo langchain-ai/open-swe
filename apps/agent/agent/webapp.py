@@ -88,7 +88,8 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     "Applied AI": {
         "projects": {
             "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
-        }
+        },
+        "default": {"owner": "langchain-ai", "name": "ai-sdr"},
     },
     "Docs": {
         "default": {"owner": "langchain-ai", "name": "docs"}
@@ -120,7 +121,9 @@ def get_repo_config_from_team_mapping(
         return config
 
     if "projects" in config and project_name:
-        return config["projects"].get(project_name)
+        project_config = config["projects"].get(project_name)
+        if project_config:
+            return project_config
 
     if "default" in config:
         return config["default"]
