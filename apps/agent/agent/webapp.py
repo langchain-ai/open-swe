@@ -76,9 +76,11 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
             "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
             "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
         },
-        "default": {"owner": "aran-yogesh", "name": "TalkBack"}  # Fallback for issues without project
+        "default": {
+            "owner": "aran-yogesh",
+            "name": "TalkBack",
+        },  # Fallback for issues without project
     },
-
     "LangChain OSS": {
         "projects": {
             "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
@@ -91,9 +93,7 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
         },
         "default": {"owner": "langchain-ai", "name": "ai-sdr"},
     },
-    "Docs": {
-        "default": {"owner": "langchain-ai", "name": "docs"}
-    },
+    "Docs": {"default": {"owner": "langchain-ai", "name": "docs"}},
 }
 
 

@@ -37,24 +37,18 @@ def remove_directory(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> 
     return result.exit_code == 0
 
 
-def git_has_uncommitted_changes(
-    sandbox_backend: SandboxBackendProtocol, repo_dir: str
-) -> bool:
+def git_has_uncommitted_changes(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
     """Check whether the repo has uncommitted changes."""
     result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
     return result.exit_code == 0 and bool(result.output.strip())
 
 
-def git_fetch_origin(
-    sandbox_backend: SandboxBackendProtocol, repo_dir: str
-) -> ExecuteResponse:
+def git_fetch_origin(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> ExecuteResponse:
     """Fetch latest from origin (best-effort)."""
     return _run_git(sandbox_backend, repo_dir, "git fetch origin 2>/dev/null || true")
 
 
-def git_has_unpushed_commits(
-    sandbox_backend: SandboxBackendProtocol, repo_dir: str
-) -> bool:
+def git_has_unpushed_commits(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> bool:
     """Check whether there are commits not pushed to upstream."""
     git_log_cmd = (
         "git log --oneline @{upstream}..HEAD 2>/dev/null "
@@ -75,9 +69,7 @@ def git_checkout_branch(
 ) -> bool:
     """Checkout branch, creating it if needed."""
     safe_branch = shlex.quote(branch)
-    checkout_result = _run_git(
-        sandbox_backend, repo_dir, f"git checkout -b {safe_branch}"
-    )
+    checkout_result = _run_git(sandbox_backend, repo_dir, f"git checkout -b {safe_branch}")
     if checkout_result.exit_code == 0:
         return True
     fallback = _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
@@ -97,9 +89,7 @@ def git_config_user(
     _run_git(sandbox_backend, repo_dir, f"git config user.email {safe_email}")
 
 
-def git_add_all(
-    sandbox_backend: SandboxBackendProtocol, repo_dir: str
-) -> ExecuteResponse:
+def git_add_all(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> ExecuteResponse:
     """Stage all changes."""
     return _run_git(sandbox_backend, repo_dir, "git add -A")
 
@@ -112,9 +102,7 @@ def git_commit(
     return _run_git(sandbox_backend, repo_dir, f"git commit -m {safe_message}")
 
 
-def git_get_remote_url(
-    sandbox_backend: SandboxBackendProtocol, repo_dir: str
-) -> str | None:
+def git_get_remote_url(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -> str | None:
     """Get the origin remote URL."""
     result = _run_git(sandbox_backend, repo_dir, "git remote get-url origin")
     if result.exit_code != 0:
