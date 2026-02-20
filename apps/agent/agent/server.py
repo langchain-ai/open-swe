@@ -329,11 +329,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 raise
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
-    # Ensure run metadata includes the active sandbox id for trace visibility.
     config.setdefault("metadata", {})["sandbox_id"] = sandbox_backend.id
-    # Also add to configurable so it shows on node/tool traces that surface config.
     config.setdefault("configurable", {})["sandbox_id"] = sandbox_backend.id
-    # Persist on thread metadata as well.
     await client.threads.update(
         thread_id=thread_id,
         metadata={"sandbox_id": sandbox_backend.id},
