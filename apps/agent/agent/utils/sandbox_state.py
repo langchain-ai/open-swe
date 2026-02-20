@@ -43,4 +43,4 @@ async def get_sandbox_backend(thread_id: str) -> Any | None:
 def get_sandbox_backend_sync(thread_id: str) -> Any | None:
     """Sync wrapper for get_sandbox_backend."""
     return asyncio.run(get_sandbox_backend(thread_id))
-
+    
