@@ -181,16 +181,12 @@ I've {action} pull request to address this issue:
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
 
-        current_branch = await asyncio.to_thread(
-            git_current_branch, sandbox_backend, repo_dir
-        )
+        current_branch = await asyncio.to_thread(git_current_branch, sandbox_backend, repo_dir)
 
         target_branch = f"open-swe/{thread_id}"
 
         if current_branch != target_branch:
-            await asyncio.to_thread(
-                git_checkout_branch, sandbox_backend, repo_dir, target_branch
-            )
+            await asyncio.to_thread(git_checkout_branch, sandbox_backend, repo_dir, target_branch)
 
         await asyncio.to_thread(
             git_config_user,
