@@ -64,11 +64,45 @@ def _create_langsmith_sandbox(
     template_name, template_image = _get_sandbox_template_config()
 
     provider = LangSmithProvider(api_key=api_key)
-    return provider.get_or_create(
+    backend = provider.get_or_create(
         sandbox_id=sandbox_id,
         template=template_name,
         template_image=template_image,
     )
+    if sandbox_id is None:
+        _update_thread_sandbox_metadata(backend.id)
+    return backend
+
+
+def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
+    """Best-effort update of thread metadata with sandbox_id."""
+    try:
+        import asyncio
+
+        from langgraph.config import get_config
+        from langgraph_sdk import get_client
+
+        config = get_config()
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            return
+        client = get_client()
+
+        async def _update() -> None:
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"sandbox_id": sandbox_id},
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_update())
+        else:
+            loop.create_task(_update())
+    except Exception:
+        # Best-effort: ignore failures (no config context, client unavailable, etc.)
+        pass
 
 
 class SandboxProvider(ABC):

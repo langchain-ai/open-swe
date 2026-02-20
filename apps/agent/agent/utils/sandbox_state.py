@@ -7,7 +7,6 @@ import logging
 from typing import Any
 
 from langgraph.config import get_config
-
 from ..integrations.langsmith import _create_langsmith_sandbox
 
 logger = logging.getLogger(__name__)
@@ -44,3 +43,4 @@ async def get_sandbox_backend(thread_id: str) -> Any | None:
 def get_sandbox_backend_sync(thread_id: str) -> Any | None:
     """Sync wrapper for get_sandbox_backend."""
     return asyncio.run(get_sandbox_backend(thread_id))
+
