@@ -4,7 +4,6 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
-import os
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -24,11 +23,10 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-
-# Local import for encryption
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 
 from .encryption import decrypt_token
+from .integrations.langsmith import _create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -37,8 +35,6 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
-from .integrations.langsmith import _create_langsmith_sandbox
-
 
 client = get_client()
 
@@ -46,12 +42,12 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 from .utils.github import (
     git_has_uncommitted_changes,
     is_valid_git_repo,
     remove_directory,
 )
+from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -87,9 +83,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
     if not is_git_repo:
-        logger.warning(
-            "Repo directory missing or not a valid git repo at %s, removing", repo_dir
-        )
+        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
         try:
             removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
             if not removed:
@@ -336,7 +330,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=ChatAnthropic(model="claude-opus-4-6", max_tokens=20_000),
+        model=ChatOpenAI(model="gpt-5.2-codex", temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,

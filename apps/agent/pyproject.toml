@@ -27,6 +27,7 @@ dependencies = [
     "langgraph-cli[inmem]>=0.4.12",
     # LangSmith SDK for sandbox management
     "langsmith>=0.7.1",
+    "langchain-openai==1.1.10",
 ]
 
 [project.optional-dependencies]
