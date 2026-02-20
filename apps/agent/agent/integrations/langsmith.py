@@ -75,7 +75,7 @@ def _create_langsmith_sandbox(
 
 
 def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
-    """Best-effort update of thread metadata with sandbox_id."""
+    """update of thread metadata with sandbox_id."""
     try:
         import asyncio
 
