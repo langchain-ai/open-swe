@@ -196,8 +196,8 @@ I've {action} pull request to address this issue:
             git_config_user,
             sandbox_backend,
             repo_dir,
-            "Open SWE[bot]",
-            "Open SWE@users.noreply.github.com",
+            "open-swe[bot]",
+            "open-swe@users.noreply.github.com",
         )
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
