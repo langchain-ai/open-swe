@@ -324,11 +324,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
     config.setdefault("metadata", {})["sandbox_id"] = sandbox_backend.id
-    config.setdefault("configurable", {})["sandbox_id"] = sandbox_backend.id
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"sandbox_id": sandbox_backend.id},
-    )
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")

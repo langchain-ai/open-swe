@@ -68,8 +68,7 @@ def _create_langsmith_sandbox(
         template=template_name,
         template_image=template_image,
     )
-    if sandbox_id is None:
-        _update_thread_sandbox_metadata(backend.id)
+    _update_thread_sandbox_metadata(backend.id)
     return backend
 
 
@@ -82,6 +81,7 @@ def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
         from langgraph_sdk import get_client
 
         config = get_config()
+        config.setdefault("metadata", {})["sandbox_id"] = sandbox_id
         thread_id = config.get("configurable", {}).get("thread_id")
         if not thread_id:
             return
