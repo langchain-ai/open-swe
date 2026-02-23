@@ -137,11 +137,10 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                 logger.exception("Failed to restore clean remote URL")
                 raise
 
-    logger.info("Repo updated at %s", repo_dir)
-    return repo_dir
+        logger.info("Repo updated at %s", repo_dir)
+        return repo_dir
 
-
-
+    # If we reach here, repo doesn't exist or is invalid - clone it
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
     try:
         result = await loop.run_in_executor(
@@ -218,7 +217,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     encrypted_token = config["configurable"].get("github_token_encrypted")
     if encrypted_token:
         github_token = decrypt_token(encrypted_token)
-        logger.debug("Decrypted GitHub token")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")

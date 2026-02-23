@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 
 from deepagents.backends.protocol import SandboxBackendProtocol
+
+logger = logging.getLogger(__name__)
 
 
 async def read_agents_md_in_sandbox(
@@ -24,7 +27,10 @@ async def read_agents_md_in_sandbox(
         f"test -f {safe_agents_path} && cat {safe_agents_path}",
     )
     if result.exit_code != 0:
+        logger.debug("AGENTS.md not found at %s", safe_agents_path)
         return None
     content = result.output or ""
     content = content.strip()
+    if content:
+        logger.info("Loaded AGENTS.md from %s", safe_agents_path)
     return content or None
