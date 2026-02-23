@@ -43,6 +43,26 @@ def _wrap_command(command: str) -> str:
     return f"timeout {DEFAULT_TIMEOUT_SECONDS}s sh -c {quoted}"
 
 
+def _overwrite_request_if_needed(request: ToolCallRequest) -> ToolCallRequest | None:
+    if _get_tool_name(request) != "execute":
+        return None
+
+    command = _get_command_arg(request)
+    if not command:
+        return None
+
+    wrapped = _wrap_command(command)
+    if wrapped == command:
+        return None
+
+    tool_call = dict(request.tool_call)
+    args = dict(tool_call.get("args", {}))
+    args["command"] = wrapped
+    tool_call["args"] = args
+    logger.info("Wrapped execute command with timeout")
+    return request.override(tool_call=tool_call)
+
+
 class TimeoutExecuteToolMiddleware(AgentMiddleware):
     """Ensure execute tool calls are wrapped with a timeout."""
 
@@ -53,43 +73,13 @@ class TimeoutExecuteToolMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
-        if _get_tool_name(request) != "execute":
-            return handler(request)
-
-        command = _get_command_arg(request)
-        if not command:
-            return handler(request)
-
-        wrapped = _wrap_command(command)
-        if wrapped == command:
-            return handler(request)
-
-        tool_call = dict(request.tool_call)
-        args = dict(tool_call.get("args", {}))
-        args["command"] = wrapped
-        tool_call["args"] = args
-        logger.info("Wrapped execute command with timeout")
-        return handler(request.override(tool_call=tool_call))
+        updated_request = _overwrite_request_if_needed(request)
+        return handler(updated_request or request)
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        if _get_tool_name(request) != "execute":
-            return await handler(request)
-
-        command = _get_command_arg(request)
-        if not command:
-            return await handler(request)
-
-        wrapped = _wrap_command(command)
-        if wrapped == command:
-            return await handler(request)
-
-        tool_call = dict(request.tool_call)
-        args = dict(tool_call.get("args", {}))
-        args["command"] = wrapped
-        tool_call["args"] = args
-        logger.info("Wrapped execute command with timeout")
-        return await handler(request.override(tool_call=tool_call))
+        updated_request = _overwrite_request_if_needed(request)
+        return await handler(updated_request or request)
