@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
+import os
 import re
 from typing import Any
 
@@ -35,26 +36,27 @@ def extract_image_urls(text: str) -> list[str]:
     return deduped
 
 
-def strip_image_urls(text: str, image_urls: list[str]) -> str:
-    """Remove markdown image links and direct image URLs from text."""
-    if not text or not image_urls:
-        return text
-
-    logger.debug("Stripping %d image URL(s) from text", len(image_urls))
-    text = IMAGE_MARKDOWN_RE.sub("", text)
-    for url in image_urls:
-        text = text.replace(url, "")
-    return text
-
 
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
-    headers: dict[str, str] | None = None,
+    *,
+    linear_api_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Fetch image bytes and build an image content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
+        headers = None
+        if "uploads.linear.app" in image_url:
+            if linear_api_key is None:
+                linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+            if linear_api_key:
+                headers = {"Authorization": linear_api_key}
+            else:
+                logger.warning(
+                    "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
+                    image_url,
+                )
         response = await client.get(image_url, headers=headers)
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()

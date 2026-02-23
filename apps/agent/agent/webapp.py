@@ -15,7 +15,7 @@ from langgraph_sdk import get_client
 
 # Local import for encryption
 from .encryption import encrypt_token
-from .utils.multimodal import extract_image_urls, fetch_image_block, strip_image_urls
+from .utils.multimodal import extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
 
@@ -581,7 +581,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     description_image_urls = extract_image_urls(description)
     if description_image_urls:
         image_urls.extend(description_image_urls)
-        description = strip_image_urls(description, description_image_urls)
         logger.debug(
             "Found %d image URL(s) in issue description",
             len(description_image_urls),
@@ -643,7 +642,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 body_image_urls = extract_image_urls(body)
                 if body_image_urls:
                     image_urls.extend(body_image_urls)
-                    body = strip_image_urls(body, body_image_urls)
                     logger.debug(
                         "Found %d image URL(s) in comment by %s",
                         len(body_image_urls),
@@ -661,7 +659,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         trigger_image_urls = extract_image_urls(trigger_body)
         if trigger_image_urls:
             image_urls.extend(trigger_image_urls)
-            trigger_body = strip_image_urls(trigger_body, trigger_image_urls)
             logger.debug(
                 "Found %d image URL(s) in triggering comment by %s",
                 len(trigger_image_urls),
@@ -696,16 +693,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
         async with httpx.AsyncClient() as client:
             for image_url in image_urls:
-                headers = None
-                if "uploads.linear.app" in image_url:
-                    if LINEAR_API_KEY:
-                        headers = {"Authorization": LINEAR_API_KEY}
-                    else:
-                        logger.warning(
-                            "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-                            image_url,
-                        )
-                image_block = await fetch_image_block(image_url, client, headers=headers)
+                image_block = await fetch_image_block(
+                    image_url, client, linear_api_key=LINEAR_API_KEY
+                )
                 if image_block:
                     content_blocks.append(image_block)
         logger.info("Built %d content block(s) for prompt", len(content_blocks))

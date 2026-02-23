@@ -27,6 +27,28 @@ class LinearNotifyState(AgentState):
     linear_messages_sent_count: int
 
 
+async def _build_blocks_from_payload(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    text = payload.get("text", "")
+    image_urls = payload.get("image_urls", []) or []
+    blocks: list[dict[str, Any]] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    if not image_urls:
+        return blocks
+    linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+    async with httpx.AsyncClient() as client:
+        for image_url in image_urls:
+            image_block = await fetch_image_block(
+                image_url, client, linear_api_key=linear_api_key
+            )
+            if image_block:
+                blocks.append(image_block)
+    return blocks
+
+
 @before_model(state_schema=LinearNotifyState)
 async def check_message_queue_before_model(  # noqa: PLR0911
     state: LinearNotifyState,  # noqa: ARG001
@@ -83,36 +105,6 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             len(queued_messages),
             thread_id,
         )
-
-        async def _build_blocks_from_payload(
-            payload: dict[str, Any],
-        ) -> list[dict[str, Any]]:
-            text = payload.get("text", "")
-            image_urls = payload.get("image_urls", []) or []
-            blocks: list[dict[str, Any]] = []
-            if text:
-                blocks.append({"type": "text", "text": text})
-
-            if not image_urls:
-                return blocks
-            linear_api_key = os.environ.get("LINEAR_API_KEY", "")
-            async with httpx.AsyncClient() as client:
-                for image_url in image_urls:
-                    headers = None
-                    if "uploads.linear.app" in image_url:
-                        if linear_api_key:
-                            headers = {"Authorization": linear_api_key}
-                        else:
-                            logger.warning(
-                                "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
-                                image_url,
-                            )
-                    image_block = await fetch_image_block(
-                        image_url, client, headers=headers
-                    )
-                    if image_block:
-                        blocks.append(image_block)
-            return blocks
 
         content_blocks: list[dict[str, Any]] = []
         for msg in queued_messages:
