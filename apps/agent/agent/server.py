@@ -42,6 +42,7 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
+from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
     git_has_uncommitted_changes,
     is_valid_git_repo,
@@ -136,8 +137,10 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                 logger.exception("Failed to restore clean remote URL")
                 raise
 
-        logger.info("Repo updated at %s", repo_dir)
-        return repo_dir
+    logger.info("Repo updated at %s", repo_dir)
+    return repo_dir
+
+
 
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
     try:
@@ -327,6 +330,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
@@ -335,6 +339,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             repo_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
+            agents_md=agents_md,
         ),
         tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,
