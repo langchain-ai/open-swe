@@ -15,6 +15,7 @@ from langgraph_sdk import get_client
 
 # Local import for encryption
 from .encryption import encrypt_token
+from .utils.comments import get_recent_comments
 
 logger = logging.getLogger(__name__)
 
@@ -586,25 +587,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     )
 
     if comments:
-        # Sort newest-first so we can collect forward until we hit the last agent response
-        sorted_comments = sorted(
-            comments,
-            key=lambda c: c.get("createdAt", ""),
-            reverse=True,
-        )
-
-        # Collect user comments since the last agent response.
-        # Iterate newest-first and stop as soon as we see a bot message.
-        recent_user_comments = []
-        for comment in sorted_comments:
-            body = comment.get("body", "")
-            if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                break  # Everything after this is from before the last agent response
-            recent_user_comments.append(comment)
-
-        # Reverse to restore chronological (oldest-first) order for the prompt
-        recent_user_comments.reverse()
-
+        recent_user_comments = get_recent_comments(comments, bot_message_prefixes)
         if recent_user_comments:
             comments_text = "\n\n## Comments:\n"
             for comment in recent_user_comments:
