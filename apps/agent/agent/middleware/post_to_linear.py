@@ -14,6 +14,7 @@ from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from ..utils.linear import comment_on_linear_issue
+from ..utils.messages import extract_text_content
 from .check_message_queue import LinearNotifyState
 
 logger = logging.getLogger(__name__)
@@ -96,12 +97,13 @@ async def post_to_linear_after_model(  # noqa: PLR0911, PLR0912
             if prev_role not in ("human", "user"):
                 return None
 
-        if not content or not isinstance(content, str):
+        content_text = extract_text_content(content)
+        if not content_text:
             return None
 
         comment = f"""🤖 **Agent Response**
 
-{content}"""
+{content_text}"""
         logger.info("Posting AI response to Linear issue %s", linear_issue_id)
         success = await comment_on_linear_issue(linear_issue_id, comment)
 
