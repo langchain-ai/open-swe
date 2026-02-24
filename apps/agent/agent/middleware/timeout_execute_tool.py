@@ -43,17 +43,17 @@ def _wrap_command(command: str) -> str:
     return f"timeout {DEFAULT_TIMEOUT_SECONDS}s sh -c {quoted}"
 
 
-def _overwrite_request_if_needed(request: ToolCallRequest) -> ToolCallRequest | None:
+def _overwrite_request_if_needed(request: ToolCallRequest) -> ToolCallRequest:
     if _get_tool_name(request) != "execute":
-        return None
+        return request
 
     command = _get_command_arg(request)
     if not command:
-        return None
+        return request
 
     wrapped = _wrap_command(command)
     if wrapped == command:
-        return None
+        return request
 
     tool_call = dict(request.tool_call)
     args = dict(tool_call.get("args", {}))
@@ -73,13 +73,11 @@ class TimeoutExecuteToolMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
-        updated_request = _overwrite_request_if_needed(request)
-        return handler(updated_request or request)
+        return handler(_overwrite_request_if_needed(request))
 
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        updated_request = _overwrite_request_if_needed(request)
-        return await handler(updated_request or request)
+        return await handler(_overwrite_request_if_needed(request))
