@@ -26,9 +26,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_openai import ChatOpenAI
 
 from .encryption import decrypt_token
-from .integrations.langsmith import _create_langsmith_sandbox
+from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
-    TimeoutExecuteToolMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     open_pr_if_needed,
@@ -253,7 +252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
             # Update metadata immediately after sandbox creation so other callers
@@ -287,7 +286,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
@@ -298,7 +297,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
-                sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+                sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
 
                 await client.threads.update(
@@ -346,7 +345,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,
         middleware=[
-            TimeoutExecuteToolMiddleware(),
             ToolErrorMiddleware(),
             check_message_queue_before_model,
             post_to_linear_after_model,

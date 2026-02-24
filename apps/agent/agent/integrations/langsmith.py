@@ -43,7 +43,7 @@ def _get_sandbox_template_config() -> tuple[str | None, str | None]:
     return template_name, template_image
 
 
-def _create_langsmith_sandbox(
+def create_langsmith_sandbox(
     sandbox_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
@@ -108,17 +108,28 @@ class LangSmithBackend(BaseSandbox):
 
     def __init__(self, sandbox: Sandbox) -> None:
         self._sandbox = sandbox
-        self._timeout: int = 30 * 60  # 30 mins default
+        self._default_timeout: int = 30 * 5  # 5 minute default
 
     @property
     def id(self) -> str:
         """Unique identifier for the sandbox backend."""
         return self._sandbox.name
 
-    def execute(self, command: str) -> ExecuteResponse:
-        """Execute a command in the sandbox and return ExecuteResponse."""
-        result = self._sandbox.run(command, timeout=self._timeout)
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        """Execute a command in the sandbox and return ExecuteResponse.
 
+        Args:
+            command: Full shell command string to execute.
+            timeout: Maximum time in seconds to wait for the command to complete.
+                If None, uses the default timeout of 5 minutes.
+
+        Returns:
+            ExecuteResponse with combined output, exit code, and truncation flag.
+        """
+        effective_timeout = timeout if timeout is not None else self._default_timeout
+        result = self._sandbox.run(command, timeout=effective_timeout)
+
+        # Combine stdout and stderr (matching other backends' approach)
         output = result.stdout or ""
         if result.stderr:
             output += "\n" + result.stderr if output else result.stderr
