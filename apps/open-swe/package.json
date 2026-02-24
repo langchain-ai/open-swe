@@ -26,7 +26,7 @@
   "dependencies": {
     "@daytonaio/sdk": "^0.25.5",
     "@langchain/anthropic": "^0.3.26",
-    "@langchain/community": "^0.3.47",
+    "@langchain/community": "^1.1.14",
     "@langchain/core": "^0.3.80",
     "@langchain/google-genai": "^0.2.9",
     "@langchain/langgraph": "^0.3.8",
@@ -41,10 +41,10 @@
     "@openswe/shared": "*",
     "bcrypt": "^6.0.0",
     "diff": "^8.0.3",
-    "hono": "^4.11.9",
+    "hono": "^4.11.10",
     "jsonwebtoken": "^9.0.2",
-    "langchain": "^1.2.18",
-    "langsmith": "^0.5.6",
+    "langchain": "^1.2.26",
+    "langsmith": "^0.4.6",
     "uuid": "^11.0.5",
     "zod": "^3.25.32"
   },
