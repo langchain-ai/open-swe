@@ -134,7 +134,7 @@ async def create_github_pr(
     base_branch: str,
     body: str,
 ) -> tuple[str | None, int | None, bool]:
-    """Create a GitHub pull request via the API.
+    """Create a draft GitHub pull request via the API.
 
     Args:
         repo_owner: Repository owner (e.g., "langchain-ai")
@@ -153,6 +153,7 @@ async def create_github_pr(
         "head": head_branch,
         "base": base_branch,
         "body": body,
+        "draft": True,
     }
 
     logger.info(
