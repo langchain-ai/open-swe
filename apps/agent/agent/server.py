@@ -325,7 +325,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
     if not repo_dir:
-        msg = "repo_dir is not defined; cannot operate without a cloned repository"
+        msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
         raise RuntimeError(msg)
 
     linear_issue = config["configurable"].get("linear_issue", {})
