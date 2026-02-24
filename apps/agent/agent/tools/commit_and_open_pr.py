@@ -181,9 +181,7 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(
-            get_github_default_branch(repo_owner, repo_name, github_token)
-        )
+        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,

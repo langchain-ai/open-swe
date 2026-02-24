@@ -30,26 +30,22 @@ def extract_image_urls(text: str) -> list[str]:
     urls.extend(IMAGE_MARKDOWN_RE.findall(text))
     urls.extend(IMAGE_URL_RE.findall(text))
 
-    deduped = _dedupe_urls(urls)
+    deduped = dedupe_urls(urls)
     if deduped:
         logger.debug("Extracted %d image URL(s)", len(deduped))
     return deduped
 
 
-
 async def fetch_image_block(
     image_url: str,
     client: httpx.AsyncClient,
-    *,
-    linear_api_key: str | None = None,
 ) -> dict[str, Any] | None:
     """Fetch image bytes and build an image content block."""
     try:
         logger.debug("Fetching image from %s", image_url)
         headers = None
         if "uploads.linear.app" in image_url:
-            if linear_api_key is None:
-                linear_api_key = os.environ.get("LINEAR_API_KEY", "")
+            linear_api_key = os.environ.get("LINEAR_API_KEY", "")
             if linear_api_key:
                 headers = {"Authorization": linear_api_key}
             else:
@@ -62,7 +58,13 @@ async def fetch_image_block(
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:
             guessed, _ = mimetypes.guess_type(image_url)
-            content_type = guessed or "application/octet-stream"
+            if not guessed:
+                logger.warning(
+                    "Could not determine content type for %s; skipping image",
+                    image_url,
+                )
+                return None
+            content_type = guessed
 
         encoded = base64.b64encode(response.content).decode("ascii")
         logger.info(
@@ -77,12 +79,6 @@ async def fetch_image_block(
         return None
 
 
-def _dedupe_urls(urls: list[str]) -> list[str]:
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for url in urls:
-        if url in seen:
-            continue
-        seen.add(url)
-        deduped.append(url)
-    return deduped
+def dedupe_urls(urls: list[str]) -> list[str]:
+    deduped: set[str] = set(urls)
+    return list(deduped)

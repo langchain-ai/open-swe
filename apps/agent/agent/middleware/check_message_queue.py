@@ -8,7 +8,6 @@ human messages before the next model call.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
@@ -38,12 +37,9 @@ async def _build_blocks_from_payload(
 
     if not image_urls:
         return blocks
-    linear_api_key = os.environ.get("LINEAR_API_KEY", "")
     async with httpx.AsyncClient() as client:
         for image_url in image_urls:
-            image_block = await fetch_image_block(
-                image_url, client, linear_api_key=linear_api_key
-            )
+            image_block = await fetch_image_block(image_url, client)
             if image_block:
                 blocks.append(image_block)
     return blocks
@@ -109,17 +105,13 @@ async def check_message_queue_before_model(  # noqa: PLR0911
         content_blocks: list[dict[str, Any]] = []
         for msg in queued_messages:
             content = msg.get("content")
-            if isinstance(content, dict) and (
-                "text" in content or "image_urls" in content
-            ):
+            if isinstance(content, dict) and ("text" in content or "image_urls" in content):
                 logger.debug("Queued message contains text + image URLs")
                 blocks = await _build_blocks_from_payload(content)
                 content_blocks.extend(blocks)
                 continue
             if isinstance(content, list):
-                logger.debug(
-                    "Queued message contains %d content block(s)", len(content)
-                )
+                logger.debug("Queued message contains %d content block(s)", len(content))
                 content_blocks.extend(content)
                 continue
             if isinstance(content, str) and content:

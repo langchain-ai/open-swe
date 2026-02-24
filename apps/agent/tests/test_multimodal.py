@@ -77,10 +77,7 @@ def test_extract_image_urls_case_insensitive() -> None:
 
 
 def test_extract_image_urls_deduplication() -> None:
-    text = (
-        "Same URL twice: https://example.com/image.png "
-        "and again https://example.com/image.png"
-    )
+    text = "Same URL twice: https://example.com/image.png and again https://example.com/image.png"
 
     assert extract_image_urls(text) == ["https://example.com/image.png"]
 

@@ -9,7 +9,7 @@ import contextlib
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from deepagents.backends.protocol import (
     ExecuteResponse,
@@ -19,7 +19,6 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
-
 from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
 
 
@@ -148,9 +147,7 @@ class LangSmithBackend(BaseSandbox):
         responses: list[FileDownloadResponse] = []
         for path in paths:
             content = self._sandbox.read(path)
-            responses.append(
-                FileDownloadResponse(path=path, content=content, error=None)
-            )
+            responses.append(FileDownloadResponse(path=path, content=content, error=None))
         return responses
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
@@ -209,10 +206,7 @@ class LangSmithProvider(SandboxProvider):
                 template_name=resolved_template_name, timeout=timeout
             )
         except Exception as e:
-            msg = (
-                f"Failed to create sandbox from template "
-                f"'{resolved_template_name}': {e}"
-            )
+            msg = f"Failed to create sandbox from template '{resolved_template_name}': {e}"
             raise RuntimeError(msg) from e
 
         # Verify sandbox is ready by polling

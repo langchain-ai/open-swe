@@ -11,11 +11,12 @@ from typing import Any
 import httpx
 import jwt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 
 # Local import for encryption
 from .encryption import encrypt_token
-from .utils.multimodal import extract_image_urls, fetch_image_block
+from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,6 @@ GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
 X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
-
 
 
 def get_service_jwt_token_for_user(
@@ -78,9 +78,11 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
             "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
             "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
         },
-        "default": {"owner": "aran-yogesh", "name": "TalkBack"}  # Fallback for issues without project
+        "default": {
+            "owner": "aran-yogesh",
+            "name": "TalkBack",
+        },  # Fallback for issues without project
     },
-
     "LangChain OSS": {
         "projects": {
             "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
@@ -93,9 +95,7 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
         },
         "default": {"owner": "langchain-ai", "name": "ai-sdr"},
     },
-    "Docs": {
-        "default": {"owner": "langchain-ai", "name": "docs"}
-    },
+    "Docs": {"default": {"owner": "langchain-ai", "name": "docs"}},
 }
 
 
@@ -676,24 +676,15 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "Please analyze this issue and implement the necessary changes. "
         "When you're done, commit and push your changes."
     )
-    content_blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
-        seen_urls: set[str] = set()
-        deduped_urls: list[str] = []
-        for url in image_urls:
-            if url in seen_urls:
-                continue
-            seen_urls.add(url)
-            deduped_urls.append(url)
-        image_urls = deduped_urls
+        image_urls = dedupe_urls(image_urls)
         logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
         logger.debug("Image URLs: %s", image_urls)
 
         async with httpx.AsyncClient() as client:
             for image_url in image_urls:
-                image_block = await fetch_image_block(
-                    image_url, client, linear_api_key=LINEAR_API_KEY
-                )
+                image_block = await fetch_image_block(image_url, client)
                 if image_block:
                     content_blocks.append(image_block)
         logger.info("Built %d content block(s) for prompt", len(content_blocks))
