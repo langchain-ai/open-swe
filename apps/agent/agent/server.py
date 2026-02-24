@@ -140,7 +140,6 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         logger.info("Repo updated at %s", repo_dir)
         return repo_dir
 
-    # If we reach here, repo doesn't exist or is invalid - clone it
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
     try:
         result = await loop.run_in_executor(
@@ -324,6 +323,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 raise
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
+
+    if not repo_dir:
+        msg = "repo_dir is not defined; cannot operate without a cloned repository"
+        raise RuntimeError(msg)
 
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")

@@ -31,6 +31,4 @@ async def read_agents_md_in_sandbox(
         return None
     content = result.output or ""
     content = content.strip()
-    if content:
-        logger.info("Loaded AGENTS.md from %s", safe_agents_path)
     return content or None

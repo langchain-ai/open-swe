@@ -73,7 +73,7 @@ def construct_system_prompt(
     working_dir: str,
     linear_project_id: str = "",
     linear_issue_number: str = "",
-    agents_md: str | None = None,
+    agents_md: str = "",
 ) -> str:
     agents_md_section = ""
     if agents_md:
