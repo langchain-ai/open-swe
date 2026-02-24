@@ -59,7 +59,7 @@ def _overwrite_request_if_needed(request: ToolCallRequest) -> ToolCallRequest:
     args = dict(tool_call.get("args", {}))
     args["command"] = wrapped
     tool_call["args"] = args
-    logger.info("Wrapped execute command with timeout")
+    logger.debug("Wrapped execute command with timeout")
     return request.override(tool_call=tool_call)
 
 
