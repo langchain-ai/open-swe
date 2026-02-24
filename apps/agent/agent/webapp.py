@@ -586,29 +586,30 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     )
 
     if comments:
-        last_bot_comment_idx = -1
-        for i, comment in enumerate(comments):
+        # Sort newest-first so we can collect forward until we hit the last agent response
+        sorted_comments = sorted(
+            comments,
+            key=lambda c: c.get("createdAt", ""),
+            reverse=True,
+        )
+
+        # Collect user comments since the last agent response.
+        # Iterate newest-first and stop as soon as we see a bot message.
+        recent_user_comments = []
+        for comment in sorted_comments:
             body = comment.get("body", "")
             if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                last_bot_comment_idx = i
+                break  # Everything after this is from before the last agent response
+            recent_user_comments.append(comment)
 
-        relevant_comments = []
-        for i, comment in enumerate(comments):
-            if i <= last_bot_comment_idx:
-                continue
-            body = comment.get("body", "")
-            if "@openswe" in body.lower():
-                relevant_comments.append(comment)
-                relevant_comments.extend(comments[i + 1 :])
-                break
+        # Reverse to restore chronological (oldest-first) order for the prompt
+        recent_user_comments.reverse()
 
-        if relevant_comments:
+        if recent_user_comments:
             comments_text = "\n\n## Comments:\n"
-            for comment in relevant_comments:
+            for comment in recent_user_comments:
                 author = comment.get("user", {}).get("name", "Unknown")
                 body = comment.get("body", "")
-                if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                    continue
                 comments_text += f"\n**{author}:** {body}\n"
 
     prompt = (
