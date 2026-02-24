@@ -1,4 +1,4 @@
-.PHONY: all format lint test tests integration_tests help run dev
+.PHONY: all format format-check lint test tests integration_tests help run dev
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -41,6 +41,9 @@ lint:
 format:
 	uv run ruff format $(PYTHON_FILES)
 	uv run ruff check --fix $(PYTHON_FILES)
+
+format-check:
+	uv run ruff format $(PYTHON_FILES) --check
 
 ######################
 # HELP
