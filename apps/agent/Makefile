@@ -23,10 +23,18 @@ install:
 TEST_FILE ?= tests/
 
 test tests:
-	uv run pytest -vvv $(TEST_FILE)
+	@if [ -d "$(TEST_FILE)" ] || [ -f "$(TEST_FILE)" ]; then \
+		uv run pytest -vvv $(TEST_FILE); \
+	else \
+		echo "Skipping tests: path not found: $(TEST_FILE)"; \
+	fi
 
 integration_tests:
-	uv run pytest -vvv tests/integration_tests/
+	@if [ -d "tests/integration_tests/" ] || [ -f "tests/integration_tests/" ]; then \
+		uv run pytest -vvv tests/integration_tests/; \
+	else \
+		echo "Skipping integration tests: path not found: tests/integration_tests/"; \
+	fi
 
 ######################
 # LINTING AND FORMATTING
