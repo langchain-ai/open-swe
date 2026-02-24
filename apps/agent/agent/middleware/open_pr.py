@@ -32,6 +32,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
+from ..utils.messages import extract_text_content
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -78,9 +79,9 @@ async def open_pr_if_needed(
         if messages:
             last_message = messages[-1]
             if isinstance(last_message, dict):
-                last_message_content = last_message.get("content", "")
+                last_message_content = extract_text_content(last_message.get("content", ""))
             elif hasattr(last_message, "content"):
-                last_message_content = last_message.content
+                last_message_content = extract_text_content(last_message.content)
 
         linear_issue = configurable.get("linear_issue", {})
         linear_issue_id = linear_issue.get("id")
@@ -192,8 +193,8 @@ I've {action} pull request to address this issue:
             git_config_user,
             sandbox_backend,
             repo_dir,
-            "Open SWE[bot]",
-            "Open SWE@users.noreply.github.com",
+            "open-swe[bot]",
+            "open-swe@users.noreply.github.com",
         )
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)

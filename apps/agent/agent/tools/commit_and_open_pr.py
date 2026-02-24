@@ -153,8 +153,8 @@ def commit_and_open_pr(
         git_config_user(
             sandbox_backend,
             repo_dir,
-            "Open SWE[bot]",
-            "Open SWE@users.noreply.github.com",
+            "open-swe[bot]",
+            "open-swe@users.noreply.github.com",
         )
         git_add_all(sandbox_backend, repo_dir)
 

@@ -4,9 +4,12 @@ You are operating in a **remote Linux sandbox** at `{working_dir}`.
 
 All code execution and file operations happen in this sandbox environment.
 
+{agents_md_section}
 
 **Important:**
 - Use `{working_dir}` as your working directory for all operations
+- The `execute` tool enforces a 5-minute timeout by default
+- If a command times out and needs longer, rerun it explicitly passing the `timeout` argument to the `execute` tool with a higher value in seconds.
 
 
 ---
@@ -72,9 +75,20 @@ def construct_system_prompt(
     working_dir: str,
     linear_project_id: str = "",
     linear_issue_number: str = "",
+    agents_md: str = "",
 ) -> str:
+    agents_md_section = ""
+    if agents_md:
+        agents_md_section = (
+            "\nThe following text is pulled from the repository's AGENTS.md file. "
+            "It may contain specific instructions and guidelines for the agent.\n"
+            "<agents_md>\n"
+            f"{agents_md}\n"
+            "</agents_md>\n"
+        )
     return SYSTEM_PROMPT.format(
         working_dir=working_dir,
         linear_project_id=linear_project_id or "<PROJECT_ID>",
         linear_issue_number=linear_issue_number or "<ISSUE_NUMBER>",
+        agents_md_section=agents_md_section,
     )
