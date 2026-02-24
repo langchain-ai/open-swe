@@ -28,11 +28,11 @@ from langchain_openai import ChatOpenAI
 from .encryption import decrypt_token
 from .integrations.langsmith import _create_langsmith_sandbox
 from .middleware import (
+    TimeoutExecuteToolMiddleware,
     ToolErrorMiddleware,
     check_message_queue_before_model,
     open_pr_if_needed,
     post_to_linear_after_model,
-    TimeoutExecuteToolMiddleware,
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request

@@ -1,0 +1,58 @@
+name: Agent CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "apps/agent/**"
+  pull_request:
+    paths:
+      - "apps/agent/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Agent lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run lint
+        run: make lint
+
+  format:
+    name: Agent format check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run format check
+        run: make format-check
+
+  unit-tests:
+    name: Agent unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Run unit tests
+        run: make test
