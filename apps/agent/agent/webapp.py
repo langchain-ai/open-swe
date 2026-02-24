@@ -133,8 +133,6 @@ def get_repo_config_from_team_mapping(
     return {"owner": "langchain-ai", "name": "langchainplus"}
 
 
-
-
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
     """Get the LangSmith user ID and tenant ID from a user's email.
 
