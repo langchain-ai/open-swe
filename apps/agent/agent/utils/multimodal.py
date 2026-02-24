@@ -80,5 +80,4 @@ async def fetch_image_block(
 
 
 def dedupe_urls(urls: list[str]) -> list[str]:
-    deduped: set[str] = set(urls)
-    return list(deduped)
+    return list(dict.fromkeys(urls))
