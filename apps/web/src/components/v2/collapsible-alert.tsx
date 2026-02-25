@@ -28,8 +28,7 @@ const alertVariants = cva(
 );
 
 interface CollapsibleAlertProps
-  extends React.ComponentProps<"div">,
-    VariantProps<typeof alertVariants> {
+  extends React.ComponentProps<"div">, VariantProps<typeof alertVariants> {
   errorState: ErrorState;
   icon?: React.ReactNode;
   title?: string;

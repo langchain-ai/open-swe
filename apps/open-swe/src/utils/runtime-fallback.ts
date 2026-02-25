@@ -40,8 +40,8 @@ function useProviderMessages(
 
 export class FallbackRunnable<
   RunInput extends BaseLanguageModelInput = BaseLanguageModelInput,
-  CallOptions extends
-    ConfigurableChatModelCallOptions = ConfigurableChatModelCallOptions,
+  CallOptions extends ConfigurableChatModelCallOptions =
+    ConfigurableChatModelCallOptions,
 > extends ConfigurableModel<RunInput, CallOptions> {
   private primaryRunnable: any;
   private config: GraphConfig;
