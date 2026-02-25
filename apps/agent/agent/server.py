@@ -255,13 +255,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
-            # Update metadata immediately after sandbox creation so other callers
-            # can connect to the sandbox while we clone the repo
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": sandbox_backend.id},
-            )
-
             repo_dir = None
             if repo_owner and repo_name:
                 logger.info("Cloning repo %s/%s into sandbox", repo_owner, repo_name)
@@ -299,11 +292,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             try:
                 sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
-
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"sandbox_id": sandbox_backend.id},
-                )
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
