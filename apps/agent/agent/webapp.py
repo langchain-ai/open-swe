@@ -16,6 +16,7 @@ from langgraph_sdk import get_client
 
 # Local import for encryption
 from .encryption import encrypt_token
+from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
@@ -602,15 +603,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     comment_ids: set[str] = set()
     comment_id_to_index: dict[str, int] = {}
     if comments:
-        last_bot_comment_idx = -1
         for i, comment in enumerate(comments):
             comment_id = comment.get("id", "")
             if comment_id:
                 comment_ids.add(comment_id)
                 comment_id_to_index[comment_id] = i
-            body = comment.get("body", "")
-            if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                last_bot_comment_idx = i
 
         relevant_comments = []
         trigger_index = None
@@ -623,14 +620,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 trigger_index,
             )
         else:
-            for i, comment in enumerate(comments):
-                if i <= last_bot_comment_idx:
-                    continue
-                body = comment.get("body", "")
-                if "@openswe" in body.lower():
-                    relevant_comments.append(comment)
-                    relevant_comments.extend(comments[i + 1 :])
-                    break
+            relevant_comments = get_recent_comments(comments, bot_message_prefixes)
 
         if relevant_comments:
             comments_text = "\n\n## Comments:\n"
