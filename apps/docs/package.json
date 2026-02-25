@@ -11,6 +11,6 @@
   },
   "devDependencies": {
     "mint": "^4.2.382",
-    "prettier": "^3.5.2"
+    "prettier": "^3.8.1"
   }
 }
