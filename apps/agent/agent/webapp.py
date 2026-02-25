@@ -625,7 +625,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         if relevant_comments:
             comments_text = "\n\n## Comments:\n"
             for comment in relevant_comments:
-                author = comment.get("user", {}).get("name", "Unknown")
+                user = comment.get("user") or {}
+                author = user.get("name", "User")
                 body = comment.get("body", "")
                 body_image_urls = extract_image_urls(body)
                 if body_image_urls:
