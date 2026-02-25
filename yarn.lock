@@ -14619,14 +14619,13 @@ __metadata:
   linkType: hard
 
 "langsmith@npm:^0.3.48":
-  version: 0.3.48
-  resolution: "langsmith@npm:0.3.48"
+  version: 0.3.87
+  resolution: "langsmith@npm:0.3.87"
   dependencies:
     "@types/uuid": ^10.0.0
     chalk: ^4.1.2
     console-table-printer: ^2.12.1
     p-queue: ^6.6.2
-    p-retry: 4
     semver: ^7.6.3
     uuid: ^10.0.0
   peerDependencies:
@@ -14643,7 +14642,7 @@ __metadata:
       optional: true
     openai:
       optional: true
-  checksum: bb535aec6ae05cd8f07bb4f32ccffa06f91793360bcd5045cab1387e52322756c5592dbdcb67e5b5358818da1913958cd63716ce6d4d3e9e016cfd3737bd57fe
+  checksum: 30b9b076199c4201ab475440e9887da58884d4c10e0cbcee554c7cffe0c42d9169224452904400d8e6c441d715217c479865fca484d4624c30160f4df6e4b6c8
   languageName: node
   linkType: hard
 
