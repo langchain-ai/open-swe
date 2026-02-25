@@ -24,8 +24,12 @@
   "resolutions": {
     "@langchain/langgraph-sdk": "^0.0.95",
     "@langchain/core": "^0.3.65",
-    "langsmith": "^0.3.48",
-    "jsonwebtoken": "^9.0.2"
+    "langsmith": "^0.5.3",
+    "jsonwebtoken": "^9.0.2",
+    "fast-xml-parser": ">=5.3.6",
+    "tar": ">=7.5.8",
+    "hono": ">=4.11.10",
+    "@stoplight/spectral-core/minimatch": "3.1.4"
   },
   "packageManager": "yarn@3.5.1"
 }

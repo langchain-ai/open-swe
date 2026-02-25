@@ -10,7 +10,7 @@
     "clean": "rm -rf .turbo || true"
   },
   "devDependencies": {
-    "mint": "^4.2.12",
+    "mint": "^4.2.382",
     "prettier": "^3.5.2"
   }
 }
