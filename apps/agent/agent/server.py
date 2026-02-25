@@ -26,7 +26,7 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_openai import ChatOpenAI
 
 from .encryption import decrypt_token
-from .integrations.langsmith import _create_langsmith_sandbox
+from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -42,6 +42,7 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
+from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
     git_has_uncommitted_changes,
     is_valid_git_repo,
@@ -215,7 +216,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     encrypted_token = config["configurable"].get("github_token_encrypted")
     if encrypted_token:
         github_token = decrypt_token(encrypted_token)
-        logger.debug("Decrypted GitHub token")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
@@ -252,7 +252,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
             # Update metadata immediately after sandbox creation so other callers
@@ -286,7 +286,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
@@ -297,7 +297,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
-                sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+                sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
 
                 await client.threads.update(
@@ -324,9 +324,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
+    if not repo_dir:
+        msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
+        raise RuntimeError(msg)
+
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
@@ -335,6 +340,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             repo_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
+            agents_md=agents_md,
         ),
         tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,

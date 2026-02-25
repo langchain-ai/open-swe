@@ -345,7 +345,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.4.0"
+version = "0.4.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -354,9 +354,9 @@ dependencies = [
     { name = "langchain-google-genai" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/ac/895c5efe77ee64f38af64146509b97220867fc149a9a376b2c74f266fd45/deepagents-0.4.0.tar.gz", hash = "sha256:ccfbb2394d2c50a3cf6f61457c5c1d3868354beee2177a57b8497c72c38f8e9b", size = 77614 }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/30/5bba09d1c196a9e6e2e3a3406cd131bdf01e84ec67c4b6233f68a903978f/deepagents-0.4.3.tar.gz", hash = "sha256:88033c616c5ea481f2620dbb2d05533bc8fdcd48f376d713f9dba49a8157b6f8", size = 83210 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/c8/cbedac42e011889f151047cf22dbecef9a38330c2e90e517c2bd1b1e636d/deepagents-0.4.0-py3-none-any.whl", hash = "sha256:475af99429c7b6abe4c53d476d6b48f01960dc1bcaec7fa21093189acdfc2864", size = 87831 },
+    { url = "https://files.pythonhosted.org/packages/58/f8/c076a841b68cc13d89c395cc97965b37751ed008691a304119efa0f5717e/deepagents-0.4.3-py3-none-any.whl", hash = "sha256:298d19c5c0b4c6fc6a74b68049a7bfea0ba481aece7201ab21e7172b71ee61b9", size = 94882 },
 ]
 
 [[package]]
@@ -787,21 +787,21 @@ wheels = [
 
 [[package]]
 name = "langchain-anthropic"
-version = "1.3.2"
+version = "1.3.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
     { name = "langchain-core" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/dd/c5e094079bdd748ca3f0bd0a09189ed2fa46bba56b5a8351198dc7c19e1f/langchain_anthropic-1.3.2.tar.gz", hash = "sha256:e551726a6ebf20229bde06022b5149d33bd48d28e34bd002a744953667b8ad48", size = 686239 }
+sdist = { url = "https://files.pythonhosted.org/packages/30/4e/7c1ffac126f5e62b0b9066f331f91ae69361e73476fd3ca1b19f8d8a3cc3/langchain_anthropic-1.3.4.tar.gz", hash = "sha256:000ed4c2d6fb8842b4ffeed22a74a3e84f9e9bcb63638e4abbb4a1d8ffa07211", size = 671858 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/6b/2da16c32308f79bb4588cec7095edbc770722ae4b3c3a1c135e05b0bdc2e/langchain_anthropic-1.3.2-py3-none-any.whl", hash = "sha256:35bc30862696a493680b898eb76bd6c866841f8e48a57d5eca1420a4fd807ac0", size = 46751 },
+    { url = "https://files.pythonhosted.org/packages/9b/cf/b7c7b7270efbb3db2edbf14b09ba9110a41628f3a85a11cae9527a35641c/langchain_anthropic-1.3.4-py3-none-any.whl", hash = "sha256:cd112dcc8049aef09f58b3c4338b2c9db5ee98105e08664954a4e40d8bf120b9", size = 47454 },
 ]
 
 [[package]]
 name = "langchain-core"
-version = "1.2.14"
+version = "1.2.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonpatch" },
@@ -813,9 +813,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/ff/c5e3da8eca8a18719b300ef6c29e28208ee4e9da7f9749022b96292b6541/langchain_core-1.2.14.tar.gz", hash = "sha256:09549d838a2672781da3a9502f3b9c300863284b77b27e2a6dac4e6e650acfed", size = 833399 }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/db/693d81b6c229aceb7c6e6809939c6ab1b023554227a25de438f00c0389c6/langchain_core-1.2.15.tar.gz", hash = "sha256:7d5f5d2daa8ddbe4054a96101dc5d509926f831b9914808c24640987d499758c", size = 835280 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/41/fe6ae9065b866b1397adbfc98db5e1648e8dcd78126b8e1266fcbe2d6395/langchain_core-1.2.14-py3-none-any.whl", hash = "sha256:b349ca28c057ac1f9b5280ea091bddb057db24d0f1c3c89bbb590713e1715838", size = 501411 },
+    { url = "https://files.pythonhosted.org/packages/48/e0/a6a83dde94400b43d9b091ecbb41a50d6f86c4fecacb81b13d8452a7712b/langchain_core-1.2.15-py3-none-any.whl", hash = "sha256:8d920d8a31d8c223966a3993d8c79fd6093b9665f2222fc878812f3a52072ab7", size = 502213 },
 ]
 
 [[package]]
@@ -1050,7 +1050,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
-    { name = "deepagents", specifier = ">=0.4.0" },
+    { name = "deepagents", specifier = ">=0.4.3" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langchain", specifier = ">=1.2.9" },
