@@ -26,6 +26,8 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_openai import ChatOpenAI
 
 from .encryption import decrypt_token
+from langsmith.sandbox import SandboxClientError
+
 from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
@@ -242,6 +244,29 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
                 )
+            except SandboxClientError:
+                logger.warning(
+                    "Cached sandbox is no longer reachable for thread %s, recreating sandbox",
+                    thread_id,
+                )
+                SANDBOX_BACKENDS.pop(thread_id, None)
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata={"sandbox_id": SANDBOX_CREATING},
+                )
+                try:
+                    sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+                    repo_dir = await _clone_or_pull_repo_in_sandbox(
+                        sandbox_backend, repo_owner, repo_name, github_token
+                    )
+                    await client.threads.update(
+                        thread_id=thread_id,
+                        metadata={"repo_dir": repo_dir},
+                    )
+                except Exception:
+                    logger.exception("Failed to recreate sandbox after connection failure")
+                    await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                    raise
             except Exception:
                 logger.exception("Failed to pull repo in cached sandbox")
                 raise
