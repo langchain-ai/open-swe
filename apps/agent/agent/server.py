@@ -174,12 +174,13 @@ async def _recreate_sandbox(
     thread_id: str,
     repo_owner: str,
     repo_name: str,
+    *,
     github_token: str | None,
 ) -> tuple[SandboxBackendProtocol, str]:
     """Recreate a sandbox and clone the repo after a connection failure.
 
     Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
-    creates a fresh sandbox, clones the repo, and updates repo_dir metadata.
+    creates a fresh sandbox, and clones the repo.
     """
     SANDBOX_BACKENDS.pop(thread_id, None)
     await client.threads.update(
@@ -190,10 +191,6 @@ async def _recreate_sandbox(
         sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name, github_token
-        )
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={"repo_dir": repo_dir},
         )
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
@@ -281,7 +278,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                     thread_id,
                 )
                 sandbox_backend, repo_dir = await _recreate_sandbox(
-                    thread_id, repo_owner, repo_name, github_token
+                    thread_id, repo_owner, repo_name, github_token=github_token
                 )
             except Exception:
                 logger.exception("Failed to pull repo in cached sandbox")
