@@ -46,7 +46,7 @@
     "date-fns": "^4.1.0",
     "esbuild": "^0.25.0",
     "esbuild-plugin-tailwindcss": "^2.0.1",
-    "framer-motion": "^12.4.9",
+    "framer-motion": "^12.34.3",
     "jsonwebtoken": "^9.0.2",
     "katex": "^0.16.21",
     "langgraph-nextjs-api-passthrough": "^0.1.4",
