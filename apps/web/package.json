@@ -84,7 +84,7 @@
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.20",
     "dotenv": "^16.4.7",
-    "eslint": "^10.0.0",
+    "eslint": "^10.0.2",
     "eslint-config-next": "15.2.2",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.18",
