@@ -24,6 +24,7 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain_openai import ChatOpenAI
+from langsmith.sandbox import SandboxClientError
 
 from .encryption import decrypt_token
 from .integrations.langsmith import create_langsmith_sandbox
@@ -169,6 +170,35 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     return repo_dir
 
 
+async def _recreate_sandbox(
+    thread_id: str,
+    repo_owner: str,
+    repo_name: str,
+    *,
+    github_token: str | None,
+) -> tuple[SandboxBackendProtocol, str]:
+    """Recreate a sandbox and clone the repo after a connection failure.
+
+    Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
+    creates a fresh sandbox, and clones the repo.
+    """
+    SANDBOX_BACKENDS.pop(thread_id, None)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"sandbox_id": SANDBOX_CREATING},
+    )
+    try:
+        sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+        repo_dir = await _clone_or_pull_repo_in_sandbox(
+            sandbox_backend, repo_owner, repo_name, github_token
+        )
+    except Exception:
+        logger.exception("Failed to recreate sandbox after connection failure")
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+        raise
+    return sandbox_backend, repo_dir
+
+
 async def _wait_for_sandbox_id(thread_id: str) -> str:
     """Wait for sandbox_id to be set in thread metadata.
 
@@ -241,6 +271,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             try:
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
+                )
+            except SandboxClientError:
+                logger.warning(
+                    "Cached sandbox is no longer reachable for thread %s, recreating sandbox",
+                    thread_id,
+                )
+                sandbox_backend, repo_dir = await _recreate_sandbox(
+                    thread_id, repo_owner, repo_name, github_token=github_token
                 )
             except Exception:
                 logger.exception("Failed to pull repo in cached sandbox")
