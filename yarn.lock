@@ -71,6 +71,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@anthropic-ai/sdk@npm:^0.74.0":
+  version: 0.74.0
+  resolution: "@anthropic-ai/sdk@npm:0.74.0"
+  dependencies:
+    json-schema-to-ts: ^3.1.1
+  peerDependencies:
+    zod: ^3.25.0 || ^4.0.0
+  peerDependenciesMeta:
+    zod:
+      optional: true
+  bin:
+    anthropic-ai-sdk: bin/cli
+  checksum: f70a3d85bde035621703720d9ee7c6c4c818cc714220b4d7e321e1880731428679e23c07125606d6adc1bd202ddccc29470f87d75bc7a6265810c3f95cfef057
+  languageName: node
+  linkType: hard
+
 "@ark/schema@npm:0.55.0":
   version: 0.55.0
   resolution: "@ark/schema@npm:0.55.0"
@@ -1388,6 +1404,13 @@ __metadata:
   peerDependencies:
     "@babel/core": ^7.0.0-0
   checksum: 22f889835d9db1e627846e71ca2f02e2d24e2eb9ebcf9845b3b1d37bd3a53787967bafabbbcb342f06aaf7627399a7102ba6ca18f9a0e17066c865d680d2ceb9
+  languageName: node
+  linkType: hard
+
+"@babel/runtime@npm:^7.18.3":
+  version: 7.28.6
+  resolution: "@babel/runtime@npm:7.28.6"
+  checksum: 42d8a868c2fc2e9a77927945a6daa7ec03c7ea49e611e0d15442933cdabb12f20e3a6849c729259076c10a4247adec229331d1f94c2d0073ea0979d7853e29fd
   languageName: node
   linkType: hard
 
@@ -3099,7 +3122,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/anthropic@npm:^0.3.25, @langchain/anthropic@npm:^0.3.26":
+"@langchain/anthropic@npm:^0.3.25":
   version: 0.3.26
   resolution: "@langchain/anthropic@npm:0.3.26"
   dependencies:
@@ -3108,6 +3131,18 @@ __metadata:
   peerDependencies:
     "@langchain/core": ">=0.3.58 <0.4.0"
   checksum: 971d29847f437e1fcd486479346da5682d182386e27637b5806de1fa4fdd3de7b2b5283d93e95d8562c8b0db79830f0ad5458d1fed6438534b087db2cca616fb
+  languageName: node
+  linkType: hard
+
+"@langchain/anthropic@npm:^1.3.21":
+  version: 1.3.21
+  resolution: "@langchain/anthropic@npm:1.3.21"
+  dependencies:
+    "@anthropic-ai/sdk": ^0.74.0
+    zod: ^3.25.76 || ^4
+  peerDependencies:
+    "@langchain/core": ^1.1.29
+  checksum: 81f9206b6f2b15744c9f74541232d2fa7a1dc33fcf31e2eca9b3496b2badce8001564ca29302bb9259be6638184d3a33d491abceb83c5fbed3ff4bc68cd145e7
   languageName: node
   linkType: hard
 
@@ -4782,7 +4817,7 @@ __metadata:
     "@eslint/eslintrc": ^3.1.0
     "@eslint/js": ^9.19.0
     "@jest/globals": ^29.7.0
-    "@langchain/anthropic": ^0.3.26
+    "@langchain/anthropic": ^1.3.21
     "@langchain/community": ^1.1.14
     "@langchain/core": ^0.3.80
     "@langchain/google-genai": ^0.2.9
@@ -14856,6 +14891,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"json-schema-to-ts@npm:^3.1.1":
+  version: 3.1.1
+  resolution: "json-schema-to-ts@npm:3.1.1"
+  dependencies:
+    "@babel/runtime": ^7.18.3
+    ts-algebra: ^2.0.0
+  checksum: b616f1c2d7492502e11eec4f8e4539ee1e897543a679d929494afdc164d9557275cead8372747b73f239b1e68056ffbf551b03ae82d0047bba0dfe2bbd6b64f4
+  languageName: node
+  linkType: hard
+
 "json-schema-traverse@npm:^0.4.1":
   version: 0.4.1
   resolution: "json-schema-traverse@npm:0.4.1"
@@ -20771,6 +20816,13 @@ __metadata:
   version: 2.2.0
   resolution: "trough@npm:2.2.0"
   checksum: 6097df63169aca1f9b08c263b1b501a9b878387f46e161dde93f6d0bba7febba93c95f876a293c5ea370f6cb03bcb687b2488c8955c3cfb66c2c0161ea8c00f6
+  languageName: node
+  linkType: hard
+
+"ts-algebra@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "ts-algebra@npm:2.0.0"
+  checksum: 970b0e7db49cf8c1a8ff2a816eb047fac8add47511f5e4995e4998c56c6f7b226399284412de88f3e137ab55c857a4262c0d8f02f0765730e7d3a021de2ea7ef
   languageName: node
   linkType: hard
 
