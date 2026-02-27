@@ -15,7 +15,7 @@ from ..encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
 
-OPEN_SWE_TAG = "@openswe"
+OPEN_SWE_TAGS = ("@openswe", "@open-swe")
 
 # Reaction endpoint differs per comment type
 _REACTION_ENDPOINTS: dict[str, str] = {
@@ -236,11 +236,11 @@ async def fetch_pr_comments_since_last_tag(
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))
 
-    # Find all @openswe mention positions
+    # Find all @openswe / @open-swe mention positions
     tag_indices = [
         i
         for i, comment in enumerate(all_comments)
-        if OPEN_SWE_TAG in (comment.get("body") or "").lower()
+        if any(tag in (comment.get("body") or "").lower() for tag in OPEN_SWE_TAGS)
     ]
 
     if not tag_indices:

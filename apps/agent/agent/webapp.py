@@ -18,6 +18,7 @@ from langgraph_sdk import get_client
 from .encryption import encrypt_token
 from .utils.comments import get_recent_comments
 from .utils.github_comments import (
+    OPEN_SWE_TAGS,
     fetch_pr_branch,
     fetch_pr_comments_since_last_tag,
     get_github_token_from_thread,
@@ -844,9 +845,9 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         if comment_body.startswith(prefix):
             logger.debug("Ignoring webhook: comment is our own bot message")
             return {"status": "ignored", "reason": "Comment is our own bot message"}
-    if "@openswe" not in comment_body.lower():
-        logger.debug("Ignoring webhook: comment doesn't mention @openswe")
-        return {"status": "ignored", "reason": "Comment doesn't mention @openswe"}
+    if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        logger.debug("Ignoring webhook: comment doesn't mention @openswe or @open-swe")
+        return {"status": "ignored", "reason": "Comment doesn't mention @openswe or @open-swe"}
 
     issue = data.get("issue", {})
     if not issue:
@@ -1053,11 +1054,11 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         if not payload.get("issue", {}).get("pull_request"):
             return {"status": "ignored", "reason": "issue_comment is not on a PR"}
 
-    # Extract comment body to check for @open-swe tag
+    # Extract comment body to check for @openswe / @open-swe tag
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
-    if "@openswe" not in comment_body.lower():
-        return {"status": "ignored", "reason": "Comment does not mention @openswe"}
+    if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
 
     logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
     background_tasks.add_task(process_github_pr_comment, payload, event_type)
