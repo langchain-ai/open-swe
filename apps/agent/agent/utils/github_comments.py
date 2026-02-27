@@ -104,7 +104,13 @@ async def get_github_token_from_thread(thread_id: str) -> str | None:
 
 
 async def react_to_github_comment(
-    repo_config: dict[str, str], comment_id: int, *, event_type: str, token: str, pull_number: int | None = None, node_id: str | None = None
+    repo_config: dict[str, str],
+    comment_id: int,
+    *,
+    event_type: str,
+    token: str,
+    pull_number: int | None = None,
+    node_id: str | None = None,
 ) -> bool:
     """Add a 👀 reaction to a GitHub PR comment.
 
@@ -129,7 +135,9 @@ async def react_to_github_comment(
     repo = repo_config.get("name", "")
 
     url_template = _REACTION_ENDPOINTS.get(event_type, _REACTION_ENDPOINTS["issue_comment"])
-    url = url_template.format(owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number)
+    url = url_template.format(
+        owner=owner, repo=repo, comment_id=comment_id, pull_number=pull_number
+    )
 
     async with httpx.AsyncClient() as client:
         try:
@@ -218,13 +226,15 @@ async def fetch_pr_comments_since_last_tag(
             headers,
         )
         for c in pr_comments:
-            all_comments.append({
-                "body": c.get("body", ""),
-                "author": c.get("user", {}).get("login", "unknown"),
-                "created_at": c.get("created_at", ""),
-                "type": "pr_comment",
-                "comment_id": c.get("id"),
-            })
+            all_comments.append(
+                {
+                    "body": c.get("body", ""),
+                    "author": c.get("user", {}).get("login", "unknown"),
+                    "created_at": c.get("created_at", ""),
+                    "type": "pr_comment",
+                    "comment_id": c.get("id"),
+                }
+            )
 
         # 2. Inline review comments
         review_comments = await _fetch_paginated(
@@ -233,15 +243,17 @@ async def fetch_pr_comments_since_last_tag(
             headers,
         )
         for c in review_comments:
-            all_comments.append({
-                "body": c.get("body", ""),
-                "author": c.get("user", {}).get("login", "unknown"),
-                "created_at": c.get("created_at", ""),
-                "type": "review_comment",
-                "comment_id": c.get("id"),
-                "path": c.get("path", ""),
-                "line": c.get("line") or c.get("original_line"),
-            })
+            all_comments.append(
+                {
+                    "body": c.get("body", ""),
+                    "author": c.get("user", {}).get("login", "unknown"),
+                    "created_at": c.get("created_at", ""),
+                    "type": "review_comment",
+                    "comment_id": c.get("id"),
+                    "path": c.get("path", ""),
+                    "line": c.get("line") or c.get("original_line"),
+                }
+            )
 
         # 3. Top-level review messages
         reviews = await _fetch_paginated(
@@ -253,13 +265,15 @@ async def fetch_pr_comments_since_last_tag(
             body = r.get("body", "")
             if not body:
                 continue
-            all_comments.append({
-                "body": body,
-                "author": r.get("user", {}).get("login", "unknown"),
-                "created_at": r.get("submitted_at", ""),
-                "type": "review",
-                "comment_id": r.get("id"),
-            })
+            all_comments.append(
+                {
+                    "body": body,
+                    "author": r.get("user", {}).get("login", "unknown"),
+                    "created_at": r.get("submitted_at", ""),
+                    "type": "review",
+                    "comment_id": r.get("id"),
+                }
+            )
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))

@@ -922,9 +922,7 @@ _SUPPORTED_GH_EVENTS = frozenset(
 )
 
 
-async def process_github_pr_comment(
-    payload: dict[str, Any], event_type: str
-) -> None:
+async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
     Retrieves the existing thread token, reacts with 👀, fetches all comments
@@ -972,7 +970,12 @@ async def process_github_pr_comment(
     node_id = comment.get("node_id") if event_type == "pull_request_review" else None
     if comment_id:
         await react_to_github_comment(
-            repo_config, comment_id, event_type=event_type, token=github_token, pull_number=pr_number, node_id=node_id
+            repo_config,
+            comment_id,
+            event_type=event_type,
+            token=github_token,
+            pull_number=pr_number,
+            node_id=node_id,
         )
 
     # Fetch all comments since last @open-swe tag
@@ -980,9 +983,7 @@ async def process_github_pr_comment(
         logger.warning("No PR number found in payload, skipping")
         return
 
-    comments = await fetch_pr_comments_since_last_tag(
-        repo_config, pr_number, token=github_token
-    )
+    comments = await fetch_pr_comments_since_last_tag(repo_config, pr_number, token=github_token)
 
     if not comments:
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
@@ -1032,9 +1033,7 @@ async def process_github_pr_comment(
 
 
 @app.post("/webhooks/github")
-async def github_webhook(
-    request: Request, background_tasks: BackgroundTasks
-) -> dict[str, str]:
+async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Handle GitHub webhooks for PR comment/review events that tag @open-swe."""
     body = await request.body()
 
