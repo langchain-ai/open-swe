@@ -17,6 +17,14 @@ from langgraph_sdk import get_client
 # Local import for encryption
 from .encryption import encrypt_token
 from .utils.comments import get_recent_comments
+from .utils.github_comments import (
+    fetch_pr_branch,
+    fetch_pr_comments_since_last_tag,
+    get_github_token_from_thread,
+    get_thread_id_from_branch,
+    react_to_github_comment,
+    verify_github_signature,
+)
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
@@ -24,6 +32,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
+GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -902,3 +911,160 @@ async def linear_webhook_verify() -> dict[str, str]:
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# ---------------------------------------------------------------------------
+# GitHub webhook
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_GH_EVENTS = frozenset(
+    ["issue_comment", "pull_request_review_comment", "pull_request_review"]
+)
+
+
+async def process_github_pr_comment(
+    payload: dict[str, Any], event_type: str
+) -> None:
+    """Process a GitHub PR comment that tagged @open-swe.
+
+    Retrieves the existing thread token, reacts with 👀, fetches all comments
+    since the last @open-swe tag, then creates or queues a new run.
+
+    Args:
+        payload: The parsed GitHub webhook payload.
+        event_type: One of 'issue_comment', 'pull_request_review_comment',
+                    'pull_request_review'.
+    """
+    # Pull request object lives at different paths per event type
+    repo = payload.get("repository", {})
+    repo_config = {"owner": repo.get("owner", {}).get("login", ""), "name": repo.get("name", "")}
+
+    # pull_request field is present for review/review_comment events
+    # issue field is present for issue_comment events (PR comments)
+    pr_data = payload.get("pull_request") or payload.get("issue", {})
+    pr_number = pr_data.get("number")
+    branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
+
+    # For issue_comment, branch is not in the payload — fetch from GitHub API
+    if not branch_name and pr_number:
+        branch_name = await fetch_pr_branch(repo_config, pr_number)
+
+    logger.info(
+        "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
+        event_type,
+        pr_number,
+        branch_name,
+    )
+
+    thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
+    if not thread_id:
+        logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
+        return
+
+    github_token = await get_github_token_from_thread(thread_id)
+    if not github_token:
+        logger.warning("No GitHub token for thread %s, skipping", thread_id)
+        return
+
+    # React with 👀 immediately
+    comment = payload.get("comment") or payload.get("review", {})
+    comment_id = comment.get("id")
+    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
+    if comment_id:
+        await react_to_github_comment(
+            repo_config, comment_id, event_type=event_type, token=github_token, pull_number=pr_number, node_id=node_id
+        )
+
+    # Fetch all comments since last @open-swe tag
+    if not pr_number:
+        logger.warning("No PR number found in payload, skipping")
+        return
+
+    comments = await fetch_pr_comments_since_last_tag(
+        repo_config, pr_number, token=github_token
+    )
+
+    if not comments:
+        logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
+        return
+
+    # Build human message
+    comments_text = ""
+    for c in comments:
+        author = c.get("author", "unknown")
+        body = c.get("body", "")
+        comment_type = c.get("type", "")
+        if comment_type == "review_comment":
+            path = c.get("path", "")
+            line = c.get("line", "")
+            loc = f" (file: `{path}`, line: {line})" if path else ""
+            comments_text += f"\n**{author}**{loc}: {body}\n"
+        else:
+            comments_text += f"\n**{author}**: {body}\n"
+
+    pr_url = pr_data.get("html_url", "") or pr_data.get("url", "")
+    prompt = (
+        "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
+        f"PR: {pr_url}\n\n"
+        f"## Comments:\n{comments_text}"
+    )
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+    else:
+        logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": prompt}]},
+            config={
+                "configurable": {
+                    "github_token_encrypted": encrypt_token(github_token),
+                    "repo": repo_config,
+                }
+            },
+            if_not_exists="create",
+        )
+        logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+
+
+@app.post("/webhooks/github")
+async def github_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle GitHub webhooks for PR comment/review events that tag @open-swe."""
+    body = await request.body()
+
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if not verify_github_signature(body, signature, secret=GITHUB_WEBHOOK_SECRET):
+        logger.warning("Invalid GitHub webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    event_type = request.headers.get("X-GitHub-Event", "")
+    if event_type not in _SUPPORTED_GH_EVENTS:
+        return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse GitHub webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    # For issue_comment: must be on a PR, not a plain issue
+    if event_type == "issue_comment":
+        if not payload.get("issue", {}).get("pull_request"):
+            return {"status": "ignored", "reason": "issue_comment is not on a PR"}
+
+    # Extract comment body to check for @open-swe tag
+    comment = payload.get("comment") or payload.get("review", {})
+    comment_body = (comment.get("body") or "") if comment else ""
+    if "@openswe" not in comment_body.lower():
+        return {"status": "ignored", "reason": "Comment does not mention @openswe"}
+
+    logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
+    background_tasks.add_task(process_github_pr_comment, payload, event_type)
+
+    return {"status": "accepted", "message": f"Processing {event_type} event"}
