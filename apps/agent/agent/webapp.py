@@ -913,10 +913,6 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy"}
 
 
-# ---------------------------------------------------------------------------
-# GitHub webhook
-# ---------------------------------------------------------------------------
-
 _SUPPORTED_GH_EVENTS = frozenset(
     ["issue_comment", "pull_request_review_comment", "pull_request_review"]
 )
@@ -959,7 +955,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
         return
 
-    github_token = await get_github_token_from_thread(thread_id)
+    github_token = await get_github_token_from_thread(thread_id, LANGGRAPH_URL)
     if not github_token:
         logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return

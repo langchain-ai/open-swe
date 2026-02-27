@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import os
 import re
 from typing import Any
 
@@ -15,10 +14,6 @@ from langgraph_sdk import get_client
 from ..encryption import decrypt_token
 
 logger = logging.getLogger(__name__)
-
-LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
-    "LANGGRAPH_URL_PROD", "http://localhost:2024"
-)
 
 OPEN_SWE_TAG = "@openswe"
 
@@ -49,16 +44,6 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
 
 
 def get_thread_id_from_branch(branch_name: str) -> str | None:
-    """Extract the thread UUID from an Open SWE branch name.
-
-    Open SWE branch names embed the thread UUID, e.g. open-swe/fix-bug-<uuid>.
-
-    Args:
-        branch_name: The git branch name from the PR.
-
-    Returns:
-        The thread UUID string, or None if not found.
-    """
     match = re.search(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         branch_name,
@@ -67,19 +52,8 @@ def get_thread_id_from_branch(branch_name: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def get_github_token_from_thread(thread_id: str) -> str | None:
-    """Retrieve and decrypt the GitHub token from the most recent run of a thread.
-
-    The github_token_encrypted is stored in the run's configurable, not in the
-    thread state checkpoint config — so we fetch the latest run to access it.
-
-    Args:
-        thread_id: The LangGraph thread ID.
-
-    Returns:
-        The plaintext GitHub token, or None if unavailable.
-    """
-    langgraph_client = get_client(url=LANGGRAPH_URL)
+async def get_github_token_from_thread(thread_id: str, langgraph_url: str) -> str | None:
+    langgraph_client = get_client(url=langgraph_url)
     try:
         runs = await langgraph_client.runs.list(thread_id, limit=10)
         for run in runs:
@@ -112,22 +86,6 @@ async def react_to_github_comment(
     pull_number: int | None = None,
     node_id: str | None = None,
 ) -> bool:
-    """Add a 👀 reaction to a GitHub PR comment.
-
-    For pull_request_review events the REST API doesn't support reactions on
-    the review body — uses GraphQL with node_id instead.
-
-    Args:
-        repo_config: Dict with 'owner' and 'name' keys.
-        comment_id: The GitHub comment ID.
-        event_type: One of 'issue_comment', 'pull_request_review_comment', 'pull_request_review'.
-        token: GitHub access token.
-        pull_number: PR number (unused, kept for future use).
-        node_id: GraphQL node ID, required for 'pull_request_review' events.
-
-    Returns:
-        True if successful, False otherwise.
-    """
     if event_type == "pull_request_review":
         return await _react_via_graphql(node_id, token=token)
 
