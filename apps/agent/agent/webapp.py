@@ -11,10 +11,13 @@ from typing import Any
 import httpx
 import jwt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 
 # Local import for encryption
 from .encryption import encrypt_token
+from .utils.comments import get_recent_comments
+from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +79,11 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
             "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
             "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
         },
-        "default": {"owner": "aran-yogesh", "name": "TalkBack"}  # Fallback for issues without project
+        "default": {
+            "owner": "aran-yogesh",
+            "name": "TalkBack",
+        },  # Fallback for issues without project
     },
-
     "LangChain OSS": {
         "projects": {
             "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
@@ -88,11 +93,10 @@ LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
     "Applied AI": {
         "projects": {
             "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
-        }
+        },
+        "default": {"owner": "langchain-ai", "name": "ai-sdr"},
     },
-    "Docs": {
-        "default": {"owner": "langchain-ai", "name": "docs"}
-    },
+    "Docs": {"default": {"owner": "langchain-ai", "name": "docs"}},
 }
 
 
@@ -120,7 +124,9 @@ def get_repo_config_from_team_mapping(
         return config
 
     if "projects" in config and project_name:
-        return config["projects"].get(project_name)
+        project_config = config["projects"].get(project_name)
+        if project_config:
+            return project_config
 
     if "default" in config:
         return config["default"]
@@ -423,7 +429,9 @@ async def is_thread_active(thread_id: str) -> bool:
     return status == "busy"
 
 
-async def queue_message_for_thread(thread_id: str, message_content: str) -> bool:
+async def queue_message_for_thread(
+    thread_id: str, message_content: str | list[dict[str, Any]] | dict[str, Any]
+) -> bool:
     """Queue a message for a thread that is currently active.
 
     Stores the message in the langgraph store, namespaced to the thread.
@@ -432,7 +440,7 @@ async def queue_message_for_thread(thread_id: str, message_content: str) -> bool
 
     Args:
         thread_id: The LangGraph thread ID
-        message_content: The message content to queue
+        message_content: The message content to queue (text or content blocks)
 
     Returns:
         True if successfully queued, False otherwise
@@ -568,9 +576,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     title = full_issue.get("title", "No title")
     description = full_issue.get("description") or "No description"
+    image_urls: list[str] = []
+    description_image_urls = extract_image_urls(description)
+    if description_image_urls:
+        image_urls.extend(description_image_urls)
+        logger.debug(
+            "Found %d image URL(s) in issue description",
+            len(description_image_urls),
+        )
 
     comments = full_issue.get("comments", {}).get("nodes", [])
     comments_text = ""
+    triggering_comment = issue_data.get("triggering_comment", "")
+    triggering_comment_id = issue_data.get("triggering_comment_id", "")
 
     bot_message_prefixes = (
         "🔐 **GitHub Authentication Required**",
@@ -582,31 +600,64 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "❌ **Agent Error**",
     )
 
+    comment_ids: set[str] = set()
+    comment_id_to_index: dict[str, int] = {}
     if comments:
-        last_bot_comment_idx = -1
         for i, comment in enumerate(comments):
-            body = comment.get("body", "")
-            if any(body.startswith(prefix) for prefix in bot_message_prefixes):
-                last_bot_comment_idx = i
+            comment_id = comment.get("id", "")
+            if comment_id:
+                comment_ids.add(comment_id)
+                comment_id_to_index[comment_id] = i
 
         relevant_comments = []
-        for i, comment in enumerate(comments):
-            if i <= last_bot_comment_idx:
-                continue
-            body = comment.get("body", "")
-            if "@openswe" in body.lower():
-                relevant_comments.append(comment)
-                relevant_comments.extend(comments[i + 1 :])
-                break
+        trigger_index = None
+        if triggering_comment_id:
+            trigger_index = comment_id_to_index.get(triggering_comment_id)
+        if trigger_index is not None:
+            relevant_comments = comments[trigger_index:]
+            logger.debug(
+                "Using triggering comment index %d to build relevant comments",
+                trigger_index,
+            )
+        else:
+            relevant_comments = get_recent_comments(comments, bot_message_prefixes)
 
         if relevant_comments:
             comments_text = "\n\n## Comments:\n"
             for comment in relevant_comments:
-                author = comment.get("user", {}).get("name", "Unknown")
+                user = comment.get("user") or {}
+                author = user.get("name", "User")
                 body = comment.get("body", "")
+                body_image_urls = extract_image_urls(body)
+                if body_image_urls:
+                    image_urls.extend(body_image_urls)
+                    logger.debug(
+                        "Found %d image URL(s) in comment by %s",
+                        len(body_image_urls),
+                        author,
+                    )
                 if any(body.startswith(prefix) for prefix in bot_message_prefixes):
                     continue
                 comments_text += f"\n**{author}:** {body}\n"
+
+    if triggering_comment and triggering_comment_id not in comment_ids:
+        if not comments_text:
+            comments_text = "\n\n## Comments:\n"
+        trigger_author = comment_author.get("name", "Unknown")
+        trigger_body = triggering_comment
+        trigger_image_urls = extract_image_urls(trigger_body)
+        if trigger_image_urls:
+            image_urls.extend(trigger_image_urls)
+            logger.debug(
+                "Found %d image URL(s) in triggering comment by %s",
+                len(trigger_image_urls),
+                trigger_author,
+            )
+        comments_text += f"\n**{trigger_author}:** {trigger_body}\n"
+        logger.debug(
+            "Appended triggering comment %s not present in issue comments list",
+            triggering_comment_id or "<missing-id>",
+        )
 
     prompt = (
         f"Please work on the following issue:\n\n"
@@ -616,6 +667,18 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "Please analyze this issue and implement the necessary changes. "
         "When you're done, commit and push your changes."
     )
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    if image_urls:
+        image_urls = dedupe_urls(image_urls)
+        logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+        logger.debug("Image URLs: %s", image_urls)
+
+        async with httpx.AsyncClient() as client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, client)
+                if image_block:
+                    content_blocks.append(image_block)
+        logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
     identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
     linear_project_id = ""
@@ -649,9 +712,10 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 thread_id,
             )
 
+            queued_payload = {"text": prompt, "image_urls": image_urls}
             queued = await queue_message_for_thread(
                 thread_id=thread_id,
-                message_content=prompt,
+                message_content=queued_payload,
             )
 
             if queued:
@@ -666,7 +730,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             await langgraph_client.runs.create(
                 thread_id,
                 "agent",
-                input={"messages": [{"role": "user", "content": prompt}]},
+                input={"messages": [{"role": "user", "content": content_blocks}]},
                 config={"configurable": configurable},
                 if_not_exists="create",
             )

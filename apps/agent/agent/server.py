@@ -4,7 +4,6 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
-import os
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -24,11 +23,11 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-
-# Local import for encryption
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+from langsmith.sandbox import SandboxClientError
 
 from .encryption import decrypt_token
+from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -37,8 +36,6 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
-from .integrations.langsmith import _create_langsmith_sandbox
-
 
 client = get_client()
 
@@ -46,12 +43,13 @@ SANDBOX_CREATING = "__creating__"
 SANDBOX_CREATION_TIMEOUT = 180
 SANDBOX_POLL_INTERVAL = 1.0
 
-from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
+from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
     git_has_uncommitted_changes,
     is_valid_git_repo,
     remove_directory,
 )
+from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
 async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
@@ -87,9 +85,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
     if not is_git_repo:
-        logger.warning(
-            "Repo directory missing or not a valid git repo at %s, removing", repo_dir
-        )
+        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
         try:
             removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
             if not removed:
@@ -174,6 +170,35 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     return repo_dir
 
 
+async def _recreate_sandbox(
+    thread_id: str,
+    repo_owner: str,
+    repo_name: str,
+    *,
+    github_token: str | None,
+) -> tuple[SandboxBackendProtocol, str]:
+    """Recreate a sandbox and clone the repo after a connection failure.
+
+    Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
+    creates a fresh sandbox, and clones the repo.
+    """
+    SANDBOX_BACKENDS.pop(thread_id, None)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"sandbox_id": SANDBOX_CREATING},
+    )
+    try:
+        sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+        repo_dir = await _clone_or_pull_repo_in_sandbox(
+            sandbox_backend, repo_owner, repo_name, github_token
+        )
+    except Exception:
+        logger.exception("Failed to recreate sandbox after connection failure")
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+        raise
+    return sandbox_backend, repo_dir
+
+
 async def _wait_for_sandbox_id(thread_id: str) -> str:
     """Wait for sandbox_id to be set in thread metadata.
 
@@ -221,7 +246,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     encrypted_token = config["configurable"].get("github_token_encrypted")
     if encrypted_token:
         github_token = decrypt_token(encrypted_token)
-        logger.debug("Decrypted GitHub token")
 
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
@@ -248,6 +272,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
                 )
+            except SandboxClientError:
+                logger.warning(
+                    "Cached sandbox is no longer reachable for thread %s, recreating sandbox",
+                    thread_id,
+                )
+                sandbox_backend, repo_dir = await _recreate_sandbox(
+                    thread_id, repo_owner, repo_name, github_token=github_token
+                )
             except Exception:
                 logger.exception("Failed to pull repo in cached sandbox")
                 raise
@@ -258,15 +290,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
             logger.info("Sandbox created: %s", sandbox_backend.id)
-
-            # Update metadata immediately after sandbox creation so other callers
-            # can connect to the sandbox while we clone the repo
-            await client.threads.update(
-                thread_id=thread_id,
-                metadata={"sandbox_id": sandbox_backend.id},
-            )
 
             repo_dir = None
             if repo_owner and repo_name:
@@ -292,7 +317,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox, sandbox_id)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
@@ -303,13 +328,8 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
-                sandbox_backend = await asyncio.to_thread(_create_langsmith_sandbox)
+                sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
-
-                await client.threads.update(
-                    thread_id=thread_id,
-                    metadata={"sandbox_id": sandbox_backend.id},
-                )
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
                 await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -330,17 +350,23 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 
+    if not repo_dir:
+        msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
+        raise RuntimeError(msg)
+
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
+    agents_md = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=ChatAnthropic(model="claude-opus-4-6", max_tokens=20_000),
+        model=ChatOpenAI(model="gpt-5.2-codex", temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
+            agents_md=agents_md,
         ),
         tools=[http_request, fetch_url, commit_and_open_pr],
         backend=sandbox_backend,

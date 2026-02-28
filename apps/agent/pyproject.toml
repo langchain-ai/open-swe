@@ -6,27 +6,20 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    # Core deepagents library
-    "deepagents>=0.4.0",
-    # FastAPI for webhook handling
+    "deepagents>=0.4.3",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
-    # HTTP client
     "httpx>=0.25.0",
-    # JWT for service authentication
     "PyJWT>=2.8.0",
-    # Encryption
     "cryptography>=41.0.0",
-    # LangGraph SDK for thread management
     "langgraph-sdk>=0.1.0",
-    # LangChain dependencies (will be pulled in by deepagents but listing for clarity)
     "langchain>=1.2.9",
     "langgraph>=1.0.8",
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.12",
-    # LangSmith SDK for sandbox management
     "langsmith>=0.7.1",
+    "langchain-openai==1.1.10",
 ]
 
 [project.optional-dependencies]

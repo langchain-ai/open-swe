@@ -153,8 +153,8 @@ def commit_and_open_pr(
         git_config_user(
             sandbox_backend,
             repo_dir,
-            "Open SWE[bot]",
-            "Open SWE@users.noreply.github.com",
+            "open-swe[bot]",
+            "open-swe@users.noreply.github.com",
         )
         git_add_all(sandbox_backend, repo_dir)
 
@@ -181,9 +181,7 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(
-            get_github_default_branch(repo_owner, repo_name, github_token)
-        )
+        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,

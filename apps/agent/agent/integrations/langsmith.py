@@ -9,7 +9,7 @@ import contextlib
 import os
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from deepagents.backends.protocol import (
     ExecuteResponse,
@@ -19,7 +19,6 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
-
 from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
 
 
@@ -44,7 +43,7 @@ def _get_sandbox_template_config() -> tuple[str | None, str | None]:
     return template_name, template_image
 
 
-def _create_langsmith_sandbox(
+def create_langsmith_sandbox(
     sandbox_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Create or connect to a LangSmith sandbox without automatic cleanup.
@@ -64,11 +63,44 @@ def _create_langsmith_sandbox(
     template_name, template_image = _get_sandbox_template_config()
 
     provider = LangSmithProvider(api_key=api_key)
-    return provider.get_or_create(
+    backend = provider.get_or_create(
         sandbox_id=sandbox_id,
         template=template_name,
         template_image=template_image,
     )
+    _update_thread_sandbox_metadata(backend.id)
+    return backend
+
+
+def _update_thread_sandbox_metadata(sandbox_id: str) -> None:
+    """Update thread metadata with sandbox_id."""
+    try:
+        import asyncio
+
+        from langgraph.config import get_config
+        from langgraph_sdk import get_client
+
+        config = get_config()
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            return
+        client = get_client()
+
+        async def _update() -> None:
+            await client.threads.update(
+                thread_id=thread_id,
+                metadata={"sandbox_id": sandbox_id},
+            )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(_update())
+        else:
+            loop.create_task(_update())
+    except Exception:
+        # Best-effort: ignore failures (no config context, client unavailable, etc.)
+        pass
 
 
 class SandboxProvider(ABC):
@@ -109,17 +141,28 @@ class LangSmithBackend(BaseSandbox):
 
     def __init__(self, sandbox: Sandbox) -> None:
         self._sandbox = sandbox
-        self._timeout: int = 30 * 60  # 30 mins default
+        self._default_timeout: int = 30 * 5  # 5 minute default
 
     @property
     def id(self) -> str:
         """Unique identifier for the sandbox backend."""
         return self._sandbox.name
 
-    def execute(self, command: str) -> ExecuteResponse:
-        """Execute a command in the sandbox and return ExecuteResponse."""
-        result = self._sandbox.run(command, timeout=self._timeout)
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        """Execute a command in the sandbox and return ExecuteResponse.
 
+        Args:
+            command: Full shell command string to execute.
+            timeout: Maximum time in seconds to wait for the command to complete.
+                If None, uses the default timeout of 5 minutes.
+
+        Returns:
+            ExecuteResponse with combined output, exit code, and truncation flag.
+        """
+        effective_timeout = timeout if timeout is not None else self._default_timeout
+        result = self._sandbox.run(command, timeout=effective_timeout)
+
+        # Combine stdout and stderr (matching other backends' approach)
         output = result.stdout or ""
         if result.stderr:
             output += "\n" + result.stderr if output else result.stderr
@@ -148,9 +191,7 @@ class LangSmithBackend(BaseSandbox):
         responses: list[FileDownloadResponse] = []
         for path in paths:
             content = self._sandbox.read(path)
-            responses.append(
-                FileDownloadResponse(path=path, content=content, error=None)
-            )
+            responses.append(FileDownloadResponse(path=path, content=content, error=None))
         return responses
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
@@ -209,10 +250,7 @@ class LangSmithProvider(SandboxProvider):
                 template_name=resolved_template_name, timeout=timeout
             )
         except Exception as e:
-            msg = (
-                f"Failed to create sandbox from template "
-                f"'{resolved_template_name}': {e}"
-            )
+            msg = f"Failed to create sandbox from template '{resolved_template_name}': {e}"
             raise RuntimeError(msg) from e
 
         # Verify sandbox is ready by polling

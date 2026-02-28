@@ -10,9 +10,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from langchain.agents.middleware import AgentState, before_model
 from langgraph.config import get_config, get_store
 from langgraph.runtime import Runtime
+
+from ..utils.multimodal import fetch_image_block
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,25 @@ class LinearNotifyState(AgentState):
     """Extended agent state for tracking Linear notifications."""
 
     linear_messages_sent_count: int
+
+
+async def _build_blocks_from_payload(
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    text = payload.get("text", "")
+    image_urls = payload.get("image_urls", []) or []
+    blocks: list[dict[str, Any]] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    if not image_urls:
+        return blocks
+    async with httpx.AsyncClient() as client:
+        for image_url in image_urls:
+            image_block = await fetch_image_block(image_url, client)
+            if image_block:
+                blocks.append(image_block)
+    return blocks
 
 
 @before_model(state_schema=LinearNotifyState)
@@ -80,11 +102,21 @@ async def check_message_queue_before_model(  # noqa: PLR0911
             thread_id,
         )
 
-        content_blocks = [
-            {"type": "text", "text": msg.get("content", "")}
-            for msg in queued_messages
-            if msg.get("content")
-        ]
+        content_blocks: list[dict[str, Any]] = []
+        for msg in queued_messages:
+            content = msg.get("content")
+            if isinstance(content, dict) and ("text" in content or "image_urls" in content):
+                logger.debug("Queued message contains text + image URLs")
+                blocks = await _build_blocks_from_payload(content)
+                content_blocks.extend(blocks)
+                continue
+            if isinstance(content, list):
+                logger.debug("Queued message contains %d content block(s)", len(content))
+                content_blocks.extend(content)
+                continue
+            if isinstance(content, str) and content:
+                logger.debug("Queued message contains text content")
+                content_blocks.append({"type": "text", "text": content})
 
         if not content_blocks:
             return None
