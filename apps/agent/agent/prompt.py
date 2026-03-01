@@ -37,12 +37,20 @@ TASK_EXECUTION_SECTION = """---
 
 ### Task Execution
 
-When working on a task, follow this order:
+**Always end by calling `linear_comment`** — whether the task required code changes or not.
+
+For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run tests and linters to confirm correctness before submitting.
-4. **Submit** — Call `commit_and_open_pr` as the final step."""
+4. **Submit** — Call `commit_and_open_pr`.
+5. **Comment** — Call `linear_comment` with a summary and the PR link.
+
+For questions or status checks (no code changes needed):
+
+1. **Answer** — Gather the information needed to respond.
+2. **Comment** — Call `linear_comment` with your answer. Never leave a question unanswered."""
 
 
 TOOL_USAGE_SECTION = """---
@@ -59,7 +67,10 @@ Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the c
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
 
 #### `commit_and_open_pr`
-Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated. Always the final step."""
+Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated. Call this before `linear_comment`.
+
+#### `linear_comment`
+Posts a comment to the Linear issue associated with this task. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!"."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
@@ -189,7 +200,21 @@ When you have completed your implementation, follow these steps in order:
 
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
 
-Always call `commit_and_open_pr` as the final step once implementation is complete and code quality checks pass."""
+4. **Comment on the Linear ticket** via `linear_comment` immediately after `commit_and_open_pr` succeeds. Include:
+   - A brief summary of what was done
+   - The PR link returned by `commit_and_open_pr`
+   - An `@mention` of relevant stakeholders if appropriate
+
+   Example comment:
+   ```
+   I've completed the implementation and opened a PR: <pr_url>
+
+   Here's a summary of the changes:
+   - <change 1>
+   - <change 2>
+   ```
+
+Always call `commit_and_open_pr` followed by `linear_comment` once implementation is complete and code quality checks pass."""
 
 
 SYSTEM_PROMPT = (

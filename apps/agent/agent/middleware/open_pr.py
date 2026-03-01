@@ -1,9 +1,8 @@
-"""After-agent middleware that creates a GitHub PR and comments on Linear.
+"""After-agent middleware that creates a GitHub PR if needed.
 
-Runs once after the agent finishes.  If the agent called the
-``commit_and_open_pr`` tool, this middleware commits any remaining changes,
-pushes to a feature branch, opens a GitHub PR, and posts a summary comment
-back to the originating Linear issue.
+Runs once after the agent finishes as a safety net. If the agent called
+``commit_and_open_pr`` and it already succeeded, this is a no-op. Otherwise it
+commits any remaining changes, pushes to a feature branch, and opens a GitHub PR.
 """
 
 from __future__ import annotations
@@ -31,8 +30,6 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
-from ..utils.linear import comment_on_linear_issue
-from ..utils.messages import extract_text_content
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -63,10 +60,8 @@ async def open_pr_if_needed(
     state: AgentState,
     runtime: Runtime,
 ) -> dict[str, Any] | None:
-    """Middleware that commits/pushes changes and comments on Linear after agent runs."""
+    """Middleware that commits/pushes changes after agent runs if the tool didn't."""
     logger.info("After-agent middleware started")
-    pr_url = None
-    pr_number = None
 
     try:
         config = get_config()
@@ -74,62 +69,15 @@ async def open_pr_if_needed(
         thread_id = configurable.get("thread_id")
         logger.debug("Middleware running for thread %s", thread_id)
 
-        last_message_content = ""
         messages = state.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            if isinstance(last_message, dict):
-                last_message_content = extract_text_content(last_message.get("content", ""))
-            elif hasattr(last_message, "content"):
-                last_message_content = extract_text_content(last_message.content)
-
-        linear_issue = configurable.get("linear_issue", {})
-        linear_issue_id = linear_issue.get("id")
-
         pr_payload = _extract_pr_params_from_messages(messages)
 
         if not pr_payload:
             logger.info("No commit_and_open_pr tool call found, skipping PR creation")
-            if linear_issue_id and last_message_content:
-                comment = f""" **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
             return None
 
         if "success" in pr_payload:
-            pr_url = pr_payload.get("pr_url")
-            pr_existing = bool(pr_payload.get("pr_existing", False))
-            error = pr_payload.get("error")
-            if linear_issue_id and last_message_content:
-                if pr_url:
-                    header = "Pull Request Updated" if pr_existing else "Pull Request Created"
-                    action = "updated the existing" if pr_existing else "created a"
-                    comment = f"""**{header}**
-
-I've {action} pull request to address this issue:
-
-{pr_url}
-
----
- **Agent Response**
-
-{last_message_content}"""
-                elif error:
-                    comment = f"""**Pull Request Error**
-
-{error}
-
----
-
-**Agent Response**
-
-{last_message_content}"""
-                else:
-                    comment = f""" **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
+            # Tool already handled commit/push/PR creation
             return None
 
         pr_title = pr_payload.get("title", "feat: Open SWE PR")
@@ -137,11 +85,6 @@ I've {action} pull request to address this issue:
         commit_message = pr_payload.get("commit_message", pr_title)
 
         if not thread_id:
-            if linear_issue_id and last_message_content:
-                comment = f"""🤖 **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
             raise ValueError("No thread_id found in config")
 
         repo_config = configurable.get("repo", {})
@@ -149,15 +92,9 @@ I've {action} pull request to address this issue:
         repo_name = repo_config.get("name")
 
         sandbox_backend = await get_sandbox_backend(thread_id)
-
         repo_dir = f"/workspace/{repo_name}"
 
         if not sandbox_backend or not repo_dir:
-            if linear_issue_id and last_message_content:
-                comment = f"""🤖 **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
             return None
 
         has_uncommitted_changes = await asyncio.to_thread(
@@ -173,17 +110,11 @@ I've {action} pull request to address this issue:
 
         if not has_changes:
             logger.info("No changes detected, skipping PR creation")
-            if linear_issue_id and last_message_content:
-                comment = f"""🤖 **Agent Response**
-
-{last_message_content}"""
-                await comment_on_linear_issue(linear_issue_id, comment)
             return None
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
 
         current_branch = await asyncio.to_thread(git_current_branch, sandbox_backend, repo_dir)
-
         target_branch = f"open-swe/{thread_id}"
 
         if current_branch != target_branch:
@@ -212,7 +143,7 @@ I've {action} pull request to address this issue:
             base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
 
-            pr_url, pr_number, pr_existing = await create_github_pr(
+            await create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
@@ -222,48 +153,8 @@ I've {action} pull request to address this issue:
                 body=pr_body,
             )
 
-            linear_issue = configurable.get("linear_issue", {})
-            linear_issue_id = linear_issue.get("id")
-
-        if linear_issue_id and last_message_content:
-            if pr_url:
-                header = "Pull Request Updated" if pr_existing else "Pull Request Created"
-                action = "updated the existing" if pr_existing else "created a"
-                comment = f"""**{header}**
-
-I've {action} pull request to address this issue:
-
-**[PR #{pr_number}: {pr_title}]({pr_url})**
-
----
-
-🤖 **Agent Response**
-
-{last_message_content}"""
-            else:
-                comment = f""" **Agent Response**
-
-{last_message_content}"""
-            await comment_on_linear_issue(linear_issue_id, comment)
-
         logger.info("After-agent middleware completed successfully")
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error in after-agent middleware")
-        try:
-            config = get_config()
-            configurable = config.get("configurable", {})
-            linear_issue = configurable.get("linear_issue", {})
-            linear_issue_id = linear_issue.get("id")
-            if linear_issue_id:
-                error_comment = f""" **Agent Error**
-
-An error occurred while processing this issue:
-
-```
-{type(e).__name__}: {e}
-```"""
-                await comment_on_linear_issue(linear_issue_id, error_comment)
-        except Exception:
-            logger.exception("Failed to post error comment to Linear")
     return None
