@@ -10,7 +10,7 @@ export function getRepoAbsolutePath(
   config?: GraphConfig,
 ): string {
   // Check for local mode first
-  if (config && isLocalMode(config)) {
+  if (isLocalMode(config)) {
     return getLocalWorkingDirectory();
   }
 
