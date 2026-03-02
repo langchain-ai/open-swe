@@ -662,7 +662,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
     tag_instruction = (
         f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
-        if user_name else ""
+        if user_name
+        else ""
     )
     prompt = (
         f"Please work on the following issue:\n\n"
