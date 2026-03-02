@@ -659,13 +659,19 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             triggering_comment_id or "<missing-id>",
         )
 
+    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
+    tag_instruction = (
+        f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
+        if user_name else ""
+    )
     prompt = (
         f"Please work on the following issue:\n\n"
         f"## Title: {title}\n\n"
+        f"{triggered_by_line}"
         f"## Description:\n{description}\n"
         f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "When you're done, commit and push your changes."
+        f"Please analyze this issue and implement the necessary changes. "
+        f"When you're done, commit and push your changes. {tag_instruction}"
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
@@ -697,6 +703,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             "identifier": identifier,
             "linear_project_id": linear_project_id,
             "linear_issue_number": linear_issue_number,
+            "triggering_user_name": user_name or "",
         },
     }
     if github_token:
