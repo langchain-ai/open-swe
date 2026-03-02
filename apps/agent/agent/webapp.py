@@ -222,6 +222,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
     except httpx.HTTPStatusError as e:
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
     except Exception as e:  # noqa: BLE001
+        logger.warning("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
         return {"error": str(e)}
 
 
@@ -558,7 +559,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                 await comment_on_linear_issue(issue_id, comment)
                 return
             else:
-                logger.warning("Auth result has neither token nor auth_url: %s", auth_result)
+                logger.warning(
+                    "Auth result has neither token nor auth_url: %s (error=%r)",
+                    auth_result,
+                    auth_result.get("error"),
+                )
         else:
             logger.warning("User %s not found in LangSmith workspace", user_email)
             comment = (
