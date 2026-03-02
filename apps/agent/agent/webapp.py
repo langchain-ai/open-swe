@@ -269,8 +269,6 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
             return False
 
 
-
-
 async def fetch_linear_issue_details(issue_id: str) -> dict[str, Any] | None:
     """Fetch full issue details from Linear API including description and comments.
 
