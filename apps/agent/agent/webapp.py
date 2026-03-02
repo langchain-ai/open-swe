@@ -183,6 +183,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
         Dict with either 'token' key or 'auth_url' key
     """
     if not GITHUB_OAUTH_PROVIDER_ID:
+        logger.error("GitHub auth failed: GITHUB_OAUTH_PROVIDER_ID is not configured")
         return {"error": "GITHUB_OAUTH_PROVIDER_ID not configured"}
 
     try:
@@ -220,8 +221,10 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             return {"error": f"Unexpected auth result: {response_data}"}
 
     except httpx.HTTPStatusError as e:
+        logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
     except Exception as e:  # noqa: BLE001
+        logger.error("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
         return {"error": str(e)}
 
 
