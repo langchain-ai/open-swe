@@ -23,7 +23,6 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-from langchain_openai import ChatOpenAI
 from langsmith.sandbox import SandboxClientError
 
 from .encryption import decrypt_token
@@ -36,6 +35,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
+from .utils.model import make_model
 
 client = get_client()
 
@@ -361,7 +361,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=ChatOpenAI(model="gpt-5.2-codex", temperature=0, max_tokens=20_000),
+        model=make_model("openai:gpt-5.3-codex", temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,
