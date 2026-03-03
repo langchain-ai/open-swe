@@ -67,7 +67,7 @@ Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the c
 Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API calls with custom headers, methods, params, or request bodies — not for fetching web pages.
 
 #### `commit_and_open_pr`
-Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated. Call this before `linear_comment`.
+Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
 
 #### `linear_comment`
 Posts a comment to the Linear issue associated with this task. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!"."""
