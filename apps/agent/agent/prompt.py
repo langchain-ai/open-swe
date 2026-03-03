@@ -70,7 +70,7 @@ Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API call
 Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
 
 #### `linear_comment`
-Posts a comment to the Linear issue associated with this task. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!"."""
+Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!"."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
