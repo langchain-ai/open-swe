@@ -60,7 +60,7 @@ async def open_pr_if_needed(
     state: AgentState,
     runtime: Runtime,
 ) -> dict[str, Any] | None:
-    """Middleware that commits/pushes changes after agent runs if the tool didn't."""
+    """Middleware that commits/pushes changes after agent runs if `commit_and_open_pr` tool didn't."""
     logger.info("After-agent middleware started")
 
     try:

@@ -37,7 +37,7 @@ TASK_EXECUTION_SECTION = """---
 
 ### Task Execution
 
-**Always end by calling `linear_comment`** — whether the task required code changes or not.
+If you make changes, call `linear_comment` to notify the user of the changes. For questions or status updates, call `linear_comment` with your answer.
 
 For tasks that require code changes, follow this order:
 
@@ -203,11 +203,11 @@ When you have completed your implementation, follow these steps in order:
 4. **Comment on the Linear ticket** via `linear_comment` immediately after `commit_and_open_pr` succeeds. Include:
    - A brief summary of what was done
    - The PR link returned by `commit_and_open_pr`
-   - An `@mention` of relevant stakeholders if appropriate
+   - An `@mention` of the user who triggered the task by their Linear display name
 
    Example comment:
    ```
-   I've completed the implementation and opened a PR: <pr_url>
+   @username, I've completed the implementation and opened a PR: <pr_url>
 
    Here's a summary of the changes:
    - <change 1>
