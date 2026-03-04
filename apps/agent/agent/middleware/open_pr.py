@@ -16,6 +16,7 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
+from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -30,7 +31,6 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
-from ..encryption import decrypt_token
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
