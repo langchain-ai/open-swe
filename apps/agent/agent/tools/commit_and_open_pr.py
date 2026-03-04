@@ -23,6 +23,23 @@ from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
 
+def get_github_token(config: dict[str, Any], thread_id: str | None) -> str | None:
+    """Resolve a GitHub token from config metadata or thread metadata."""
+    encrypted_token = None
+    metadata = config.get("metadata", {})
+    if isinstance(metadata, dict):
+        encrypted_token = metadata.get("github_token_encrypted")
+    if not encrypted_token and thread_id:
+        try:
+            client = get_client()
+            thread = asyncio.run(client.threads.get(thread_id))
+            thread_metadata = (thread or {}).get("metadata", {})
+            if isinstance(thread_metadata, dict):
+                encrypted_token = thread_metadata.get("github_token_encrypted")
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to fetch thread metadata for %s", thread_id)
+    return decrypt_token(encrypted_token) if encrypted_token else None
+
 
 def commit_and_open_pr(
     title: str,
@@ -170,20 +187,7 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        encrypted_token = None
-        metadata = config.get("metadata", {})
-        if isinstance(metadata, dict):
-            encrypted_token = metadata.get("github_token_encrypted")
-        if not encrypted_token and thread_id:
-            try:
-                client = get_client()
-                thread = asyncio.run(client.threads.get(thread_id))
-                thread_metadata = (thread or {}).get("metadata", {})
-                if isinstance(thread_metadata, dict):
-                    encrypted_token = thread_metadata.get("github_token_encrypted")
-            except Exception:  # noqa: BLE001
-                logger.exception("Failed to fetch thread metadata for %s", thread_id)
-        github_token = decrypt_token(encrypted_token) if encrypted_token else None
+        github_token = get_github_token(config, thread_id)
         if not github_token:
             logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
             return {

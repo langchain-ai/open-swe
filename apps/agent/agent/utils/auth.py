@@ -9,8 +9,14 @@ from typing import Any
 
 import httpx
 import jwt
+from langgraph_sdk import get_client
+
+from ..encryption import encrypt_token
+from .linear import comment_on_linear_issue
 
 logger = logging.getLogger(__name__)
+
+client = get_client()
 
 LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
 LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
@@ -148,3 +154,33 @@ async def resolve_github_token_from_email(email: str) -> dict[str, Any]:
 
     auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
     return auth_result
+
+
+async def leave_failure_comment(
+    configurable: dict[str, Any],
+    source: str,
+    message: str,
+) -> None:
+    """Leave an auth failure comment for the appropriate source."""
+    if source == "linear":
+        linear_issue = configurable.get("linear_issue", {})
+        issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
+        if issue_id:
+            logger.info(
+                "Posting auth failure comment to Linear issue %s (source=%s)",
+                issue_id,
+                source,
+            )
+            await comment_on_linear_issue(issue_id, message)
+        return
+    raise ValueError(f"Unknown source: {source}")
+
+
+async def persist_encrypted_github_token(thread_id: str, token: str) -> str:
+    """Encrypt a GitHub token and store it on the thread metadata."""
+    encrypted = encrypt_token(token)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"github_token_encrypted": encrypted},
+    )
+    return encrypted

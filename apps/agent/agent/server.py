@@ -26,7 +26,6 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
-from .encryption import encrypt_token
 from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
@@ -35,8 +34,12 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request, linear_comment
-from .utils.auth import get_github_token_for_user, get_ls_user_id_from_email
-from .utils.linear import comment_on_linear_issue
+from .utils.auth import (
+    get_github_token_for_user,
+    get_ls_user_id_from_email,
+    leave_failure_comment,
+    persist_encrypted_github_token,
+)
 from .utils.model import make_model
 
 client = get_client()
@@ -234,38 +237,10 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
-async def leave_failure_comment(source: str, issue_id: str, message: str) -> None:
-    """Leave an auth failure comment for the appropriate source."""
-    if source == "linear" and issue_id:
-        logger.info("Posting auth failure comment to Linear issue %s (source=%s)", issue_id, source)
-        await comment_on_linear_issue(issue_id, message)
-
-
-async def get_langsmith_user_from_email(email: str) -> tuple[str | None, str | None]:
-    """Resolve LangSmith user + tenant ids from an email."""
-    user_info = await get_ls_user_id_from_email(email)
-    return user_info.get("ls_user_id"), user_info.get("tenant_id")
-
-
-async def get_token_or_auth_url_from_id(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
-    """Resolve a GitHub token or auth URL from LangSmith user + tenant ids."""
-    return await get_github_token_for_user(ls_user_id, tenant_id)
-
-
-async def persist_encrypted_github_token(thread_id: str, token: str) -> str:
-    """Encrypt a GitHub token and store it on the thread metadata."""
-    encrypted = encrypt_token(token)
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={"github_token_encrypted": encrypted},
-    )
-    return encrypted
-
-
 async def save_encrypted_token_from_email(
     email: str | None,
     source: str,
-    issue_id: str,
+    configurable: dict[str, Any],
     thread_id: str,
 ) -> tuple[str, str]:
     """Resolve, encrypt, and store a GitHub token based on user email."""
@@ -275,10 +250,12 @@ async def save_encrypted_token_from_email(
             "Failed to authenticate with GitHub: missing_user_email\n\n"
             "Please try again or contact support."
         )
-        await leave_failure_comment(source, issue_id, message)
+        await leave_failure_comment(configurable, source, message)
         raise ValueError("GitHub auth failed: missing user_email")
 
-    ls_user_id, tenant_id = await get_langsmith_user_from_email(email)
+    user_info = await get_ls_user_id_from_email(email)
+    ls_user_id = user_info.get("ls_user_id")
+    tenant_id = user_info.get("tenant_id")
     if not ls_user_id or not tenant_id:
         message = (
             "🔐 **GitHub Authentication Required**\n\n"
@@ -289,10 +266,10 @@ async def save_encrypted_token_from_email(
             "Once your email is added to LangSmith, "
             "reply to this issue mentioning @openswe to retry."
         )
-        await leave_failure_comment(source, issue_id, message)
+        await leave_failure_comment(configurable, source, message)
         raise ValueError(f"No ls_user_id found from email {email}")
 
-    auth_result = await get_token_or_auth_url_from_id(ls_user_id, tenant_id)
+    auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
     auth_url = auth_result.get("auth_url")
     if auth_url:
         message = (
@@ -302,7 +279,7 @@ async def save_encrypted_token_from_email(
             f"[Authenticate with GitHub]({auth_url})\n\n"
             "Once authenticated, reply to this issue mentioning @openswe to retry."
         )
-        await leave_failure_comment(source, issue_id, message)
+        await leave_failure_comment(configurable, source, message)
         raise ValueError("User not authenticated.")
 
     token = auth_result.get("token")
@@ -313,7 +290,7 @@ async def save_encrypted_token_from_email(
             f"Failed to authenticate with GitHub: {error}\n\n"
             "Please try again or contact support."
         )
-        await leave_failure_comment(source, issue_id, message)
+        await leave_failure_comment(configurable, source, message)
         raise ValueError(f"No token found: {error}")
 
     encrypted = await persist_encrypted_github_token(thread_id, token)
@@ -344,14 +321,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
         msg = f"GitHub auth failed for thread {thread_id}: missing source"
         raise RuntimeError(msg)
-    linear_issue = config["configurable"].get("linear_issue", {})
-    linear_issue_id = linear_issue.get("id", "")
-
     try:
         github_token, new_encrypted = await save_encrypted_token_from_email(
             user_email,
             source,
-            linear_issue_id,
+            config["configurable"],
             thread_id,
         )
     except ValueError as exc:

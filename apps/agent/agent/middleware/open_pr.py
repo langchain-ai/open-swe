@@ -30,7 +30,6 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
-from ..utils.linear import comment_on_linear_issue
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -141,10 +140,6 @@ async def open_pr_if_needed(
             bool(github_token),
         )
 
-        pr_url: str | None = None
-        pr_number: int | None = None
-        pr_existing: bool = False
-
         if github_token:
             await asyncio.to_thread(
                 git_push, sandbox_backend, repo_dir, target_branch, github_token
@@ -153,7 +148,7 @@ async def open_pr_if_needed(
             base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
 
-            pr_url, pr_number, pr_existing = await create_github_pr(
+            await create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 github_token=github_token,
@@ -162,17 +157,6 @@ async def open_pr_if_needed(
                 base_branch=base_branch,
                 body=pr_body,
             )
-
-        linear_issue = configurable.get("linear_issue", {})
-        linear_issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
-
-        if linear_issue_id:
-            if pr_url:
-                action = "updated the existing" if pr_existing else "created a"
-                comment = f"I've {action} pull request to address this issue: **[PR #{pr_number}: {pr_title}]({pr_url})**"
-            else:
-                comment = f"Implementation is complete but I was unable to open a PR (missing GitHub token for thread `{thread_id}`)."
-            await comment_on_linear_issue(linear_issue_id, comment)
 
         logger.info("After-agent middleware completed successfully")
 
