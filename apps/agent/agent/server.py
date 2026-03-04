@@ -261,7 +261,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc
 
-    config["configurable"]["github_token_encrypted"] = new_encrypted
+    config["metadata"]["github_token_encrypted"] = new_encrypted
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
