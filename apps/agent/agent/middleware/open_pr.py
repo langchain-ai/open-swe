@@ -131,14 +131,9 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
         encrypted_token = configurable.get("github_token_encrypted")
-        github_token = decrypt_token(encrypted_token) if encrypted_token else None
-
-        logger.info(
-            "PR flow token state for thread %s: has_encrypted_token=%s has_token=%s",
-            thread_id,
-            bool(encrypted_token),
-            bool(github_token),
-        )
+        github_token = None
+        if encrypted_token:
+            github_token = decrypt_token(encrypted_token)i 
 
         if github_token:
             await asyncio.to_thread(
