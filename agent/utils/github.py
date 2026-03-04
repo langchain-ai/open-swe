@@ -141,36 +141,12 @@ def git_push(
     if not out_of_sync:
         return result
 
-    logger.warning("Push rejected (branch out of sync with remote), attempting pull-merge-recommit")
+    logger.warning("Push rejected (branch out of sync with remote), attempting rebase and retry")
 
-    # Save the last commit message before resetting
-    log_result = _run_git(sandbox_backend, repo_dir, "git log -1 --format=%B")
-    if log_result.exit_code != 0:
-        logger.error("Could not retrieve last commit message; returning original push error")
-        return result
-    commit_message = log_result.output.strip()
-
-    # Undo the last commit, keeping changes in the working tree
-    reset_result = _run_git(sandbox_backend, repo_dir, "git reset HEAD~")
-    if reset_result.exit_code != 0:
-        logger.error("git reset HEAD~ failed; returning original push error")
-        return result
-
-    # Pull with merge strategy (rebase=false)
-    pull_result = _run_git(
-        sandbox_backend, repo_dir, f"git pull --no-rebase origin {safe_branch}"
-    )
+    pull_result = _run_git(sandbox_backend, repo_dir, f"git pull --rebase origin {safe_branch}")
     if pull_result.exit_code != 0:
-        logger.error("git pull failed after reset: %s", pull_result.output)
+        logger.error("git pull --rebase failed: %s", pull_result.output)
         return pull_result
-
-    # Re-stage, re-commit, and push
-    _run_git(sandbox_backend, repo_dir, "git add -A")
-    safe_message = shlex.quote(commit_message)
-    commit_result = _run_git(sandbox_backend, repo_dir, f"git commit -m {safe_message}")
-    if commit_result.exit_code != 0:
-        logger.error("Re-commit failed: %s", commit_result.output)
-        return commit_result
 
     return _do_push()
 
@@ -231,7 +207,6 @@ async def create_github_pr(
             if pr_response.status_code == HTTP_CREATED:
                 pr_url = pr_data.get("html_url")
                 pr_number = pr_data.get("number")
-                logger.info("PR created successfully: %s", pr_url)
                 return pr_url, pr_number, False
 
             if pr_response.status_code == HTTP_UNPROCESSABLE_ENTITY:
