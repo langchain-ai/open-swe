@@ -5,7 +5,6 @@
 # ruff: noqa: E402
 import logging
 import warnings
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +33,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request, linear_comment
-from .utils.auth import (
-    get_github_token_for_user,
-    get_ls_user_id_from_email,
-    leave_failure_comment,
-    persist_encrypted_github_token,
-)
+from .utils.auth import save_encrypted_token_from_email
 from .utils.model import make_model
 
 client = get_client()
@@ -237,66 +231,6 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
-async def save_encrypted_token_from_email(
-    email: str | None,
-    source: str,
-    configurable: dict[str, Any],
-    thread_id: str,
-) -> tuple[str, str]:
-    """Resolve, encrypt, and store a GitHub token based on user email."""
-    if not email:
-        message = (
-            "❌ **GitHub Auth Error**\n\n"
-            "Failed to authenticate with GitHub: missing_user_email\n\n"
-            "Please try again or contact support."
-        )
-        await leave_failure_comment(configurable, source, message)
-        raise ValueError("GitHub auth failed: missing user_email")
-
-    user_info = await get_ls_user_id_from_email(email)
-    ls_user_id = user_info.get("ls_user_id")
-    tenant_id = user_info.get("tenant_id")
-    if not ls_user_id or not tenant_id:
-        message = (
-            "🔐 **GitHub Authentication Required**\n\n"
-            f"Could not find a LangSmith account for **{email}**.\n\n"
-            "Please ensure this email is invited to the main LangSmith organization. "
-            "If your Linear account uses a different email than your LangSmith account, "
-            "you may need to update one of them to match.\n\n"
-            "Once your email is added to LangSmith, "
-            "reply to this issue mentioning @openswe to retry."
-        )
-        await leave_failure_comment(configurable, source, message)
-        raise ValueError(f"No ls_user_id found from email {email}")
-
-    auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
-    auth_url = auth_result.get("auth_url")
-    if auth_url:
-        message = (
-            "🔐 **GitHub Authentication Required**\n\n"
-            "To allow the Open SWE agent to work on this issue, "
-            "please authenticate with GitHub by clicking the link below:\n\n"
-            f"[Authenticate with GitHub]({auth_url})\n\n"
-            "Once authenticated, reply to this issue mentioning @openswe to retry."
-        )
-        await leave_failure_comment(configurable, source, message)
-        raise ValueError("User not authenticated.")
-
-    token = auth_result.get("token")
-    if not token:
-        error = auth_result.get("error", "unknown")
-        message = (
-            "❌ **GitHub Auth Error**\n\n"
-            f"Failed to authenticate with GitHub: {error}\n\n"
-            "Please try again or contact support."
-        )
-        await leave_failure_comment(configurable, source, message)
-        raise ValueError(f"No token found: {error}")
-
-    encrypted = await persist_encrypted_github_token(thread_id, token)
-    return token, encrypted
-
-
 async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
@@ -322,12 +256,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = f"GitHub auth failed for thread {thread_id}: missing source"
         raise RuntimeError(msg)
     try:
-        github_token, new_encrypted = await save_encrypted_token_from_email(
-            user_email,
-            source,
-            config["configurable"],
-            thread_id,
-        )
+        github_token, new_encrypted = await save_encrypted_token_from_email(user_email, source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc

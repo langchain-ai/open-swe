@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 import jwt
+from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
@@ -157,12 +158,13 @@ async def resolve_github_token_from_email(email: str) -> dict[str, Any]:
 
 
 async def leave_failure_comment(
-    configurable: dict[str, Any],
     source: str,
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
     if source == "linear":
+        config = get_config()
+        configurable = config.get("configurable", {})
         linear_issue = configurable.get("linear_issue", {})
         issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
         if issue_id:
@@ -184,3 +186,66 @@ async def persist_encrypted_github_token(thread_id: str, token: str) -> str:
         metadata={"github_token_encrypted": encrypted},
     )
     return encrypted
+
+
+async def save_encrypted_token_from_email(
+    email: str | None,
+    source: str,
+) -> tuple[str, str]:
+    """Resolve, encrypt, and store a GitHub token based on user email."""
+    config = get_config()
+    configurable = config.get("configurable", {})
+    thread_id = configurable.get("thread_id")
+    if not thread_id:
+        raise ValueError("GitHub auth failed: missing thread_id")
+    if not email:
+        message = (
+            "❌ **GitHub Auth Error**\n\n"
+            "Failed to authenticate with GitHub: missing_user_email\n\n"
+            "Please try again or contact support."
+        )
+        await leave_failure_comment(source, message)
+        raise ValueError("GitHub auth failed: missing user_email")
+
+    user_info = await get_ls_user_id_from_email(email)
+    ls_user_id = user_info.get("ls_user_id")
+    tenant_id = user_info.get("tenant_id")
+    if not ls_user_id or not tenant_id:
+        message = (
+            "🔐 **GitHub Authentication Required**\n\n"
+            f"Could not find a LangSmith account for **{email}**.\n\n"
+            "Please ensure this email is invited to the main LangSmith organization. "
+            "If your Linear account uses a different email than your LangSmith account, "
+            "you may need to update one of them to match.\n\n"
+            "Once your email is added to LangSmith, "
+            "reply to this issue mentioning @openswe to retry."
+        )
+        await leave_failure_comment(source, message)
+        raise ValueError(f"No ls_user_id found from email {email}")
+
+    auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
+    auth_url = auth_result.get("auth_url")
+    if auth_url:
+        message = (
+            "🔐 **GitHub Authentication Required**\n\n"
+            "To allow the Open SWE agent to work on this issue, "
+            "please authenticate with GitHub by clicking the link below:\n\n"
+            f"[Authenticate with GitHub]({auth_url})\n\n"
+            "Once authenticated, reply to this issue mentioning @openswe to retry."
+        )
+        await leave_failure_comment(source, message)
+        raise ValueError("User not authenticated.")
+
+    token = auth_result.get("token")
+    if not token:
+        error = auth_result.get("error", "unknown")
+        message = (
+            "❌ **GitHub Auth Error**\n\n"
+            f"Failed to authenticate with GitHub: {error}\n\n"
+            "Please try again or contact support."
+        )
+        await leave_failure_comment(source, message)
+        raise ValueError(f"No token found: {error}")
+
+    encrypted = await persist_encrypted_github_token(thread_id, token)
+    return token, encrypted
