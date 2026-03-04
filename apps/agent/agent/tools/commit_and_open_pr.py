@@ -5,6 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 from langgraph_sdk import get_client
 
+from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -18,7 +19,6 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
-from ..encryption import decrypt_token
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)

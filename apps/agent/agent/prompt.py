@@ -201,9 +201,8 @@ When you have completed your implementation, follow these steps in order:
 
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
 
-Always call `commit_and_open_pr` as the final step once implementation is complete and code quality checks pass.
+**IMPORTANT: Never ask the user for permission or confirmation before calling `commit_and_open_pr`. Do not say "if you want, I can proceed" or "shall I open the PR?". When your implementation is done and checks pass, call the tool immediately and autonomously.**
 
-**IMPORTANT: Never ask the user for permission or confirmation before calling `commit_and_open_pr`. Do not say "if you want, I can proceed" or "shall I open the PR?". When your implementation is done and checks pass, call the tool immediately and autonomously.**"""
 4. **Comment on the Linear ticket** via `linear_comment` immediately after `commit_and_open_pr` succeeds. Include:
    - A brief summary of what was done
    - The PR link returned by `commit_and_open_pr`
@@ -218,7 +217,7 @@ Always call `commit_and_open_pr` as the final step once implementation is comple
    - <change 2>
    ```
 
-Always call `commit_and_open_pr` followed by `linear_comment` once implementation is complete and code quality checks pass."""
+Always call the `commit_and_open_pr` tool followed by the `linear_comment` tool once implementation is complete and code quality checks pass."""
 
 
 SYSTEM_PROMPT = (

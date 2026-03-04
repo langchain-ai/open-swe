@@ -33,7 +33,7 @@ from .middleware import (
     open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
-from .tools import commit_and_open_pr, fetch_url, http_request
+from .tools import commit_and_open_pr, fetch_url, http_request, linear_comment
 from .utils.auth import resolve_github_token_from_email
 from .utils.linear import comment_on_linear_issue
 from .utils.model import make_model
@@ -307,11 +307,6 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         raise RuntimeError(msg)
 
     auth_result = await resolve_github_token_from_email(user_email)
-    logger.warning(
-        "#temp logging: github auth_result keys=%s thread=%s",
-        sorted(auth_result.keys()),
-        thread_id,
-    )
     if "token" in auth_result:
         github_token = auth_result["token"]
         new_encrypted = encrypt_token(github_token)

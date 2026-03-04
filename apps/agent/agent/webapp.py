@@ -13,7 +13,6 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 
 from .utils.comments import get_recent_comments
-from .utils.linear import comment_on_linear_issue
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
