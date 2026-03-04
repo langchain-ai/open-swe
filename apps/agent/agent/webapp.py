@@ -13,6 +13,7 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 
 from .utils.comments import get_recent_comments
+from .utils.linear import comment_on_linear_issue
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 
 logger = logging.getLogger(__name__)
@@ -130,52 +131,6 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
             response.raise_for_status()
             result = response.json()
             return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
-
-
-async def comment_on_linear_issue(issue_id: str, comment_body: str) -> bool:
-    """Add a comment to a Linear issue.
-
-    Args:
-        issue_id: The Linear issue ID
-        comment_body: The comment text
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
-    mutation = """
-    mutation CommentCreate($issueId: String!, $body: String!) {
-        commentCreate(input: { issueId: $issueId, body: $body }) {
-            success
-            comment {
-                id
-            }
-        }
-    }
-    """
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"issueId": issue_id, "body": comment_body},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("commentCreate", {}).get("success"))
         except Exception:  # noqa: BLE001
             return False
 
@@ -473,13 +428,23 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             triggering_comment_id or "<missing-id>",
         )
 
+    identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
+
+    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
+    tag_instruction = (
+        f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
+        if user_name
+        else ""
+    )
     prompt = (
         f"Please work on the following issue:\n\n"
         f"## Title: {title}\n\n"
+        f"{triggered_by_line}"
+        f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
         f"## Description:\n{description}\n"
         f"{comments_text}\n\n"
-        "Please analyze this issue and implement the necessary changes. "
-        "When you're done, commit and push your changes."
+        f"Please analyze this issue and implement the necessary changes. "
+        f"When you're done, commit and push your changes. {tag_instruction}"
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
     if image_urls:
@@ -494,7 +459,6 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
                     content_blocks.append(image_block)
         logger.info("Built %d content block(s) for prompt", len(content_blocks))
 
-    identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
     linear_project_id = ""
     linear_issue_number = ""
     if identifier and "-" in identifier:
@@ -511,6 +475,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             "identifier": identifier,
             "linear_project_id": linear_project_id,
             "linear_issue_number": linear_issue_number,
+            "triggering_user_name": user_name or "",
         },
         "user_email": user_email,
         "source": "linear",

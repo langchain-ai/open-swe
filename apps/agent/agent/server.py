@@ -31,7 +31,6 @@ from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     open_pr_if_needed,
-    post_to_linear_after_model,
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
@@ -456,12 +455,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[http_request, fetch_url, commit_and_open_pr],
+        tools=[http_request, fetch_url, commit_and_open_pr, linear_comment],
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),
             check_message_queue_before_model,
-            post_to_linear_after_model,
             open_pr_if_needed,
         ],
     ).with_config(config)
