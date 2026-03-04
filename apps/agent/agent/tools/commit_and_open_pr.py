@@ -3,8 +3,8 @@ import logging
 from typing import Any
 
 from langgraph.config import get_config
+from langgraph_sdk import get_client
 
-from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -18,6 +18,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..encryption import decrypt_token
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,7 @@ def commit_and_open_pr(
         config = get_config()
         configurable = config.get("configurable", {})
         thread_id = configurable.get("thread_id")
+
         if not thread_id:
             return {"success": False, "error": "Missing thread_id in config", "pr_url": None}
 
@@ -168,10 +170,27 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        encrypted_token = configurable.get("github_token_encrypted")
+        encrypted_token = None
+        metadata = config.get("metadata", {})
+        if isinstance(metadata, dict):
+            encrypted_token = metadata.get("github_token_encrypted")
+        if not encrypted_token and thread_id:
+            try:
+                client = get_client()
+                thread = asyncio.run(client.threads.get(thread_id))
+                thread_metadata = (thread or {}).get("metadata", {})
+                if isinstance(thread_metadata, dict):
+                    encrypted_token = thread_metadata.get("github_token_encrypted")
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to fetch thread metadata for %s", thread_id)
         github_token = decrypt_token(encrypted_token) if encrypted_token else None
         if not github_token:
-            return {"success": False, "error": "Missing GitHub token", "pr_url": None}
+            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
+            return {
+                "success": False,
+                "error": "Missing GitHub token",
+                "pr_url": None,
+            }
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
         if push_result.exit_code != 0:

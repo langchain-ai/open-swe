@@ -103,7 +103,8 @@ CORE_BEHAVIOR_SECTION = """---
 ### Core Behavior
 
 - **Persistence:** Keep working until the current task is completely resolved. Only terminate when you are certain the task is complete.
-- **Accuracy:** Never guess or make up information. Always use tools to gather accurate data about files and codebase structure."""
+- **Accuracy:** Never guess or make up information. Always use tools to gather accurate data about files and codebase structure.
+- **Autonomy:** Never ask the user for permission mid-task. Run linters, fix errors, and call `commit_and_open_pr` without waiting for confirmation."""
 
 
 DEPENDENCY_SECTION = """---
@@ -189,7 +190,9 @@ When you have completed your implementation, follow these steps in order:
 
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
 
-Always call `commit_and_open_pr` as the final step once implementation is complete and code quality checks pass."""
+Always call `commit_and_open_pr` as the final step once implementation is complete and code quality checks pass.
+
+**IMPORTANT: Never ask the user for permission or confirmation before calling `commit_and_open_pr`. Do not say "if you want, I can proceed" or "shall I open the PR?". When your implementation is done and checks pass, call the tool immediately and autonomously.**"""
 
 
 SYSTEM_PROMPT = (

@@ -17,7 +17,6 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -33,7 +32,7 @@ from ..utils.github import (
 )
 from ..utils.linear import comment_on_linear_issue
 from ..utils.messages import extract_text_content
-from ..utils.sandbox_state import get_sandbox_backend
+from ..utils.sandbox_state import GITHUB_TOKENS, get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
@@ -199,10 +198,15 @@ I've {action} pull request to address this issue:
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
+        github_token = GITHUB_TOKENS.get(thread_id) if thread_id else None
         encrypted_token = configurable.get("github_token_encrypted")
-        github_token = None
-        if encrypted_token:
-            github_token = decrypt_token(encrypted_token)
+
+        logger.info(
+            "PR flow token state for thread %s: has_encrypted_token=%s has_token=%s",
+            thread_id,
+            bool(encrypted_token),
+            bool(github_token),
+        )
 
         if github_token:
             await asyncio.to_thread(
@@ -241,6 +245,11 @@ I've {action} pull request to address this issue:
 
 {last_message_content}"""
             else:
+                if not github_token:
+                    logger.warning(
+                        "Skipping PR creation due to missing GitHub token for thread %s",
+                        thread_id,
+                    )
                 comment = f""" **Agent Response**
 
 {last_message_content}"""

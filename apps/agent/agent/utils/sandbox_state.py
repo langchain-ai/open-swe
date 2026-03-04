@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Thread ID -> SandboxBackend mapping, shared between server.py and middleware
 SANDBOX_BACKENDS: dict[str, Any] = {}
 
+# Thread ID -> plaintext GitHub token, shared between server.py, tools, and middleware
+GITHUB_TOKENS: dict[str, str] = {}
+
 
 async def get_sandbox_id_from_metadata(thread_id: str) -> str | None:
     """Fetch sandbox_id from thread metadata."""

@@ -25,7 +25,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
-from .encryption import decrypt_token
+from .encryption import encrypt_token
 from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
@@ -35,6 +35,8 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request
+from .utils.auth import resolve_github_token_from_email
+from .utils.linear import comment_on_linear_issue
 from .utils.model import make_model
 
 client = get_client()
@@ -232,10 +234,47 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
+async def _handle_auth_failure(
+    source: str,
+    issue_id: str,
+    *,
+    auth_url: str | None = None,
+    error: str | None = None,
+    email: str | None = None,
+) -> None:
+    """Post an auth failure comment to the appropriate source (e.g. Linear)."""
+    if source == "linear" and issue_id:
+        if auth_url:
+            comment = (
+                "🔐 **GitHub Authentication Required**\n\n"
+                "To allow the Open SWE agent to work on this issue, "
+                "please authenticate with GitHub by clicking the link below:\n\n"
+                f"[Authenticate with GitHub]({auth_url})\n\n"
+                "Once authenticated, reply to this issue mentioning @openswe to retry."
+            )
+        elif error == "no_ls_user" and email:
+            comment = (
+                "🔐 **GitHub Authentication Required**\n\n"
+                f"Could not find a LangSmith account for **{email}**.\n\n"
+                "Please ensure this email is invited to the main LangSmith organization. "
+                "If your Linear account uses a different email than your LangSmith account, "
+                "you may need to update one of them to match.\n\n"
+                "Once your email is added to LangSmith, "
+                "reply to this issue mentioning @openswe to retry."
+            )
+        else:
+            comment = (
+                "❌ **GitHub Auth Error**\n\n"
+                f"Failed to authenticate with GitHub: {error or 'unknown error'}\n\n"
+                "Please try again or contact support."
+            )
+        logger.info("Posting auth failure comment to Linear issue %s (source=%s)", issue_id, source)
+        await comment_on_linear_issue(issue_id, comment)
+
+
 async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
-    logger.info("get_agent called for thread %s", thread_id)
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -243,16 +282,65 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     repo_owner = repo_config.get("owner")
     repo_name = repo_config.get("name")
 
-    encrypted_token = config["configurable"].get("github_token_encrypted")
-    if encrypted_token:
-        github_token = decrypt_token(encrypted_token)
-
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
         return create_deep_agent(
             system_prompt="",
             tools=[],
         ).with_config(config)
+
+    # --- GitHub token resolution ---
+    user_email = config["configurable"].get("user_email")
+    source = config["configurable"].get("source")
+    if not source:
+        logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
+        msg = f"GitHub auth failed for thread {thread_id}: missing source"
+        raise RuntimeError(msg)
+    linear_issue = config["configurable"].get("linear_issue", {})
+    linear_issue_id = linear_issue.get("id", "")
+
+    github_token: str | None = None
+    # Resolve GitHub token from user email via LangSmith auth flow
+    if not user_email:
+        logger.error("Missing user_email for thread %s; cannot resolve GitHub token", thread_id)
+        await _handle_auth_failure(source, linear_issue_id, error="missing_user_email")
+        msg = f"GitHub auth failed for thread {thread_id}: missing user_email"
+        raise RuntimeError(msg)
+
+    auth_result = await resolve_github_token_from_email(user_email)
+    logger.warning(
+        "#temp logging: github auth_result keys=%s thread=%s",
+        sorted(auth_result.keys()),
+        thread_id,
+    )
+    if "token" in auth_result:
+        github_token = auth_result["token"]
+        new_encrypted = encrypt_token(github_token)
+        config["configurable"]["github_token_encrypted"] = new_encrypted
+        await client.threads.update(
+            thread_id=thread_id,
+            metadata={"github_token_encrypted": new_encrypted},
+        )
+    elif "auth_url" in auth_result:
+        logger.warning(
+            "GitHub auth URL required for user %s on thread %s",
+            user_email,
+            thread_id,
+        )
+        await _handle_auth_failure(source, linear_issue_id, auth_url=auth_result["auth_url"])
+        msg = f"GitHub authentication required for {user_email}"
+        raise RuntimeError(msg)
+    else:
+        error = auth_result.get("error", "unknown")
+        logger.error(
+            "GitHub auth failed for user %s on thread %s: %s",
+            user_email,
+            thread_id,
+            error,
+        )
+        await _handle_auth_failure(source, linear_issue_id, error=error, email=user_email)
+        msg = f"GitHub auth failed for {user_email}: {error}"
+        raise RuntimeError(msg)
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
