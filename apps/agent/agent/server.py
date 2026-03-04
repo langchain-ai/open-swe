@@ -5,6 +5,7 @@
 # ruff: noqa: E402
 import logging
 import warnings
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ from .middleware import (
 )
 from .prompt import construct_system_prompt
 from .tools import commit_and_open_pr, fetch_url, http_request, linear_comment
-from .utils.auth import resolve_github_token_from_email
+from .utils.auth import get_github_token_for_user, get_ls_user_id_from_email
 from .utils.linear import comment_on_linear_issue
 from .utils.model import make_model
 
@@ -233,42 +234,90 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
-async def _handle_auth_failure(
+async def leave_failure_comment(source: str, issue_id: str, message: str) -> None:
+    """Leave an auth failure comment for the appropriate source."""
+    if source == "linear" and issue_id:
+        logger.info("Posting auth failure comment to Linear issue %s (source=%s)", issue_id, source)
+        await comment_on_linear_issue(issue_id, message)
+
+
+async def get_langsmith_user_from_email(email: str) -> tuple[str | None, str | None]:
+    """Resolve LangSmith user + tenant ids from an email."""
+    user_info = await get_ls_user_id_from_email(email)
+    return user_info.get("ls_user_id"), user_info.get("tenant_id")
+
+
+async def get_token_or_auth_url_from_id(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
+    """Resolve a GitHub token or auth URL from LangSmith user + tenant ids."""
+    return await get_github_token_for_user(ls_user_id, tenant_id)
+
+
+async def persist_encrypted_github_token(thread_id: str, token: str) -> str:
+    """Encrypt a GitHub token and store it on the thread metadata."""
+    encrypted = encrypt_token(token)
+    await client.threads.update(
+        thread_id=thread_id,
+        metadata={"github_token_encrypted": encrypted},
+    )
+    return encrypted
+
+
+async def save_encrypted_token_from_email(
+    email: str | None,
     source: str,
     issue_id: str,
-    *,
-    auth_url: str | None = None,
-    error: str | None = None,
-    email: str | None = None,
-) -> None:
-    """Post an auth failure comment to the appropriate source (e.g. Linear)."""
-    if source == "linear" and issue_id:
-        if auth_url:
-            comment = (
-                "🔐 **GitHub Authentication Required**\n\n"
-                "To allow the Open SWE agent to work on this issue, "
-                "please authenticate with GitHub by clicking the link below:\n\n"
-                f"[Authenticate with GitHub]({auth_url})\n\n"
-                "Once authenticated, reply to this issue mentioning @openswe to retry."
-            )
-        elif error == "no_ls_user" and email:
-            comment = (
-                "🔐 **GitHub Authentication Required**\n\n"
-                f"Could not find a LangSmith account for **{email}**.\n\n"
-                "Please ensure this email is invited to the main LangSmith organization. "
-                "If your Linear account uses a different email than your LangSmith account, "
-                "you may need to update one of them to match.\n\n"
-                "Once your email is added to LangSmith, "
-                "reply to this issue mentioning @openswe to retry."
-            )
-        else:
-            comment = (
-                "❌ **GitHub Auth Error**\n\n"
-                f"Failed to authenticate with GitHub: {error or 'unknown error'}\n\n"
-                "Please try again or contact support."
-            )
-        logger.info("Posting auth failure comment to Linear issue %s (source=%s)", issue_id, source)
-        await comment_on_linear_issue(issue_id, comment)
+    thread_id: str,
+) -> tuple[str, str]:
+    """Resolve, encrypt, and store a GitHub token based on user email."""
+    if not email:
+        message = (
+            "❌ **GitHub Auth Error**\n\n"
+            "Failed to authenticate with GitHub: missing_user_email\n\n"
+            "Please try again or contact support."
+        )
+        await leave_failure_comment(source, issue_id, message)
+        raise ValueError("GitHub auth failed: missing user_email")
+
+    ls_user_id, tenant_id = await get_langsmith_user_from_email(email)
+    if not ls_user_id or not tenant_id:
+        message = (
+            "🔐 **GitHub Authentication Required**\n\n"
+            f"Could not find a LangSmith account for **{email}**.\n\n"
+            "Please ensure this email is invited to the main LangSmith organization. "
+            "If your Linear account uses a different email than your LangSmith account, "
+            "you may need to update one of them to match.\n\n"
+            "Once your email is added to LangSmith, "
+            "reply to this issue mentioning @openswe to retry."
+        )
+        await leave_failure_comment(source, issue_id, message)
+        raise ValueError(f"No ls_user_id found from email {email}")
+
+    auth_result = await get_token_or_auth_url_from_id(ls_user_id, tenant_id)
+    auth_url = auth_result.get("auth_url")
+    if auth_url:
+        message = (
+            "🔐 **GitHub Authentication Required**\n\n"
+            "To allow the Open SWE agent to work on this issue, "
+            "please authenticate with GitHub by clicking the link below:\n\n"
+            f"[Authenticate with GitHub]({auth_url})\n\n"
+            "Once authenticated, reply to this issue mentioning @openswe to retry."
+        )
+        await leave_failure_comment(source, issue_id, message)
+        raise ValueError("User not authenticated.")
+
+    token = auth_result.get("token")
+    if not token:
+        error = auth_result.get("error", "unknown")
+        message = (
+            "❌ **GitHub Auth Error**\n\n"
+            f"Failed to authenticate with GitHub: {error}\n\n"
+            "Please try again or contact support."
+        )
+        await leave_failure_comment(source, issue_id, message)
+        raise ValueError(f"No token found: {error}")
+
+    encrypted = await persist_encrypted_github_token(thread_id, token)
+    return token, encrypted
 
 
 async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
@@ -298,43 +347,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_issue_id = linear_issue.get("id", "")
 
-    github_token: str | None = None
-    # Resolve GitHub token from user email via LangSmith auth flow
-    if not user_email:
-        logger.error("Missing user_email for thread %s; cannot resolve GitHub token", thread_id)
-        await _handle_auth_failure(source, linear_issue_id, error="missing_user_email")
-        msg = f"GitHub auth failed for thread {thread_id}: missing user_email"
-        raise RuntimeError(msg)
+    try:
+        github_token, new_encrypted = await save_encrypted_token_from_email(
+            user_email,
+            source,
+            linear_issue_id,
+            thread_id,
+        )
+    except ValueError as exc:
+        logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
+        raise RuntimeError(str(exc)) from exc
 
-    auth_result = await resolve_github_token_from_email(user_email)
-    if "token" in auth_result:
-        github_token = auth_result["token"]
-        new_encrypted = encrypt_token(github_token)
-        config["configurable"]["github_token_encrypted"] = new_encrypted
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={"github_token_encrypted": new_encrypted},
-        )
-    elif "auth_url" in auth_result:
-        logger.warning(
-            "GitHub auth URL required for user %s on thread %s",
-            user_email,
-            thread_id,
-        )
-        await _handle_auth_failure(source, linear_issue_id, auth_url=auth_result["auth_url"])
-        msg = f"GitHub authentication required for {user_email}"
-        raise RuntimeError(msg)
-    else:
-        error = auth_result.get("error", "unknown")
-        logger.error(
-            "GitHub auth failed for user %s on thread %s: %s",
-            user_email,
-            thread_id,
-            error,
-        )
-        await _handle_auth_failure(source, linear_issue_id, error=error, email=user_email)
-        msg = f"GitHub auth failed for {user_email}: {error}"
-        raise RuntimeError(msg)
+    config["configurable"]["github_token_encrypted"] = new_encrypted
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)

@@ -30,7 +30,8 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.linear import comment_on_linear_issue
-from ..utils.sandbox_state import GITHUB_TOKENS, get_sandbox_backend
+from ..encryption import decrypt_token
+from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,8 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        github_token = GITHUB_TOKENS.get(thread_id) if thread_id else None
         encrypted_token = configurable.get("github_token_encrypted")
+        github_token = decrypt_token(encrypted_token) if encrypted_token else None
 
         logger.info(
             "PR flow token state for thread %s: has_encrypted_token=%s has_token=%s",
