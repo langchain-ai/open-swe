@@ -55,6 +55,15 @@ def _extract_slack_user_name(user: dict[str, Any]) -> str:
     return "unknown"
 
 
+def replace_bot_mention_with_username(text: str, bot_user_id: str, bot_username: str) -> str:
+    """Replace Slack bot ID mention token with @username."""
+    if not text:
+        return ""
+    if bot_user_id and bot_username:
+        return text.replace(f"<@{bot_user_id}>", f"@{bot_username}")
+    return text
+
+
 def verify_slack_signature(
     body: bytes,
     timestamp: str,
@@ -82,17 +91,23 @@ def verify_slack_signature(
     return hmac.compare_digest(expected, signature)
 
 
-def strip_bot_mention(text: str, bot_user_id: str) -> str:
+def strip_bot_mention(text: str, bot_user_id: str, bot_username: str = "") -> str:
     """Remove bot mention token from Slack text."""
     if not text:
         return ""
-    if not bot_user_id:
-        return text.strip()
-    return text.replace(f"<@{bot_user_id}>", "").strip()
+    stripped = text
+    if bot_user_id:
+        stripped = stripped.replace(f"<@{bot_user_id}>", "")
+    if bot_username:
+        stripped = stripped.replace(f"@{bot_username}", "")
+    return stripped.strip()
 
 
 def select_slack_context_messages(
-    messages: list[dict[str, Any]], current_message_ts: str, bot_user_id: str
+    messages: list[dict[str, Any]],
+    current_message_ts: str,
+    bot_user_id: str,
+    bot_username: str = "",
 ) -> tuple[list[dict[str, Any]], str]:
     """Select context from thread start or previous bot mention."""
     if not messages:
@@ -104,14 +119,18 @@ def select_slack_context_messages(
     if not up_to_current:
         up_to_current = ordered
 
-    mention_token = f"<@{bot_user_id}>" if bot_user_id else ""
-    if not mention_token:
+    mention_tokens = []
+    if bot_user_id:
+        mention_tokens.append(f"<@{bot_user_id}>")
+    if bot_username:
+        mention_tokens.append(f"@{bot_username}")
+    if not mention_tokens:
         return up_to_current, "thread_start"
 
     last_mention_index = -1
     for index, message in enumerate(up_to_current[:-1]):
         text = message.get("text", "")
-        if isinstance(text, str) and mention_token in text:
+        if isinstance(text, str) and any(token in text for token in mention_tokens):
             last_mention_index = index
 
     if last_mention_index >= 0:
@@ -120,7 +139,10 @@ def select_slack_context_messages(
 
 
 def format_slack_messages_for_prompt(
-    messages: list[dict[str, Any]], user_names_by_id: dict[str, str] | None = None
+    messages: list[dict[str, Any]],
+    user_names_by_id: dict[str, str] | None = None,
+    bot_user_id: str = "",
+    bot_username: str = "",
 ) -> str:
     """Format Slack messages into readable prompt text."""
     if not messages:
@@ -128,7 +150,14 @@ def format_slack_messages_for_prompt(
 
     lines: list[str] = []
     for message in messages:
-        text = str(message.get("text", "")).strip() or "[non-text message]"
+        text = (
+            replace_bot_mention_with_username(
+                str(message.get("text", "")),
+                bot_user_id=bot_user_id,
+                bot_username=bot_username,
+            ).strip()
+            or "[non-text message]"
+        )
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
             author_name = (user_names_by_id or {}).get(user_id) or user_id
@@ -170,6 +199,37 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             return True
         except httpx.HTTPError:
             logger.exception("Slack chat.postMessage request failed")
+            return False
+
+
+async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
+    """Add a reaction to a Slack message."""
+    if not SLACK_BOT_TOKEN:
+        return False
+
+    payload = {
+        "channel": channel_id,
+        "timestamp": message_ts,
+        "name": emoji,
+    }
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/reactions.add",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("ok"):
+                return True
+            if data.get("error") == "already_reacted":
+                return True
+            logger.warning("Slack reactions.add failed: %s", data.get("error"))
+            return False
+        except httpx.HTTPError:
+            logger.exception("Slack reactions.add request failed")
             return False
 
 

@@ -19,6 +19,7 @@ from .encryption import encrypt_token
 from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
+    add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
@@ -36,6 +37,7 @@ app = FastAPI()
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
+SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
 SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
 
@@ -436,7 +438,7 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
             repo = match.group(1)
             owner, name = repo.split("/")
             await post_slack_thread_reply(
-                channel_id, thread_ts, f"Using repository: {owner}/{name}"
+                channel_id, thread_ts, f"Using repository: `{owner}/{name}`"
             )
             return {"owner": owner, "name": name}
 
@@ -836,6 +838,14 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         )
         return
 
+    reacted = await add_slack_reaction(channel_id, event_ts, "eyes")
+    if not reacted:
+        logger.debug(
+            "Unable to add eyes reaction for Slack message ts=%s in channel=%s",
+            event_ts,
+            channel_id,
+        )
+
     thread_source_id = f"{channel_id}:{thread_ts}"
     thread_id = generate_thread_id_from_slack_thread(thread_source_id)
 
@@ -919,7 +929,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
 
     context_messages, context_mode = select_slack_context_messages(
-        thread_messages, event_ts, bot_user_id
+        thread_messages, event_ts, bot_user_id, SLACK_BOT_USERNAME
     )
     context_user_ids = [
         value
@@ -929,13 +939,21 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     user_names_by_id = await get_slack_user_names(context_user_ids)
     if user_id and user_name and user_id not in user_names_by_id:
         user_names_by_id[user_id] = user_name
-    context_text = format_slack_messages_for_prompt(context_messages, user_names_by_id)
+    context_text = format_slack_messages_for_prompt(
+        context_messages,
+        user_names_by_id,
+        bot_user_id=bot_user_id,
+        bot_username=SLACK_BOT_USERNAME,
+    )
     context_source = (
         "the previous message where I was tagged"
         if context_mode == "last_mention"
         else "the beginning of the thread"
     )
-    clean_text = strip_bot_mention(text, bot_user_id) or "(no text in mention)"
+    clean_text = (
+        strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
+        or "(no text in mention)"
+    )
     trigger_user = user_name or user_mention or "Unknown user"
 
     prompt = (
@@ -1144,7 +1162,18 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     event = payload.get("event", {})
     if event.get("type") != "app_mention":
-        if not (event.get("type") == "message" and "<@U0AKDLKCV3J>" in event.get("text", "")):
+        message_text = event.get("text", "")
+        has_username_mention = bool(
+            event.get("type") == "message"
+            and SLACK_BOT_USERNAME
+            and f"@{SLACK_BOT_USERNAME}" in message_text
+        )
+        has_id_mention = bool(
+            event.get("type") == "message"
+            and SLACK_BOT_USER_ID
+            and f"<@{SLACK_BOT_USER_ID}>" in message_text
+        )
+        if not (has_username_mention or has_id_mention):
             return {"status": "ignored", "reason": "Not an app_mention event"}
 
     if event.get("subtype") == "bot_message" or event.get("bot_id"):

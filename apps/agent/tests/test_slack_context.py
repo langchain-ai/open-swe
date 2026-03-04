@@ -1,5 +1,6 @@
 from agent.utils.slack import (
     format_slack_messages_for_prompt,
+    replace_bot_mention_with_username,
     select_slack_context_messages,
     strip_bot_mention,
 )
@@ -62,6 +63,20 @@ def test_strip_bot_mention_removes_bot_tag() -> None:
     assert strip_bot_mention("<@UBOT> please check", "UBOT") == "please check"
 
 
+def test_strip_bot_mention_removes_bot_username_tag() -> None:
+    assert (
+        strip_bot_mention("@open-swe please check", "UBOT", bot_username="open-swe")
+        == "please check"
+    )
+
+
+def test_replace_bot_mention_with_username() -> None:
+    assert (
+        replace_bot_mention_with_username("<@UBOT> can you help?", "UBOT", "open-swe")
+        == "@open-swe can you help?"
+    )
+
+
 def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
     formatted = format_slack_messages_for_prompt(
         [{"ts": "1.0", "text": "hello", "user": "U123"}],
@@ -69,3 +84,30 @@ def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
     )
 
     assert formatted == "@alice(U123): hello"
+
+
+def test_format_slack_messages_for_prompt_replaces_bot_id_mention_in_text() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "<@UBOT> status update?", "user": "U123"}],
+        {"U123": "alice"},
+        bot_user_id="UBOT",
+        bot_username="open-swe",
+    )
+
+    assert formatted == "@alice(U123): @open-swe status update?"
+
+
+def test_select_slack_context_messages_detects_username_mention() -> None:
+    selected, mode = select_slack_context_messages(
+        [
+            {"ts": "1.0", "text": "@open-swe first request", "user": "U1"},
+            {"ts": "2.0", "text": "follow up", "user": "U2"},
+            {"ts": "3.0", "text": "@open-swe second request", "user": "U3"},
+        ],
+        "3.0",
+        bot_user_id="UBOT",
+        bot_username="open-swe",
+    )
+
+    assert mode == "last_mention"
+    assert [item["ts"] for item in selected] == ["1.0", "2.0", "3.0"]
