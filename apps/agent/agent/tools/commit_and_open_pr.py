@@ -23,6 +23,7 @@ from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
 
+
 def get_github_token(config: dict[str, Any], thread_id: str | None) -> str | None:
     """Resolve a GitHub token from config metadata or thread metadata."""
     encrypted_token = None
