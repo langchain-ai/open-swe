@@ -1,4 +1,8 @@
-from agent.utils.slack import select_slack_context_messages, strip_bot_mention
+from agent.utils.slack import (
+    format_slack_messages_for_prompt,
+    select_slack_context_messages,
+    strip_bot_mention,
+)
 from agent.webapp import generate_thread_id_from_slack_thread
 
 
@@ -56,3 +60,12 @@ def test_select_slack_context_messages_ignores_messages_after_current_event() ->
 
 def test_strip_bot_mention_removes_bot_tag() -> None:
     assert strip_bot_mention("<@UBOT> please check", "UBOT") == "please check"
+
+
+def test_format_slack_messages_for_prompt_uses_name_and_id() -> None:
+    formatted = format_slack_messages_for_prompt(
+        [{"ts": "1.0", "text": "hello", "user": "U123"}],
+        {"U123": "alice"},
+    )
+
+    assert formatted == "@alice(U123): hello"

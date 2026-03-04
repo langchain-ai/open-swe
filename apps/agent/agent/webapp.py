@@ -22,6 +22,7 @@ from .utils.slack import (
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
+    get_slack_user_names,
     post_slack_thread_reply,
     select_slack_context_messages,
     strip_bot_mention,
@@ -414,6 +415,7 @@ def generate_thread_id_from_issue(issue_id: str) -> str:
         f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
     )
 
+
 def generate_thread_id_from_slack_thread(slack_thread_id: str) -> str:
     """Generate a deterministic thread ID from a Slack thread identifier."""
     hash_bytes = hashlib.sha256(f"slack-thread:{slack_thread_id}".encode()).hexdigest()
@@ -428,14 +430,16 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
     if "repo:" in message:
         # extract out the repo from the message assuming its in the format of repo:owner/repo
         import re
-        
+
         match = re.search(r"repo:([^ ]+)", message)
         if match:
             repo = match.group(1)
             owner, name = repo.split("/")
-            await post_slack_thread_reply(channel_id, thread_ts, f"Using repository: {owner}/{name}")
+            await post_slack_thread_reply(
+                channel_id, thread_ts, f"Using repository: {owner}/{name}"
+            )
             return {"owner": owner, "name": name}
-    
+
     owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
     name = SLACK_REPO_NAME.strip() or "langchainplus"
     return {"owner": owner, "name": name}
@@ -917,7 +921,15 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     context_messages, context_mode = select_slack_context_messages(
         thread_messages, event_ts, bot_user_id
     )
-    context_text = format_slack_messages_for_prompt(context_messages)
+    context_user_ids = [
+        value
+        for value in (message.get("user") for message in context_messages)
+        if isinstance(value, str) and value
+    ]
+    user_names_by_id = await get_slack_user_names(context_user_ids)
+    if user_id and user_name and user_id not in user_names_by_id:
+        user_names_by_id[user_id] = user_name
+    context_text = format_slack_messages_for_prompt(context_messages, user_names_by_id)
     context_source = (
         "the previous message where I was tagged"
         if context_mode == "last_mention"

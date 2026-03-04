@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -31,6 +32,27 @@ def _parse_ts(ts: str | None) -> float:
         return float(ts or "0")
     except (TypeError, ValueError):
         return 0.0
+
+
+def _extract_slack_user_name(user: dict[str, Any]) -> str:
+    profile = user.get("profile", {})
+    if isinstance(profile, dict):
+        display_name = profile.get("display_name")
+        if isinstance(display_name, str) and display_name.strip():
+            return display_name.strip()
+        real_name = profile.get("real_name")
+        if isinstance(real_name, str) and real_name.strip():
+            return real_name.strip()
+
+    real_name = user.get("real_name")
+    if isinstance(real_name, str) and real_name.strip():
+        return real_name.strip()
+
+    name = user.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+
+    return "unknown"
 
 
 def verify_slack_signature(
@@ -97,7 +119,9 @@ def select_slack_context_messages(
     return up_to_current, "thread_start"
 
 
-def format_slack_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
+def format_slack_messages_for_prompt(
+    messages: list[dict[str, Any]], user_names_by_id: dict[str, str] | None = None
+) -> str:
     """Format Slack messages into readable prompt text."""
     if not messages:
         return "(no thread messages available)"
@@ -107,14 +131,16 @@ def format_slack_messages_for_prompt(messages: list[dict[str, Any]]) -> str:
         text = str(message.get("text", "")).strip() or "[non-text message]"
         user_id = message.get("user")
         if isinstance(user_id, str) and user_id:
-            author = f"<@{user_id}>"
+            author_name = (user_names_by_id or {}).get(user_id) or user_id
+            author = f"@{author_name}({user_id})"
         else:
             bot_profile = message.get("bot_profile", {})
             if isinstance(bot_profile, dict):
-                author = bot_profile.get("name") or message.get("username") or "Bot"
+                bot_name = bot_profile.get("name") or message.get("username") or "Bot"
             else:
-                author = message.get("username") or "Bot"
-        lines.append(f"- {author}: {text}")
+                bot_name = message.get("username") or "Bot"
+            author = f"@{bot_name}(bot)"
+        lines.append(f"{author}: {text}")
     return "\n".join(lines)
 
 
@@ -170,6 +196,26 @@ async def get_slack_user_info(user_id: str) -> dict[str, Any] | None:
         except httpx.HTTPError:
             logger.exception("Slack users.info request failed")
     return None
+
+
+async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
+    """Get display names for a set of Slack user IDs."""
+    unique_ids = sorted({user_id for user_id in user_ids if isinstance(user_id, str) and user_id})
+    if not unique_ids:
+        return {}
+
+    user_infos = await asyncio.gather(
+        *(get_slack_user_info(user_id) for user_id in unique_ids),
+        return_exceptions=True,
+    )
+
+    user_names: dict[str, str] = {}
+    for user_id, user_info in zip(unique_ids, user_infos, strict=True):
+        if isinstance(user_info, dict):
+            user_names[user_id] = _extract_slack_user_name(user_info)
+        else:
+            user_names[user_id] = user_id
+    return user_names
 
 
 async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
