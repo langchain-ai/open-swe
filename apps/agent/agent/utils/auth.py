@@ -18,7 +18,7 @@ LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.h
 GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
 X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
 
-logger.info(
+logger.debug(
     "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
     "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s X_SERVICE_AUTH_JWT_SECRET=%s",
     "set" if LANGSMITH_API_KEY else "missing",
