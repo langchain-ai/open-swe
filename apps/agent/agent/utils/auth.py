@@ -87,7 +87,6 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
         headers = {
             "X-Service-Key": service_token,
             "X-Tenant-Id": tenant_id,
-            "X-User-Id": ls_user_id,
         }
 
         payload = {
