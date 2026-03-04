@@ -4,7 +4,6 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -18,6 +17,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..utils.github_token import get_github_token
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ def commit_and_open_pr(
         config = get_config()
         configurable = config.get("configurable", {})
         thread_id = configurable.get("thread_id")
+
         if not thread_id:
             return {"success": False, "error": "Missing thread_id in config", "pr_url": None}
 
@@ -168,10 +169,14 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        encrypted_token = configurable.get("github_token_encrypted")
-        github_token = decrypt_token(encrypted_token) if encrypted_token else None
+        github_token = get_github_token()
         if not github_token:
-            return {"success": False, "error": "Missing GitHub token", "pr_url": None}
+            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
+            return {
+                "success": False,
+                "error": "Missing GitHub token",
+                "pr_url": None,
+            }
 
         push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
         if push_result.exit_code != 0:

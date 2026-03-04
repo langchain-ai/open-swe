@@ -5,17 +5,13 @@ import hmac
 import json
 import logging
 import os
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-import jwt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 
-# Local import for encryption
-from .encryption import encrypt_token
 from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
@@ -45,47 +41,7 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
-LANGSMITH_API_KEY = os.environ.get("LANGSMITH_API_KEY_PROD", "")
-LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-
-GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
-
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
-
-X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
-
-
-def get_service_jwt_token_for_user(
-    user_id: str, tenant_id: str, expiration_seconds: int = 300
-) -> str:
-    """Create a short-lived service JWT for authenticating as a specific user.
-
-    Args:
-        tenant_id: The LangSmith tenant ID to associate with the token
-        user_id: The LangSmith user ID to associate with the token
-        expiration_seconds: Token expiration time in seconds (default: 5 minutes)
-
-    Returns:
-        JWT token string
-
-    Raises:
-        ValueError: If X_SERVICE_AUTH_JWT_SECRET is not configured
-    """
-    if not X_SERVICE_AUTH_JWT_SECRET:
-        msg = "X_SERVICE_AUTH_JWT_SECRET is not configured. Cannot generate service keys."
-        raise ValueError(msg)
-
-    exp_datetime = datetime.now(tz=UTC) + timedelta(seconds=expiration_seconds)
-    exp = int(exp_datetime.timestamp())
-
-    payload = {
-        "sub": "unspecified",
-        "exp": exp,
-        "tenant_id": tenant_id,
-        "user_id": user_id,
-    }
-
-    return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
 
 
 LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
@@ -151,100 +107,6 @@ def get_repo_config_from_team_mapping(
     return {"owner": "langchain-ai", "name": "langchainplus"}
 
 
-async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
-    """Get the LangSmith user ID and tenant ID from a user's email.
-
-    Args:
-        email: The user's email address
-
-    Returns:
-        Dict with 'ls_user_id' and 'tenant_id' keys (values may be None if not found)
-    """
-    if not LANGSMITH_API_KEY:
-        return {"ls_user_id": None, "tenant_id": None}
-
-    url = f"{LANGSMITH_API_URL}/api/v1/workspaces/current/members/active"
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(
-                url,
-                headers={"X-API-Key": LANGSMITH_API_KEY},
-                params={"emails": [email]},
-            )
-            response.raise_for_status()
-            members = response.json()
-
-            if members and len(members) > 0:
-                member = members[0]
-                return {
-                    "ls_user_id": member.get("ls_user_id"),
-                    "tenant_id": member.get("tenant_id"),
-                }
-        except httpx.HTTPError:
-            logger.debug("HTTP error getting LangSmith user info for email")
-        return {"ls_user_id": None, "tenant_id": None}
-
-
-LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
-
-
-async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str, Any]:
-    """Get GitHub OAuth token for a user via LangSmith agent auth.
-
-    Args:
-        ls_user_id: The LangSmith user ID
-        tenant_id: The LangSmith tenant ID
-
-    Returns:
-        Dict with either 'token' key or 'auth_url' key
-    """
-    if not GITHUB_OAUTH_PROVIDER_ID:
-        logger.error("GitHub auth failed: GITHUB_OAUTH_PROVIDER_ID is not configured")
-        return {"error": "GITHUB_OAUTH_PROVIDER_ID not configured"}
-
-    try:
-        service_token = get_service_jwt_token_for_user(ls_user_id, tenant_id)
-
-        headers = {
-            "X-Service-Key": service_token,
-            "X-Tenant-Id": tenant_id,
-            "X-User-Id": ls_user_id,
-        }
-
-        payload = {
-            "provider": GITHUB_OAUTH_PROVIDER_ID,
-            "scopes": ["repo"],
-            "user_id": ls_user_id,
-            "ls_user_id": ls_user_id,
-        }
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{LANGSMITH_HOST_API_URL}/v2/auth/authenticate",
-                json=payload,
-                headers=headers,
-            )
-            response.raise_for_status()
-            response_data = response.json()
-
-            token = response_data.get("token")
-            auth_url = response_data.get("url")
-
-            if token:
-                return {"token": token}
-            if auth_url:
-                return {"auth_url": auth_url}
-            return {"error": f"Unexpected auth result: {response_data}"}
-
-    except httpx.HTTPStatusError as e:
-        logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
-        return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
-    except Exception as e:  # noqa: BLE001
-        logger.error("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
-        return {"error": str(e)}
-
-
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
     """Add an emoji reaction to a Linear comment.
 
@@ -284,52 +146,6 @@ async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
             response.raise_for_status()
             result = response.json()
             return bool(result.get("data", {}).get("reactionCreate", {}).get("success"))
-        except Exception:  # noqa: BLE001
-            return False
-
-
-async def comment_on_linear_issue(issue_id: str, comment_body: str) -> bool:
-    """Add a comment to a Linear issue.
-
-    Args:
-        issue_id: The Linear issue ID
-        comment_body: The comment text
-
-    Returns:
-        True if successful, False otherwise
-    """
-    if not LINEAR_API_KEY:
-        return False
-
-    url = "https://api.linear.app/graphql"
-
-    mutation = """
-    mutation CommentCreate($issueId: String!, $body: String!) {
-        commentCreate(input: { issueId: $issueId, body: $body }) {
-            success
-            comment {
-                id
-            }
-        }
-    }
-    """
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url,
-                headers={
-                    "Authorization": LINEAR_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {"issueId": issue_id, "body": comment_body},
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            return bool(result.get("data", {}).get("commentCreate", {}).get("success"))
         except Exception:  # noqa: BLE001
             return False
 
@@ -569,59 +385,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             user_email = assignee.get("email")
             user_name = user_name or assignee.get("name")
 
-    user_mention = f"@{user_name}" if user_name else ""
-
-    logger.info(
-        "User email: %s, GITHUB_OAUTH_PROVIDER_ID set: %s",
-        user_email,
-        bool(GITHUB_OAUTH_PROVIDER_ID),
-    )
-
-    github_token = None
-    if user_email and GITHUB_OAUTH_PROVIDER_ID:
-        user_info = await get_ls_user_id_from_email(user_email)
-        ls_user_id = user_info.get("ls_user_id")
-        tenant_id = user_info.get("tenant_id")
-        logger.info(
-            "LangSmith user ID for %s: %s, tenant_id: %s", user_email, ls_user_id, tenant_id
-        )
-
-        if ls_user_id and tenant_id:
-            auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
-            logger.info("Auth result keys: %s", list(auth_result.keys()))
-
-            if "token" in auth_result:
-                github_token = auth_result["token"]
-                logger.info("GitHub token obtained for user %s", user_email)
-            elif "auth_url" in auth_result:
-                auth_url = auth_result["auth_url"]
-                logger.info("GitHub auth required for user %s, sending auth URL", user_email)
-                comment = (
-                    f"🔐 **GitHub Authentication Required** {user_mention}\n\n"
-                    "To allow the Open SWE agent to work on this issue, "
-                    "please authenticate with GitHub by clicking the link below:\n\n"
-                    f"[Authenticate with GitHub]({auth_url})\n\n"
-                    "Once authenticated, reply to this issue mentioning @openswe to retry."
-                )
-
-                await comment_on_linear_issue(issue_id, comment)
-                return
-            else:
-                logger.warning("Auth result has neither token nor auth_url: %s", auth_result)
-        else:
-            logger.warning("User %s not found in LangSmith workspace", user_email)
-            comment = (
-                f"🔐 **GitHub Authentication Required** {user_mention}\n\n"
-                f"Could not find a LangSmith account for **{user_email}**.\n\n"
-                "Please ensure this email is invited to the main LangSmith organization. "
-                "If your Linear account uses a different email than your LangSmith account, "
-                "you may need to update one of them to match.\n\n"
-                "Once your email is added to LangSmith, "
-                "reply to this issue mentioning @openswe to retry."
-            )
-
-            await comment_on_linear_issue(issue_id, comment)
-            return
+    logger.info("User email for issue %s: %s", issue_id, user_email)
 
     title = full_issue.get("title", "No title")
     description = full_issue.get("description") or "No description"
@@ -757,67 +521,41 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             "linear_issue_number": linear_issue_number,
             "triggering_user_name": user_name or "",
         },
+        "user_email": user_email,
+        "source": "linear",
     }
-    if github_token:
-        configurable["github_token_encrypted"] = encrypt_token(github_token)
 
-        logger.info("Checking if thread %s is active before creating run", thread_id)
-        thread_active = await is_thread_active(thread_id)
-        logger.info("Thread %s active status: %s", thread_id, thread_active)
+    logger.info("Checking if thread %s is active before creating run", thread_id)
+    thread_active = await is_thread_active(thread_id)
+    logger.info("Thread %s active status: %s", thread_id, thread_active)
 
-        if thread_active:
-            logger.info(
-                "Thread %s is active (busy), will queue message instead of creating run",
-                thread_id,
-            )
+    if thread_active:
+        logger.info(
+            "Thread %s is active (busy), will queue message instead of creating run",
+            thread_id,
+        )
 
-            queued_payload = {"text": prompt, "image_urls": image_urls}
-            queued = await queue_message_for_thread(
-                thread_id=thread_id,
-                message_content=queued_payload,
-            )
+        queued_payload = {"text": prompt, "image_urls": image_urls}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
 
-            if queued:
-                logger.info(
-                    "Message queued for thread %s, will be processed by middleware", thread_id
-                )
-            else:
-                logger.error("Failed to queue message for thread %s", thread_id)
+        if queued:
+            logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
         else:
-            logger.info("Creating LangGraph run for thread %s", thread_id)
-            langgraph_client = get_client(url=LANGGRAPH_URL)
-            await langgraph_client.runs.create(
-                thread_id,
-                "agent",
-                input={"messages": [{"role": "user", "content": content_blocks}]},
-                config={"configurable": configurable},
-                if_not_exists="create",
-            )
-            logger.info("LangGraph run created successfully for thread %s", thread_id)
+            logger.error("Failed to queue message for thread %s", thread_id)
     else:
-        logger.warning("No GitHub token available, cannot create run for issue %s", issue_id)
-        if not user_email:
-            comment = (
-                f"🔐 **GitHub Authentication Required** {user_mention}\n\n"
-                "Could not determine the user email from this issue. "
-                "Please ensure your Linear account has an email address configured.\n\n"
-                "Reply to this issue mentioning @openswe to retry."
-            )
-        elif not GITHUB_OAUTH_PROVIDER_ID:
-            comment = (
-                f"❌ **Configuration Error** {user_mention}\n\n"
-                "The Open SWE agent is not properly configured (missing GitHub OAuth provider).\n\n"
-                "Please contact your administrator."
-            )
-        else:
-            comment = (
-                f"🔐 **GitHub Authentication Required** {user_mention}\n\n"
-                "Unable to authenticate with GitHub. "
-                "Please ensure you have connected your GitHub account in LangSmith.\n\n"
-                "Reply to this issue mentioning @openswe to retry."
-            )
-
-        await comment_on_linear_issue(issue_id, comment)
+        logger.info("Creating LangGraph run for thread %s", thread_id)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={"configurable": configurable},
+            if_not_exists="create",
+        )
+        logger.info("LangGraph run created successfully for thread %s", thread_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
