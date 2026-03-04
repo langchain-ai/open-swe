@@ -133,7 +133,7 @@ async def open_pr_if_needed(
         encrypted_token = configurable.get("github_token_encrypted")
         github_token = None
         if encrypted_token:
-            github_token = decrypt_token(encrypted_token)i 
+            github_token = decrypt_token(encrypted_token)
 
         if github_token:
             await asyncio.to_thread(
