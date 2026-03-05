@@ -214,6 +214,7 @@ export async function checkoutBranchAndCommit(
 ): Promise<{ branchName: string; updatedTaskPlan?: TaskPlan }> {
   const absoluteRepoDir = getRepoAbsolutePath(targetRepository);
   const branchName = options.branchName || getBranchName(config);
+  const executor = createShellExecutor(config);
 
   logger.info(`Committing changes to branch ${branchName}`);
 
@@ -259,7 +260,7 @@ export async function checkoutBranchAndCommit(
   );
 
   if (pushRes instanceof Error) {
-    const errorFields =
+    const pushErrorFields =
       pushRes instanceof Error
         ? {
             message: pushRes.message,
@@ -267,35 +268,71 @@ export async function checkoutBranchAndCommit(
           }
         : pushRes;
 
-    logger.error("Failed to push changes, attempting to pull and push again", {
-      ...errorFields,
-    });
-
-    // attempt to git pull, then push again
-    const pullRes = await withRetry(
-      async () => {
-        return await sandbox.git.pull(
-          absoluteRepoDir,
-          "git",
-          options.githubInstallationToken,
-        );
-      },
-      { retries: 1, delay: 0 },
+    logger.error(
+      "Failed to push changes, attempting reset/pull/re-commit strategy",
+      { ...pushErrorFields },
     );
 
-    if (pullRes instanceof Error) {
-      const errorFields =
-        pullRes instanceof Error
-          ? {
-              message: pullRes.message,
-              name: pullRes.name,
-            }
-          : pullRes;
-      logger.error("Failed to pull changes after a push failed.", {
-        ...errorFields,
+    // Step 1: Reset the last commit, keeping changes in the working directory.
+    // This allows a clean pull without merge conflicts in the commit history.
+    const resetRes = await executor.executeCommand({
+      command: "git reset HEAD~",
+      workdir: absoluteRepoDir,
+      timeout: TIMEOUT_SEC,
+      sandbox,
+    });
+
+    if (resetRes.exitCode !== 0) {
+      logger.error("Failed to reset last commit after push failure", {
+        exitCode: resetRes.exitCode,
+        result: resetRes.result,
       });
     } else {
-      logger.info("Successfully pulled changes. Pushing again.");
+      logger.info("Successfully reset last commit. Pulling remote changes.");
+
+      // Step 2: Disable rebase for the pull so we get a clean merge commit.
+      await executor.executeCommand({
+        command: "git config pull.rebase false",
+        workdir: absoluteRepoDir,
+        timeout: TIMEOUT_SEC,
+        sandbox,
+      });
+
+      // Step 3: Pull latest changes from remote.
+      const pullRes = await withRetry(
+        async () => {
+          return await sandbox.git.pull(
+            absoluteRepoDir,
+            "git",
+            options.githubInstallationToken,
+          );
+        },
+        { retries: 1, delay: 0 },
+      );
+
+      if (pullRes instanceof Error) {
+        logger.error("Failed to pull changes after reset", {
+          message: pullRes.message,
+          name: pullRes.name,
+        });
+      } else {
+        logger.info(
+          "Successfully pulled remote changes. Re-adding and re-committing local changes.",
+        );
+
+        // Step 4: Re-add the validated files.
+        await sandbox.git.add(absoluteRepoDir, validFiles);
+
+        // Step 5: Re-commit the local changes on top of the pulled remote state.
+        await sandbox.git.commit(
+          absoluteRepoDir,
+          constructCommitMessage(),
+          userName,
+          userEmail,
+        );
+
+        logger.info("Re-committed local changes. Attempting final push.");
+      }
     }
 
     const pushRes2 = await withRetry(
@@ -327,7 +364,7 @@ export async function checkoutBranchAndCommit(
       });
       throw new Error("Failed to push changes");
     } else {
-      logger.info("Pulling changes before pushing succeeded");
+      logger.info("Successfully pushed changes after reset/pull/re-commit");
     }
   } else {
     logger.info("Successfully pushed changes");
