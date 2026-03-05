@@ -202,6 +202,39 @@ async def post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) ->
             return False
 
 
+async def post_slack_ephemeral_message(
+    channel_id: str, user_id: str, text: str, thread_ts: str | None = None
+) -> bool:
+    """Post an ephemeral message visible only to one user."""
+    if not SLACK_BOT_TOKEN:
+        return False
+
+    payload: dict[str, str] = {
+        "channel": channel_id,
+        "user": user_id,
+        "text": text,
+    }
+    if thread_ts:
+        payload["thread_ts"] = thread_ts
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(
+                f"{SLACK_API_BASE_URL}/chat.postEphemeral",
+                headers=_slack_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack chat.postEphemeral failed: %s", data.get("error"))
+                return False
+            return True
+        except httpx.HTTPError:
+            logger.exception("Slack chat.postEphemeral request failed")
+            return False
+
+
 async def add_slack_reaction(channel_id: str, message_ts: str, emoji: str = "eyes") -> bool:
     """Add a reaction to a Slack message."""
     if not SLACK_BOT_TOKEN:
