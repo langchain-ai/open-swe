@@ -123,7 +123,9 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                 f"cd {repo_dir} && git remote set-url origin {auth_url}",
             )
             pull_result = await loop.run_in_executor(
-                None, sandbox_backend.execute, f"cd {repo_dir} && git pull origin"
+                None,
+                sandbox_backend.execute,
+                f"cd {repo_dir} && git pull origin $(git -C {repo_dir} rev-parse --abbrev-ref HEAD)",
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:
@@ -131,31 +133,6 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                     "Git pull failed with exit code %s: %s",
                     pull_result.exit_code,
                     pull_result.output[:200] if pull_result.output else "",
-                )
-                logger.info("Attempting recovery after git pull failure")
-                await loop.run_in_executor(
-                    None, sandbox_backend.execute, f"cd {repo_dir} && git fetch origin"
-                )
-                head_result = await loop.run_in_executor(
-                    None,
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git symbolic-ref --short refs/remotes/origin/HEAD",
-                )
-                default_branch = ""
-                if head_result.exit_code == 0:
-                    default_branch = head_result.output.strip().replace("origin/", "")
-                if not default_branch:
-                    default_branch = "main"
-                safe_branch = shlex.quote(default_branch)
-                await loop.run_in_executor(
-                    None,
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git checkout -B {safe_branch} origin/{safe_branch}",
-                )
-                await loop.run_in_executor(
-                    None,
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git reset --hard origin/{safe_branch}",
                 )
         except Exception:
             logger.exception("Failed to execute git pull")

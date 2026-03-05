@@ -326,6 +326,20 @@ async def save_encrypted_token_from_email(
     return token, encrypted
 
 
+async def _is_github_token_valid(token: str) -> bool:
+    """Check if a GitHub token is still valid by calling GET /user."""
+    try:
+        async with httpx.AsyncClient() as http:
+            r = await http.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            return r.status_code != 401
+    except Exception:
+        logger.debug("Failed to validate GitHub token, assuming invalid")
+        return False
+
+
 async def _get_token_from_thread_metadata(thread_id: str) -> tuple[str, str] | None:
     """Read and decrypt a GitHub token from thread metadata. Returns (token, encrypted) or None."""
     try:
@@ -336,6 +350,9 @@ async def _get_token_from_thread_metadata(thread_id: str) -> tuple[str, str] | N
             if encrypted:
                 token = decrypt_token(encrypted)
                 if token:
+                    if not await _is_github_token_valid(token):
+                        logger.info("Cached GitHub token for thread %s is expired, falling back to OAuth", thread_id)
+                        return None
                     logger.info("Using existing GitHub token from thread metadata for thread %s", thread_id)
                     return token, encrypted
     except Exception:

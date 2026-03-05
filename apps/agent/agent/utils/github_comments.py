@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -10,6 +11,7 @@ from typing import Any
 
 import httpx
 from langgraph_sdk import get_client
+from langgraph_sdk.errors import NotFoundError
 
 from ..encryption import decrypt_token
 
@@ -22,7 +24,7 @@ client = get_client()
 # Reaction endpoint differs per comment type
 _REACTION_ENDPOINTS: dict[str, str] = {
     "issue_comment": "https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-                                                                                                                                             "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
+    "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
     "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
 }
 
@@ -76,17 +78,13 @@ async def get_github_token_from_thread(thread_id: str) -> str | None:
                     logger.info("Found GitHub token in thread metadata for thread %s", thread_id)
                     return token
 
-        logger.warning(
-            "No github_token_encrypted found in thread metadata for thread %s", thread_id
-        )
+        logger.debug("No github_token_encrypted found in thread metadata for thread %s", thread_id)
         return None
-    except Exception as exc:
-        from langgraph_sdk.errors import NotFoundError
-
-        if isinstance(exc, NotFoundError):
-            logger.debug("Thread %s not found, will fall back to OAuth", thread_id)
-        else:
-            logger.exception("Failed to get GitHub token from thread %s", thread_id)
+    except NotFoundError:
+        logger.debug("Thread %s not found, will fall back to OAuth", thread_id)
+        return None
+    except Exception:
+        logger.exception("Failed to get GitHub token from thread %s", thread_id)
         return None
 
 
@@ -218,61 +216,59 @@ async def fetch_pr_comments_since_last_tag(
     all_comments: list[dict[str, Any]] = []
 
     async with httpx.AsyncClient() as http_client:
-        # 1. PR issue comments
-        pr_comments = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments",
-            headers,
+        pr_comments, review_comments, reviews = await asyncio.gather(
+            _fetch_paginated(
+                http_client,
+                f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments",
+                headers,
+            ),
+            _fetch_paginated(
+                http_client,
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                headers,
+            ),
+            _fetch_paginated(
+                http_client,
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+                headers,
+            ),
         )
-        for c in pr_comments:
-            all_comments.append(
-                {
-                    "body": c.get("body", ""),
-                    "author": c.get("user", {}).get("login", "unknown"),
-                    "created_at": c.get("created_at", ""),
-                    "type": "pr_comment",
-                    "comment_id": c.get("id"),
-                }
-            )
 
-        # 2. Inline review comments
-        review_comments = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments",
-            headers,
+    for c in pr_comments:
+        all_comments.append(
+            {
+                "body": c.get("body", ""),
+                "author": c.get("user", {}).get("login", "unknown"),
+                "created_at": c.get("created_at", ""),
+                "type": "pr_comment",
+                "comment_id": c.get("id"),
+            }
         )
-        for c in review_comments:
-            all_comments.append(
-                {
-                    "body": c.get("body", ""),
-                    "author": c.get("user", {}).get("login", "unknown"),
-                    "created_at": c.get("created_at", ""),
-                    "type": "review_comment",
-                    "comment_id": c.get("id"),
-                    "path": c.get("path", ""),
-                    "line": c.get("line") or c.get("original_line"),
-                }
-            )
-
-        # 3. Top-level review messages
-        reviews = await _fetch_paginated(
-            http_client,
-            f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
-            headers,
+    for c in review_comments:
+        all_comments.append(
+            {
+                "body": c.get("body", ""),
+                "author": c.get("user", {}).get("login", "unknown"),
+                "created_at": c.get("created_at", ""),
+                "type": "review_comment",
+                "comment_id": c.get("id"),
+                "path": c.get("path", ""),
+                "line": c.get("line") or c.get("original_line"),
+            }
         )
-        for r in reviews:
-            body = r.get("body", "")
-            if not body:
-                continue
-            all_comments.append(
-                {
-                    "body": body,
-                    "author": r.get("user", {}).get("login", "unknown"),
-                    "created_at": r.get("submitted_at", ""),
-                    "type": "review",
-                    "comment_id": r.get("id"),
-                }
-            )
+    for r in reviews:
+        body = r.get("body", "")
+        if not body:
+            continue
+        all_comments.append(
+            {
+                "body": body,
+                "author": r.get("user", {}).get("login", "unknown"),
+                "created_at": r.get("submitted_at", ""),
+                "type": "review",
+                "comment_id": r.get("id"),
+            }
+        )
 
     # Sort all comments chronologically
     all_comments.sort(key=lambda c: c.get("created_at", ""))
