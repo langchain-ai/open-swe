@@ -296,7 +296,7 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
-async def check_if_using_repo_msg_send(
+async def check_if_using_repo_msg_sent(
     channel_id: str, thread_ts: str, using_repo_str: str
 ) -> bool:
     thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
@@ -342,7 +342,7 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
         name = default_name
 
     using_repo_str = f"Using repository: `{owner}/{name}`"
-    if not await check_if_using_repo_msg_send(channel_id, thread_ts, using_repo_str):
+    if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
         await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
 
     return {"owner": owner, "name": name}
