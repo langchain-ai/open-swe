@@ -37,7 +37,9 @@ TASK_EXECUTION_SECTION = """---
 
 ### Task Execution
 
-If you make changes, call `linear_comment` to notify the user of the changes. For questions or status updates, call `linear_comment` with your answer.
+If you make changes, communicate updates in the source channel:
+- Use `linear_comment` for Linear-triggered tasks.
+- Use `slack_thread_reply` for Slack-triggered tasks.
 
 For tasks that require code changes, follow this order:
 
@@ -45,12 +47,12 @@ For tasks that require code changes, follow this order:
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run tests and linters to confirm correctness before submitting.
 4. **Submit** — Call `commit_and_open_pr`.
-5. **Comment** — Call `linear_comment` with a summary and the PR link.
+5. **Comment** — Call `linear_comment` or `slack_thread_reply` with a summary and the PR link.
 
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment` with your answer. Never leave a question unanswered."""
+2. **Comment** — Call `linear_comment` or `slack_thread_reply` with your answer. Never leave a question unanswered."""
 
 
 TOOL_USAGE_SECTION = """---
@@ -70,7 +72,11 @@ Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API call
 Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
 
 #### `linear_comment`
-Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!"."""
+Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!".
+
+#### `slack_thread_reply`
+Posts a message to the active Slack thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Slack.
+Remember that Slack does not use standard markdown formatting. Ensure you always conform to the Slack specific markdown format when sending messages"""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---

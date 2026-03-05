@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import uuid
 from typing import Any
 
 import httpx
@@ -14,12 +15,28 @@ from langgraph_sdk import get_client
 
 from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.slack import (
+    add_slack_reaction,
+    fetch_slack_thread_messages,
+    format_slack_messages_for_prompt,
+    get_slack_user_info,
+    get_slack_user_names,
+    post_slack_thread_reply,
+    select_slack_context_messages,
+    strip_bot_mention,
+    verify_slack_signature,
+)
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
+SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
+SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
+SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
+SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -216,6 +233,33 @@ def generate_thread_id_from_issue(issue_id: str) -> str:
         f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
         f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
     )
+
+
+def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
+    """Generate a deterministic thread ID from a Slack thread identifier."""
+    composite = f"{channel_id}:{thread_id}"
+    md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
+    return str(uuid.UUID(hex=md5_hex))
+
+
+async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
+    """Resolve repository configuration for Slack-triggered runs."""
+    if "repo:" in message:
+        # extract out the repo from the message assuming its in the format of repo:owner/repo
+        import re
+
+        match = re.search(r"repo:([^ ]+)", message)
+        if match:
+            repo = match.group(1)
+            owner, name = repo.split("/")
+            await post_slack_thread_reply(
+                channel_id, thread_ts, f"Using repository: `{owner}/{name}`"
+            )
+            return {"owner": owner, "name": name}
+
+    owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
+    name = SLACK_REPO_NAME.strip() or "langchainplus"
+    return {"owner": owner, "name": name}
 
 
 async def is_thread_active(thread_id: str) -> bool:
@@ -513,6 +557,120 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         logger.info("LangGraph run created successfully for thread %s", thread_id)
 
 
+async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+    """Process a Slack app mention by creating or interrupting a thread run."""
+    channel_id = event_data.get("channel_id", "")
+    thread_ts = event_data.get("thread_ts", "")
+    event_ts = event_data.get("event_ts", "")
+    user_id = event_data.get("user_id", "")
+    text = event_data.get("text", "")
+    bot_user_id = event_data.get("bot_user_id", "")
+
+    if not channel_id or not thread_ts or not event_ts:
+        logger.warning(
+            "Missing Slack event fields (channel_id=%s, thread_ts=%s, event_ts=%s)",
+            channel_id,
+            thread_ts,
+            event_ts,
+        )
+        return
+
+    reacted = await add_slack_reaction(channel_id, event_ts, "eyes")
+    if not reacted:
+        logger.debug(
+            "Unable to add eyes reaction for Slack message ts=%s in channel=%s",
+            event_ts,
+            channel_id,
+        )
+
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+
+    user_email = None
+    user_name = ""
+    if user_id:
+        slack_user = await get_slack_user_info(user_id)
+        if slack_user:
+            profile = slack_user.get("profile", {})
+            if isinstance(profile, dict):
+                user_email = profile.get("email")
+                user_name = (
+                    profile.get("display_name")
+                    or profile.get("real_name")
+                    or slack_user.get("real_name")
+                    or slack_user.get("name")
+                    or ""
+                )
+
+    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+    if not any(str(message.get("ts")) == str(event_ts) for message in thread_messages):
+        thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
+
+    context_messages, context_mode = select_slack_context_messages(
+        thread_messages, event_ts, bot_user_id, SLACK_BOT_USERNAME
+    )
+    context_user_ids = [
+        value
+        for value in (message.get("user") for message in context_messages)
+        if isinstance(value, str) and value
+    ]
+    user_names_by_id = await get_slack_user_names(context_user_ids)
+    if user_id and user_name and user_id not in user_names_by_id:
+        user_names_by_id[user_id] = user_name
+    context_text = format_slack_messages_for_prompt(
+        context_messages,
+        user_names_by_id,
+        bot_user_id=bot_user_id,
+        bot_username=SLACK_BOT_USERNAME,
+    )
+    context_source = (
+        "the previous message where I was tagged"
+        if context_mode == "last_mention"
+        else "the beginning of the thread"
+    )
+    clean_text = (
+        strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
+        or "(no text in mention)"
+    )
+    trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
+
+    prompt = (
+        "You were mentioned in Slack.\n\n"
+        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Triggered by\n{trigger_user}\n\n"
+        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
+        f"- Context starts at: {context_source}\n\n"
+        f"## Conversation Context\n{context_text}\n\n"
+        f"## Latest Mention Request\n{clean_text}\n\n"
+        "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+        "status updates, and final summaries."
+    )
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+
+    configurable: dict[str, Any] = {
+        "repo": repo_config,
+        "slack_thread": {
+            "channel_id": channel_id,
+            "thread_ts": thread_ts,
+            "triggering_user_id": user_id,
+            "triggering_user_name": user_name,
+            "triggering_user_email": user_email,
+            "triggering_event_ts": event_ts,
+        },
+        "user_email": user_email,
+        "source": "slack",
+    }
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": content_blocks}]},
+        config={"configurable": configurable},
+        if_not_exists="create",
+        multitask_strategy="interrupt",
+    )
+
+
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
     """Verify the Linear webhook signature.
 
@@ -649,6 +807,100 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
 async def linear_webhook_verify() -> dict[str, str]:
     """Verify endpoint for Linear webhook setup."""
     return {"status": "ok", "message": "Linear webhook endpoint is active"}
+
+
+@app.post("/webhooks/slack")
+async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Handle Slack Event API webhooks for app mentions."""
+    body = await request.body()
+
+    signature = request.headers.get("X-Slack-Signature", "")
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    if SLACK_SIGNING_SECRET and not verify_slack_signature(
+        body=body,
+        timestamp=timestamp,
+        signature=signature,
+        secret=SLACK_SIGNING_SECRET,
+    ):
+        logger.warning("Invalid Slack signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse Slack webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    if payload.get("type") == "url_verification":
+        challenge = payload.get("challenge", "")
+        return {"challenge": challenge}
+
+    if payload.get("type") != "event_callback":
+        return {"status": "ignored", "reason": "Not an event callback"}
+
+    event = payload.get("event", {})
+    if event.get("type") != "app_mention":
+        message_text = event.get("text", "")
+        has_username_mention = bool(
+            event.get("type") == "message"
+            and SLACK_BOT_USERNAME
+            and f"@{SLACK_BOT_USERNAME}" in message_text
+        )
+        has_id_mention = bool(
+            event.get("type") == "message"
+            and SLACK_BOT_USER_ID
+            and f"<@{SLACK_BOT_USER_ID}>" in message_text
+        )
+        if not (has_username_mention or has_id_mention):
+            return {"status": "ignored", "reason": "Not an app_mention event"}
+
+    if event.get("subtype") == "bot_message" or event.get("bot_id"):
+        return {"status": "ignored", "reason": "Event from a bot"}
+
+    channel_id = event.get("channel", "")
+    event_ts = event.get("ts", "")
+    thread_ts = event.get("thread_ts") or event_ts
+    user_id = event.get("user", "")
+    text = event.get("text", "")
+    if not channel_id or not event_ts or not thread_ts:
+        return {"status": "ignored", "reason": "Missing channel/thread timestamp"}
+
+    bot_user_id = SLACK_BOT_USER_ID
+    if not bot_user_id:
+        authorizations = payload.get("authorizations", [])
+        if isinstance(authorizations, list) and authorizations:
+            auth_user_id = authorizations[0].get("user_id")
+            if isinstance(auth_user_id, str):
+                bot_user_id = auth_user_id
+    if not bot_user_id:
+        authed_users = payload.get("authed_users", [])
+        if isinstance(authed_users, list) and authed_users:
+            first_user = authed_users[0]
+            if isinstance(first_user, str):
+                bot_user_id = first_user
+
+    if bot_user_id and user_id == bot_user_id:
+        return {"status": "ignored", "reason": "Event from this bot user"}
+
+    event_data = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "event_ts": event_ts,
+        "user_id": user_id,
+        "text": text,
+        "bot_user_id": bot_user_id,
+    }
+    repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
+
+    background_tasks.add_task(process_slack_mention, event_data, repo_config)
+
+    return {"status": "accepted", "message": "Slack mention queued"}
+
+
+@app.get("/webhooks/slack")
+async def slack_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for Slack webhook setup."""
+    return {"status": "ok", "message": "Slack webhook endpoint is active"}
 
 
 @app.get("/health")
