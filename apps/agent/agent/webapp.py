@@ -244,21 +244,21 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
+    owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
+    name = SLACK_REPO_NAME.strip() or "langchainplus"
+
     if "repo:" in message:
-        # extract out the repo from the message assuming its in the format of repo:owner/repo
         import re
 
         match = re.search(r"repo:([^ ]+)", message)
         if match:
             repo = match.group(1)
-            owner, name = repo.split("/")
-            await post_slack_thread_reply(
-                channel_id, thread_ts, f"Using repository: `{owner}/{name}`"
-            )
-            return {"owner": owner, "name": name}
-
-    owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    name = SLACK_REPO_NAME.strip() or "langchainplus"
+            if "/" in repo:
+                owner, name = repo.split("/", 1)
+    
+    await post_slack_thread_reply(
+        channel_id, thread_ts, f"Using repository: `{owner}/{name}`"
+    )
     return {"owner": owner, "name": name}
 
 
