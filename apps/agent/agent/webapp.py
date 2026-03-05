@@ -255,10 +255,8 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
             repo = match.group(1)
             if "/" in repo:
                 owner, name = repo.split("/", 1)
-    
-    await post_slack_thread_reply(
-        channel_id, thread_ts, f"Using repository: `{owner}/{name}`"
-    )
+
+    await post_slack_thread_reply(channel_id, thread_ts, f"Using repository: `{owner}/{name}`")
     return {"owner": owner, "name": name}
 
 
