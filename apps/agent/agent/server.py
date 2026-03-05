@@ -23,19 +23,24 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-from langchain_openai import ChatOpenAI
 from langsmith.sandbox import SandboxClientError
 
-from .encryption import decrypt_token
 from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
     open_pr_if_needed,
-    post_to_linear_after_model,
 )
 from .prompt import construct_system_prompt
-from .tools import commit_and_open_pr, fetch_url, http_request
+from .tools import (
+    commit_and_open_pr,
+    fetch_url,
+    http_request,
+    linear_comment,
+    slack_thread_reply,
+)
+from .utils.auth import save_encrypted_token_from_email
+from .utils.model import make_model
 
 client = get_client()
 
@@ -235,7 +240,6 @@ DEFAULT_RECURSION_LIMIT = 1_000
 async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     """Get or create an agent with a sandbox for the given thread."""
     thread_id = config["configurable"].get("thread_id", None)
-    logger.info("get_agent called for thread %s", thread_id)
 
     config["recursion_limit"] = DEFAULT_RECURSION_LIMIT
 
@@ -243,16 +247,27 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     repo_owner = repo_config.get("owner")
     repo_name = repo_config.get("name")
 
-    encrypted_token = config["configurable"].get("github_token_encrypted")
-    if encrypted_token:
-        github_token = decrypt_token(encrypted_token)
-
     if thread_id is None or not graph_loaded_for_execution(config):
         logger.info("No thread_id or not for execution, returning agent without sandbox")
         return create_deep_agent(
             system_prompt="",
             tools=[],
         ).with_config(config)
+
+    # --- GitHub token resolution ---
+    user_email = config["configurable"].get("user_email")
+    source = config["configurable"].get("source")
+    if not source:
+        logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
+        msg = f"GitHub auth failed for thread {thread_id}: missing source"
+        raise RuntimeError(msg)
+    try:
+        github_token, new_encrypted = await save_encrypted_token_from_email(user_email, source)
+    except ValueError as exc:
+        logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
+        raise RuntimeError(str(exc)) from exc
+
+    config["metadata"]["github_token_encrypted"] = new_encrypted
 
     sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
     sandbox_id = await get_sandbox_id_from_metadata(thread_id)
@@ -361,19 +376,18 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     return create_deep_agent(
-        model=ChatOpenAI(model="gpt-5.2-codex", temperature=0, max_tokens=20_000),
+        model=make_model("openai:gpt-5.3-codex", temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
             repo_dir,
             linear_project_id=linear_project_id,
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[http_request, fetch_url, commit_and_open_pr],
+        tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),
             check_message_queue_before_model,
-            post_to_linear_after_model,
             open_pr_if_needed,
         ],
     ).with_config(config)
