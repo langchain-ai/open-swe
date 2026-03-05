@@ -5007,7 +5007,7 @@ __metadata:
     swr: ^2.4.0
     tailwind-merge: ^3.0.2
     tailwind-scrollbar: ^4.0.1
-    tailwindcss: ^4.0.13
+    tailwindcss: ^4.2.1
     tailwindcss-animate: ^1.0.7
     typescript: ~5.7.2
     typescript-eslint: ^8.54.0
@@ -20592,10 +20592,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tailwindcss@npm:4.1.11, tailwindcss@npm:^4.0.13":
+"tailwindcss@npm:4.1.11":
   version: 4.1.11
   resolution: "tailwindcss@npm:4.1.11"
   checksum: db5883219aa7b4192aa13a028547867c5d6c18b3438b99c25ac7af64c3f9475d1b96970cb27f52f6f53789bb91d8fc4ed8e7f181c73ba7dda721cf5a44983804
+  languageName: node
+  linkType: hard
+
+"tailwindcss@npm:^4.2.1":
+  version: 4.2.1
+  resolution: "tailwindcss@npm:4.2.1"
+  checksum: dc2a2dd6bc486932211d277a3fee64b98dd4bb846699e94dc9e69ac53656cb5a407eaf6eb27917ba5ec4a7418482380df48bbb72859505b2e121d30b60053df7
   languageName: node
   linkType: hard
 
