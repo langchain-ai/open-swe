@@ -10,7 +10,7 @@ import {
 import { List, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { PlanItem, Task, TaskPlan } from "@openswe/shared/open-swe/types";
+import { PlanItem, TaskPlan } from "@openswe/shared/open-swe/types";
 import {
   getActivePlanItems,
   getActiveTask,
@@ -52,13 +52,12 @@ export function ProgressBar({
     );
   }
 
-  let currentTask: Task | null = null;
   let planItems: PlanItem[] = [];
   let sortedPlanItems: PlanItem[] = [];
   let currentTaskIndex: number | null = null;
 
   try {
-    currentTask = getActiveTask(taskPlan);
+    getActiveTask(taskPlan);
     planItems = getActivePlanItems(taskPlan);
     sortedPlanItems = [...planItems].sort((a, b) => a.index - b.index);
 
@@ -69,7 +68,7 @@ export function ProgressBar({
         (min, item) => (item.index < min ? item.index : min),
         Number.POSITIVE_INFINITY,
       );
-  } catch (error) {
+  } catch (_error) {
     return (
       <div
         className={cn(

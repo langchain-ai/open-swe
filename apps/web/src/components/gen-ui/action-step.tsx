@@ -7,7 +7,6 @@ import {
   FileText,
   ChevronDown,
   ChevronUp,
-  MessageSquare,
   Search,
   CheckCircle,
   XCircle,

@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ArrowLeft, GitBranch, Terminal, Clock } from "lucide-react";
+import { ArrowLeft, GitBranch, Clock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThreadSwitcher } from "./thread-switcher";
 import { ThreadMetadata } from "./types";

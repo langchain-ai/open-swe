@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
         email: user.email,
       },
     });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json(
       { error: "Failed to fetch user info" },
       { status: 500 },

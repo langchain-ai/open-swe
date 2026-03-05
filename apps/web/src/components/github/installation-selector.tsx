@@ -10,7 +10,6 @@ import { GitHubSVG } from "@/components/icons/github";
 import { useGitHubAppProvider } from "@/providers/GitHubApp";
 import { cn } from "@/lib/utils";
 import { Building2, User } from "lucide-react";
-import type { Installation } from "@/hooks/useGitHubInstallations";
 
 interface InstallationSelectorProps {
   disabled?: boolean;
@@ -37,7 +36,7 @@ export function InstallationSelector({
     await switchInstallation(value);
   };
 
-  const getAccountIcon = (accountType: "User" | "Organization") => {
+  const _getAccountIcon = (accountType: "User" | "Organization") => {
     return accountType === "Organization" ? (
       <Building2 className="h-4 w-4" />
     ) : (

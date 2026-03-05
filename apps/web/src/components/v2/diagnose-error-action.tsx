@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  AlertTriangle,
-  Loader2,
-  CheckCircle,
-  MessageSquare,
-  ChevronDown,
-} from "lucide-react";
+import { AlertTriangle, Loader2, CheckCircle, ChevronDown } from "lucide-react";
 import { BasicMarkdownText } from "../thread/markdown-text";
 import { cn } from "@/lib/utils";
 

@@ -47,7 +47,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const [threads, setThreads] = useState<Thread<GraphState>[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
-  const [recentlyUpdatedThreads, setRecentlyUpdatedThreads] = useState<
+  const [recentlyUpdatedThreads, _setRecentlyUpdatedThreads] = useState<
     Set<string>
   >(new Set());
 

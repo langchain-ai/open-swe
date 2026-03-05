@@ -42,7 +42,7 @@ export function useGitHubToken(): UseGitHubTokenReturn {
       setInstallationId(data.installation_id);
       setIsLoading(false);
       return data.token;
-    } catch (err) {
+    } catch (_err) {
       setError("Network error when fetching token");
       setIsLoading(false);
       return null;

@@ -56,8 +56,6 @@ interface UseThreadsStatusResult {
 
 const sessionDataCache: SessionCache = new Map();
 
-const CACHE_TTL = 30000;
-
 /**
  * Fetches statuses for multiple threads in parallel
  * Uses session caching to achieve "single request per thread + cache sessions" goal

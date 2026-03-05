@@ -10,7 +10,6 @@ import { ThreadMetadata } from "@/components/v2/types";
 import { useThreadsSWR } from "@/hooks/useThreadsSWR";
 import { ThreadCard, ThreadCardLoading } from "@/components/v2/thread-card";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { InstallationSelector } from "@/components/github/installation-selector";
 import { GitHubAppProvider, useGitHubAppProvider } from "@/providers/GitHubApp";
 import { MANAGER_GRAPH_ID } from "@openswe/shared/constants";
 import { useThreadsStatus } from "@/hooks/useThreadsStatus";
