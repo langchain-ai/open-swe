@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -12,6 +13,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
+from langgraph_sdk.client import LangGraphClient
 
 from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -242,17 +244,92 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
     return str(uuid.UUID(hex=md5_hex))
 
 
+def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
+    """Extract repo config from persisted thread data."""
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    repo = metadata.get("repo")
+    if isinstance(repo, dict):
+        owner = repo.get("owner")
+        name = repo.get("name")
+        if isinstance(owner, str) and owner and isinstance(name, str) and name:
+            return {"owner": owner, "name": name}
+
+    owner = metadata.get("repo_owner")
+    name = metadata.get("repo_name")
+    if isinstance(owner, str) and owner and isinstance(name, str) and name:
+        return {"owner": owner, "name": name}
+
+    return None
+
+
+def _is_not_found_error(exc: Exception) -> bool:
+    """Best-effort check for LangGraph 404 errors."""
+    return getattr(exc, "status_code", None) == 404
+
+
+async def _upsert_slack_thread_repo_metadata(
+    thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
+) -> None:
+    """Persist the selected repo config on the thread metadata."""
+    try:
+        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            try:
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"repo": repo_config},
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to create Slack thread %s while persisting repo metadata",
+                    thread_id,
+                )
+            return
+        logger.exception(
+            "Failed to persist Slack thread repo metadata for thread %s",
+            thread_id,
+        )
+
+
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
     name = SLACK_REPO_NAME.strip() or "langchainplus"
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    if "repo:" in message:
-        import re
+    should_parse_repo_from_message = False
+    try:
+        thread = await langgraph_client.threads.get(thread_id)
+        thread_repo_config = _extract_repo_config_from_thread(thread)
+        if thread_repo_config:
+            owner = thread_repo_config["owner"]
+            name = thread_repo_config["name"]
+        else:
+            logger.warning(
+                "Slack thread %s exists but no repo metadata found; using default repo %s/%s",
+                thread_id,
+                owner,
+                name,
+            )
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            should_parse_repo_from_message = True
+        else:
+            logger.exception(
+                "Failed to fetch Slack thread %s for repo resolution; using default repo",
+                thread_id,
+            )
 
+    if should_parse_repo_from_message and "repo:" in message:
         match = re.search(r"repo:([^ ]+)", message)
         if match:
-            repo = match.group(1)
+            repo = match.group(1).strip()
             if "/" in repo:
                 owner, name = repo.split("/", 1)
 
@@ -659,6 +736,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     }
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
+    await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
     await langgraph_client.runs.create(
         thread_id,
         "agent",
