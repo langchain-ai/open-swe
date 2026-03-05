@@ -38,12 +38,23 @@ def check_if_confirming_completion(messages: list[AnyMessage]) -> bool:
     return False
 
 
+def check_if_no_op(messages: list[AnyMessage]) -> bool:
+    for msg in messages:
+        if msg.type == "tool" and msg.name == "no_op":
+            return True
+    return False
+
+
 @after_model
 def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
     last_msg = state["messages"][-1]
     has_contents = bool(last_msg.text())
     has_tool_calls = bool(last_msg.tool_calls)
     if not has_tool_calls and not has_contents:
+        messages_since_last_human = get_every_message_since_last_human(state)
+        if check_if_no_op(messages_since_last_human):
+            return None
+
         tc_id = str(uuid4())
         last_msg.tool_calls = [{"name": "no_op", "args": {}, "id": tc_id}]
         no_op_tool_msg = ToolMessage(
