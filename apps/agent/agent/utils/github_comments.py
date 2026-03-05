@@ -80,8 +80,13 @@ async def get_github_token_from_thread(thread_id: str) -> str | None:
             "No github_token_encrypted found in thread metadata for thread %s", thread_id
         )
         return None
-    except Exception:
-        logger.exception("Failed to get GitHub token from thread %s", thread_id)
+    except Exception as exc:
+        from langgraph_sdk.errors import NotFoundError
+
+        if isinstance(exc, NotFoundError):
+            logger.debug("Thread %s not found, will fall back to OAuth", thread_id)
+        else:
+            logger.exception("Failed to get GitHub token from thread %s", thread_id)
         return None
 
 

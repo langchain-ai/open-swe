@@ -16,6 +16,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from .github_user_mapping import GITHUB_USER_EMAIL_MAP
+from .utils.auth import persist_encrypted_github_token, resolve_github_token_from_email
 from .utils.comments import get_recent_comments
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
@@ -1085,6 +1086,16 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     github_token = await get_github_token_from_thread(thread_id)
+    if not github_token:
+        email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+        if email:
+            auth_result = await resolve_github_token_from_email(email)
+            github_token = auth_result.get("token")
+            if github_token:
+                try:
+                    await persist_encrypted_github_token(thread_id, github_token)
+                except Exception:
+                    logger.warning("Could not persist GitHub token for thread %s", thread_id)
     if not github_token:
         logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return
