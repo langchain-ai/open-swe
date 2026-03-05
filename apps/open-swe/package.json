@@ -60,7 +60,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.13.5",
     "commander": "^14.0.0",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.3.1",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-import": "^2.27.5",
