@@ -327,6 +327,56 @@ async def fetch_pr_branch(
     return ""
 
 
+async def extract_pr_context(
+    payload: dict[str, Any], event_type: str
+) -> tuple[dict[str, str], int | None, str, str, str, int | None, str | None]:
+    """Extract key fields from a GitHub PR webhook payload.
+
+    Returns:
+        (repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id)
+    """
+    repo = payload.get("repository", {})
+    repo_config = {"owner": repo.get("owner", {}).get("login", ""), "name": repo.get("name", "")}
+
+    pr_data = payload.get("pull_request") or payload.get("issue", {})
+    pr_number = pr_data.get("number")
+    pr_url = pr_data.get("html_url", "") or pr_data.get("url", "")
+    branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
+
+    if not branch_name and pr_number:
+        branch_name = await fetch_pr_branch(repo_config, pr_number)
+
+    github_login = payload.get("sender", {}).get("login", "")
+
+    comment = payload.get("comment") or payload.get("review", {})
+    comment_id = comment.get("id")
+    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
+
+    return repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id
+
+
+def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
+    """Format PR comments into a human message for the agent."""
+    lines: list[str] = []
+    for c in comments:
+        author = c.get("author", "unknown")
+        body = c.get("body", "")
+        if c.get("type") == "review_comment":
+            path = c.get("path", "")
+            line = c.get("line", "")
+            loc = f" (file: `{path}`, line: {line})" if path else ""
+            lines.append(f"\n**{author}**{loc}: {body}\n")
+        else:
+            lines.append(f"\n**{author}**: {body}\n")
+
+    comments_text = "".join(lines)
+    return (
+        "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
+        f"PR: {pr_url}\n\n"
+        f"## Comments:\n{comments_text}"
+    )
+
+
 async def _fetch_paginated(
     client: httpx.AsyncClient, url: str, headers: dict[str, str]
 ) -> list[dict[str, Any]]:

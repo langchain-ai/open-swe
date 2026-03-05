@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import jwt
 from langgraph.config import get_config
+from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
@@ -155,34 +156,6 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
         return {"error": str(e)}
 
 
-async def resolve_github_token_from_email(email: str) -> dict[str, Any]:
-    """Resolve a GitHub token for a user identified by email.
-
-    Chains get_ls_user_id_from_email -> get_github_token_for_user.
-
-    Returns:
-        Dict with one of:
-        - {"token": str} on success
-        - {"auth_url": str} if user needs to authenticate via OAuth
-        - {"error": str} on failure; error="no_ls_user" if email not in LangSmith
-    """
-    user_info = await get_ls_user_id_from_email(email)
-    ls_user_id = user_info.get("ls_user_id")
-    tenant_id = user_info.get("tenant_id")
-
-    if not ls_user_id or not tenant_id:
-        logger.warning(
-            "No LangSmith user found for email %s (ls_user_id=%s, tenant_id=%s)",
-            email,
-            ls_user_id,
-            tenant_id,
-        )
-        return {"error": "no_ls_user", "email": email}
-
-    auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
-    return auth_result
-
-
 async def leave_failure_comment(
     source: str,
     message: str,
@@ -313,3 +286,30 @@ async def save_token_from_github_login(
     if not email:
         raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
     return await save_encrypted_token_from_email(email, source)
+
+
+async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:
+    """Resolve a GitHub token from the run config based on the source.
+
+    Routes to the correct auth method depending on whether the run was
+    triggered from GitHub (login-based) or Linear/Slack (email-based).
+
+    Returns:
+        (github_token, new_encrypted) tuple.
+
+    Raises:
+        RuntimeError: If source is missing or token resolution fails.
+    """
+    configurable = config["configurable"]
+    source = configurable.get("source")
+    if not source:
+        logger.error("Missing source for thread %s; cannot route auth failure responses", thread_id)
+        raise RuntimeError(f"GitHub auth failed for thread {thread_id}: missing source")
+
+    try:
+        if source == "github":
+            return await save_token_from_github_login(configurable.get("github_login"), source)
+        return await save_encrypted_token_from_email(configurable.get("user_email"), source)
+    except ValueError as exc:
+        logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
+        raise RuntimeError(str(exc)) from exc

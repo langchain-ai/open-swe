@@ -17,7 +17,8 @@ from .github_user_mapping import GITHUB_USER_EMAIL_MAP
 from .utils.comments import get_recent_comments
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
-    fetch_pr_branch,
+    build_pr_prompt,
+    extract_pr_context,
     fetch_pr_comments_since_last_tag,
     get_github_token_from_thread,
     get_thread_id_from_branch,
@@ -923,6 +924,40 @@ _SUPPORTED_GH_EVENTS = frozenset(
 )
 
 
+async def _trigger_or_queue_run(
+    thread_id: str,
+    prompt: str,
+    *,
+    github_login: str,
+    repo_config: dict[str, str],
+    pr_number: int,
+) -> None:
+    """Create a new agent run or queue the message if the thread is busy."""
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={
+            "configurable": {
+                "source": "github",
+                "github_login": github_login,
+                "repo": repo_config,
+                "pr_number": pr_number,
+            }
+        },
+        if_not_exists="create",
+    )
+    logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
+
+
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
@@ -934,16 +969,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         event_type: One of 'issue_comment', 'pull_request_review_comment',
                     'pull_request_review'.
     """
-    repo = payload.get("repository", {})
-    repo_config = {"owner": repo.get("owner", {}).get("login", ""), "name": repo.get("name", "")}
-
-    pr_data = payload.get("pull_request") or payload.get("issue", {})
-    pr_number = pr_data.get("number")
-    branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
-
-    # For issue_comment, branch is not in the payload — fetch unauthenticated first
-    if not branch_name and pr_number:
-        branch_name = await fetch_pr_branch(repo_config, pr_number)
+    repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id = (
+        await extract_pr_context(payload, event_type)
+    )
 
     logger.info(
         "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
@@ -957,10 +985,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
         return
 
-    # Resolve user email from GitHub sender login via mapping
-    github_login = payload.get("sender", {}).get("login", "")
-    user_email = GITHUB_USER_EMAIL_MAP.get(github_login)
-    if not user_email:
+    if not GITHUB_USER_EMAIL_MAP.get(github_login):
         logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
@@ -969,10 +994,6 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return
 
-    # React with 👀 immediately
-    comment = payload.get("comment") or payload.get("review", {})
-    comment_id = comment.get("id")
-    node_id = comment.get("node_id") if event_type == "pull_request_review" else None
     if comment_id:
         await react_to_github_comment(
             repo_config,
@@ -992,49 +1013,14 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
 
-    # Build human message
-    comments_text = ""
-    for c in comments:
-        author = c.get("author", "unknown")
-        body = c.get("body", "")
-        comment_type = c.get("type", "")
-        if comment_type == "review_comment":
-            path = c.get("path", "")
-            line = c.get("line", "")
-            loc = f" (file: `{path}`, line: {line})" if path else ""
-            comments_text += f"\n**{author}**{loc}: {body}\n"
-        else:
-            comments_text += f"\n**{author}**: {body}\n"
-
-    pr_url = pr_data.get("html_url", "") or pr_data.get("url", "")
-    prompt = (
-        "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
-        f"PR: {pr_url}\n\n"
-        f"## Comments:\n{comments_text}"
+    prompt = build_pr_prompt(comments, pr_url)
+    await _trigger_or_queue_run(
+        thread_id,
+        prompt,
+        github_login=github_login,
+        repo_config=repo_config,
+        pr_number=pr_number,
     )
-
-    thread_active = await is_thread_active(thread_id)
-    if thread_active:
-        logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
-    else:
-        logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
-        langgraph_client = get_client(url=LANGGRAPH_URL)
-        await langgraph_client.runs.create(
-            thread_id,
-            "agent",
-            input={"messages": [{"role": "user", "content": prompt}]},
-            config={
-                "configurable": {
-                    "source": "github",
-                    "github_login": github_login,
-                    "repo": repo_config,
-                    "pr_number": pr_number,
-                }
-            },
-            if_not_exists="create",
-        )
-        logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
 
 
 @app.post("/webhooks/github")
