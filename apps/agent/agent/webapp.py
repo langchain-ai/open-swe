@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import uuid
 from typing import Any
 
 import httpx
@@ -234,13 +235,11 @@ def generate_thread_id_from_issue(issue_id: str) -> str:
     )
 
 
-def generate_thread_id_from_slack_thread(slack_thread_id: str) -> str:
+def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
     """Generate a deterministic thread ID from a Slack thread identifier."""
-    hash_bytes = hashlib.sha256(f"slack-thread:{slack_thread_id}".encode()).hexdigest()
-    return (
-        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
-        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
-    )
+    composite = f"{channel_id}:{thread_id}"
+    md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
+    return str(uuid.UUID(hex=md5_hex))
 
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
@@ -584,8 +583,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             channel_id,
         )
 
-    thread_source_id = f"{channel_id}:{thread_ts}"
-    thread_id = generate_thread_id_from_slack_thread(thread_source_id)
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
 
     user_email = None
     user_name = ""

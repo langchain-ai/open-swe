@@ -70,10 +70,10 @@ def get_service_jwt_token_for_user(
         raise ValueError(msg)
 
     payload = {
-        "sub": user_id,
-        "tenant_id": tenant_id,
-        "iat": datetime.now(UTC),
+        "sub": "unspecified",
         "exp": datetime.now(UTC) + timedelta(seconds=expiration_seconds),
+        "user_id": user_id,
+        "tenant_id": tenant_id,
     }
     return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
 
@@ -119,6 +119,7 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
         headers = {
             "X-Service-Key": service_token,
             "X-Tenant-Id": tenant_id,
+            "X-User-Id": ls_user_id,
         }
 
         payload = {
@@ -187,9 +188,10 @@ async def leave_failure_comment(
     message: str,
 ) -> None:
     """Leave an auth failure comment for the appropriate source."""
+    config = get_config()
+    configurable = config.get("configurable", {})
+
     if source == "linear":
-        config = get_config()
-        configurable = config.get("configurable", {})
         linear_issue = configurable.get("linear_issue", {})
         issue_id = linear_issue.get("id") if isinstance(linear_issue, dict) else None
         if issue_id:
@@ -201,8 +203,6 @@ async def leave_failure_comment(
             await comment_on_linear_issue(issue_id, message)
         return
     if source == "slack":
-        config = get_config()
-        configurable = config.get("configurable", {})
         slack_thread = configurable.get("slack_thread", {})
         channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
         thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
