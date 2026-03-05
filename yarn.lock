@@ -4980,7 +4980,7 @@ __metadata:
     eslint: ^10.0.2
     eslint-config-next: 15.2.2
     eslint-plugin-react-hooks: ^7.0.1
-    eslint-plugin-react-refresh: ^0.4.18
+    eslint-plugin-react-refresh: ^0.5.2
     framer-motion: ^12.34.3
     globals: ^15.14.0
     jsonwebtoken: ^9.0.2
@@ -11510,12 +11510,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-plugin-react-refresh@npm:^0.4.18":
-  version: 0.4.20
-  resolution: "eslint-plugin-react-refresh@npm:0.4.20"
+"eslint-plugin-react-refresh@npm:^0.5.2":
+  version: 0.5.2
+  resolution: "eslint-plugin-react-refresh@npm:0.5.2"
   peerDependencies:
-    eslint: ">=8.40"
-  checksum: b0e946be32f10f0c8239e7ec958b1e095fc633da3f2e8f6bd5bd09188f348bee1bf17d0e175d47e02a8e22fcad24f8246a9f1f065a84968f819e4102f0953256
+    eslint: ^9 || ^10
+  checksum: cf88dfa5e71ed7cf781c09dca2d65d866737b5555ad7e69374ec9abaf4f479f42d631fdeceb472abd7158ffc2841d8cfa9eb8a9228cfa949c1c7c0da263d2949
   languageName: node
   linkType: hard
 
