@@ -29,6 +29,7 @@ from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    ensure_no_empty_msg,
     open_pr_if_needed,
 )
 from .prompt import construct_system_prompt
@@ -388,6 +389,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         middleware=[
             ToolErrorMiddleware(),
             check_message_queue_before_model,
+            ensure_no_empty_msg,
             open_pr_if_needed,
         ],
     ).with_config(config)
