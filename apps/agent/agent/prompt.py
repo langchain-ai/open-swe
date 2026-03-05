@@ -40,19 +40,20 @@ TASK_EXECUTION_SECTION = """---
 If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
+- Use `github_thread_reply` for GitHub PR comment-triggered tasks.
 
 For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run tests and linters to confirm correctness before submitting.
-4. **Submit** — Call `commit_and_open_pr`.
-5. **Comment** — Call `linear_comment` or `slack_thread_reply` with a summary and the PR link.
+4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
+5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_thread_reply` with a summary and the PR link.
 
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
-2. **Comment** — Call `linear_comment` or `slack_thread_reply` with your answer. Never leave a question unanswered."""
+2. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_thread_reply` with your answer. Never leave a question unanswered."""
 
 
 TOOL_USAGE_SECTION = """---
@@ -76,7 +77,10 @@ Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `com
 
 #### `slack_thread_reply`
 Posts a message to the active Slack thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Slack.
-Remember that Slack does not use standard markdown formatting. Ensure you always conform to the Slack specific markdown format when sending messages"""
+Remember that Slack does not use standard markdown formatting. Ensure you always conform to the Slack specific markdown format when sending messages
+
+#### `github_thread_reply`
+Posts a comment to the current GitHub Pull Request. Use this when the task was triggered from a GitHub PR comment — to reply with updates, answers, or a summary after completing work."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---

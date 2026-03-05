@@ -35,11 +35,12 @@ from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
     fetch_url,
+    github_thread_reply,
     http_request,
     linear_comment,
     slack_thread_reply,
 )
-from .utils.auth import save_encrypted_token_from_email
+from .utils.auth import save_encrypted_token_from_email, save_token_from_github_login
 from .utils.model import make_model
 
 client = get_client()
@@ -262,7 +263,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = f"GitHub auth failed for thread {thread_id}: missing source"
         raise RuntimeError(msg)
     try:
-        github_token, new_encrypted = await save_encrypted_token_from_email(user_email, source)
+        if source == "github":
+            github_login = config["configurable"].get("github_login")
+            github_token, new_encrypted = await save_token_from_github_login(github_login, source)
+        else:
+            github_token, new_encrypted = await save_encrypted_token_from_email(user_email, source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc
@@ -383,7 +388,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+        tools=[
+            http_request,
+            fetch_url,
+            commit_and_open_pr,
+            linear_comment,
+            slack_thread_reply,
+            github_thread_reply,
+        ],
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),

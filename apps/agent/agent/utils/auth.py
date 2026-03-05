@@ -214,6 +214,11 @@ async def leave_failure_comment(
             )
             await post_slack_thread_reply(channel_id, thread_ts, message)
         return
+    if source == "github":
+        logger.warning(
+            "Auth failure for GitHub-triggered run (no token to post comment): %s", message
+        )
+        return
     raise ValueError(f"Unknown source: {source}")
 
 
@@ -291,3 +296,20 @@ async def save_encrypted_token_from_email(
 
     encrypted = await persist_encrypted_github_token(thread_id, token)
     return token, encrypted
+
+
+async def save_token_from_github_login(
+    github_login: str,
+    source: str,
+) -> tuple[str, str]:
+    """Resolve a GitHub token from a GitHub username via the user mapping.
+
+    Looks up the email for the given GitHub login in GITHUB_USER_EMAIL_MAP,
+    then delegates to save_encrypted_token_from_email.
+    """
+    from ..github_user_mapping import GITHUB_USER_EMAIL_MAP
+
+    email = GITHUB_USER_EMAIL_MAP.get(github_login)
+    if not email:
+        raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
+    return await save_encrypted_token_from_email(email, source)
