@@ -296,44 +296,55 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
+async def check_if_using_repo_msg_sent(
+    channel_id: str, thread_ts: str, using_repo_str: str
+) -> bool:
+    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+    for message in thread_messages:
+        if using_repo_str in message.get("text", ""):
+            return True
+    return False
+
+
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
-    owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    name = SLACK_REPO_NAME.strip() or "langchainplus"
+    default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
+    default_name = SLACK_REPO_NAME.strip() or "langchainplus"
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    should_parse_repo_from_message = False
-    try:
-        thread = await langgraph_client.threads.get(thread_id)
-        thread_repo_config = _extract_repo_config_from_thread(thread)
-        if thread_repo_config:
-            owner = thread_repo_config["owner"]
-            name = thread_repo_config["name"]
-        else:
-            logger.warning(
-                "Slack thread %s exists but no repo metadata found; using default repo %s/%s",
-                thread_id,
-                owner,
-                name,
-            )
-    except Exception as exc:  # noqa: BLE001
-        if _is_not_found_error(exc):
-            should_parse_repo_from_message = True
-        else:
-            logger.exception(
-                "Failed to fetch Slack thread %s for repo resolution; using default repo",
-                thread_id,
-            )
+    owner: str | None = None
+    name: str | None = None
 
-    if should_parse_repo_from_message and "repo:" in message:
+    if "repo:" in message:
         match = re.search(r"repo:([^ ]+)", message)
         if match:
             repo = match.group(1).strip()
             if "/" in repo:
                 owner, name = repo.split("/", 1)
 
-    await post_slack_thread_reply(channel_id, thread_ts, f"Using repository: `{owner}/{name}`")
+    if not owner or not name:
+        try:
+            thread = await langgraph_client.threads.get(thread_id)
+            thread_repo_config = _extract_repo_config_from_thread(thread)
+            if thread_repo_config:
+                owner = thread_repo_config["owner"]
+                name = thread_repo_config["name"]
+        except Exception as exc:  # noqa: BLE001
+            if not _is_not_found_error(exc):
+                logger.exception(
+                    "Failed to fetch Slack thread %s for repo resolution",
+                    thread_id,
+                )
+
+    if not owner or not name:
+        owner = default_owner
+        name = default_name
+
+    using_repo_str = f"Using repository: `{owner}/{name}`"
+    if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
+        await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
+
     return {"owner": owner, "name": name}
 
 
