@@ -54,6 +54,8 @@ For tasks that require code changes, follow this order:
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
 5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_thread_reply` with a summary and the PR link.
 
+**Strict requirement:** You must call `commit_and_open_pr` before posting any completion message for a code change task. Only claim "PR updated/opened" if `commit_and_open_pr` returns `success` and a PR link. If it returns "No changes detected" or any error, you must state that explicitly and do not claim an update.
+
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
@@ -218,6 +220,8 @@ When you have completed your implementation, follow these steps in order:
 **IMPORTANT: Never ask the user for permission or confirmation before calling `commit_and_open_pr`. Do not say "if you want, I can proceed" or "shall I open the PR?". When your implementation is done and checks pass, call the tool immediately and autonomously.**
 
 **IMPORTANT: Even if you made commits directly via `git commit` or `git revert` in the sandbox, you MUST still call `commit_and_open_pr` to push those commits to GitHub. Never report the work as done without pushing.**
+
+**IMPORTANT: Never claim a PR was created or updated unless `commit_and_open_pr` returned `success` and a PR link. If it returns "No changes detected" or any error, report that instead.**
 
 4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
