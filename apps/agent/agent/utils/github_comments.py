@@ -382,7 +382,10 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
         "If code changes are needed:\n"
         "1. Make the changes in the sandbox\n"
         "2. Call `commit_and_open_pr` to push them to GitHub — this is REQUIRED, do NOT skip it\n"
-        "3. Call `github_thread_reply` to post a summary on the PR"
+        "3. Call `github_thread_reply` to post a summary on the PR\n\n"
+        "If no code changes are needed:\n"
+        "1. Call `github_thread_reply` to explain your answer — this is REQUIRED, never end silently\n\n"
+        "**You MUST always call `github_thread_reply` before finishing — whether or not changes were made.**"
     )
 
 
