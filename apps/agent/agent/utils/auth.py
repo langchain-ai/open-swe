@@ -14,6 +14,7 @@ from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
 from .linear import comment_on_linear_issue
+from .slack import post_slack_thread_reply
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,30 @@ logger.debug(
     "set" if GITHUB_OAUTH_PROVIDER_ID else "missing",
     "set" if X_SERVICE_AUTH_JWT_SECRET else "missing",
 )
+
+
+def _retry_instruction(source: str) -> str:
+    if source == "slack":
+        return "Once authenticated, mention me again in this Slack thread to retry."
+    return "Once authenticated, reply to this issue mentioning @openswe to retry."
+
+
+def _source_account_label(source: str) -> str:
+    if source == "slack":
+        return "Slack"
+    return "Linear"
+
+
+def _auth_link_text(source: str, auth_url: str) -> str:
+    if source == "slack":
+        return auth_url
+    return f"[Authenticate with GitHub]({auth_url})"
+
+
+def _work_item_label(source: str) -> str:
+    if source == "slack":
+        return "thread"
+    return "issue"
 
 
 def get_service_jwt_token_for_user(
@@ -175,6 +200,20 @@ async def leave_failure_comment(
             )
             await comment_on_linear_issue(issue_id, message)
         return
+    if source == "slack":
+        config = get_config()
+        configurable = config.get("configurable", {})
+        slack_thread = configurable.get("slack_thread", {})
+        channel_id = slack_thread.get("channel_id") if isinstance(slack_thread, dict) else None
+        thread_ts = slack_thread.get("thread_ts") if isinstance(slack_thread, dict) else None
+        if channel_id and thread_ts:
+            logger.info(
+                "Posting auth failure reply to Slack channel %s thread %s",
+                channel_id,
+                thread_ts,
+            )
+            await post_slack_thread_reply(channel_id, thread_ts, message)
+        return
     raise ValueError(f"Unknown source: {source}")
 
 
@@ -211,14 +250,15 @@ async def save_encrypted_token_from_email(
     ls_user_id = user_info.get("ls_user_id")
     tenant_id = user_info.get("tenant_id")
     if not ls_user_id or not tenant_id:
+        account_label = _source_account_label(source)
         message = (
             "🔐 **GitHub Authentication Required**\n\n"
             f"Could not find a LangSmith account for **{email}**.\n\n"
             "Please ensure this email is invited to the main LangSmith organization. "
-            "If your Linear account uses a different email than your LangSmith account, "
+            f"If your {account_label} account uses a different email than your LangSmith account, "
             "you may need to update one of them to match.\n\n"
             "Once your email is added to LangSmith, "
-            "reply to this issue mentioning @openswe to retry."
+            f"{_retry_instruction(source)}"
         )
         await leave_failure_comment(source, message)
         raise ValueError(f"No ls_user_id found from email {email}")
@@ -226,12 +266,14 @@ async def save_encrypted_token_from_email(
     auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
     auth_url = auth_result.get("auth_url")
     if auth_url:
+        work_item_label = _work_item_label(source)
+        auth_link_text = _auth_link_text(source, auth_url)
         message = (
             "🔐 **GitHub Authentication Required**\n\n"
-            "To allow the Open SWE agent to work on this issue, "
+            f"To allow the Open SWE agent to work on this {work_item_label}, "
             "please authenticate with GitHub by clicking the link below:\n\n"
-            f"[Authenticate with GitHub]({auth_url})\n\n"
-            "Once authenticated, reply to this issue mentioning @openswe to retry."
+            f"{auth_link_text}\n\n"
+            f"{_retry_instruction(source)}"
         )
         await leave_failure_comment(source, message)
         raise ValueError("User not authenticated.")

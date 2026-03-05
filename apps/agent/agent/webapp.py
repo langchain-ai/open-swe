@@ -603,65 +603,6 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
                     or ""
                 )
 
-    async def send_slack_message(message: str) -> None:
-        sent = await post_slack_thread_reply(channel_id, thread_ts, message)
-        if not sent:
-            logger.warning(
-                "Failed to post Slack reply for channel %s thread %s", channel_id, thread_ts
-            )
-
-    user_mention = f"<@{user_id}>" if user_id else ""
-
-    github_token = None
-    if user_email and GITHUB_OAUTH_PROVIDER_ID:
-        user_info = await get_ls_user_id_from_email(user_email)
-        ls_user_id = user_info.get("ls_user_id")
-        tenant_id = user_info.get("tenant_id")
-
-        if ls_user_id and tenant_id:
-            auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
-            if "token" in auth_result:
-                github_token = auth_result["token"]
-            elif "auth_url" in auth_result:
-                auth_url = auth_result["auth_url"]
-                await send_slack_message(
-                    f"🔐 GitHub authentication required {user_mention}\n\n"
-                    "Please authenticate with GitHub here:\n"
-                    f"{auth_url}\n\n"
-                    "Once authenticated, mention me again in this thread."
-                )
-                return
-            else:
-                logger.warning("Auth result has neither token nor auth_url: %s", auth_result)
-        else:
-            await send_slack_message(
-                f"🔐 GitHub authentication required {user_mention}\n\n"
-                f"I couldn't find a LangSmith account for `{user_email}`.\n"
-                "Please ensure this email is invited to the LangSmith workspace, "
-                "then mention me again in this thread."
-            )
-            return
-    elif not user_email:
-        await send_slack_message(
-            f"🔐 GitHub authentication required {user_mention}\n\n"
-            "I couldn't read your Slack email. Please ensure your Slack profile has an email "
-            "and that this app has `users:read.email` permission."
-        )
-        return
-    elif not GITHUB_OAUTH_PROVIDER_ID:
-        await send_slack_message(
-            "❌ Configuration error\n\n"
-            "The Open SWE agent is missing GitHub OAuth provider configuration."
-        )
-        return
-
-    if not github_token:
-        await send_slack_message(
-            f"🔐 GitHub authentication required {user_mention}\n\n"
-            "Unable to authenticate with GitHub right now. Please try mentioning me again."
-        )
-        return
-
     thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
     if not any(str(message.get("ts")) == str(event_ts) for message in thread_messages):
         thread_messages.append({"ts": event_ts, "text": text, "user": user_id})
@@ -692,7 +633,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME)
         or "(no text in mention)"
     )
-    trigger_user = user_name or user_mention or "Unknown user"
+    trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
     prompt = (
         "You were mentioned in Slack.\n\n"
@@ -717,7 +658,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
             "triggering_user_email": user_email,
             "triggering_event_ts": event_ts,
         },
-        "github_token_encrypted": encrypt_token(github_token),
+        "user_email": user_email,
+        "source": "slack",
     }
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
