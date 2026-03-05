@@ -969,9 +969,15 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         event_type: One of 'issue_comment', 'pull_request_review_comment',
                     'pull_request_review'.
     """
-    repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id = (
-        await extract_pr_context(payload, event_type)
-    )
+    (
+        repo_config,
+        pr_number,
+        branch_name,
+        github_login,
+        pr_url,
+        comment_id,
+        node_id,
+    ) = await extract_pr_context(payload, event_type)
 
     logger.info(
         "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
