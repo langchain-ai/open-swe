@@ -328,7 +328,7 @@ async def fetch_pr_branch(
     return ""
 
 
-async def extract_pr_context(                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+async def extract_pr_context(
     payload: dict[str, Any], event_type: str
 ) -> tuple[dict[str, str], int | None, str, str, str, int | None, str | None]:
     """Extract key fields from a GitHub PR webhook payload.
@@ -345,7 +345,7 @@ async def extract_pr_context(
     branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
 
     if not branch_name and pr_number:
-        branch_name = await fetch_pr_branch(repo_config, pr_number)                                                                                                                                 
+        branch_name = await fetch_pr_branch(repo_config, pr_number)
 
     github_login = payload.get("sender", {}).get("login", "")
 

@@ -351,12 +351,20 @@ async def _get_token_from_thread_metadata(thread_id: str) -> tuple[str, str] | N
                 token = decrypt_token(encrypted)
                 if token:
                     if not await _is_github_token_valid(token):
-                        logger.info("Cached GitHub token for thread %s is expired, falling back to OAuth", thread_id)
+                        logger.info(
+                            "Cached GitHub token for thread %s is expired, falling back to OAuth",
+                            thread_id,
+                        )
                         return None
-                    logger.info("Using existing GitHub token from thread metadata for thread %s", thread_id)
+                    logger.info(
+                        "Using existing GitHub token from thread metadata for thread %s", thread_id
+                    )
                     return token, encrypted
     except Exception:
-        logger.debug("Could not read token from thread metadata for thread %s, falling back to OAuth", thread_id)
+        logger.debug(
+            "Could not read token from thread metadata for thread %s, falling back to OAuth",
+            thread_id,
+        )
     return None
 
 
