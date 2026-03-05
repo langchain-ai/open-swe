@@ -22,7 +22,7 @@ client = get_client()
 # Reaction endpoint differs per comment type
 _REACTION_ENDPOINTS: dict[str, str] = {
     "issue_comment": "https://api.github.com/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-    "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
+                                                                                                                                             "pull_request_review_comment": "https://api.github.com/repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
     "pull_request_review": "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{comment_id}/reactions",
 }
 
@@ -131,9 +131,9 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
 
     query = """
     mutation AddReaction($subjectId: ID!) {
-      addReaction(input: {subjectId: $subjectId, content: EYES}) {
+    addReaction(input: {subjectId: $subjectId, content: EYES}) {
         reaction { content }
-      }
+    }
     }
     """
     async with httpx.AsyncClient() as http_client:
@@ -190,9 +190,9 @@ async def fetch_pr_comments_since_last_tag(
     then returns every comment from the last @open-swe mention onwards.
 
     For inline review comments the dict also includes:
-      - 'path': file path commented on
-      - 'line': line number
-      - 'comment_id': GitHub comment ID (for future reply tooling)
+    - 'path': file path commented on
+    - 'line': line number
+    - 'comment_id': GitHub comment ID (for future reply tooling)
 
     Args:
         repo_config: Dict with 'owner' and 'name' keys.
@@ -327,7 +327,7 @@ async def fetch_pr_branch(
     return ""
 
 
-async def extract_pr_context(
+async def extract_pr_context(                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
     payload: dict[str, Any], event_type: str
 ) -> tuple[dict[str, str], int | None, str, str, str, int | None, str | None]:
     """Extract key fields from a GitHub PR webhook payload.
@@ -344,7 +344,7 @@ async def extract_pr_context(
     branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
 
     if not branch_name and pr_number:
-        branch_name = await fetch_pr_branch(repo_config, pr_number)
+        branch_name = await fetch_pr_branch(repo_config, pr_number)                                                                                                                                 
 
     github_login = payload.get("sender", {}).get("login", "")
 
@@ -373,7 +373,11 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
     return (
         "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
         f"PR: {pr_url}\n\n"
-        f"## Comments:\n{comments_text}"
+        f"## Comments:\n{comments_text}\n\n"
+        "If code changes are needed:\n"
+        "1. Make the changes in the sandbox\n"
+        "2. Call `commit_and_open_pr` to push them to GitHub — this is REQUIRED, do NOT skip it\n"
+        "3. Call `github_thread_reply` to post a summary on the PR"
     )
 
 

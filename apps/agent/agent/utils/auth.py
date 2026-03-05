@@ -13,7 +13,7 @@ from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from ..encryption import encrypt_token
+from ..encryption import decrypt_token, encrypt_token
 from .linear import comment_on_linear_issue
 from .slack import post_slack_thread_reply
 
@@ -154,6 +154,34 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
     except Exception as e:  # noqa: BLE001
         logger.error("GitHub auth API call failed: %s: %s", type(e).__name__, str(e))
         return {"error": str(e)}
+
+
+async def resolve_github_token_from_email(email: str) -> dict[str, Any]:
+    """Resolve a GitHub token for a user identified by email.
+
+    Chains get_ls_user_id_from_email -> get_github_token_for_user.
+
+    Returns:
+        Dict with one of:
+        - {"token": str} on success
+        - {"auth_url": str} if user needs to authenticate via OAuth
+        - {"error": str} on failure; error="no_ls_user" if email not in LangSmith
+    """
+    user_info = await get_ls_user_id_from_email(email)
+    ls_user_id = user_info.get("ls_user_id")
+    tenant_id = user_info.get("tenant_id")
+
+    if not ls_user_id or not tenant_id:
+        logger.warning(
+            "No LangSmith user found for email %s (ls_user_id=%s, tenant_id=%s)",
+            email,
+            ls_user_id,
+            tenant_id,
+        )
+        return {"error": "no_ls_user", "email": email}
+
+    auth_result = await get_github_token_for_user(ls_user_id, tenant_id)
+    return auth_result
 
 
 async def leave_failure_comment(
@@ -308,6 +336,18 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
+            try:
+                thread = await client.threads.get(thread_id)
+                thread_metadata = (thread or {}).get("metadata", {})
+                if isinstance(thread_metadata, dict):
+                    encrypted = thread_metadata.get("github_token_encrypted", "")
+                    if encrypted:
+                        token = decrypt_token(encrypted)
+                        if token:
+                            logger.info("Using existing GitHub token from thread metadata for thread %s", thread_id)
+                            return token, encrypted
+            except Exception:
+                logger.debug("Could not read token from thread metadata, falling back to OAuth")
             return await save_token_from_github_login(configurable.get("github_login"), source)
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:

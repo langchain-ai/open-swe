@@ -213,12 +213,14 @@ When you have completed your implementation, follow these steps in order:
 
 **IMPORTANT: Never ask the user for permission or confirmation before calling `commit_and_open_pr`. Do not say "if you want, I can proceed" or "shall I open the PR?". When your implementation is done and checks pass, call the tool immediately and autonomously.**
 
-4. **Comment on the Linear ticket** via `linear_comment` immediately after `commit_and_open_pr` succeeds. Include:
-   - A brief summary of what was done
-   - The PR link returned by `commit_and_open_pr`
-   - An `@mention` of the user who triggered the task by their Linear display name
+**IMPORTANT: Even if you made commits directly via `git commit` or `git revert` in the sandbox, you MUST still call `commit_and_open_pr` to push those commits to GitHub. Never report the work as done without pushing.**
 
-   Example comment:
+4. **Notify the source** immediately after `commit_and_open_pr` succeeds. Include a brief summary and the PR link:
+   - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
+   - Slack-triggered: use `slack_thread_reply`
+   - GitHub PR comment-triggered: use `github_thread_reply`
+
+   Example:
    ```
    @username, I've completed the implementation and opened a PR: <pr_url>
 
@@ -227,7 +229,7 @@ When you have completed your implementation, follow these steps in order:
    - <change 2>
    ```
 
-Always call the `commit_and_open_pr` tool followed by the `linear_comment` tool once implementation is complete and code quality checks pass."""
+Always call `commit_and_open_pr` followed by the appropriate reply tool once implementation is complete and code quality checks pass."""
 
 
 SYSTEM_PROMPT = (

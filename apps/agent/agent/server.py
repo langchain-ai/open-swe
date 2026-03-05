@@ -4,6 +4,7 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -129,6 +130,31 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
                     "Git pull failed with exit code %s: %s",
                     pull_result.exit_code,
                     pull_result.output[:200] if pull_result.output else "",
+                )
+                logger.info("Attempting recovery after git pull failure")
+                await loop.run_in_executor(
+                    None, sandbox_backend.execute, f"cd {repo_dir} && git fetch origin"
+                )
+                head_result = await loop.run_in_executor(
+                    None,
+                    sandbox_backend.execute,
+                    f"cd {repo_dir} && git symbolic-ref --short refs/remotes/origin/HEAD",
+                )
+                default_branch = ""
+                if head_result.exit_code == 0:
+                    default_branch = head_result.output.strip().replace("origin/", "")
+                if not default_branch:
+                    default_branch = "main"
+                safe_branch = shlex.quote(default_branch)
+                await loop.run_in_executor(
+                    None,
+                    sandbox_backend.execute,
+                    f"cd {repo_dir} && git checkout -B {safe_branch} origin/{safe_branch}",
+                )
+                await loop.run_in_executor(
+                    None,
+                    sandbox_backend.execute,
+                    f"cd {repo_dir} && git reset --hard origin/{safe_branch}",
                 )
         except Exception:
             logger.exception("Failed to execute git pull")
@@ -347,6 +373,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             try:
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
+                )
+            except SandboxClientError:
+                logger.warning(
+                    "Existing sandbox is no longer reachable for thread %s, recreating sandbox",
+                    thread_id,
+                )
+                sandbox_backend, repo_dir = await _recreate_sandbox(
+                    thread_id, repo_owner, repo_name, github_token=github_token
                 )
             except Exception:
                 logger.exception("Failed to pull repo in existing sandbox")
