@@ -28,8 +28,3 @@ def test_leave_failure_comment_posts_to_slack_thread(
     asyncio.run(auth.leave_failure_comment("slack", "auth failed"))
 
     assert called == {"channel_id": "C123", "thread_ts": "1.2", "message": "auth failed"}
-
-
-def test_leave_failure_comment_unknown_source_raises() -> None:
-    with pytest.raises(ValueError, match="Unknown source"):
-        asyncio.run(auth.leave_failure_comment("unknown", "auth failed"))

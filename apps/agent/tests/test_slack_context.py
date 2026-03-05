@@ -8,9 +8,10 @@ from agent.webapp import generate_thread_id_from_slack_thread
 
 
 def test_generate_thread_id_from_slack_thread_is_deterministic() -> None:
-    thread_source = "C12345:1730900000.123456"
-    first = generate_thread_id_from_slack_thread(thread_source)
-    second = generate_thread_id_from_slack_thread(thread_source)
+    channel_id = "C12345"
+    thread_ts = "1730900000.123456"
+    first = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    second = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     assert first == second
     assert len(first) == 36
 
