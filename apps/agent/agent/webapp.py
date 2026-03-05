@@ -296,6 +296,16 @@ async def _upsert_slack_thread_repo_metadata(
         )
 
 
+async def check_if_using_repo_msg_send(
+    channel_id: str, thread_ts: str, using_repo_str: str
+) -> bool:
+    thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
+    for message in thread_messages:
+        if using_repo_str in message.get("text", ""):
+            return True
+    return False
+
+
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
@@ -333,7 +343,10 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
             if "/" in repo:
                 owner, name = repo.split("/", 1)
 
-    await post_slack_thread_reply(channel_id, thread_ts, f"Using repository: `{owner}/{name}`")
+    using_repo_str = f"Using repository: `{owner}/{name}`"
+    if not await check_if_using_repo_msg_send(channel_id, thread_ts, using_repo_str):
+        await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
+
     return {"owner": owner, "name": name}
 
 
