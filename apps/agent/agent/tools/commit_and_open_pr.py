@@ -64,33 +64,29 @@ def commit_and_open_pr(
     The PR body MUST follow this exact template:
 
         ## Description
-        <Explain WHY this PR is needed. Include:
-        - List of changes made
-        - Reference to the Linear issue or design docs
-        - Any context on the approach taken>
+        <1-3 sentences explaining WHY this PR is needed and the approach taken.
+        Reference the Linear issue. DO NOT list files changed or enumerate code
+        changes — that information is already in the commit history.>
 
         ## Test Plan
-        - [ ] <specific test step 1>
-        - [ ] <specific test step 2>
+        - [ ] <new test case or manual verification step ONLY for new behavior>
+
+    IMPORTANT RULES for the body:
+    - NEVER add a "Changes:" or "Files changed:" section — it's redundant with git commits
+    - Test Plan must ONLY include new/novel verification steps, NOT "run existing tests"
+      or "verify existing functionality is unaffected" — those are always implied
+    - Keep the entire body concise (aim for under 10 lines total)
 
     Example body:
 
         ## Description
-        Fixes the null pointer exception that occurs when a user without
-        a profile attempts to authenticate. The root cause was a missing
-        null check in the `getProfile` method.
-
-        Changes:
-        - Added null check in `auth/getProfile.ts`
-        - Added fallback default profile object
-        - Updated related unit tests
+        Fixes the null pointer exception when a user without a profile authenticates.
+        The root cause was a missing null check in `getProfile`.
 
         Resolves AA-123
 
         ## Test Plan
         - [ ] Verify login works for users without profiles
-        - [ ] Verify existing users are unaffected
-        - [ ] Run `yarn test` and confirm all tests pass
 
     ## Commit Message
 
