@@ -75,6 +75,7 @@ def commit_and_open_pr(
     - NEVER add a "Changes:" or "Files changed:" section — it's redundant with git commits
     - Test Plan must ONLY include new/novel verification steps, NOT "run existing tests"
       or "verify existing functionality is unaffected" — those are always implied
+      If it's a UI change you may say something along the lines of "Test in preview deployment"
     - Keep the entire body concise (aim for under 10 lines total)
 
     Example body:
