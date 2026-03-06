@@ -65,7 +65,7 @@ def commit_and_open_pr(
 
         ## Description
         <1-3 sentences explaining WHY this PR is needed and the approach taken.
-        Reference the Linear issue. DO NOT list files changed or enumerate code
+        DO NOT list files changed or enumerate code
         changes — that information is already in the commit history.>
 
         ## Test Plan
