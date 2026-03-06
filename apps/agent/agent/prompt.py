@@ -200,7 +200,7 @@ When you have completed your implementation, follow these steps in order:
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
 
-   **PR Body** (keep under 10 lines total):
+   **PR Body** (keep under 10 lines total. the more concise the better):
    ```
    ## Description
    <1-3 sentences on WHY and the approach. Reference the Linear issue.
