@@ -20,8 +20,6 @@ Open SWE is an open-source cloud-based asynchronous coding agent built with [Lan
 
 # Features
 
-![UI Screenshot](./static/ui-screenshot.png)
-
 - 🔗 **Trigger from Linear, Slack, or GitHub** — mention `@openswe` in a Linear comment, Slack thread, or GitHub PR comment to kick off a task
 - 👀 **Instant acknowledgement** — reacts with 👀 the moment it picks up your message so you know it's on it
 - 💬 **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
@@ -68,14 +66,14 @@ Then in Linear:
 2. Fill in:
    - **Label**: `open-swe`
    - **URL**: `https://xxxx.ngrok.io/webhooks/linear`
-   - **Secret**: generate a random string — copy it, you'll need it for `LINEAR_WEBHOOK_SECRET`
+   - **Secret**: generate one with `openssl rand -hex 32` — copy it, you'll need it for `LINEAR_WEBHOOK_SECRET`
 3. Under **Data change events**, enable **Comments** → `Create` only
 4. Click **Create webhook**
 
-To get your `LINEAR_API_KEY`:
+To get your `LINEAR_API_KEY` (set this under `LINEAR_API_KEY` in `.env`):
 
 1. Go to **Settings** → **API** → **Personal API keys** → **New API key**
-2. Name it `open-swe` and copy the key
+2. Name it `open-swe`, select **All access**, and copy the key
 
 ### 4. Set environment variables
 
@@ -99,7 +97,8 @@ GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 GITHUB_APP_INSTALLATION_ID=""       # GitHub App installation ID
 
 # GitHub Webhook
-GITHUB_WEBHOOK_SECRET=""            # Secret for verifying GitHub webhooks
+# Generate with: openssl rand -hex 32
+GITHUB_WEBHOOK_SECRET=""
 
 # Linear
 LINEAR_API_KEY=""                   # Linear API key (from step 3)
