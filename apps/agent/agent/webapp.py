@@ -299,6 +299,7 @@ async def _upsert_slack_thread_repo_metadata(
 async def check_if_using_repo_msg_sent(
     channel_id: str, thread_ts: str, using_repo_str: str
 ) -> bool:
+    """doc"""
     thread_messages = await fetch_slack_thread_messages(channel_id, thread_ts)
     for message in thread_messages:
         if using_repo_str in message.get("text", ""):
