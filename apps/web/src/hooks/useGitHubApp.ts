@@ -171,6 +171,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       setBranches([]);
       setSelectedBranchParam(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRepository]);
 
   const selectedBranch = selectedBranchParam;
@@ -282,6 +283,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
         if (append) setBranchesLoadingMore(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedRepository?.owner, selectedRepository?.repo],
   );
 
@@ -327,6 +329,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
         return null;
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedRepository?.owner, selectedRepository?.repo],
   );
 
@@ -355,7 +358,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
     }
 
     checkInstallation();
-  }, [currentInstallationId]);
+  }, [currentInstallationId, setSelectedRepository]);
 
   useEffect(() => {
     if (
@@ -443,6 +446,7 @@ export function useGitHubApp(): UseGitHubAppReturn {
       saveRepositoryToLocalStorage(targetRepo);
       hasAutoSelectedRef.current = true;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     repositories,
     selectedRepository,

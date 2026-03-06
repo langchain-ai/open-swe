@@ -100,6 +100,7 @@ export function useThreadsSWR<
       ];
     }
     return baseKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantId, paginationWithDefaults]);
 
   const fetcher = async (): Promise<Thread<TGraphState>[]> => {
@@ -162,6 +163,7 @@ export function useThreadsSWR<
 
   const hasMore = useMemo(() => {
     return hasMoreState && !!threads.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threads, paginationWithDefaults]);
 
   return {

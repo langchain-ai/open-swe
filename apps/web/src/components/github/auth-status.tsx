@@ -48,6 +48,7 @@ function AuthStatusContent() {
       console.log("redirecting to chat");
       router.push("/chat");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [githubToken]);
 
   const checkAuthStatus = async () => {

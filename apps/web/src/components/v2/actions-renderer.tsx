@@ -175,6 +175,7 @@ export function ActionsRenderer<
 
       return prev;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.messages]);
 
   // Clear streamLoading as soon as we get any content (agent has started running)
@@ -185,6 +186,7 @@ export function ActionsRenderer<
     if (hasContent && streamLoading) {
       setStreamLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.messages, customNodeEvents, streamLoading]);
 
   useEffect(() => {

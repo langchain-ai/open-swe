@@ -192,6 +192,7 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function mapToolMessageToActionStepProps(
   message: ToolMessage,
   threadMessages: Message[],

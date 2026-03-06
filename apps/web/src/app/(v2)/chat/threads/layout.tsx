@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "../../../globals.css";
 import React from "react";
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const metadata: Metadata = {
   title: "Open SWE - All Threads",
   description: "Open SWE view all threads",

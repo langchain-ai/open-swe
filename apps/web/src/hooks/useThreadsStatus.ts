@@ -157,10 +157,10 @@ export function useThreadsStatus(
     THREAD_STATUS_SWR_CONFIG,
   );
 
-  const statusMap = fetchResult?.statusMap || {};
-  const taskPlanMap = fetchResult?.taskPlanMap || {};
-
   return useMemo(() => {
+    const statusMap = fetchResult?.statusMap || {};
+    const taskPlanMap = fetchResult?.taskPlanMap || {};
+
     const groupedThreads: GroupedThreadIds = {
       running: [],
       completed: [],
@@ -191,12 +191,12 @@ export function useThreadsStatus(
     };
 
     return {
-      statusMap: statusMap || {},
-      taskPlanMap: taskPlanMap || {},
+      statusMap,
+      taskPlanMap,
       statusCounts,
       groupedThreads,
       isLoading,
       hasErrors: !!error,
     };
-  }, [statusMap, taskPlanMap, threadIds, threadIdsKey, isLoading, error]);
+  }, [fetchResult, threadIds, isLoading, error]);
 }

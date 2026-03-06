@@ -11,6 +11,7 @@ const inter = Inter({
   display: "swap",
 });
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const metadata: Metadata = {
   title: "Open SWE",
   description: "Open SWE UX by LangChain",

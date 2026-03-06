@@ -252,6 +252,7 @@ export function TerminalInput({
       // Clear quick action prompt
       setQuickActionPrompt?.("");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quickActionPrompt]);
 
   // Handle draft loading from external components

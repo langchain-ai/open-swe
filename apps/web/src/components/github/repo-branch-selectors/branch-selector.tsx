@@ -94,6 +94,7 @@ export function BranchSelector({
         setSelectedBranch(findDefaultBranch(branches, defaultBranch));
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedRepository?.owner,
     selectedRepository?.repo,

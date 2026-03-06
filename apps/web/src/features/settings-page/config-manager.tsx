@@ -86,6 +86,7 @@ export function ConfigManager() {
 
   useEffect(() => {
     loadConfigurations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasConfiguredValues = configurations.some((config) => {

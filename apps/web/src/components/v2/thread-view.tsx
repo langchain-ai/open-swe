@@ -121,6 +121,7 @@ export function ThreadView({
       const configurable = (thread as Record<string, any>).config?.configurable;
       setHasGitHubIssue(!!configurable?.shouldCreateIssue);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayThread.id]);
 
   // Load optimistic message from sessionStorage
@@ -208,6 +209,7 @@ export function ThreadView({
     } else if (!plannerSession?.runId) {
       joinedPlannerRunId.current = undefined;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plannerSession]);
 
   const programmerStream = useStream<GraphState>({
@@ -234,6 +236,7 @@ export function ThreadView({
     } else if (!programmerSession?.runId) {
       joinedProgrammerRunId.current = undefined;
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programmerSession]);
 
   useEffect(() => {
@@ -248,6 +251,7 @@ export function ThreadView({
         setSelectedTab("planner");
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream?.values]);
 
   useEffect(() => {
@@ -292,7 +296,12 @@ export function ThreadView({
         }, 2000);
       }
     }
-  }, [plannerStream.values, selectedTab]);
+  }, [
+    plannerStream.values,
+    selectedTab,
+    programmerSession?.runId,
+    programmerSession?.threadId,
+  ]);
 
   useEffect(() => {
     if (programmerStream.values?.taskPlan) {

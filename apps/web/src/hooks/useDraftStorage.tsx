@@ -73,6 +73,7 @@ export const useDraftStorage = (): UseDraftStorageReturn => {
   const hasLoadedInitialDraft = useRef(false);
 
   // Debounced auto-save function
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const debouncedSave = useCallback(
     debounce((content: string) => {
       saveDraftToLocalStorage(content);

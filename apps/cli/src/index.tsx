@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable react-refresh/only-export-components */
 import React, { useState, useEffect } from "react";
 import { render, Box, Text, useInput } from "ink";
 import { Command } from "commander";

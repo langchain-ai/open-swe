@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "../../globals.css";
 import React, { Suspense } from "react";
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const metadata: Metadata = {
   title: "Open SWE - Chat",
   description: "Open SWE chat",

@@ -91,6 +91,7 @@ export default function ThreadPage({
     if (initialThreadFetched.current && initialFetchedThread && thread) {
       setInitialFetchedThread(null);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread_id, thread]);
 
   if (statusError && "message" in statusError && "type" in statusError) {
