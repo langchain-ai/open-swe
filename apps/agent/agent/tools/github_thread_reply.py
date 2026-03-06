@@ -5,10 +5,9 @@ from langgraph.config import get_config
 
 from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_pr_comment
-from ..utils.github_token import get_github_token
 
 
-def github_thread_reply(message: str) -> dict[str, Any]:
+def github_thread_reply(message: str, pr_number: int) -> dict[str, Any]:
     """Post a comment to the current GitHub Pull Request.
 
     Use this tool to communicate progress and updates to stakeholders on GitHub.
@@ -20,6 +19,7 @@ def github_thread_reply(message: str) -> dict[str, Any]:
 
     Args:
         message: Markdown-formatted comment text to post to the GitHub PR.
+        pr_number: Pull request number to comment on.
 
     Returns:
         Dictionary with 'success' (bool) key.
@@ -28,19 +28,17 @@ def github_thread_reply(message: str) -> dict[str, Any]:
     configurable = config.get("configurable", {})
 
     repo_config = configurable.get("repo", {})
-    pr_number = configurable.get("pr_number")
-
     if not pr_number:
-        return {"success": False, "error": "No pr_number found in config"}
+        return {"success": False, "error": "Missing pr_number argument"}
     if not repo_config:
         return {"success": False, "error": "No repo config found in config"}
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    # Try GitHub App installation token first (posts as bot), fall back to user OAuth token
-    token = asyncio.run(get_github_app_installation_token()) or get_github_token()
+    # Require GitHub App installation token (posts as bot)
+    token = asyncio.run(get_github_app_installation_token())
     if not token:
-        return {"success": False, "error": "No GitHub token found"}
+        return {"success": False, "error": "Failed to get GitHub App installation token"}
 
     success = asyncio.run(post_github_pr_comment(repo_config, pr_number, message, token=token))
     return {"success": success}

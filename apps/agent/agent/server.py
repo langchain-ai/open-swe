@@ -124,7 +124,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
             pull_result = await loop.run_in_executor(
                 None,
                 sandbox_backend.execute,
-                f"cd {repo_dir} && git pull origin $(git -C {repo_dir} rev-parse --abbrev-ref HEAD)",
+                f"cd {repo_dir} && git pull origin $(git rev-parse --abbrev-ref HEAD)",
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:

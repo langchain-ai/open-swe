@@ -13,8 +13,9 @@ from langgraph.config import get_config
 from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
-from ..encryption import decrypt_token, encrypt_token
+from ..encryption import encrypt_token
 from ..github_user_mapping import GITHUB_USER_EMAIL_MAP
+from .github_comments import get_github_token_from_thread
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -326,59 +327,6 @@ async def save_encrypted_token_from_email(
     return token, encrypted
 
 
-async def _is_github_token_valid(token: str) -> bool:
-    """Check if a GitHub token is still valid by calling GET /user."""
-    try:
-        async with httpx.AsyncClient() as http:
-            r = await http.get(
-                "https://api.github.com/user",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            return r.status_code != 401
-    except Exception:
-        logger.debug("Failed to validate GitHub token, assuming invalid")
-        return False
-
-
-async def _get_token_from_thread_metadata(thread_id: str) -> tuple[str, str] | None:
-    """Read and decrypt a GitHub token from thread metadata. Returns (token, encrypted) or None."""
-    try:
-        thread = await client.threads.get(thread_id)
-        thread_metadata = (thread or {}).get("metadata", {})
-        if isinstance(thread_metadata, dict):
-            encrypted = thread_metadata.get("github_token_encrypted", "")
-            if encrypted:
-                token = decrypt_token(encrypted)
-                if token:
-                    if not await _is_github_token_valid(token):
-                        logger.info(
-                            "Cached GitHub token for thread %s is expired, falling back to OAuth",
-                            thread_id,
-                        )
-                        return None
-                    logger.info(
-                        "Using existing GitHub token from thread metadata for thread %s", thread_id
-                    )
-                    return token, encrypted
-    except Exception:
-        logger.debug(
-            "Could not read token from thread metadata for thread %s, falling back to OAuth",
-            thread_id,
-        )
-    return None
-
-
-async def save_token_from_github_login(
-    github_login: str,
-    source: str,
-) -> tuple[str, str]:
-    """Resolve a GitHub token from a GitHub username via the user mapping."""
-    email = GITHUB_USER_EMAIL_MAP.get(github_login)
-    if not email:
-        raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
-    return await save_encrypted_token_from_email(email, source)
-
-
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:
     """Resolve a GitHub token from the run config based on the source.
 
@@ -399,10 +347,14 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached = await _get_token_from_thread_metadata(thread_id)
+            cached = await get_github_token_from_thread(thread_id, return_encrypted=True)
             if cached:
                 return cached
-            return await save_token_from_github_login(configurable.get("github_login"), source)
+            github_login = configurable.get("github_login")
+            email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
+            if not email:
+                raise ValueError(f"No email mapping found for GitHub user '{github_login}'")
+            return await save_encrypted_token_from_email(email, source)
         return await save_encrypted_token_from_email(configurable.get("user_email"), source)
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))

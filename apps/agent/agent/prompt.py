@@ -86,7 +86,7 @@ Posts a message to the active Slack thread. Use this for clarifying questions, s
 Remember that Slack does not use standard markdown formatting. Ensure you always conform to the Slack specific markdown format when sending messages
 
 #### `github_thread_reply`
-Posts a comment to the current GitHub Pull Request. Use this when the task was triggered from a GitHub PR comment — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub Pull Request. Provide the `pr_number` explicitly. Use this when the task was triggered from a GitHub PR comment — to reply with updates, answers, or a summary after completing work."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---

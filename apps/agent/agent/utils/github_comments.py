@@ -56,7 +56,9 @@ def get_thread_id_from_branch(branch_name: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def get_github_token_from_thread(thread_id: str) -> str | None:
+async def get_github_token_from_thread(
+    thread_id: str, *, return_encrypted: bool = False
+) -> str | tuple[str, str] | None:
     """Resolve a GitHub token from thread metadata.
 
     Used in webhook context (outside LangGraph run) where get_config() is unavailable.
@@ -65,7 +67,8 @@ async def get_github_token_from_thread(thread_id: str) -> str | None:
         thread_id: The LangGraph thread ID.
 
     Returns:
-        Decrypted GitHub token, or None if not found.
+        Decrypted GitHub token, or None if not found. If return_encrypted is True,
+        returns (token, encrypted) instead.
     """
     try:
         thread = await client.threads.get(thread_id)
@@ -76,6 +79,8 @@ async def get_github_token_from_thread(thread_id: str) -> str | None:
                 token = decrypt_token(encrypted)
                 if token:
                     logger.info("Found GitHub token in thread metadata for thread %s", thread_id)
+                    if return_encrypted:
+                        return token, encrypted
                     return token
 
         logger.debug("No github_token_encrypted found in thread metadata for thread %s", thread_id)
@@ -378,9 +383,9 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
         "If code changes are needed:\n"
         "1. Make the changes in the sandbox\n"
         "2. Call `commit_and_open_pr` to push them to GitHub — this is REQUIRED, do NOT skip it\n"
-        "3. Call `github_thread_reply` to post a summary on the PR\n\n"
+        "3. Call `github_thread_reply` with the PR number to post a summary on the PR\n\n"
         "If no code changes are needed:\n"
-        "1. Call `github_thread_reply` to explain your answer — this is REQUIRED, never end silently\n\n"
+        "1. Call `github_thread_reply` with the PR number to explain your answer — this is REQUIRED, never end silently\n\n"
         "**You MUST always call `github_thread_reply` before finishing — whether or not changes were made.**"
     )
 
