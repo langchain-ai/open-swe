@@ -57,8 +57,9 @@ uv sync
 In a terminal, start ngrok to get your public URL:
 
 ```bash
-ngrok http 8000
+ngrok http 2024
 # e.g. https://xxxx.ngrok.io
+
 ```
 
 Then in Linear:
@@ -89,10 +90,6 @@ LANGCHAIN_PROJECT=""
 # LLM
 ANTHROPIC_API_KEY=""                # Anthropic API key (recommended default provider)
 
-# GitHub OAuth (via LangSmith agent auth)
-GITHUB_OAUTH_PROVIDER_ID=""         # GitHub OAuth provider ID from LangSmith
-X_SERVICE_AUTH_JWT_SECRET=""        # Secret for service JWT tokens
-
 # GitHub App (Bot)
 GITHUB_APP_ID=""                    # GitHub App ID
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
@@ -118,24 +115,17 @@ SLACK_SIGNING_SECRET=""
 DEFAULT_SANDBOX_TEMPLATE_NAME=""    # LangSmith sandbox template name (uses default if not set)
 
 # Token encryption
-TOKEN_ENCRYPTION_KEY=""             # 32-byte url-safe base64 key for encrypting GitHub tokens
+# Generate with: openssl rand -base64 32
+TOKEN_ENCRYPTION_KEY=""
 ```
 
 ### 5. Run the agent
-
-In one terminal, start the LangGraph dev server:
 
 ```bash
 uv run langgraph dev --no-browser
 ```
 
-In a second terminal, start the webhook server:
-
-```bash
-make run
-```
-
-The LangGraph server runs on `http://localhost:2024` and the webhook server on `http://localhost:8000`.
+The LangGraph server runs on `http://localhost:2024` and serves the webhook endpoints automatically.
 
 ### 6. Verify it works
 
@@ -149,5 +139,5 @@ Comment `@openswe` on any Linear issue. You should see:
 
 Open SWE can be used in multiple ways:
 
-- 📋 **From Linear**. Mention `@openswe` in a comment on any Linear issue and describe the task you want it to perform (e.g. `@openswe fix the login bug described above`). The agent will pick up the issue context along with your instructions and start working on it.
-- 🐙 **GitHub (for Open SWE-generated PRs)**. Once Open SWE completes implementation, it pushes changes to a branch `open-swe/<thread-id>` and opens a **draft pull request** linking back to the originating Linear issue. From there, you can review the code, request changes, and merge when ready.
+- 📋 **From Linear**. Mention `@openswe` in a comment on any Linear issue to trigger the agent. It will automatically read the issue description and full context, then autonomously start working on it. You can also include additional instructions in the comment if needed (e.g. `@openswe focus on the auth module`).
+- 🐙 **GitHub (for Open SWE-generated PRs)**. In PRs which Open SWE has created, you can tag it in comments or reviews via `@openswe` to have it resolve reviews automatically for you. Tagging `@openswe` on an Open SWE generated PR will create a new run passing all of the comments from the PR as the prompt. Any changes will be directly committed back to the same branch. 
