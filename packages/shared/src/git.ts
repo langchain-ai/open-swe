@@ -5,6 +5,27 @@ import {
   getLocalWorkingDirectory,
 } from "./open-swe/local-mode.js";
 
+/**
+ * Strips invalid git branch characters from a string and returns a valid branch name.
+ */
+export function sanitizeBranchName(name: string): string {
+  let sanitized = name
+    .replace(/[\s~^:?*[\]\\]+/g, "-")
+    .replace(/\.{2,}/g, "-")
+    .replace(/\/{2,}/g, "/")
+    .replace(/\.lock(\/|$)/g, "-lock$1")
+    .replace(/@\{/g, "-{")
+    .replace(/^[.\-/]+/, "")
+    .replace(/[.\-/]+$/, "")
+    .replace(/-{2,}/g, "-");
+
+  if (!sanitized) {
+    sanitized = "branch";
+  }
+
+  return sanitized;
+}
+
 export function getRepoAbsolutePath(
   targetRepository: TargetRepository,
   config?: GraphConfig,
