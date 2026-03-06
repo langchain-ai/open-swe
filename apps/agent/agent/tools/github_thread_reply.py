@@ -3,6 +3,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_comments import post_github_pr_comment
 from ..utils.github_token import get_github_token
 
@@ -36,10 +37,10 @@ def github_thread_reply(message: str) -> dict[str, Any]:
     if not message.strip():
         return {"success": False, "error": "Message cannot be empty"}
 
-    # TODO: replace with openswe bot token → token = os.environ.get("OPENSWE_BOT_GITHUB_TOKEN")
-    token = get_github_token()
+    # Try GitHub App installation token first (posts as bot), fall back to user OAuth token
+    token = asyncio.run(get_github_app_installation_token()) or get_github_token()
     if not token:
-        return {"success": False, "error": "No Bot GitHub token found"}
+        return {"success": False, "error": "No GitHub token found"}
 
     success = asyncio.run(post_github_pr_comment(repo_config, pr_number, message, token=token))
     return {"success": success}
