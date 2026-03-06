@@ -127,6 +127,47 @@ The LangGraph server runs on `http://localhost:2024` and the webhook server on `
 
 ---
 
+## Setting up the Linear Webhook
+
+### 1. Get your webhook URL
+
+Start ngrok and copy the HTTPS URL:
+
+```bash
+ngrok http 8000
+# e.g. https://xxxx.ngrok.io
+```
+
+Your Linear webhook URL will be: `https://xxxx.ngrok.io/webhooks/linear`
+
+### 2. Create the webhook in Linear
+
+1. Go to **Linear** → **Settings** → **API** → **Webhooks**
+2. Click **New webhook**
+3. Fill in the form:
+   - **Label**: `open-swe`
+   - **URL**: `https://xxxx.ngrok.io/webhooks/linear`
+   - **Secret**: generate a random string and copy it — this goes in `LINEAR_WEBHOOK_SECRET` in your `.env`
+4. Under **Data change events**, enable:
+   -  **Comments** → `Create`
+5. Click **Create webhook**
+
+### 3. Set the Linear API key
+
+Open SWE uses `LINEAR_API_KEY` to fetch full issue details (description, project, team) and to post comments back. To get it:
+
+1. Go to **Linear** → **Settings** → **API** → **Personal API keys**
+2. Click **New API key**, name it `open-swe`
+3. Copy the key into `LINEAR_API_KEY` in your `.env`
+
+### 4. Verify it works
+
+Comment `@openswe` on any Linear issue. You should see:
+- A 👀 reaction appear on your comment within a few seconds
+- A new run appear in your LangSmith project
+
+---
+
 ## Usage
 
 Open SWE can be used in multiple ways:
