@@ -320,11 +320,7 @@ async def check_if_using_repo_msg_sent(
 
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
-    """Resolve repository configuration for Slack-triggered runs.
-
-    For an existing thread: use saved repo from thread metadata, or default.
-    For a new thread (not found): parse message for repo:owner/name, or default.
-    """
+    """Resolve repository configuration for Slack-triggered runs."""
     default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
     default_name = SLACK_REPO_NAME.strip() or "langchainplus"
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
