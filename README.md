@@ -83,8 +83,6 @@ Create a `.env` file in `apps/agent/` with the following:
 ```bash
 # LangSmith
 LANGSMITH_API_KEY_PROD=""           # Your LangSmith API key
-LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
-LANGSMITH_HOST_API_URL="https://api.host.langchain.com"
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""
 
