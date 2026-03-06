@@ -200,13 +200,14 @@ When you have completed your implementation, follow these steps in order:
    ```
    Where type is one of: `fix` (bug fix), `feat` (new feature), `chore` (maintenance), `ci` (CI/CD)
 
-   **PR Body**:
+   **PR Body** (keep under 10 lines total. the more concise the better):
    ```
    ## Description
-   <Explain WHY this PR is needed, list the changes, and reference the Linear issue>
+   <1-3 sentences on WHY and the approach.
+   NO "Changes:" section — file changes are already in the commit history.>
 
    ## Test Plan
-   - [ ] <specific verification step>
+   - [ ] <new/novel verification steps only — NOT "run existing tests" or "verify existing behavior">
    ```
 
    **Commit message**: Concise, focusing on the "why" rather than the "what". If not provided, the PR title is used.
