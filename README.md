@@ -52,7 +52,31 @@ cd open-swe/apps/agent
 uv sync
 ```
 
-### 3. Set environment variables
+### 3. Set up the Linear webhook
+
+In a terminal, start ngrok to get your public URL:
+
+```bash
+ngrok http 8000
+# e.g. https://xxxx.ngrok.io
+```
+
+Then in Linear:
+
+1. Go to **Settings** → **API** → **Webhooks** → **New webhook**
+2. Fill in:
+   - **Label**: `open-swe`
+   - **URL**: `https://xxxx.ngrok.io/webhooks/linear`
+   - **Secret**: generate a random string — copy it, you'll need it for `LINEAR_WEBHOOK_SECRET`
+3. Under **Data change events**, enable **Comments** → `Create` only
+4. Click **Create webhook**
+
+To get your `LINEAR_API_KEY`:
+
+1. Go to **Settings** → **API** → **Personal API keys** → **New API key**
+2. Name it `open-swe` and copy the key
+
+### 4. Set environment variables
 
 Create a `.env` file in `apps/agent/` with the following:
 
@@ -83,8 +107,8 @@ GITHUB_APP_INSTALLATION_ID=""       # GitHub App installation ID
 GITHUB_WEBHOOK_SECRET=""            # Secret for verifying GitHub webhooks
 
 # Linear
-LINEAR_API_KEY=""                   # Linear API key
-LINEAR_WEBHOOK_SECRET=""            # Secret for verifying Linear webhooks
+LINEAR_API_KEY=""                   # Linear API key (from step 3)
+LINEAR_WEBHOOK_SECRET=""            # Secret you set when creating the webhook (from step 3)
 
 # Slack (optional)
 SLACK_BOT_TOKEN=""
@@ -99,12 +123,12 @@ DEFAULT_SANDBOX_TEMPLATE_NAME=""    # LangSmith sandbox template name (uses defa
 TOKEN_ENCRYPTION_KEY=""             # 32-byte url-safe base64 key for encrypting GitHub tokens
 ```
 
-### 4. Run the agent
+### 5. Run the agent
 
 In one terminal, start the LangGraph dev server:
 
 ```bash
-uv run langgraph dev 
+uv run langgraph dev --no-browser
 ```
 
 In a second terminal, start the webhook server:
@@ -113,57 +137,12 @@ In a second terminal, start the webhook server:
 make run
 ```
 
-### 5. Expose webhooks with ngrok
-
-In a third terminal, expose the webhook server so Linear/GitHub/Slack can reach it:
-
-```bash
-ngrok http 8000
-```
-
-Use the ngrok HTTPS URL as your webhook endpoint when configuring Linear, GitHub, and Slack integrations (e.g. `https://xxxx.ngrok.io/webhooks/linear`).
-
 The LangGraph server runs on `http://localhost:2024` and the webhook server on `http://localhost:8000`.
 
----
-
-## Setting up the Linear Webhook
-
-### 1. Get your webhook URL
-
-Start ngrok and copy the HTTPS URL:
-
-```bash
-ngrok http 8000
-# e.g. https://xxxx.ngrok.io
-```
-
-Your Linear webhook URL will be: `https://xxxx.ngrok.io/webhooks/linear`
-
-### 2. Create the webhook in Linear
-
-1. Go to **Linear** → **Settings** → **API** → **Webhooks**
-2. Click **New webhook**
-3. Fill in the form:
-   - **Label**: `open-swe`
-   - **URL**: `https://xxxx.ngrok.io/webhooks/linear`
-   - **Secret**: generate a random string and copy it — this goes in `LINEAR_WEBHOOK_SECRET` in your `.env`
-4. Under **Data change events**, enable:
-   -  **Comments** → `Create`
-5. Click **Create webhook**
-
-### 3. Set the Linear API key
-
-Open SWE uses `LINEAR_API_KEY` to fetch full issue details (description, project, team) and to post comments back. To get it:
-
-1. Go to **Linear** → **Settings** → **API** → **Personal API keys**
-2. Click **New API key**, name it `open-swe`
-3. Copy the key into `LINEAR_API_KEY` in your `.env`
-
-### 4. Verify it works
+### 6. Verify it works
 
 Comment `@openswe` on any Linear issue. You should see:
-- A 👀 reaction appear on your comment within a few seconds
+- A 👀 reaction on your comment within a few seconds
 - A new run appear in your LangSmith project
 
 ---
