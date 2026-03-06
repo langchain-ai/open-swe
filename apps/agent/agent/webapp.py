@@ -333,33 +333,30 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
     owner: str | None = None
     name: str | None = None
 
-    try:
-        thread = await langgraph_client.threads.get(thread_id)
-        thread_repo_config = _extract_repo_config_from_thread(thread)
-        if thread_repo_config:
-            owner = thread_repo_config["owner"]
-            name = thread_repo_config["name"]
-        if not owner or not name:
-            owner = default_owner
-            name = default_name
-    except Exception as exc:  # noqa: BLE001
-        if _is_not_found_error(exc):
-            if "repo:" in message:
-                match = re.search(r"repo:([^ ]+)", message)
-                if match:
-                    repo = match.group(1).strip()
-                    if "/" in repo:
-                        owner, name = repo.split("/", 1)
-            if not owner or not name:
-                owner = default_owner
-                name = default_name
-        else:
-            logger.exception(
-                "Failed to fetch Slack thread %s for repo resolution",
-                thread_id,
-            )
-            owner = default_owner
-            name = default_name
+    if "repo:" in message:
+        match = re.search(r"repo:([^ ]+)", message)
+        if match:
+            repo = match.group(1).strip()
+            if "/" in repo:
+                owner, name = repo.split("/", 1)
+
+    if not owner or not name:
+        try:
+            thread = await langgraph_client.threads.get(thread_id)
+            thread_repo_config = _extract_repo_config_from_thread(thread)
+            if thread_repo_config:
+                owner = thread_repo_config["owner"]
+                name = thread_repo_config["name"]
+        except Exception as exc:  # noqa: BLE001
+            if not _is_not_found_error(exc):
+                logger.exception(
+                    "Failed to fetch Slack thread %s for repo resolution",
+                    thread_id,
+                )
+
+    if not owner or not name:
+        owner = default_owner
+        name = default_name
 
     using_repo_str = f"Using repository: `{owner}/{name}`"
     if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
