@@ -203,7 +203,7 @@ When you have completed your implementation, follow these steps in order:
    **PR Body** (keep under 10 lines total. the more concise the better):
    ```
    ## Description
-   <1-3 sentences on WHY and the approach. Reference the Linear issue.
+   <1-3 sentences on WHY and the approach.
    NO "Changes:" section — file changes are already in the commit history.>
 
    ## Test Plan
