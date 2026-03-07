@@ -1,28 +1,12 @@
 {
-  "node_version": "20",
+  "$schema": "https://langgra.ph/schema.json",
+  "python_version": "3.12",
   "graphs": {
-    "programmer": "./apps/open-swe/src/graphs/programmer/index.ts:graph",
-    "planner": "./apps/open-swe/src/graphs/planner/index.ts:graph",
-    "manager": "./apps/open-swe/src/graphs/manager/index.ts:graph"
+    "agent": "agent.server:get_agent"
   },
-  "env": "./apps/open-swe/.env",
-  "dependencies": ["./apps/open-swe"],
-  "auth": {
-    "path": "./apps/open-swe/src/security/auth.ts:auth"
-  },
+  "dependencies": ["."],
   "http": {
-    "app": "./apps/open-swe/src/routes/app.ts:app",
-    "configurable_headers": {
-      "include": [
-        "x-github-access-token",
-        "x-github-installation-token",
-        "x-github-user-id",
-        "x-github-user-login",
-        "x-github-installation-name",
-        "x-github-installation-id",
-        "x-github-pat",
-        "x-local-mode"
-      ]
-    }
-  }
+    "app": "agent.webapp:app"
+  },
+  "env": ".env" 
 }
