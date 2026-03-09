@@ -114,7 +114,11 @@ def git_get_remote_url(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -
 def _is_unauthenticated_github_https(url: str) -> bool:
     """Return True only if the URL is a plain GitHub HTTPS URL with no embedded credentials."""
     parsed = urlparse(url)
-    return parsed.scheme == "https" and parsed.hostname in ("github.com", "www.github.com") and not parsed.username
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in ("github.com", "www.github.com")
+        and not parsed.username
+    )
 
 
 def _has_merge_conflicts(status_output: str) -> bool:
