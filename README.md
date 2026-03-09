@@ -1,5 +1,7 @@
 > [!CAUTION]
 > **⚠️ DEPRECATED — This project is no longer maintained and should not be used.**
+>
+> If you're looking to build and deploy agents, check out [LangSmith Agent Builder](https://www.langchain.com/langsmith/agent-builder) instead.
 
 <div align="center">
   <picture>
