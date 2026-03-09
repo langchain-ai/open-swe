@@ -1,0 +1,44 @@
+import asyncio
+from typing import Any
+
+from langgraph.config import get_config
+
+from ..utils.github_pr_webhook import post_github_pr_comment
+from ..utils.github_token import get_github_token
+
+
+def github_comment_on_pr(message: str, pr_number: int) -> dict[str, Any]:
+    """Post a comment to the current GitHub Pull Request.
+
+    Use this tool to communicate progress and updates to stakeholders on GitHub.
+
+    **When to use:**
+    - After calling `commit_and_open_pr`, post a comment to let stakeholders know
+      the task is complete and summarize what was done.
+    - When answering a question or sharing an update triggered from a GitHub PR comment.
+
+    Args:
+        message: Markdown-formatted comment text to post to the GitHub PR.
+        pr_number: Pull request number to comment on.
+
+    Returns:
+        Dictionary with 'success' (bool) key.
+    """
+    config = get_config()
+    configurable = config.get("configurable", {})
+    repo_config = configurable.get("repo", {})
+    owner = repo_config.get("owner")
+    name = repo_config.get("name")
+
+    if not owner or not name:
+        return {"success": False, "error": "Missing repo owner/name in config"}
+
+    github_token = get_github_token()
+    if not github_token:
+        return {"success": False, "error": "Missing GitHub token"}
+
+    if not message.strip():
+        return {"success": False, "error": "Message cannot be empty"}
+
+    success = asyncio.run(post_github_pr_comment(owner, name, pr_number, github_token, message))
+    return {"success": success}

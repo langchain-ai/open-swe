@@ -16,6 +16,16 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from .utils.comments import get_recent_comments
+from .utils.github_pr_webhook import (
+    collect_comments_since_last_tag,
+    extract_thread_id_from_branch,
+    fetch_issue_comments,
+    fetch_pr_review_comments,
+    fetch_pr_reviews,
+    format_review_comment_for_prompt,
+    react_to_github_comment,
+    verify_github_signature,
+)
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
     add_slack_reaction,
@@ -34,6 +44,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
+GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
@@ -988,6 +999,356 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 async def slack_webhook_verify() -> dict[str, str]:
     """Verify endpoint for Slack webhook setup."""
     return {"status": "ok", "message": "Slack webhook endpoint is active"}
+
+
+async def _get_github_token_for_pr(owner: str, repo: str, pr_number: int) -> str | None:
+    """Resolve a GitHub token for reacting to comments on a PR.
+
+    Finds the thread ID from the PR branch name, then reads the encrypted
+    token from thread metadata.
+    """
+    from .encryption import decrypt_token
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+
+    try:
+        pr_data = None
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            if response.status_code == 200:  # noqa: PLR2004
+                pr_data = response.json()
+
+        if not pr_data:
+            return None
+
+        head_branch = pr_data.get("head", {}).get("ref", "")
+        thread_id = extract_thread_id_from_branch(head_branch)
+        if not thread_id:
+            return None
+
+        thread = await langgraph_client.threads.get(thread_id)
+        metadata = thread.get("metadata", {})
+        encrypted = metadata.get("github_token_encrypted")
+        if encrypted:
+            return decrypt_token(encrypted)
+    except Exception:  # noqa: BLE001
+        logger.debug("Could not resolve GitHub token for PR #%d", pr_number)
+    return None
+
+
+async def process_github_pr_comment(  # noqa: PLR0912, PLR0915
+    event_data: dict[str, Any],
+) -> None:
+    """Process a GitHub PR comment by creating or queuing a LangGraph run."""
+    owner = event_data["owner"]
+    repo = event_data["repo"]
+    pr_number = event_data["pr_number"]
+    head_branch = event_data["head_branch"]
+    triggering_comment_id = event_data.get("triggering_comment_id")
+    triggering_user = event_data.get("triggering_user", "")
+    triggering_user_email = event_data.get("triggering_user_email")
+    comment_type = event_data.get("comment_type", "issue_comment")
+    is_review_comment = comment_type == "pr_review_comment"
+
+    github_token = event_data.get("github_token")
+    if not github_token:
+        github_token = await _get_github_token_for_pr(owner, repo, pr_number)
+
+    if github_token and triggering_comment_id:
+        await react_to_github_comment(
+            owner,
+            repo,
+            triggering_comment_id,
+            github_token,
+            "eyes",
+            is_pr_review_comment=is_review_comment,
+        )
+
+    thread_id = extract_thread_id_from_branch(head_branch)
+    if not thread_id:
+        logger.warning("Could not extract thread ID from branch %s", head_branch)
+        return
+
+    all_comments: list[dict[str, Any]] = []
+    review_comments: list[dict[str, Any]] = []
+
+    if github_token:
+        issue_comments = await fetch_issue_comments(owner, repo, pr_number, github_token)
+        for c in issue_comments:
+            c["_comment_type"] = "issue_comment"
+        all_comments.extend(issue_comments)
+
+        review_comments = await fetch_pr_review_comments(owner, repo, pr_number, github_token)
+        for c in review_comments:
+            c["_comment_type"] = "pr_review_comment"
+        all_comments.extend(review_comments)
+
+        reviews = await fetch_pr_reviews(owner, repo, pr_number, github_token)
+        for r in reviews:
+            if r.get("body"):
+                r["_comment_type"] = "pr_review"
+                r["created_at"] = r.get("submitted_at", r.get("created_at", ""))
+                all_comments.append(r)
+
+    relevant_comments = collect_comments_since_last_tag(all_comments, triggering_comment_id)
+
+    comments_text = ""
+    if relevant_comments:
+        comments_parts: list[str] = []
+        for comment in relevant_comments:
+            ctype = comment.get("_comment_type", "issue_comment")
+            author = comment.get("user", {}).get("login", "Unknown")
+            body = comment.get("body", "")
+
+            if ctype == "pr_review_comment":
+                comments_parts.append(format_review_comment_for_prompt(comment))
+            elif ctype == "pr_review":
+                state = comment.get("state", "")
+                state_label = f" [{state}]" if state else ""
+                comments_parts.append(f"**@{author}** (review{state_label}):\n{body}")
+            else:
+                comment_id = comment.get("id", "")
+                comments_parts.append(f"**@{author}** (comment_id: {comment_id}):\n{body}")
+
+        comments_text = "\n\n## PR Comments:\n\n" + "\n\n---\n\n".join(comments_parts)
+
+    pr_url = f"https://github.com/{owner}/{repo}/pull/{pr_number}"
+    prompt = (
+        "You've been tagged in GitHub PR comments. Please resolve them.\n\n"
+        f"## Repository\n{owner}/{repo}\n\n"
+        f"## Pull Request\n#{pr_number}: {pr_url}\n\n"
+        f"## Triggered by\n@{triggering_user}\n\n"
+        f"{comments_text}\n\n"
+        "Use `github_comment_on_pr` to communicate in this PR for clarifications, "
+        "status updates, and final summaries. Use `commit_and_open_pr` to push any code changes."
+    )
+
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+
+    image_urls = extract_image_urls(comments_text)
+    if image_urls:
+        image_urls = dedupe_urls(image_urls)
+        async with httpx.AsyncClient() as client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, client)
+                if image_block:
+                    content_blocks.append(image_block)
+
+    configurable: dict[str, Any] = {
+        "repo": {"owner": owner, "name": repo},
+        "github_pr": {
+            "pr_number": pr_number,
+            "pr_url": pr_url,
+            "head_branch": head_branch,
+            "triggering_user": triggering_user,
+            "triggering_user_email": triggering_user_email,
+            "github_token": github_token,
+        },
+        "user_email": triggering_user_email,
+        "source": "github",
+    }
+
+    logger.info("Checking if thread %s is active before creating run", thread_id)
+    thread_active = await is_thread_active(thread_id)
+
+    if thread_active:
+        logger.info("Thread %s is active, queuing message", thread_id)
+        queued = await queue_message_for_thread(thread_id=thread_id, message_content=prompt)
+        if queued:
+            logger.info("Message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue message for thread %s", thread_id)
+    else:
+        logger.info("Creating LangGraph run for thread %s", thread_id)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={"configurable": configurable},
+            if_not_exists="create",
+        )
+        logger.info("LangGraph run created for thread %s", thread_id)
+
+
+def _is_pr_comment(payload: dict[str, Any]) -> bool:
+    """Check if an issue_comment event is actually on a PR (not a plain issue)."""
+    issue = payload.get("issue", {})
+    return "pull_request" in issue
+
+
+@app.post("/webhooks/github")
+async def github_webhook(  # noqa: PLR0911, PLR0912, PLR0915
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle GitHub webhooks for PR comments, PR review comments, and PR reviews."""
+    logger.info("Received GitHub webhook")
+    body = await request.body()
+
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if GITHUB_WEBHOOK_SECRET and not verify_github_signature(
+        body, signature, GITHUB_WEBHOOK_SECRET
+    ):
+        logger.warning("Invalid GitHub webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse GitHub webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    event_type = request.headers.get("X-GitHub-Event", "")
+    action = payload.get("action", "")
+
+    repo_data = payload.get("repository", {})
+    owner = repo_data.get("owner", {}).get("login", "")
+    repo = repo_data.get("name", "")
+
+    if event_type == "issue_comment" and action == "created":
+        if not _is_pr_comment(payload):
+            return {"status": "ignored", "reason": "Comment is on an issue, not a PR"}
+
+        comment = payload.get("comment", {})
+        comment_body = comment.get("body", "")
+
+        if not re.search(r"@open-swe\b", comment_body, re.IGNORECASE):
+            return {"status": "ignored", "reason": "Comment doesn't mention @open-swe"}
+
+        if comment.get("performed_via_github_app"):
+            return {"status": "ignored", "reason": "Comment is from a GitHub App"}
+
+        issue = payload.get("issue", {})
+        pr_number = issue.get("number")
+        pr_url = issue.get("pull_request", {}).get("url", "")
+
+        pr_data = None
+        if pr_url:
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.get(
+                        pr_url,
+                        headers={
+                            "Accept": "application/vnd.github+json",
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                    )
+                    if resp.status_code == 200:  # noqa: PLR2004
+                        pr_data = resp.json()
+                except httpx.HTTPError:
+                    logger.exception("Failed to fetch PR details from %s", pr_url)
+
+        head_branch = ""
+        if pr_data:
+            head_branch = pr_data.get("head", {}).get("ref", "")
+
+        if not head_branch or not extract_thread_id_from_branch(head_branch):
+            return {
+                "status": "ignored",
+                "reason": "PR branch is not an open-swe branch",
+            }
+
+        user = comment.get("user", {})
+        event_data = {
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_branch": head_branch,
+            "triggering_comment_id": comment.get("id"),
+            "triggering_user": user.get("login", ""),
+            "triggering_user_email": user.get("email"),
+            "comment_type": "issue_comment",
+        }
+
+        background_tasks.add_task(process_github_pr_comment, event_data)
+        return {"status": "accepted", "message": f"Processing PR comment on #{pr_number}"}
+
+    if event_type == "pull_request_review_comment" and action == "created":
+        comment = payload.get("comment", {})
+        comment_body = comment.get("body", "")
+
+        if not re.search(r"@open-swe\b", comment_body, re.IGNORECASE):
+            return {"status": "ignored", "reason": "Review comment doesn't mention @open-swe"}
+
+        if comment.get("performed_via_github_app"):
+            return {"status": "ignored", "reason": "Comment is from a GitHub App"}
+
+        pr = payload.get("pull_request", {})
+        pr_number = pr.get("number")
+        head_branch = pr.get("head", {}).get("ref", "")
+
+        if not head_branch or not extract_thread_id_from_branch(head_branch):
+            return {
+                "status": "ignored",
+                "reason": "PR branch is not an open-swe branch",
+            }
+
+        user = comment.get("user", {})
+        event_data = {
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_branch": head_branch,
+            "triggering_comment_id": comment.get("id"),
+            "triggering_user": user.get("login", ""),
+            "triggering_user_email": user.get("email"),
+            "comment_type": "pr_review_comment",
+        }
+
+        background_tasks.add_task(process_github_pr_comment, event_data)
+        return {
+            "status": "accepted",
+            "message": f"Processing PR review comment on #{pr_number}",
+        }
+
+    if event_type == "pull_request_review" and action == "submitted":
+        review = payload.get("review", {})
+        review_body = review.get("body", "") or ""
+
+        if not re.search(r"@open-swe\b", review_body, re.IGNORECASE):
+            return {"status": "ignored", "reason": "Review doesn't mention @open-swe"}
+
+        pr = payload.get("pull_request", {})
+        pr_number = pr.get("number")
+        head_branch = pr.get("head", {}).get("ref", "")
+
+        if not head_branch or not extract_thread_id_from_branch(head_branch):
+            return {
+                "status": "ignored",
+                "reason": "PR branch is not an open-swe branch",
+            }
+
+        user = review.get("user", {})
+        event_data = {
+            "owner": owner,
+            "repo": repo,
+            "pr_number": pr_number,
+            "head_branch": head_branch,
+            "triggering_comment_id": review.get("id"),
+            "triggering_user": user.get("login", ""),
+            "triggering_user_email": user.get("email"),
+            "comment_type": "pr_review",
+        }
+
+        background_tasks.add_task(process_github_pr_comment, event_data)
+        return {
+            "status": "accepted",
+            "message": f"Processing PR review on #{pr_number}",
+        }
+
+    return {"status": "ignored", "reason": f"Unhandled event: {event_type}/{action}"}
+
+
+@app.get("/webhooks/github")
+async def github_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for GitHub webhook setup."""
+    return {"status": "ok", "message": "GitHub webhook endpoint is active"}
 
 
 @app.get("/health")

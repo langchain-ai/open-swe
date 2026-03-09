@@ -13,6 +13,7 @@ from langgraph.config import get_config
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
+from .github_pr_webhook import post_github_pr_comment
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -40,12 +41,16 @@ logger.debug(
 def _retry_instruction(source: str) -> str:
     if source == "slack":
         return "Once authenticated, mention me again in this Slack thread to retry."
+    if source == "github":
+        return "Once authenticated, tag @open-swe again in a PR comment to retry."
     return "Once authenticated, reply to this issue mentioning @openswe to retry."
 
 
 def _source_account_label(source: str) -> str:
     if source == "slack":
         return "Slack"
+    if source == "github":
+        return "GitHub"
     return "Linear"
 
 
@@ -58,6 +63,8 @@ def _auth_link_text(source: str, auth_url: str) -> str:
 def _work_item_label(source: str) -> str:
     if source == "slack":
         return "thread"
+    if source == "github":
+        return "pull request"
     return "issue"
 
 
@@ -239,6 +246,23 @@ async def leave_failure_comment(
                 thread_ts,
             )
             await post_slack_thread_reply(channel_id, thread_ts, message)
+        return
+    if source == "github":
+        github_pr = configurable.get("github_pr", {})
+        if isinstance(github_pr, dict):
+            repo = configurable.get("repo", {})
+            owner = repo.get("owner") if isinstance(repo, dict) else None
+            name = repo.get("name") if isinstance(repo, dict) else None
+            pr_number = github_pr.get("pr_number")
+            github_token = github_pr.get("github_token")
+            if owner and name and pr_number and github_token:
+                logger.info(
+                    "Posting auth failure comment to GitHub PR #%s on %s/%s",
+                    pr_number,
+                    owner,
+                    name,
+                )
+                await post_github_pr_comment(owner, name, pr_number, github_token, message)
         return
     raise ValueError(f"Unknown source: {source}")
 

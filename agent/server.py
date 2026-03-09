@@ -36,6 +36,8 @@ from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
     fetch_url,
+    github_comment_on_issue,
+    github_comment_on_pr,
     http_request,
     linear_comment,
     slack_thread_reply,
@@ -384,7 +386,15 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
         ),
-        tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+        tools=[
+            http_request,
+            fetch_url,
+            commit_and_open_pr,
+            linear_comment,
+            slack_thread_reply,
+            github_comment_on_pr,
+            github_comment_on_issue,
+        ],
         backend=sandbox_backend,
         middleware=[
             ToolErrorMiddleware(),
