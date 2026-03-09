@@ -27,23 +27,26 @@ Open SWE authenticates as a [GitHub App](https://docs.github.com/en/apps/creatin
 2. Fill in:
    - **App name**: `open-swe` (or your preferred name)
    - **Homepage URL**: any valid URL
+   - **Callback URL**: Set this to `https://smith.langchain.com/host-oauth-callback/<your-provider-id>` (replace `<your-provider-id>` with the actual provider ID you configure in LangSmith during step #3. e.g. `github-oauth-provider`)
+   - **Request user authorization (OAuth) during installation**: Enable this
    - **Webhook URL**: `https://<your-ngrok-url>/webhooks/github` (you'll set this up in step 4)
    - **Webhook secret**: generate with `openssl rand -hex 32` — save this for `GITHUB_WEBHOOK_SECRET`
 3. Set permissions:
    - **Repository permissions**:
      - Contents: Read & write
      - Pull requests: Read & write
-     - Issues: Read
+     - Issues: Read & write
      - Metadata: Read-only
 4. Under **Subscribe to events**, enable:
-   - Pull request review comment
-   - Issue comment
+   - `Issue comment`
+   - `Pull request review`
+   - `Pull request review comment`
 5. Click **Create GitHub App**
-6. Note the **App ID** from the app settings page
-7. Generate a **private key** (scroll down on the app page → **Generate a private key**). Save the `.pem` file contents.
+6. Note the **App ID** from the app settings page - you'll need this for the `GITHUB_APP_ID` environment variable.
+7. Generate a **private key** (scroll down on the app page → **Generate a private key**). Save the `.pem` file contents. You'll need to set this under `GITHUB_APP_PRIVATE_KEY`.
 8. **Install the app** on the repositories you want Open SWE to access:
    - Go to your app's page → **Install App** → select your org/account → choose repositories
-   - Note the **Installation ID** from the URL after installation (e.g. `https://github.com/settings/installations/12345678` → `12345678`)
+   - Note the **Installation ID** from the URL after installation (e.g. `https://github.com/settings/installations/12345678` → `12345678`) - you'll need to set this under `GITHUB_APP_INSTALLATION_ID`
 
 ## 3. Set up LangSmith
 
@@ -60,8 +63,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for two things:
 Open SWE resolves GitHub tokens per-user via LangSmith's OAuth integration. This lets each user authenticate with their own GitHub account rather than sharing a single bot token.
 
 You'll need these from your LangSmith workspace settings:
-- `GITHUB_OAUTH_PROVIDER_ID` — the OAuth provider ID configured in LangSmith
-- `X_SERVICE_AUTH_JWT_SECRET` — the service JWT secret for user token resolution
+- `GITHUB_OAUTH_PROVIDER_ID` — the OAuth provider ID configured in LangSmith (e.g. `github-oauth-provider`)
 
 > **Note**: If these aren't configured, the agent will fall back to the GitHub App's installation token for all operations.
 
@@ -124,30 +126,77 @@ Update this to match your Linear workspace structure.
 
 **Create a Slack App:**
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
-2. Name it `open-swe` and select your workspace
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
+2. Copy the following Slack App Manifest, and paste it in
+<details>
+<summary>Slack App Manifest</summary>
 
-**Configure OAuth & permissions:**
+```json
+{
+    "display_information": {
+        "name": "Open SWE",
+        "description": "Enables Open SWE to interact with your workspace",
+        "background_color": "#000000"
+    },
+    "features": {
+        "app_home": {
+            "home_tab_enabled": false,
+            "messages_tab_enabled": true,
+            "messages_tab_read_only_enabled": false
+        },
+        "bot_user": {
+            "display_name": "Open SWE",
+            "always_online": true
+        }
+    },
+    "oauth_config": {
+        "redirect_urls": [
+            "https://smith.langchain.com/host-oauth-callback/<replace-with-your-langsmith-oauth-provider-id>"
+        ],
+        "scopes": {
+            "bot": [
+                "reactions:write",
+                "app_mentions:read",
+                "channels:history",
+                "channels:read",
+                "chat:write",
+                "groups:history",
+                "groups:read",
+                "im:history",
+                "im:read",
+                "im:write",
+                "mpim:history",
+                "mpim:read",
+                "team:read",
+                "users:read",
+                "users:read.email"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "request_url": "<replace-with-your-langsmith-deployment-url-or-ngrok-url>/webhooks/slack",
+            "bot_events": [
+                "app_mention",
+                "message.im",
+                "message.mpim"
+            ]
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": false,
+        "token_rotation_enabled": false
+    }
+}
+```
 
-Under **OAuth & Permissions**, add these Bot Token Scopes:
-- `app_mentions:read`
-- `channels:history`
-- `channels:read`
-- `chat:write`
-- `reactions:write`
-- `users:read`
-- `users:read.email`
+Place the two URLs with their proper values:
+1. **redirect_urls**: `"https://smith.langchain.com/host-oauth-callback/<replace-with-your-langsmith-oauth-provider-id>"` add your LangSmith OAuth provider ID you set when creating the OAuth provider in LangSmith.
+2. **request_url**: `"https://<your-ngrok-url>/webhooks/slack"` add your ngrok URL pointing to `http://localhost:2024` for local development, or your LangSmith deployment URL if deployed on LangSmith Deployments.
+
+</details>
+3. Copy the following App Manifest and paste it in the Slack App configuration page.
 
 Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-...`).
-
-**Configure event subscriptions:**
-
-1. Under **Event Subscriptions**, enable events
-2. Set the **Request URL** to `https://<your-ngrok-url>/webhooks/slack`
-3. Subscribe to bot events:
-   - `app_mention`
-   - `message.channels` (if you want non-@ mentions to work with username matching)
-4. Save changes
 
 **Credentials you'll need:**
 
@@ -195,7 +244,6 @@ GITHUB_WEBHOOK_SECRET=""               # openssl rand -hex 32
 
 # === GitHub OAuth (via LangSmith) ===
 GITHUB_OAUTH_PROVIDER_ID=""            # Optional — LangSmith OAuth provider
-X_SERVICE_AUTH_JWT_SECRET=""            # Optional — service JWT secret
 
 # === Linear ===
 LINEAR_API_KEY=""                      # From step 4

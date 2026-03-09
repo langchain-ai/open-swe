@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import jwt
@@ -15,7 +15,7 @@ from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
 from ..github_user_mapping import GITHUB_USER_EMAIL_MAP
-from .github_comments import get_github_token_from_thread
+from .github_token import get_github_token_from_thread
 from .linear import comment_on_linear_issue
 from .slack import post_slack_ephemeral_message, post_slack_thread_reply
 
@@ -28,15 +28,15 @@ LANGSMITH_API_URL = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.lang
 LANGSMITH_HOST_API_URL = os.environ.get("LANGSMITH_HOST_API_URL", "https://api.host.langchain.com")
 GITHUB_OAUTH_PROVIDER_ID = os.environ.get("GITHUB_OAUTH_PROVIDER_ID", "")
 X_SERVICE_AUTH_JWT_SECRET = os.environ.get("X_SERVICE_AUTH_JWT_SECRET", "")
+USER_ID_API_KEY_MAP = os.environ.get("USER_ID_API_KEY_MAP", "")
 
 logger.debug(
     "Auth env snapshot: LANGSMITH_API_KEY_PROD=%s LANGSMITH_ENDPOINT=%s "
-    "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s X_SERVICE_AUTH_JWT_SECRET=%s",
+    "LANGSMITH_HOST_API_URL=%s GITHUB_OAUTH_PROVIDER_ID=%s",
     "set" if LANGSMITH_API_KEY else "missing",
     "set" if LANGSMITH_API_URL else "missing",
     "set" if LANGSMITH_HOST_API_URL else "missing",
     "set" if GITHUB_OAUTH_PROVIDER_ID else "missing",
-    "set" if X_SERVICE_AUTH_JWT_SECRET else "missing",
 )
 
 
@@ -64,11 +64,27 @@ def _work_item_label(source: str) -> str:
     return "issue"
 
 
-def get_service_jwt_token_for_user(
+def parse_user_id_api_key_map() -> dict[str, str]:
+    if not USER_ID_API_KEY_MAP:
+        return {}
+    return {
+        k.strip(): v.strip()
+        for k, v in (pair.split(":", 1) for pair in USER_ID_API_KEY_MAP.split(","))
+    }
+
+
+def get_secret_key_for_user(
     user_id: str, tenant_id: str, expiration_seconds: int = 300
-) -> str:
+) -> tuple[str, Literal["service", "api_key"]]:
     """Create a short-lived service JWT for authenticating as a specific user."""
     if not X_SERVICE_AUTH_JWT_SECRET:
+        user_id_api_key_map = parse_user_id_api_key_map()
+        if user_id_api_key_map:
+            if user_id in user_id_api_key_map:
+                return user_id_api_key_map[user_id], "api_key"
+            msg = f"User {user_id} not found in USER_ID_API_KEY_MAP"
+            raise ValueError(msg)
+
         msg = "X_SERVICE_AUTH_JWT_SECRET is not configured. Cannot generate service keys."
         raise ValueError(msg)
 
@@ -78,7 +94,7 @@ def get_service_jwt_token_for_user(
         "user_id": user_id,
         "tenant_id": tenant_id,
     }
-    return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, X_SERVICE_AUTH_JWT_SECRET, algorithm="HS256"), "service"
 
 
 async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
@@ -117,13 +133,15 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
         return {"error": "GITHUB_OAUTH_PROVIDER_ID not configured"}
 
     try:
-        service_token = get_service_jwt_token_for_user(ls_user_id, tenant_id)
-
         headers = {
-            "X-Service-Key": service_token,
             "X-Tenant-Id": tenant_id,
             "X-User-Id": ls_user_id,
         }
+        secret_key, secret_type = get_secret_key_for_user(ls_user_id, tenant_id)
+        if secret_type == "api_key":
+            headers["X-API-Key"] = secret_key
+        else:
+            headers["X-Service-Key"] = secret_key
 
         payload = {
             "provider": GITHUB_OAUTH_PROVIDER_ID,
@@ -347,9 +365,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
 
     try:
         if source == "github":
-            cached = await get_github_token_from_thread(thread_id, return_encrypted=True)
-            if cached:
-                return cached
+            cached_token, cached_encrypted = await get_github_token_from_thread(thread_id)
+            if cached_token and cached_encrypted:
+                return cached_token, cached_encrypted
             github_login = configurable.get("github_login")
             email = GITHUB_USER_EMAIL_MAP.get(github_login or "")
             if not email:

@@ -10,16 +10,16 @@ import re
 from typing import Any
 
 import httpx
-from langgraph_sdk import get_client
-from langgraph_sdk.errors import NotFoundError
 
-from ..encryption import decrypt_token
+from ..github_user_mapping import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
-OPEN_SWE_TAGS = ("@openswe", "@open-swe")
-
-client = get_client()
+OPEN_SWE_TAGS = ("@openswe", "@open-swe", "@openswe-dev")
+UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>"
+UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>"
+_SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "[blocked-untrusted-comment-tag-open]"
+_SANITIZED_UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "[blocked-untrusted-comment-tag-close]"
 
 # Reaction endpoint differs per comment type
 _REACTION_ENDPOINTS: dict[str, str] = {
@@ -56,41 +56,31 @@ def get_thread_id_from_branch(branch_name: str) -> str | None:
     return match.group(0) if match else None
 
 
-async def get_github_token_from_thread(
-    thread_id: str, *, return_encrypted: bool = False
-) -> str | tuple[str, str] | None:
-    """Resolve a GitHub token from thread metadata.
+def sanitize_github_comment_body(body: str) -> str:
+    """Strip reserved trust wrapper tags from raw GitHub comment bodies."""
+    sanitized = body.replace(
+        UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
+        _SANITIZED_UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
+    ).replace(
+        UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
+        _SANITIZED_UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
+    )
+    if sanitized != body:
+        logger.warning("Sanitized reserved untrusted-comment tags from GitHub comment body")
+    return sanitized
 
-    Used in webhook context (outside LangGraph run) where get_config() is unavailable.
 
-    Args:
-        thread_id: The LangGraph thread ID.
+def format_github_comment_body_for_prompt(author: str, body: str) -> str:
+    """Format a GitHub comment body for prompt inclusion."""
+    sanitized_body = sanitize_github_comment_body(body)
+    if author in GITHUB_USER_EMAIL_MAP:
+        return sanitized_body
 
-    Returns:
-        Decrypted GitHub token, or None if not found. If return_encrypted is True,
-        returns (token, encrypted) instead.
-    """
-    try:
-        thread = await client.threads.get(thread_id)
-        thread_metadata = (thread or {}).get("metadata", {})
-        if isinstance(thread_metadata, dict):
-            encrypted = thread_metadata.get("github_token_encrypted", "")
-            if encrypted:
-                token = decrypt_token(encrypted)
-                if token:
-                    logger.info("Found GitHub token in thread metadata for thread %s", thread_id)
-                    if return_encrypted:
-                        return token, encrypted
-                    return token
-
-        logger.debug("No github_token_encrypted found in thread metadata for thread %s", thread_id)
-        return None
-    except NotFoundError:
-        logger.debug("Thread %s not found, will fall back to OAuth", thread_id)
-        return None
-    except Exception:
-        logger.exception("Failed to get GitHub token from thread %s", thread_id)
-        return None
+    return (
+        f"{UNTRUSTED_GITHUB_COMMENT_OPEN_TAG}\n"
+        f"{sanitized_body}\n"
+        f"{UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG}"
+    )
 
 
 async def react_to_github_comment(
@@ -161,17 +151,17 @@ async def _react_via_graphql(node_id: str | None, *, token: str) -> bool:
             return False
 
 
-async def post_github_pr_comment(
+async def post_github_comment(
     repo_config: dict[str, str],
-    pr_number: int,
+    issue_number: int,
     body: str,
     *,
     token: str,
 ) -> bool:
-    """Post a comment to a GitHub PR."""
+    """Post a comment to a GitHub issue or PR."""
     owner = repo_config.get("owner", "")
     repo = repo_config.get("name", "")
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
@@ -185,8 +175,39 @@ async def post_github_pr_comment(
             response.raise_for_status()
             return True
         except httpx.HTTPError:
-            logger.exception("Failed to post comment to GitHub PR #%s", pr_number)
+            logger.exception("Failed to post comment to GitHub issue/PR #%s", issue_number)
             return False
+
+
+async def fetch_issue_comments(
+    repo_config: dict[str, str], issue_number: int, *, token: str | None = None
+) -> list[dict[str, Any]]:
+    """Fetch all comments for a GitHub issue."""
+    owner = repo_config.get("owner", "")
+    repo = repo_config.get("name", "")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    async with httpx.AsyncClient() as http_client:
+        comments = await _fetch_paginated(
+            http_client,
+            f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments",
+            headers,
+        )
+
+    return [
+        {
+            "body": comment.get("body", ""),
+            "author": comment.get("user", {}).get("login", "unknown"),
+            "created_at": comment.get("created_at", ""),
+            "comment_id": comment.get("id"),
+        }
+        for comment in comments
+    ]
 
 
 async def fetch_pr_comments_since_last_tag(
@@ -366,14 +387,14 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
     lines: list[str] = []
     for c in comments:
         author = c.get("author", "unknown")
-        body = c.get("body", "")
+        body = format_github_comment_body_for_prompt(author, c.get("body", ""))
         if c.get("type") == "review_comment":
             path = c.get("path", "")
             line = c.get("line", "")
             loc = f" (file: `{path}`, line: {line})" if path else ""
-            lines.append(f"\n**{author}**{loc}: {body}\n")
+            lines.append(f"\n**{author}**{loc}:\n{body}\n")
         else:
-            lines.append(f"\n**{author}**: {body}\n")
+            lines.append(f"\n**{author}**:\n{body}\n")
 
     comments_text = "".join(lines)
     return (
@@ -383,10 +404,10 @@ def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:
         "If code changes are needed:\n"
         "1. Make the changes in the sandbox\n"
         "2. Call `commit_and_open_pr` to push them to GitHub — this is REQUIRED, do NOT skip it\n"
-        "3. Call `github_thread_reply` with the PR number to post a summary on the PR\n\n"
+        "3. Call `github_comment` with the PR number to post a summary on GitHub\n\n"
         "If no code changes are needed:\n"
-        "1. Call `github_thread_reply` with the PR number to explain your answer — this is REQUIRED, never end silently\n\n"
-        "**You MUST always call `github_thread_reply` before finishing — whether or not changes were made.**"
+        "1. Call `github_comment` with the PR number to explain your answer — this is REQUIRED, never end silently\n\n"
+        "**You MUST always call `github_comment` before finishing — whether or not changes were made.**"
     )
 
 

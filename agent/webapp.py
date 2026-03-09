@@ -18,16 +18,20 @@ from langgraph_sdk.client import LangGraphClient
 from .github_user_mapping import GITHUB_USER_EMAIL_MAP
 from .utils.auth import persist_encrypted_github_token, resolve_github_token_from_email
 from .utils.comments import get_recent_comments
+from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
     build_pr_prompt,
     extract_pr_context,
+    fetch_issue_comments,
     fetch_pr_comments_since_last_tag,
-    get_github_token_from_thread,
+    format_github_comment_body_for_prompt,
     get_thread_id_from_branch,
     react_to_github_comment,
+    sanitize_github_comment_body,
     verify_github_signature,
 )
+from .utils.github_token import get_github_token_from_thread
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
     add_slack_reaction,
@@ -58,6 +62,16 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
+
+_GITHUB_BOT_MESSAGE_PREFIXES = (
+    "🔐 **GitHub Authentication Required**",
+    "✅ **Pull Request Created**",
+    "✅ **Pull Request Updated**",
+    "**Pull Request Created**",
+    "**Pull Request Updated**",
+    "🤖 **Agent Response**",
+    "❌ **Agent Error**",
+)
 
 
 LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
@@ -250,6 +264,15 @@ def generate_thread_id_from_issue(issue_id: str) -> str:
     )
 
 
+def generate_thread_id_from_github_issue(issue_id: str) -> str:
+    """Generate a deterministic thread ID from a GitHub issue ID."""
+    hash_bytes = hashlib.sha256(f"github-issue:{issue_id}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
 def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str:
     """Generate a deterministic thread ID from a Slack thread identifier."""
     composite = f"{channel_id}:{thread_id}"
@@ -390,6 +413,19 @@ async def is_thread_active(thread_id: str) -> bool:
         )
         status = "idle"
     return status == "busy"
+
+
+async def _thread_exists(thread_id: str) -> bool:
+    """Return whether a LangGraph thread already exists."""
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.get(thread_id)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            return False
+        logger.warning("Failed to fetch thread %s, assuming it exists", thread_id)
+        return True
 
 
 async def queue_message_for_thread(
@@ -1010,8 +1046,68 @@ async def health_check() -> dict[str, str]:
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
-    ["issue_comment", "pull_request_review_comment", "pull_request_review"]
+    ["issue_comment", "issues", "pull_request_review_comment", "pull_request_review"]
 )
+_SUPPORTED_GH_ISSUE_ACTIONS = frozenset(["edited", "opened", "reopened"])
+
+
+def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for comment in comments:
+        body = comment.get("body", "")
+        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
+            continue
+        author = comment.get("author", "unknown")
+        formatted_body = format_github_comment_body_for_prompt(author, body)
+        lines.append(f"\n**{author}:**\n{formatted_body}\n")
+
+    if not lines:
+        return ""
+    return "\n\n## Comments:\n" + "".join(lines)
+
+
+def build_github_issue_prompt(
+    repo_config: dict[str, str],
+    issue_number: int,
+    issue_id: str,
+    title: str,
+    body: str,
+    comments: list[dict[str, Any]],
+    *,
+    github_login: str,
+) -> str:
+    """Build the user prompt for a GitHub issue-triggered run."""
+    triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
+    comments_text = _build_github_issue_comments_text(comments)
+    return (
+        "Please work on the following GitHub issue:\n\n"
+        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"{triggered_by_line}"
+        f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
+        f"## Title: {title}\n\n"
+        f"## Description:\n{body}\n"
+        f"{comments_text}\n\n"
+        "Please analyze this issue and implement the necessary changes. "
+        "When you need to communicate on GitHub, use `github_comment` with the issue number."
+    )
+
+
+def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
+    """Build the prompt for a follow-up GitHub issue comment."""
+    return (
+        f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
+    )
+
+
+def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
+    """Build the prompt for a follow-up GitHub issue title/body update."""
+    sanitized_title = sanitize_github_comment_body(title)
+    formatted_body = format_github_comment_body_for_prompt(github_login, body)
+    return (
+        f"**{github_login}:** updated the GitHub issue title/body.\n\n"
+        f"Title: {sanitized_title}\n\n"
+        f"Description:\n{formatted_body}"
+    )
 
 
 async def _trigger_or_queue_run(
@@ -1048,6 +1144,24 @@ async def _trigger_or_queue_run(
     logger.info("LangGraph run created for thread %s from GitHub PR comment", thread_id)
 
 
+async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
+    """Resolve and persist a GitHub token for a thread when available."""
+    github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
+    if github_token:
+        return github_token
+
+    auth_result = await resolve_github_token_from_email(email)
+    github_token = auth_result.get("token")
+    if not github_token:
+        return None
+
+    try:
+        await persist_encrypted_github_token(thread_id, github_token)
+    except Exception:
+        logger.warning("Could not persist GitHub token for thread %s", thread_id)
+    return github_token
+
+
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
     """Process a GitHub PR comment that tagged @open-swe.
 
@@ -1081,21 +1195,12 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
         return
 
-    if not GITHUB_USER_EMAIL_MAP.get(github_login):
+    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    if not email:
         logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
         return
 
-    github_token = await get_github_token_from_thread(thread_id)
-    if not github_token:
-        email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
-        if email:
-            auth_result = await resolve_github_token_from_email(email)
-            github_token = auth_result.get("token")
-            if github_token:
-                try:
-                    await persist_encrypted_github_token(thread_id, github_token)
-                except Exception:
-                    logger.warning("Could not persist GitHub token for thread %s", thread_id)
+    github_token = await _get_or_resolve_thread_github_token(thread_id, email)
     if not github_token:
         logger.warning("No GitHub token for thread %s, skipping", thread_id)
         return
@@ -1129,9 +1234,124 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     )
 
 
+async def process_github_issue(payload: dict[str, Any], event_type: str) -> None:
+    """Process a GitHub issue or issue comment that tagged @open-swe."""
+    issue = payload.get("issue", {})
+    repo = payload.get("repository", {})
+    repo_config = {
+        "owner": repo.get("owner", {}).get("login", ""),
+        "name": repo.get("name", ""),
+    }
+
+    issue_id = str(issue.get("id", ""))
+    issue_number = issue.get("number")
+    github_login = payload.get("sender", {}).get("login", "")
+    issue_url = issue.get("html_url", "") or issue.get("url", "")
+    title = issue.get("title", "No title")
+    description = issue.get("body") or "No description"
+
+    logger.info(
+        "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
+        event_type,
+        issue_number,
+        repo_config.get("owner"),
+        repo_config.get("name"),
+    )
+
+    if not issue_id or not issue_number:
+        logger.warning("Missing GitHub issue id/number, skipping")
+        return
+
+    email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
+    if not email:
+        logger.warning("No email mapping for GitHub user '%s', skipping", github_login)
+        return
+
+    thread_id = generate_thread_id_from_github_issue(issue_id)
+    existing_thread = await _thread_exists(thread_id)
+    github_token = await _get_or_resolve_thread_github_token(thread_id, email)
+    app_token = await get_github_app_installation_token()
+    reaction_token = github_token or app_token
+    comment = payload.get("comment", {})
+    comment_id = comment.get("id")
+    if event_type == "issue_comment" and comment_id:
+        if not reaction_token:
+            logger.warning("No GitHub token available to react to issue comment %s", comment_id)
+        else:
+            reacted = await react_to_github_comment(
+                repo_config,
+                comment_id,
+                event_type="issue_comment",
+                token=reaction_token,
+            )
+            if not reacted:
+                logger.warning("Failed to react to GitHub issue comment %s", comment_id)
+
+    if existing_thread:
+        if event_type == "issue_comment":
+            prompt = build_github_issue_followup_prompt(
+                comment.get("user", {}).get("login", github_login) or github_login,
+                comment.get("body", ""),
+            )
+        else:
+            prompt = build_github_issue_update_prompt(github_login, title, description)
+    else:
+        comments = await fetch_issue_comments(
+            repo_config, issue_number, token=github_token or app_token
+        )
+        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
+            comments.append(
+                {
+                    "body": comment.get("body", ""),
+                    "author": comment.get("user", {}).get("login", "unknown"),
+                    "created_at": comment.get("created_at", ""),
+                    "comment_id": comment_id,
+                }
+            )
+            comments.sort(key=lambda item: item.get("created_at", ""))
+
+        prompt = build_github_issue_prompt(
+            repo_config,
+            issue_number,
+            issue_id,
+            title,
+            description,
+            comments,
+            github_login=github_login,
+        )
+    configurable: dict[str, Any] = {
+        "source": "github",
+        "github_login": github_login,
+        "repo": repo_config,
+        "github_issue": {
+            "id": issue_id,
+            "number": issue_number,
+            "title": title,
+            "url": issue_url,
+        },
+    }
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Thread %s is busy, queuing GitHub issue message", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    logger.info("Creating LangGraph run for thread %s from GitHub issue", thread_id)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable},
+        if_not_exists="create",
+    )
+    logger.info("LangGraph run created for thread %s from GitHub issue", thread_id)
+
+
 @app.post("/webhooks/github")
 async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
-    """Handle GitHub webhooks for PR comment/review events that tag @open-swe."""
+    """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
 
     signature = request.headers.get("X-Hub-Signature-256", "")
@@ -1141,6 +1361,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     event_type = request.headers.get("X-GitHub-Event", "")
     if event_type not in _SUPPORTED_GH_EVENTS:
+        logger.info("Ignoring unsupported GitHub event type: %s", event_type)
         return {"status": "ignored", "reason": f"Unsupported event type: {event_type}"}
 
     try:
@@ -1149,16 +1370,48 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
 
-    if event_type == "issue_comment":
-        if not payload.get("issue", {}).get("pull_request"):
-            return {"status": "ignored", "reason": "issue_comment is not on a PR"}
+    issue = payload.get("issue", {})
+    is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
+    is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
+    is_issue_event = event_type == "issues"
+
+    if is_issue_event:
+        action = payload.get("action", "")
+        if action not in _SUPPORTED_GH_ISSUE_ACTIONS:
+            logger.info("Ignoring unsupported GitHub issue action: %s", action)
+            return {"status": "ignored", "reason": f"Unsupported GitHub issue action: {action}"}
+        if action == "edited":
+            changes = payload.get("changes", {})
+            if not any(field in changes for field in ("body", "title")):
+                logger.info("Ignoring GitHub issue edit without title/body changes")
+                return {"status": "ignored", "reason": "Issue edit did not change title or body"}
+
+        issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}".lower()
+        if not any(tag in issue_text for tag in OPEN_SWE_TAGS):
+            logger.info("Ignoring issue that does not mention @openswe or @open-swe")
+            return {"status": "ignored", "reason": "Issue does not mention @openswe or @open-swe"}
+
+        logger.info("Accepted GitHub issue webhook, scheduling background task")
+        background_tasks.add_task(process_github_issue, payload, event_type)
+        return {"status": "accepted", "message": "Processing GitHub issue event"}
 
     comment = payload.get("comment") or payload.get("review", {})
     comment_body = (comment.get("body") or "") if comment else ""
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
+        logger.info("Ignoring comment that does not mention @openswe or @open-swe")
         return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
 
     logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
-    background_tasks.add_task(process_github_pr_comment, payload, event_type)
+    if is_pull_request_comment or event_type in {
+        "pull_request_review_comment",
+        "pull_request_review",
+    }:
+        background_tasks.add_task(process_github_pr_comment, payload, event_type)
+        return {"status": "accepted", "message": f"Processing {event_type} event"}
 
-    return {"status": "accepted", "message": f"Processing {event_type} event"}
+    if is_issue_comment:
+        background_tasks.add_task(process_github_issue, payload, event_type)
+        return {"status": "accepted", "message": "Processing GitHub issue comment event"}
+
+    logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
+    return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
