@@ -148,6 +148,17 @@ async def get_github_token_for_user(ls_user_id: str, tenant_id: str) -> dict[str
             return {"error": f"Unexpected auth result: {response_data}"}
 
     except httpx.HTTPStatusError as e:
+        # The auth API may return a non-2xx response that still contains a "url" field
+        # in the response body (e.g. on a first-time authentication attempt where the
+        # user has not yet authorised the GitHub OAuth app).  Extract the URL so that
+        # callers can surface the proper auth link instead of a generic error message.
+        try:
+            error_data = e.response.json()
+            auth_url = error_data.get("url")
+            if auth_url:
+                return {"auth_url": auth_url}
+        except Exception:  # noqa: BLE001
+            pass
         logger.error("GitHub auth API HTTP error: %s - %s", e.response.status_code, e.response.text)
         return {"error": f"HTTP error: {e.response.status_code} - {e.response.text}"}
     except Exception as e:  # noqa: BLE001
