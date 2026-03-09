@@ -143,7 +143,7 @@ def test_select_slack_context_messages_detects_username_mention() -> None:
     assert [item["ts"] for item in selected] == ["1.0", "2.0", "3.0"]
 
 
-def test_get_slack_repo_config_uses_existing_thread_repo(
+def test_get_slack_repo_config_message_repo_overrides_existing_thread_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, str] = {}
@@ -164,11 +164,9 @@ def test_get_slack_repo_config_uses_existing_thread_repo(
         webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
     )
 
-    assert repo == {"owner": "saved-owner", "name": "saved-repo"}
-    assert threads_client.requested_thread_id == generate_thread_id_from_slack_thread(
-        "C123", "1.234"
-    )
-    assert captured["text"] == "Using repository: `saved-owner/saved-repo`"
+    assert repo == {"owner": "new-owner", "name": "new-repo"}
+    assert threads_client.requested_thread_id is None
+    assert captured["text"] == "Using repository: `new-owner/new-repo`"
 
 
 def test_get_slack_repo_config_parses_message_for_new_thread(
@@ -202,8 +200,9 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
     monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
 
-    repo = asyncio.run(
-        webapp.get_slack_repo_config("please use repo:new-owner/new-repo", "C123", "1.234")
-    )
+    repo = asyncio.run(webapp.get_slack_repo_config("please help", "C123", "1.234"))
 
     assert repo == {"owner": "default-owner", "name": "default-repo"}
+    assert threads_client.requested_thread_id == generate_thread_id_from_slack_thread(
+        "C123", "1.234"
+    )
