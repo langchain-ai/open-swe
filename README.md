@@ -1,5 +1,5 @@
 > [!CAUTION]
-> **This repository is deprecated and no longer maintained.** It should not be used in production or as a dependency. No further updates, bug fixes, or security patches will be provided. If you are looking for an actively maintained solution, please explore other options.
+> **This repository is deprecated and no longer maintained.** It should not be used in production or as a dependency. No further updates, bug fixes, or security patches will be provided. If you are looking for an actively maintained solution, check out [LangSmith Agent Builder](https://www.langchain.com/langsmith/agent-builder).
 
 <div align="center">
   <picture>
