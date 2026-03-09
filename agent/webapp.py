@@ -19,6 +19,7 @@ from .utils.comments import get_recent_comments
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
     add_slack_reaction,
+    fetch_slack_messages_from_links,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
     get_slack_user_info,
@@ -559,6 +560,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
     identifier = full_issue.get("identifier", "") or issue_data.get("identifier", "")
 
+    slack_context = await fetch_slack_messages_from_links(f"{description}\n{comments_text}")
+    slack_context_section = (
+        f"\n\n## Referenced Slack Messages\n{slack_context}" if slack_context else ""
+    )
+
     triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
     tag_instruction = (
         f"When calling linear_comment, tag @{user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
@@ -571,7 +577,8 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         f"{triggered_by_line}"
         f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
         f"## Description:\n{description}\n"
-        f"{comments_text}\n\n"
+        f"{comments_text}"
+        f"{slack_context_section}\n\n"
         f"Please analyze this issue and implement the necessary changes. "
         f"When you're done, commit and push your changes. {tag_instruction}"
     )
@@ -719,6 +726,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
+    slack_linked_context = await fetch_slack_messages_from_links(f"{context_text}\n{clean_text}")
+    slack_linked_section = (
+        f"\n\n## Referenced Slack Messages\n{slack_linked_context}" if slack_linked_context else ""
+    )
+
     prompt = (
         "You were mentioned in Slack.\n\n"
         f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -726,7 +738,8 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
         f"- Context starts at: {context_source}\n\n"
         f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
+        f"## Latest Mention Request\n{clean_text}"
+        f"{slack_linked_section}\n\n"
         "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
         "status updates, and final summaries."
     )
