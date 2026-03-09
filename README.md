@@ -1,3 +1,6 @@
+> [!CAUTION]
+> **This repository is deprecated and no longer maintained.** It should not be used in production or as a dependency. No further updates, bug fixes, or security patches will be provided. If you are looking for an actively maintained solution, please explore other options.
+
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
