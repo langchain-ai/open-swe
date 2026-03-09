@@ -1,3 +1,5 @@
+from langchain_core.messages import SystemMessage
+
 WORKING_ENV_SECTION = """---
 
 ### Working Environment
@@ -249,9 +251,7 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
     agents_md: str = "",
-) -> "SystemMessage":
-    from langchain_core.messages import SystemMessage
-
+) -> SystemMessage:
     agents_md_section = ""
     if agents_md:
         agents_md_section = (
