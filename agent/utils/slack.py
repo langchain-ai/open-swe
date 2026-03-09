@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -354,3 +355,132 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
 
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
+
+
+SLACK_MESSAGE_LINK_RE = re.compile(
+    r"https?://[a-zA-Z0-9\-]+\.slack\.com/archives/([A-Z0-9]+)/p(\d+)"
+    r"(?:\?[^\s>)]*thread_ts=([\d.]+)[^\s>)]*)?",
+)
+
+
+def extract_slack_message_links(text: str) -> list[dict[str, str]]:
+    """Extract Slack message links from text and return parsed components."""
+    if not text:
+        return []
+    results: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in SLACK_MESSAGE_LINK_RE.finditer(text):
+        channel_id = match.group(1)
+        raw_ts = match.group(2)
+        message_ts = raw_ts[:-6] + "." + raw_ts[-6:] if len(raw_ts) > 6 else raw_ts
+        thread_ts = match.group(3) or ""
+        key = (channel_id, message_ts)
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append(
+            {
+                "channel_id": channel_id,
+                "message_ts": message_ts,
+                "thread_ts": thread_ts,
+                "url": match.group(0),
+            }
+        )
+    return results
+
+
+async def _fetch_single_slack_message(
+    channel_id: str,
+    message_ts: str,
+    thread_ts: str = "",
+) -> dict[str, Any] | None:
+    """Fetch a single Slack message by channel and timestamp."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            if thread_ts:
+                params: dict[str, str | int] = {
+                    "channel": channel_id,
+                    "ts": thread_ts,
+                    "latest": message_ts,
+                    "inclusive": 1,
+                    "limit": 1,
+                }
+                response = await http_client.get(
+                    f"{SLACK_API_BASE_URL}/conversations.replies",
+                    headers=_slack_headers(),
+                    params=params,
+                )
+            else:
+                params = {
+                    "channel": channel_id,
+                    "latest": message_ts,
+                    "inclusive": 1,
+                    "limit": 1,
+                }
+                response = await http_client.get(
+                    f"{SLACK_API_BASE_URL}/conversations.history",
+                    headers=_slack_headers(),
+                    params=params,
+                )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning(
+                    "Slack API error fetching message %s in %s: %s",
+                    message_ts,
+                    channel_id,
+                    data.get("error"),
+                )
+                return None
+            messages = data.get("messages", [])
+            for msg in messages:
+                if isinstance(msg, dict) and str(msg.get("ts")) == str(message_ts):
+                    return msg
+            if messages and isinstance(messages[0], dict):
+                return messages[0]
+        except httpx.HTTPError:
+            logger.exception(
+                "Failed to fetch Slack message %s in channel %s", message_ts, channel_id
+            )
+    return None
+
+
+async def fetch_slack_messages_from_links(text: str) -> str:
+    """Extract Slack message links from text, fetch their content, and return formatted context."""
+    links = extract_slack_message_links(text)
+    if not links:
+        return ""
+
+    fetch_tasks = [
+        _fetch_single_slack_message(
+            link["channel_id"], link["message_ts"], link.get("thread_ts", "")
+        )
+        for link in links
+    ]
+    fetched_messages = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    user_ids: set[str] = set()
+    valid_messages: list[tuple[dict[str, str], dict[str, Any]]] = []
+    for link, result in zip(links, fetched_messages, strict=True):
+        if isinstance(result, dict):
+            valid_messages.append((link, result))
+            uid = result.get("user")
+            if isinstance(uid, str) and uid:
+                user_ids.add(uid)
+
+    if not valid_messages:
+        return ""
+
+    user_names = await get_slack_user_names(sorted(user_ids)) if user_ids else {}
+
+    sections: list[str] = []
+    for link, msg in valid_messages:
+        uid = msg.get("user", "")
+        author = user_names.get(uid, uid) if uid else "Unknown"
+        msg_text = msg.get("text", "[no text]")
+        sections.append(f"[Slack message from {link['url']}]\n@{author}: {msg_text}")
+
+    return "\n\n".join(sections)
