@@ -14,7 +14,9 @@ This guide walks you through setting up Open SWE end-to-end: local development, 
 ```bash
 git clone https://github.com/langchain-ai/open-swe.git
 cd open-swe
-uv sync
+uv venv
+source .venv/bin/activate
+uv sync --all-extras
 ```
 
 ## 2. Create a GitHub App
