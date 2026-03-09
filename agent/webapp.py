@@ -15,7 +15,6 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from .github_user_mapping import GITHUB_USER_EMAIL_MAP
 from .utils.auth import persist_encrypted_github_token, resolve_github_token_from_email
 from .utils.comments import get_recent_comments
 from .utils.github_app import get_github_app_installation_token
@@ -32,6 +31,8 @@ from .utils.github_comments import (
     verify_github_signature,
 )
 from .utils.github_token import get_github_token_from_thread
+from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
     add_slack_reaction,
@@ -72,35 +73,6 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🤖 **Agent Response**",
     "❌ **Agent Error**",
 )
-
-
-LINEAR_TEAM_TO_REPO: dict[str, dict[str, Any] | dict[str, str]] = {
-    "Brace's test workspace": {"owner": "langchain-ai", "name": "open-swe"},
-    "Yogesh-dev": {
-        "projects": {
-            "open-swe-v3-test": {"owner": "aran-yogesh", "name": "nimedge"},
-            "open-swe-dev-test": {"owner": "aran-yogesh", "name": "TalkBack"},
-        },
-        "default": {
-            "owner": "aran-yogesh",
-            "name": "TalkBack",
-        },  # Fallback for issues without project
-    },
-    "LangChain OSS": {
-        "projects": {
-            "deepagents": {"owner": "langchain-ai", "name": "deepagents"},
-            "langchain": {"owner": "langchain-ai", "name": "langchain"},
-        }
-    },
-    "Applied AI": {
-        "projects": {
-            "GTM Engineering": {"owner": "langchain-ai", "name": "ai-sdr"},
-        },
-        "default": {"owner": "langchain-ai", "name": "ai-sdr"},
-    },
-    "Docs": {"default": {"owner": "langchain-ai", "name": "docs"}},
-    "Open SWE": {"default": {"owner": "langchain-ai", "name": "open-swe"}},
-}
 
 
 def get_repo_config_from_team_mapping(

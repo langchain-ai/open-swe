@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from ..github_user_mapping import GITHUB_USER_EMAIL_MAP
+from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 
 logger = logging.getLogger(__name__)
 
