@@ -1,6 +1,4 @@
-# Run formatting on all PRs
-
-name: CI
+name: Agent CI
 
 permissions:
   contents: read
@@ -8,134 +6,43 @@ permissions:
 on:
   push:
     branches: ["main"]
-    paths:
-      - "apps/web/**"
-      - "packages/shared/**"
-      - "*"
-      - ".*"
   pull_request:
-    paths:
-      - "apps/web/**"
-      - "packages/shared/**"
-      - "*"
-      - ".*"
-  workflow_dispatch: # Allows triggering the workflow manually in GitHub UI
+  workflow_dispatch:
 
-# If another push to the same PR or branch happens while this workflow is still running,
-# cancel the earlier run in favor of the next run.
-#
-# There's no point in testing an outdated version of the code. GitHub only allows
-# a limited number of job runners to be active at the same time, so it's better to cancel
-# pointless jobs early so that more useful jobs can run sooner.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  format:
-    name: Check formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Enable Corepack
-        run: corepack enable
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: "yarn"
-      - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
-      - name: Check formatting
-        run: yarn format:check
-
   lint:
-    name: Check linting
+    name: Agent lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enable Corepack
-        run: corepack enable
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: "yarn"
+      - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
-      - name: Check linting
-        run: yarn run lint
+        run: uv sync --locked --extra dev
+      - name: Run lint
+        run: make lint
 
-  build:
-    name: Build
+  format:
+    name: Agent format check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enable Corepack
-        run: corepack enable
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: "yarn"
+      - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
-      - name: Build
-        run: yarn build
+        run: uv sync --locked --extra dev
+      - name: Run format check
+        run: make format-check
 
-  readme-spelling:
-    name: Check README spelling
+  unit-tests:
+    name: Agent unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: codespell-project/actions-codespell@v2
-        with:
-          ignore_words_file: .codespellignore
-          path: README.md
-
-  check-spelling:
-    name: Check code spelling
-    runs-on: ubuntu-latest
-    if: hashFiles('apps/open-swe/package.json') != ''
-    steps:
-      - uses: actions/checkout@v4
-      - uses: codespell-project/actions-codespell@v2
-        with:
-          ignore_words_file: .codespellignore
-          path: apps/open-swe/src
-
-  dev-server-check:
-    name: Check dev server startup
-    runs-on: ubuntu-latest
-    if: hashFiles('apps/open-swe/package.json') != ''
-    defaults:
-      run:
-        working-directory: apps/open-swe
-    steps:
-      - uses: actions/checkout@v4
-      - name: Enable Corepack
-        run: corepack enable
-        working-directory: .
-      - name: Use Node.js 18.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18.x
-          cache: "yarn"
+      - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
-        run: yarn install --immutable --mode=skip-build
-        working-directory: .
-      - name: Build all packages
-        run: yarn build
-        working-directory: .
-      - name: Build dev server check script
-        run: yarn tsc --module commonjs --skipLibCheck --outDir ./dist/scripts ./scripts/check-dev-server.ts
-      - name: Rename compiled script to .cjs
-        run: mv ./dist/scripts/check-dev-server.js ./dist/scripts/check-dev-server.cjs
-      - name: Create .env file for dev server check
-        # .env needs to be in the apps/open-swe directory
-        run: touch .env
-      - name: Run dev server check
-        run: node ./dist/scripts/check-dev-server.cjs
-        env:
-          NODE_ENV: development
-        timeout-minutes: 2
+        run: uv sync --locked --extra dev
+      - name: Run unit tests
+        run: make test
