@@ -79,7 +79,9 @@ class TestGetPrReviewComments:
         reviews = [_make_review(body="Review body", review_id=30)]
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -109,7 +111,9 @@ class TestGetPrReviewComments:
         review_comments = [_make_review_comment(path="agent/tools/foo.py", line=17)]
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -136,7 +140,9 @@ class TestGetPrReviewComments:
         from agent.tools.get_pr_review_comments import get_pr_review_comments
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config) as mock_cfg,
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ) as mock_cfg,
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -174,7 +180,9 @@ class TestGetPrReviewComments:
                 side_effect=[[], [], []],
             ) as mock_fetch,
         ):
-            result = get_pr_review_comments(pr_number=7, repo_owner="explicit-org", repo_name="explicit-repo")
+            result = get_pr_review_comments(
+                pr_number=7, repo_owner="explicit-org", repo_name="explicit-repo"
+            )
 
         assert result["success"] is True
         called_urls = [call.args[1] for call in mock_fetch.call_args_list]
@@ -184,7 +192,9 @@ class TestGetPrReviewComments:
         from agent.tools.get_pr_review_comments import get_pr_review_comments
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -217,7 +227,9 @@ class TestGetPrReviewComments:
         ]
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -238,12 +250,18 @@ class TestGetPrReviewComments:
     def test_comments_sorted_chronologically(self, mock_langgraph_config: MagicMock) -> None:
         from agent.tools.get_pr_review_comments import get_pr_review_comments
 
-        pr_comments = [_make_pr_comment(body="Third", created_at="2026-03-01T13:00:00Z", comment_id=3)]
-        review_comments = [_make_review_comment(body="First", created_at="2026-03-01T10:00:00Z", comment_id=1)]
+        pr_comments = [
+            _make_pr_comment(body="Third", created_at="2026-03-01T13:00:00Z", comment_id=3)
+        ]
+        review_comments = [
+            _make_review_comment(body="First", created_at="2026-03-01T10:00:00Z", comment_id=1)
+        ]
         reviews = [_make_review(body="Second", submitted_at="2026-03-01T12:00:00Z", review_id=2)]
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
@@ -267,7 +285,9 @@ class TestGetPrReviewComments:
         pr_comments = [_make_pr_comment(comment_id=1), _make_pr_comment(comment_id=2)]
 
         with (
-            patch("agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config),
+            patch(
+                "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
+            ),
             patch(
                 "agent.tools.get_pr_review_comments.get_github_app_installation_token",
                 new_callable=AsyncMock,
