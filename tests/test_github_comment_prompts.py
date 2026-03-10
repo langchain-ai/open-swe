@@ -20,9 +20,7 @@ def _system_message_to_text(msg: object) -> str:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            return "".join(
-                c.get("text", "") for c in content if isinstance(c, dict)
-            )
+            return "".join(c.get("text", "") for c in content if isinstance(c, dict))
     return ""
 
 

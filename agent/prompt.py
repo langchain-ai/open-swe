@@ -1,4 +1,5 @@
 from langchain_core.messages import SystemMessage
+
 from .utils.github_comments import UNTRUSTED_GITHUB_COMMENT_OPEN_TAG
 
 WORKING_ENV_SECTION = """---
@@ -267,14 +268,6 @@ _STATIC_PROMPT = (
     + CODE_REVIEW_GUIDELINES_SECTION
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
-<<<<<<< HEAD
-    + COMMIT_PR_SECTION
-    + """
-
-{agents_md_section}
-"""
-=======
->>>>>>> f1da384e (formatting)
 )
 
 
