@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shlex
+from urllib.parse import urlparse
 
 import httpx
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
@@ -113,19 +114,98 @@ def git_get_remote_url(sandbox_backend: SandboxBackendProtocol, repo_dir: str) -
     return result.output.strip()
 
 
+def _is_unauthenticated_github_https(url: str) -> bool:
+    """Return True only if the URL is a plain GitHub HTTPS URL with no embedded credentials."""
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in ("github.com", "www.github.com")
+        and not parsed.username
+    )
+
+
+def _has_merge_conflicts(status_output: str) -> bool:
+    """Detect merge conflicts from git status --porcelain output."""
+    conflict_prefixes = ("UU", "AA", "DD", "UD", "DU", "UA", "AU")
+    return any(line.startswith(conflict_prefixes) for line in status_output.splitlines())
+
+
 def git_push(
     sandbox_backend: SandboxBackendProtocol,
     repo_dir: str,
     branch: str,
     github_token: str | None = None,
 ) -> ExecuteResponse:
-    """Push the branch to origin, using a token if needed."""
+    """Push the branch to origin, using a token if needed.
+
+    If the push is rejected because the remote is ahead, resets the last commit,
+    pulls (merge strategy, rebase=false), then re-adds, re-commits, and retries the push.
+    """
     safe_branch = shlex.quote(branch)
     remote_url = git_get_remote_url(sandbox_backend, repo_dir)
-    if remote_url and "github.com" in remote_url and "@" not in remote_url and github_token:
-        auth_url = remote_url.replace("https://", f"https://git:{github_token}@")
-        return _run_git(sandbox_backend, repo_dir, f"git push {auth_url} {safe_branch}")
-    return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
+
+    def _do_push() -> ExecuteResponse:
+        if remote_url and github_token and _is_unauthenticated_github_https(remote_url):
+            parsed = urlparse(remote_url)
+            host = parsed.hostname or ""
+            if parsed.port:
+                host = f"{host}:{parsed.port}"
+            auth_netloc = f"git:{github_token}@{host}"
+            auth_url = parsed._replace(netloc=auth_netloc).geturl()
+            return _run_git(sandbox_backend, repo_dir, f"git push {auth_url} {safe_branch}")
+        return _run_git(sandbox_backend, repo_dir, f"git push origin {safe_branch}")
+
+    result = _do_push()
+    if result.exit_code == 0:
+        return result
+
+    out_of_sync = any(
+        marker in result.output.lower()
+        for marker in ("rejected", "non-fast-forward", "tip of your current branch is behind")
+    )
+    if not out_of_sync:
+        return result
+
+    logger.warning("Push rejected (branch out of sync with remote), attempting pull-merge-recommit")
+
+    # Save the last commit message before resetting
+    log_result = _run_git(sandbox_backend, repo_dir, "git log -1 --format=%B")
+    if log_result.exit_code != 0:
+        logger.error("Could not retrieve last commit message; returning original push error")
+        return result
+    commit_message = log_result.output.strip()
+
+    # Undo the last commit, keeping changes in the working tree
+    reset_result = _run_git(sandbox_backend, repo_dir, "git reset HEAD~")
+    if reset_result.exit_code != 0:
+        logger.error("git reset HEAD~ failed; returning original push error")
+        return result
+
+    # Pull with merge strategy (rebase=false)
+    pull_result = _run_git(sandbox_backend, repo_dir, f"git pull --no-rebase origin {safe_branch}")
+    if pull_result.exit_code != 0:
+        logger.error("git pull failed during recovery; returning pull error")
+        return pull_result
+
+    status_result = _run_git(sandbox_backend, repo_dir, "git status --porcelain")
+    if status_result.exit_code == 0 and _has_merge_conflicts(status_result.output):
+        logger.error("Merge conflicts detected during pull; returning pull error")
+        return pull_result
+
+    # Re-stage and re-commit changes
+    _run_git(sandbox_backend, repo_dir, "git add -A")
+    commit_result = _run_git(
+        sandbox_backend, repo_dir, f"git commit -m {shlex.quote(commit_message)}"
+    )
+    if commit_result.exit_code != 0:
+        msg = (commit_result.output or "").lower()
+        if "nothing to commit" in msg or "no changes added to commit" in msg:
+            logger.warning("No changes to re-commit after pull; retrying push anyway")
+        else:
+            logger.error("git commit failed during recovery; returning commit error")
+            return commit_result
+
+    return _do_push()
 
 
 async def create_github_pr(
