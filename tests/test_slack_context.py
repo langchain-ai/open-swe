@@ -206,3 +206,118 @@ def test_get_slack_repo_config_existing_thread_without_repo_uses_default(
     assert threads_client.requested_thread_id == generate_thread_id_from_slack_thread(
         "C123", "1.234"
     )
+
+
+def test_get_slack_repo_config_space_syntax_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo owner/name (space instead of colon) should be detected correctly."""
+    threads_client = _FakeThreadsClient(raise_not_found=True)
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "please fix the bug in repo langchain-ai/langchainjs", "C123", "1.234"
+        )
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "langchainjs"}
+
+
+def test_get_slack_repo_config_github_url_extracted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GitHub URL in message should be used to detect the repo."""
+    threads_client = _FakeThreadsClient(raise_not_found=True)
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "I found a bug in https://github.com/langchain-ai/langgraph-api please fix it",
+            "C123",
+            "1.234",
+        )
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
+
+
+def test_get_slack_repo_config_explicit_repo_beats_github_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit repo: syntax takes priority over a GitHub URL also present in the message."""
+    threads_client = _FakeThreadsClient(raise_not_found=True)
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "see https://github.com/langchain-ai/langgraph-api but use repo:my-org/my-repo",
+            "C123",
+            "1.234",
+        )
+    )
+
+    assert repo == {"owner": "my-org", "name": "my-repo"}
+
+
+def test_get_slack_repo_config_explicit_space_syntax_beats_thread_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit repo owner/name (space syntax) takes priority over saved thread metadata."""
+    threads_client = _FakeThreadsClient(
+        thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
+    )
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "actually use repo langchain-ai/langchainjs today", "C123", "1.234"
+        )
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "langchainjs"}
+
+
+def test_get_slack_repo_config_github_url_beats_thread_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A GitHub URL in the message takes priority over saved thread metadata."""
+    threads_client = _FakeThreadsClient(
+        thread={"metadata": {"repo": {"owner": "saved-owner", "name": "saved-repo"}}}
+    )
+
+    async def fake_post_slack_thread_reply(channel_id: str, thread_ts: str, text: str) -> bool:
+        return True
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: _FakeClient(threads_client))
+    monkeypatch.setattr(webapp, "post_slack_thread_reply", fake_post_slack_thread_reply)
+
+    repo = asyncio.run(
+        webapp.get_slack_repo_config(
+            "I found a bug in https://github.com/langchain-ai/langgraph-api",
+            "C123",
+            "1.234",
+        )
+    )
+
+    assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
