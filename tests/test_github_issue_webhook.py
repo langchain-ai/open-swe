@@ -5,7 +5,7 @@ import asyncio
 from fastapi.testclient import TestClient
 
 from agent import webapp
-from agent.utils import github_user_email_map
+from agent.utils import github_comments
 
 
 def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
@@ -184,9 +184,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(monkeypatch)
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(
-        github_user_email_map, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
-    )
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
 
     asyncio.run(
         webapp.process_github_issue(
@@ -261,8 +259,9 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
     monkeypatch.setattr(
-        github_user_email_map, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
+        github_comments, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
     )
 
     asyncio.run(
