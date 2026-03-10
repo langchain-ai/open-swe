@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.tools.get_pr_review_comments import get_pr_review_comments
+
 
 @pytest.fixture()
 def repo_config() -> dict[str, str]:
@@ -72,8 +74,6 @@ class TestGetPrReviewComments:
     def test_returns_formatted_comments_from_all_three_sources(
         self, mock_langgraph_config: MagicMock, repo_config: dict[str, str]
     ) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         pr_comments = [_make_pr_comment(body="Thread comment", comment_id=10)]
         review_comments = [_make_review_comment(body="Inline comment", comment_id=20)]
         reviews = [_make_review(body="Review body", review_id=30)]
@@ -106,8 +106,6 @@ class TestGetPrReviewComments:
     def test_inline_review_comments_include_path_and_line(
         self, mock_langgraph_config: MagicMock
     ) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         review_comments = [_make_review_comment(path="agent/tools/foo.py", line=17)]
 
         with (
@@ -137,8 +135,6 @@ class TestGetPrReviewComments:
     def test_uses_repo_config_from_get_config_when_no_owner_name_provided(
         self, mock_langgraph_config: MagicMock
     ) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         with (
             patch(
                 "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
@@ -162,8 +158,6 @@ class TestGetPrReviewComments:
         assert all("langchain-ai/open-swe" in url for url in called_urls)
 
     def test_accepts_explicit_repo_owner_and_name(self) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         config = MagicMock()
         config.get.return_value = {"repo": {"owner": "other-org", "name": "other-repo"}}
 
@@ -189,8 +183,6 @@ class TestGetPrReviewComments:
         assert all("explicit-org/explicit-repo" in url for url in called_urls)
 
     def test_handles_auth_failure_gracefully(self, mock_langgraph_config: MagicMock) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         with (
             patch(
                 "agent.tools.get_pr_review_comments.get_config", return_value=mock_langgraph_config
@@ -207,8 +199,6 @@ class TestGetPrReviewComments:
         assert "token" in result["error"].lower()
 
     def test_handles_missing_repo_config(self) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         config = MagicMock()
         config.get.return_value = {}  # no "repo" key
 
@@ -219,8 +209,6 @@ class TestGetPrReviewComments:
         assert "repo" in result["error"].lower()
 
     def test_skips_reviews_with_empty_body(self, mock_langgraph_config: MagicMock) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         reviews = [
             _make_review(body="", review_id=1),
             _make_review(body="Approved", review_id=2),
@@ -248,8 +236,6 @@ class TestGetPrReviewComments:
         assert result["comments"][0]["body"] == "Approved"
 
     def test_comments_sorted_chronologically(self, mock_langgraph_config: MagicMock) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         pr_comments = [
             _make_pr_comment(body="Third", created_at="2026-03-01T13:00:00Z", comment_id=3)
         ]
@@ -280,8 +266,6 @@ class TestGetPrReviewComments:
         assert bodies == ["First", "Second", "Third"]
 
     def test_returns_total_count(self, mock_langgraph_config: MagicMock) -> None:
-        from agent.tools.get_pr_review_comments import get_pr_review_comments
-
         pr_comments = [_make_pr_comment(comment_id=1), _make_pr_comment(comment_id=2)]
 
         with (
