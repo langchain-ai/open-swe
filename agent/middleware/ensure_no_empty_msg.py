@@ -58,6 +58,11 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
         if check_if_no_op(messages_since_last_human):
             return None
 
+        if check_if_model_already_called_commit_and_open_pr(
+            messages_since_last_human
+        ) and check_if_model_messaged_user(messages_since_last_human):
+            return None
+
         tc_id = str(uuid4())
         last_msg.tool_calls = [{"name": "no_op", "args": {}, "id": tc_id}]
         no_op_tool_msg = ToolMessage(
