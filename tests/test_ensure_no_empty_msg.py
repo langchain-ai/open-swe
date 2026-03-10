@@ -1,9 +1,12 @@
+from unittest.mock import MagicMock
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.middleware.ensure_no_empty_msg import (
     check_if_confirming_completion,
     check_if_model_already_called_commit_and_open_pr,
     check_if_model_messaged_user,
+    ensure_no_empty_msg,
     get_every_message_since_last_human,
 )
 
@@ -158,3 +161,87 @@ class TestCheckIfConfirmingCompletion:
         ]
 
         assert check_if_confirming_completion(messages) is True
+
+
+class TestEnsureNoEmptyMsgCommitAndNotify:
+    """Tests the branch: commit_and_open_pr was called AND user was messaged -> return None."""
+
+    def _make_runtime(self) -> MagicMock:
+        return MagicMock()
+
+    def test_returns_none_when_pr_opened_and_user_messaged(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
+                ToolMessage(content="message sent", tool_call_id="2", name="slack_thread_reply"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+
+    def test_returns_none_with_linear_comment_instead_of_slack(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
+                ToolMessage(content="commented", tool_call_id="2", name="linear_comment"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+
+    def test_returns_none_with_github_comment_instead_of_slack(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
+                ToolMessage(content="commented", tool_call_id="2", name="github_comment"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is None
+
+    def test_injects_no_op_when_only_pr_opened_but_user_not_messaged(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="PR opened", tool_call_id="1", name="commit_and_open_pr"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is not None
+        assert len(result["messages"]) == 2
+        assert result["messages"][0].tool_calls[0]["name"] == "no_op"
+
+    def test_injects_no_op_when_only_user_messaged_but_no_pr(self) -> None:
+        empty_ai = AIMessage(content="")
+        state = {
+            "messages": [
+                HumanMessage(content="fix the bug"),
+                ToolMessage(content="message sent", tool_call_id="1", name="slack_thread_reply"),
+                empty_ai,
+            ]
+        }
+
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
+
+        assert result is not None
+        assert len(result["messages"]) == 2
+        assert result["messages"][0].tool_calls[0]["name"] == "no_op"
