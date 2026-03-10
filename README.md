@@ -12,7 +12,7 @@
 </div>
 
 > [!WARNING]
-> **Deprecation Notice:** This project is no longer in active development. The repository is archived for reference purposes. If you're looking for an actively maintained coding agent framework, check out [Deep Agents](https://github.com/langchain-ai/deepagents) and [LangGraph](https://langchain-ai.github.io/langgraph/).
+> **Deprecation Notice:** This project is no longer in active development. The repository is archived for reference purposes. If you're looking for an actively maintained coding agent framework, check out [LangSmith Agent Builder](https://www.langchain.com/langsmith/agent-builder), [Deep Agents](https://github.com/langchain-ai/deepagents), and [LangGraph](https://langchain-ai.github.io/langgraph/).
 
 Elite engineering orgs like Stripe, Ramp, and Coinbase are building their own internal coding agents — Slackbots, CLIs, and web apps that meet engineers where they already work. These agents are connected to internal systems with the right context, permissioning, and safety boundaries to operate with minimal human oversight.
 
