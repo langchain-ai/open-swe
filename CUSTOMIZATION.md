@@ -7,7 +7,7 @@ Open SWE is designed to be forked and customized for your org. The core agent is
 return create_deep_agent(
     model=make_model("anthropic:claude-opus-4-6", temperature=0, max_tokens=20_000),
     system_prompt=construct_system_prompt(repo_dir, ...),
-    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply, github_comment],
     backend=sandbox_backend,
     middleware=[
         ToolErrorMiddleware(),
@@ -203,7 +203,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
 
 ## 3. Tools
 
-Open SWE ships with five custom tools on top of the built-in Deep Agents tools (file operations, shell execution, subagents, todos):
+Open SWE ships with six custom tools on top of the built-in Deep Agents tools (file operations, shell execution, subagents, todos):
 
 | Tool | File | Purpose |
 |---|---|---|
@@ -212,6 +212,7 @@ Open SWE ships with five custom tools on top of the built-in Deep Agents tools (
 | `http_request` | `agent/tools/http_request.py` | HTTP API calls |
 | `linear_comment` | `agent/tools/linear_comment.py` | Post comments on Linear tickets |
 | `slack_thread_reply` | `agent/tools/slack_thread_reply.py` | Reply in Slack threads |
+| `github_comment` | `agent/tools/github_comment.py` | Post comments on GitHub issues/PRs |
 
 ### Adding a tool
 

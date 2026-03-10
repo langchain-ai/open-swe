@@ -1,8 +1,8 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
-    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="35%">
+    <source media="(prefers-color-scheme: dark)" srcset="static/dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="static/light.svg">
+    <img src="static/dark.svg" alt="Open SWE Logo" width="35%">
   </picture>
 </div>
 
@@ -32,7 +32,7 @@ Rather than forking an existing agent or building from scratch, Open SWE **compo
 create_deep_agent(
     model="anthropic:claude-opus-4-6",
     system_prompt=construct_system_prompt(repo_dir, ...),
-    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply],
+    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply, github_comment],
     backend=sandbox_backend,
     middleware=[ToolErrorMiddleware(), check_message_queue_before_model, ...],
 )
@@ -62,6 +62,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `commit_and_open_pr` | Git commit + open a GitHub draft PR |
 | `linear_comment` | Post updates to Linear tickets |
 | `slack_thread_reply` | Reply in Slack threads |
+| `github_comment` | Post comments on GitHub issues/PRs |
 
 Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
 
