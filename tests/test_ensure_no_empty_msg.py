@@ -180,7 +180,7 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
             ]
         }
 
-        result = ensure_no_empty_msg(state, self._make_runtime())
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is None
 
@@ -195,7 +195,7 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
             ]
         }
 
-        result = ensure_no_empty_msg(state, self._make_runtime())
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is None
 
@@ -210,7 +210,7 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
             ]
         }
 
-        result = ensure_no_empty_msg(state, self._make_runtime())
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is None
 
@@ -224,7 +224,7 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
             ]
         }
 
-        result = ensure_no_empty_msg(state, self._make_runtime())
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is not None
         assert len(result["messages"]) == 2
@@ -240,7 +240,7 @@ class TestEnsureNoEmptyMsgCommitAndNotify:
             ]
         }
 
-        result = ensure_no_empty_msg(state, self._make_runtime())
+        result = ensure_no_empty_msg.after_model(state, self._make_runtime())
 
         assert result is not None
         assert len(result["messages"]) == 2
