@@ -267,11 +267,14 @@ _STATIC_PROMPT = (
     + CODE_REVIEW_GUIDELINES_SECTION
     + COMMUNICATION_SECTION
     + EXTERNAL_UNTRUSTED_COMMENTS_SECTION
+<<<<<<< HEAD
     + COMMIT_PR_SECTION
     + """
 
 {agents_md_section}
 """
+=======
+>>>>>>> f1da384e (formatting)
 )
 
 
