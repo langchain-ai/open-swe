@@ -218,6 +218,8 @@ SLACK_REPO_NAME="my-repo"      # Default GitHub repo
 
 GitHub triggering works automatically once your GitHub App is set up (step 2). Tag `@openswe` in PR comments on agent-created PRs to have it address review feedback and push fixes to the same branch.
 
+In order for Open SWE to recognize users who should be able to trigger it via GitHub, you'll need to add them to the `GITHUB_USER_EMAIL_MAP` in `agent/utils/github_user_email_map.py`. The email should be the same email associated with their LangSmith account.
+
 ## 5. Environment variables
 
 Create a `.env` file in the project root:
