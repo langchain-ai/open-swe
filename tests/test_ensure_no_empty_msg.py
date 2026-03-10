@@ -112,6 +112,13 @@ class TestCheckIfModelMessagedUser:
 
         assert check_if_model_messaged_user(messages) is True
 
+    def test_returns_true_for_github_comment(self) -> None:
+        messages = [
+            ToolMessage(content="commented", tool_call_id="123", name="github_comment"),
+        ]
+
+        assert check_if_model_messaged_user(messages) is True
+
     def test_returns_false_for_other_tools(self) -> None:
         messages = [
             ToolMessage(content="result", tool_call_id="123", name="bash"),

@@ -25,8 +25,11 @@ def check_if_model_already_called_commit_and_open_pr(messages: list[AnyMessage])
 
 def check_if_model_messaged_user(messages: list[AnyMessage]) -> bool:
     for msg in messages:
-        # see if tool name is one of slack_thread_reply or linear_comment
-        if msg.type == "tool" and msg.name in ["slack_thread_reply", "linear_comment"]:
+        if msg.type == "tool" and msg.name in [
+            "slack_thread_reply",
+            "linear_comment",
+            "github_comment",
+        ]:
             return True
     return False
 
