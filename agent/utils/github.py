@@ -69,8 +69,11 @@ def git_checkout_branch(
 ) -> bool:
     """Checkout branch, creating it if needed."""
     safe_branch = shlex.quote(branch)
-    checkout_result = _run_git(sandbox_backend, repo_dir, f"git checkout -b {safe_branch}")
+    checkout_result = _run_git(sandbox_backend, repo_dir, f"git checkout -B {safe_branch}")
     if checkout_result.exit_code == 0:
+        return True
+    fallback_create = _run_git(sandbox_backend, repo_dir, f"git checkout -b {safe_branch}")
+    if fallback_create.exit_code == 0:
         return True
     fallback = _run_git(sandbox_backend, repo_dir, f"git checkout {safe_branch}")
     return fallback.exit_code == 0

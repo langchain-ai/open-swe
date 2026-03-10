@@ -16,7 +16,6 @@ from langchain.agents.middleware import AgentState, after_agent
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
-from ..encryption import decrypt_token
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -30,6 +29,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..utils.github_token import get_github_token
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -130,10 +130,7 @@ async def open_pr_if_needed(
         await asyncio.to_thread(git_add_all, sandbox_backend, repo_dir)
         await asyncio.to_thread(git_commit, sandbox_backend, repo_dir, commit_message)
 
-        encrypted_token = configurable.get("github_token_encrypted")
-        github_token = None
-        if encrypted_token:
-            github_token = decrypt_token(encrypted_token)
+        github_token = get_github_token()
 
         if github_token:
             await asyncio.to_thread(

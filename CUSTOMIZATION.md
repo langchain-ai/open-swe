@@ -296,7 +296,7 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 
 ### Customizing Linear routing
 
-The `LINEAR_TEAM_TO_REPO` dict in `agent/webapp.py` maps Linear teams and projects to GitHub repos:
+The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
 
 ```python
 LINEAR_TEAM_TO_REPO = {
