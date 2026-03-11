@@ -162,9 +162,7 @@ class TestOpenPrIfNeededMiddleware:
                         ):
                             # Middleware should NOT short-circuit; it reaches sandbox logic
                             # We verify get_sandbox_backend was called (safety net fired)
-                            result = await open_pr_if_needed.aafter_agent(
-                                state, self._make_runtime()
-                            )
+                            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # The safety net fired: get_sandbox_backend was called
         mock_sandbox.assert_called_once_with("thread-push-fail")
@@ -214,9 +212,7 @@ class TestOpenPrIfNeededMiddleware:
                             "agent.middleware.open_pr.git_has_unpushed_commits",
                             return_value=True,
                         ):
-                            result = await open_pr_if_needed.aafter_agent(
-                                state, self._make_runtime()
-                            )
+                            await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # The safety net fired: get_sandbox_backend was called
         mock_sandbox.assert_called_once_with("thread-pr-fail")
@@ -277,7 +273,9 @@ class TestOpenPrIfNeededMiddleware:
                 }
             },
         ):
-            with patch("agent.middleware.open_pr.get_sandbox_backend", side_effect=fake_get_sandbox):
+            with patch(
+                "agent.middleware.open_pr.get_sandbox_backend", side_effect=fake_get_sandbox
+            ):
                 await open_pr_if_needed.aafter_agent(state, self._make_runtime())
 
         # If the old buggy `"success" in pr_payload` check was used, the middleware
