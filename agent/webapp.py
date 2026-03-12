@@ -456,6 +456,13 @@ async def queue_message_for_thread(
         except Exception:  # noqa: BLE001
             logger.debug("No existing queued messages for thread %s", thread_id)
 
+        if any(existing.get("content") == new_message["content"] for existing in existing_messages):
+            logger.info(
+                "Duplicate queued message detected for thread %s, skipping append",
+                thread_id,
+            )
+            return True
+
         existing_messages.append(new_message)
         value = {"messages": existing_messages}
 
@@ -794,6 +801,24 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info(
+            "Thread %s is active (busy), will queue Slack message instead of creating run",
+            thread_id,
+        )
+        queued_payload = {"text": prompt, "image_urls": []}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
+        if queued:
+            logger.info("Slack message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue Slack message for thread %s", thread_id)
+        return
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
