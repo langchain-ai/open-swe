@@ -15,7 +15,11 @@ from langchain_core.messages.content import create_text_block
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
-from .utils.auth import persist_encrypted_github_token, resolve_github_token_from_email
+from .utils.auth import (
+    is_bot_token_only_mode,
+    persist_encrypted_github_token,
+    resolve_github_token_from_email,
+)
 from .utils.comments import get_recent_comments
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import (
@@ -60,6 +64,12 @@ SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
+)
+
+ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
+    org.strip().lower()
+    for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
+    if org.strip()
 )
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
@@ -276,6 +286,18 @@ def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] |
 def _is_not_found_error(exc: Exception) -> bool:
     """Best-effort check for LangGraph 404 errors."""
     return getattr(exc, "status_code", None) == 404
+
+
+def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
+    """Check if the repo owner/org is in the allowlist.
+
+    Returns True if no allowlist is configured (empty ALLOWED_GITHUB_ORGS),
+    or if the repo owner is in the allowlist.
+    """
+    if not ALLOWED_GITHUB_ORGS:
+        return True
+    owner = repo_config.get("owner", "").lower()
+    return owner in ALLOWED_GITHUB_ORGS
 
 
 async def _upsert_slack_thread_repo_metadata(
@@ -794,7 +816,8 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
         True if signature is valid, False otherwise
     """
     if not secret:
-        return True
+        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
 
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
@@ -813,9 +836,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
     body = await request.body()
 
     signature = request.headers.get("Linear-Signature", "")
-    if LINEAR_WEBHOOK_SECRET and not verify_linear_signature(
-        body, signature, LINEAR_WEBHOOK_SECRET
-    ):
+    if not verify_linear_signature(body, signature, LINEAR_WEBHOOK_SECRET):
         logger.warning("Invalid webhook signature")
         raise HTTPException(status_code=401, detail="Invalid signature")
 
@@ -892,6 +913,13 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         },
     )
 
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Linear webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
     repo_owner = repo_config["owner"]
     repo_name = repo_config["name"]
 
@@ -927,7 +955,7 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
     signature = request.headers.get("X-Slack-Signature", "")
     timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-    if SLACK_SIGNING_SECRET and not verify_slack_signature(
+    if not verify_slack_signature(
         body=body,
         timestamp=timestamp,
         signature=signature,
@@ -1003,6 +1031,13 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
     }
     repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
 
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
     background_tasks.add_task(process_slack_mention, event_data, repo_config)
 
     return {"status": "accepted", "message": "Slack mention queued"}
@@ -1050,17 +1085,20 @@ def build_github_issue_prompt(
     comments: list[dict[str, Any]],
     *,
     github_login: str,
+    issue_author: str = "",
 ) -> str:
     """Build the user prompt for a GitHub issue-triggered run."""
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
     comments_text = _build_github_issue_comments_text(comments)
+    sanitized_title = sanitize_github_comment_body(title)
+    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
     return (
         "Please work on the following GitHub issue:\n\n"
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
         f"{triggered_by_line}"
         f"## GitHub Issue: #{issue_number} - Issue ID: {issue_id}\n\n"
-        f"## Title: {title}\n\n"
-        f"## Description:\n{body}\n"
+        f"## Title: {sanitized_title}\n\n"
+        f"## Description:\n{formatted_body}\n"
         f"{comments_text}\n\n"
         "Please analyze this issue and implement the necessary changes. "
         "When you need to communicate on GitHub, use `github_comment` with the issue number."
@@ -1120,7 +1158,22 @@ async def _trigger_or_queue_run(
 
 
 async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
-    """Resolve and persist a GitHub token for a thread when available."""
+    """Resolve and persist a GitHub token for a thread when available.
+
+    In bot-token-only mode, returns a fresh GitHub App installation token
+    instead of resolving per-user OAuth tokens.
+    """
+    if is_bot_token_only_mode():
+        bot_token = await get_github_app_installation_token()
+        if bot_token:
+            try:
+                await persist_encrypted_github_token(thread_id, bot_token)
+            except Exception:
+                logger.warning("Could not persist bot token for thread %s", thread_id)
+            return bot_token
+        logger.warning("Bot-token-only mode but GitHub App token unavailable")
+        return None
+
     github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
     if github_token:
         return github_token
@@ -1224,6 +1277,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     issue_url = issue.get("html_url", "") or issue.get("url", "")
     title = issue.get("title", "No title")
     description = issue.get("body") or "No description"
+    issue_author = issue.get("user", {}).get("login", "")
 
     logger.info(
         "Processing GitHub issue: event=%s, issue=%s, repo=%s/%s",
@@ -1293,6 +1347,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             description,
             comments,
             github_login=github_login,
+            issue_author=issue_author,
         )
     configurable: dict[str, Any] = {
         "source": "github",
@@ -1344,6 +1399,19 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     except json.JSONDecodeError:
         logger.exception("Failed to parse GitHub webhook JSON")
         return {"status": "error", "message": "Invalid JSON"}
+
+    # Check org allowlist
+    webhook_repo = payload.get("repository", {})
+    webhook_repo_config = {
+        "owner": webhook_repo.get("owner", {}).get("login", ""),
+        "name": webhook_repo.get("name", ""),
+    }
+    if not _is_repo_org_allowed(webhook_repo_config):
+        logger.warning(
+            "Rejecting GitHub webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            webhook_repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     issue = payload.get("issue", {})
     is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))

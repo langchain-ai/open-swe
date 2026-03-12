@@ -14,6 +14,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
+from .github_app import get_github_app_installation_token
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .linear import comment_on_linear_issue
@@ -40,6 +41,17 @@ logger.debug(
 )
 
 
+def is_bot_token_only_mode() -> bool:
+    """Check if we're in bot-token-only mode.
+
+    This is the case when LANGSMITH_API_KEY_PROD is set (deployed) but neither
+    X_SERVICE_AUTH_JWT_SECRET nor USER_ID_API_KEY_MAP is configured, meaning we
+    can't resolve per-user GitHub OAuth tokens. In this mode the GitHub App
+    installation token is used for all git operations instead.
+    """
+    return bool(LANGSMITH_API_KEY and not X_SERVICE_AUTH_JWT_SECRET and not USER_ID_API_KEY_MAP)
+
+
 def _retry_instruction(source: str) -> str:
     if source == "slack":
         return "Once authenticated, mention me again in this Slack thread to retry."
@@ -64,27 +76,11 @@ def _work_item_label(source: str) -> str:
     return "issue"
 
 
-def parse_user_id_api_key_map() -> dict[str, str]:
-    if not USER_ID_API_KEY_MAP:
-        return {}
-    return {
-        k.strip(): v.strip()
-        for k, v in (pair.split(":", 1) for pair in USER_ID_API_KEY_MAP.split(","))
-    }
-
-
 def get_secret_key_for_user(
     user_id: str, tenant_id: str, expiration_seconds: int = 300
 ) -> tuple[str, Literal["service", "api_key"]]:
     """Create a short-lived service JWT for authenticating as a specific user."""
     if not X_SERVICE_AUTH_JWT_SECRET:
-        user_id_api_key_map = parse_user_id_api_key_map()
-        if user_id_api_key_map:
-            if user_id in user_id_api_key_map:
-                return user_id_api_key_map[user_id], "api_key"
-            msg = f"User {user_id} not found in USER_ID_API_KEY_MAP"
-            raise ValueError(msg)
-
         msg = "X_SERVICE_AUTH_JWT_SECRET is not configured. Cannot generate service keys."
         raise ValueError(msg)
 
@@ -345,11 +341,31 @@ async def save_encrypted_token_from_email(
     return token, encrypted
 
 
+async def _resolve_bot_installation_token(thread_id: str) -> tuple[str, str]:
+    """Get a GitHub App installation token and persist it for the thread."""
+    bot_token = await get_github_app_installation_token()
+    if not bot_token:
+        raise RuntimeError(
+            "Bot-token-only mode is active (LANGSMITH_API_KEY_PROD set without "
+            "X_SERVICE_AUTH_JWT_SECRET) but the GitHub App is not configured. "
+            "Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_APP_INSTALLATION_ID."
+        )
+    logger.info(
+        "Using GitHub App installation token for thread %s (bot-token-only mode)", thread_id
+    )
+    encrypted = await persist_encrypted_github_token(thread_id, bot_token)
+    return bot_token, encrypted
+
+
 async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:
     """Resolve a GitHub token from the run config based on the source.
 
     Routes to the correct auth method depending on whether the run was
     triggered from GitHub (login-based) or Linear/Slack (email-based).
+
+    In bot-token-only mode (LANGSMITH_API_KEY_PROD set without
+    X_SERVICE_AUTH_JWT_SECRET), the GitHub App installation token is used
+    for all operations instead of per-user OAuth tokens.
 
     Returns:
         (github_token, new_encrypted) tuple.
@@ -357,6 +373,9 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     Raises:
         RuntimeError: If source is missing or token resolution fails.
     """
+    if is_bot_token_only_mode():
+        return await _resolve_bot_installation_token(thread_id)
+
     configurable = config["configurable"]
     source = configurable.get("source")
     if not source:
