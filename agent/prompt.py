@@ -50,7 +50,7 @@ If you make changes, communicate updates in the source channel:
 
 For tasks that require code changes, follow this order:
 
-1. **Understand** — Read the issue/task carefully. Explore relevant files before making any changes.
+1. **Understand** — Read the issue/task carefully. Before reading any file or grepping anything, map the repo structure first by running `find . -type f | grep -v node_modules | grep -v dist | grep -v ".git" | head -150` from `{working_dir}`. This gives you the complete real file tree so you never have to guess filenames. Subagent output is findings, not a filesystem map — always build your own map first.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run tests and linters to confirm correctness before submitting.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
@@ -103,7 +103,24 @@ TOOL_BEST_PRACTICES_SECTION = """---
 - **History:** Use `git log` and `git blame` via `execute` for additional context when needed.
 - **Parallel Tool Calling:** Call multiple tools at once when they don't depend on each other.
 - **URL Content:** Use `fetch_url` to fetch URL contents. Only use for URLs the user has provided or discovered during exploration.
-- **Scripts may require dependencies:** Always ensure dependencies are installed before running a script."""
+- **Scripts may require dependencies:** Always ensure dependencies are installed before running a script.
+
+### Subagent Task Descriptions
+
+When dispatching a `task` subagent for research or investigation:
+
+- **Search for causes, not symptoms.** For UI bugs (flickers, empty states, loading issues), search for data fetching patterns, state management hooks, and loading flags — NOT for visible UI string labels (e.g. `"Messages"`, `"Details"`). UI labels match hundreds of files and provide no signal.
+- **Be specific about what to return.** End every task description with: "Return a structured findings table with these columns: file path | line number | severity (critical/high/medium/low) | one-sentence description of the issue | the single problematic line of code. One row per issue. No prose paragraphs, no fix code blocks, no full file dumps. If no issues found, say so explicitly."
+- **One focused task beats two overlapping ones.** If you need to understand a bug, dispatch a single subagent that covers the full technical surface (data fetching + state + component tree) rather than two parallel ones that split on superficial angles and risk returning empty results.
+- **Never overlap file scope across parallel subagents.** Each parallel subagent must get a strictly non-overlapping set of files. Never assign the same file to more than one subagent — if subagent A reads file X, subagent B and C must not read file X.
+- **Integration subagents must be grep-only.** If you need a third subagent to check cross-layer connections, its task description must explicitly say "grep only — do not read files" and list specific grep patterns to run. Never assign file reads to an integration/cross-layer subagent — it should only verify that patterns exist across file boundaries, not re-read files already covered by other subagents.
+- **Do not tell subagents to read entire files.** Instead of "read X completely", tell subagents to search for specific functions, patterns, or behaviours. Subagents should grep and read targeted sections — not dump entire files into their response.
+
+### Avoiding Redundant Tool Calls
+
+- **Todos:** Only call `write_todos` when the todo list content actually changes. Do not rewrite it with the same content between steps.
+- **Re-reads:** Never re-read a file you have already read unless you have modified it since.
+- **Re-runs:** If a command succeeded and you have not changed any files since, do not re-run it. Only re-run after making changes."""
 
 
 CODING_STANDARDS_SECTION = """---
