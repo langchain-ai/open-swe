@@ -11,6 +11,9 @@
   <p><strong>The open-source framework for building your org's internal coding agent</strong></p>
 </div>
 
+> [!CAUTION]
+> **⚠️ Deprecation Notice:** This repository is no longer actively maintained. It may contain outdated dependencies, unpatched security issues, or incompatibilities with current tooling. Use at your own risk. We recommend exploring actively maintained alternatives.
+
 Elite engineering orgs like Stripe, Ramp, and Coinbase are building their own internal coding agents — Slackbots, CLIs, and web apps that meet engineers where they already work. These agents are connected to internal systems with the right context, permissioning, and safety boundaries to operate with minimal human oversight.
 
 Open SWE is the open-source version of this pattern. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [Deep Agents](https://github.com/langchain-ai/deepagents), it gives you the same architecture those companies built internally: cloud sandboxes, Slack and Linear invocation, subagent orchestration, and automatic PR creation — ready to customize for your own codebase and workflows.
