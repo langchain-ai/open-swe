@@ -107,6 +107,8 @@ TOOL_BEST_PRACTICES_SECTION = """---
 
 ### Subagent Task Descriptions
 
+**When NOT to use a subagent:** Never dispatch a subagent to read a specific file, retrieve exact code, or run a single grep — use `read_file` and `grep` directly. Subagents are only for broad investigation across a large codebase where you need to search many files in parallel. If the task can be done in 1-3 direct tool calls, do it yourself.
+
 When dispatching a `task` subagent for research or investigation:
 
 - **Search for causes, not symptoms.** For UI bugs (flickers, empty states, loading issues), search for data fetching patterns, state management hooks, and loading flags — NOT for visible UI string labels (e.g. `"Messages"`, `"Details"`). UI labels match hundreds of files and provide no signal.

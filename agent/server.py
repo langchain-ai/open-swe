@@ -388,6 +388,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                     "- Search for technical identifiers (function names, hook names, state variable names, API endpoints) — NEVER search for visible UI text like tab names, button labels, or display strings; these match hundreds of files and give no signal\n"
                     "- Return a structured findings table: file path | line number | severity | one-sentence description | single problematic code line. One row per issue. No prose paragraphs, no fix code blocks, no full file dumps.\n"
                     "- Never say 'the summary above' or reference prior context — your response is the only output the caller receives\n"
+                    "- If asked to return file contents or exact code, return the verbatim text — never summarize or paraphrase code you are asked to retrieve\n"
                     "- If a search returns no results, try 1-2 different specific technical terms; if still no results after that, report 'no findings for this area' and stop — do not keep searching with variations of the same dead-end pattern\n"
                     "- Stay within your assigned file scope — do not read files outside what your task description specifies\n"
                     "- If your task says 'grep only' or 'do not read files', use ONLY grep/search commands — never open a file, just return grep match results\n"
