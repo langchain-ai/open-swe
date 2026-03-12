@@ -41,7 +41,8 @@ def verify_github_signature(body: bytes, signature: str, *, secret: str) -> bool
         True if signature is valid or no secret is configured.
     """
     if not secret:
-        return True
+        logger.warning("GITHUB_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        return False
 
     expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)

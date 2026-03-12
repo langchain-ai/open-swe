@@ -1,11 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 
 from fastapi.testclient import TestClient
 
 from agent import webapp
 from agent.utils import github_comments
+
+_TEST_WEBHOOK_SECRET = "test-secret-for-webhook"
+
+
+def _sign_body(body: bytes, secret: str = _TEST_WEBHOOK_SECRET) -> str:
+    """Compute the X-Hub-Signature-256 header value for raw bytes."""
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return f"sha256={sig}"
+
+
+def _post_github_webhook(client: TestClient, event_type: str, payload: dict) -> object:
+    """Send a signed GitHub webhook POST request."""
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    return client.post(
+        "/webhooks/github",
+        content=body,
+        headers={
+            "X-GitHub-Event": event_type,
+            "X-Hub-Signature-256": _sign_body(body),
+            "Content-Type": "application/json",
+        },
+    )
 
 
 def test_generate_thread_id_from_github_issue_is_deterministic() -> None:
@@ -49,13 +74,13 @@ def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
         called["event_type"] = event_type
 
     monkeypatch.setattr(webapp, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(webapp.app)
-    response = client.post(
-        "/webhooks/github",
-        headers={"X-GitHub-Event": "issues"},
-        json={
+    response = _post_github_webhook(
+        client,
+        "issues",
+        {
             "action": "opened",
             "issue": {
                 "id": 12345,
@@ -81,13 +106,13 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(monkey
         called = True
 
     monkeypatch.setattr(webapp, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(webapp.app)
-    response = client.post(
-        "/webhooks/github",
-        headers={"X-GitHub-Event": "issues"},
-        json={
+    response = _post_github_webhook(
+        client,
+        "issues",
+        {
             "action": "edited",
             "changes": {"labels": {"from": []}},
             "issue": {
@@ -114,13 +139,13 @@ def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
         called["event_type"] = event_type
 
     monkeypatch.setattr(webapp, "process_github_issue", fake_process_github_issue)
-    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", "")
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
 
     client = TestClient(webapp.app)
-    response = client.post(
-        "/webhooks/github",
-        headers={"X-GitHub-Event": "issue_comment"},
-        json={
+    response = _post_github_webhook(
+        client,
+        "issue_comment",
+        {
             "issue": {"id": 12345, "number": 42, "title": "Fix the flaky test"},
             "comment": {"body": "@openswe please handle this"},
             "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},

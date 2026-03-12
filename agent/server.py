@@ -52,9 +52,12 @@ SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
+    _CRED_FILE_PATH,
+    cleanup_git_credentials,
     git_has_uncommitted_changes,
     is_valid_git_repo,
     remove_directory,
+    setup_git_credentials,
 )
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
@@ -86,8 +89,8 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         raise ValueError(msg)
 
     repo_dir = f"/workspace/{repo}"
-    auth_url = f"https://git:{token}@github.com/{owner}/{repo}.git"
     clean_url = f"https://github.com/{owner}/{repo}.git"
+    cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
 
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
@@ -115,16 +118,12 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
 
+        await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
         try:
-            await loop.run_in_executor(
-                None,
-                sandbox_backend.execute,
-                f"cd {repo_dir} && git remote set-url origin {auth_url}",
-            )
             pull_result = await loop.run_in_executor(
                 None,
                 sandbox_backend.execute,
-                f"cd {repo_dir} && git pull origin $(git rev-parse --abbrev-ref HEAD)",
+                f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:
@@ -137,43 +136,30 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
             logger.exception("Failed to execute git pull")
             raise
         finally:
-            try:
-                await loop.run_in_executor(
-                    None,
-                    sandbox_backend.execute,
-                    f"cd {repo_dir} && git remote set-url origin {clean_url}",
-                )
-            except Exception:
-                logger.exception("Failed to restore clean remote URL")
-                raise
+            await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
         logger.info("Repo updated at %s", repo_dir)
         return repo_dir
 
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
+    await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
     try:
         result = await loop.run_in_executor(
-            None, sandbox_backend.execute, f"git clone {auth_url} {repo_dir}"
+            None,
+            sandbox_backend.execute,
+            f"git {cred_helper_arg} clone {clean_url} {repo_dir}",
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
         logger.exception("Failed to execute git clone")
         raise
+    finally:
+        await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
     if result.exit_code != 0:
         msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
         logger.error(msg)
         raise RuntimeError(msg)
-
-    try:
-        await loop.run_in_executor(
-            None,
-            sandbox_backend.execute,
-            f"cd {repo_dir} && git remote set-url origin {clean_url}",
-        )
-    except Exception:
-        logger.exception("Failed to set remote URL after clone")
-        raise
 
     logger.info("Repo cloned successfully at %s", repo_dir)
     return repo_dir

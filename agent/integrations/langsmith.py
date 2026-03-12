@@ -128,7 +128,7 @@ class SandboxProvider(ABC):
 
 
 # Default template configuration
-DEFAULT_TEMPLATE_NAME = "deepagents-cli"
+DEFAULT_TEMPLATE_NAME = "open-swe"
 DEFAULT_TEMPLATE_IMAGE = "python:3"
 
 
