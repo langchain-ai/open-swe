@@ -36,6 +36,7 @@ from .prompt import construct_system_prompt
 from .tools import (
     commit_and_open_pr,
     fetch_url,
+    get_pr_review_comments,
     github_comment,
     http_request,
     linear_comment,
@@ -376,6 +377,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_comment,
             slack_thread_reply,
             github_comment,
+            get_pr_review_comments,
         ],
         backend=sandbox_backend,
         middleware=[
