@@ -30,4 +30,4 @@ A new tool `fetch_github_pr_comments` was created that:
 
 ## PR URL
 
-See the pull request at: https://github.com/langchain-ai/open-swe/pull/NEW
+See the pull request at: https://github.com/langchain-ai/open-swe/pull/1059
