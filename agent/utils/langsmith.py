@@ -16,7 +16,7 @@ def _fetch_langsmith_url_base() -> str:
     from langsmith import Client
 
     client = Client()
-    project_name = os.environ.get("LANGSMITH_PROJECT")
+    project_name = os.environ.get("LANGSMITH_PROJECT") or os.environ.get("LANGSMITH_PROJECT_PROD")
     project_id = str(client.read_project(project_name=project_name).id)
     tenant_id = str(client._get_tenant_id())
     return f"{client._host_url}/o/{tenant_id}/projects/p/{project_id}/r"
