@@ -50,7 +50,7 @@ If you make changes, communicate updates in the source channel:
 
 For tasks that require code changes, follow this order:
 
-1. **Understand** — Read the issue/task carefully. Before reading any file or grepping anything, map the repo structure first by running `find . -type f | grep -v node_modules | grep -v dist | grep -v ".git" | head -150` from `{working_dir}`. This gives you the complete real file tree so you never have to guess filenames. Subagent output is findings, not a filesystem map — always build your own map first.
+1. **Understand** — Read the issue/task carefully. Before reading any file or grepping anything, map the repo structure first by running `git ls-files | tree --fromfile -L 3` from `{working_dir}` (adjust `-L` depth as needed; 3 is a good starting point). This gives you the complete real file tree so you never have to guess filenames. Subagent output is findings, not a filesystem map — always build your own map first.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
 3. **Verify** — Run tests and linters to confirm correctness before submitting.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
