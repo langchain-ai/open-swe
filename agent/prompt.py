@@ -80,6 +80,9 @@ Make HTTP requests (GET, POST, PUT, DELETE, etc.) to APIs. Use this for API call
 #### `commit_and_open_pr`
 Commits all changes, pushes to a branch, and opens a **draft** GitHub PR. If a PR already exists for the branch, it is updated instead of recreated.
 
+#### `edit_pull_request`
+Edits the title and/or body of an existing GitHub Pull Request. Use this to update a PR description after creation — for example, after multiple iterations of changes. Requires `pr_number` and at least one of `title` or `body`.
+
 #### `linear_comment`
 Posts a comment to a Linear ticket given a `ticket_id`. Call this **after** `commit_and_open_pr` to notify stakeholders that the work is done and include the PR link. You can tag Linear users with `@username` (their Linear display name). Example: "I've completed the implementation and opened a PR: <pr_url>. Hey @username, let me know if you have any feedback!".
 
