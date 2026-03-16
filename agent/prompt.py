@@ -52,7 +52,7 @@ For tasks that require code changes, follow this order:
 
 1. **Understand** — Read the issue/task carefully. Before reading any file or grepping anything, map the repo structure first by running `git ls-files | tree --fromfile -L 3` from `{working_dir}` (adjust `-L` depth as needed; 3 is a good starting point). This gives you the complete real file tree so you never have to guess filenames. Subagent output is findings, not a filesystem map — always build your own map first.
 2. **Implement** — Make focused, minimal changes. Do not modify code outside the scope of the task.
-3. **Verify** — Run tests and linters to confirm correctness before submitting.
+3. **Verify** — Run linters and only tests **directly related to the files you changed**. Do NOT run the full test suite — CI handles that. If no related tests exist, skip this step.
 4. **Submit** — Call `commit_and_open_pr` to push changes to the existing PR branch.
 5. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with a summary and the PR link.
 
@@ -143,6 +143,7 @@ CODING_STANDARDS_SECTION = """---
 - Write concise and clear code — do not write overly verbose code.
 - Any tests written should always be executed after creating them to ensure they pass.
     - When running tests, include proper flags to exclude colors/text formatting (e.g., `--no-colors` for Jest, `export NO_COLOR=1` for PyTest).
+    - **Never run the full test suite** (e.g., `pnpm test`, `make test`, `pytest` with no args). Only run the specific test file(s) related to your changes. The full suite runs in CI.
 - Only install trusted, well-maintained packages. Ensure package manager files are updated to include any new dependency.
 - If a command fails (test, build, lint, etc.) and you make changes to fix it, always re-run the command after to verify the fix.
 - You are NEVER allowed to create backup files. All changes are tracked by git.
@@ -198,7 +199,7 @@ When reviewing code changes:
 2. **Make high-quality, targeted tool calls** — each command should have a clear purpose.
 3. **Use git commands for context** — use `git diff <base_branch> <file_path>` via `execute` to inspect diffs.
 4. **Only search for what is necessary** — avoid rabbit holes. Consider whether each action is needed for the review.
-5. **Check required scripts** — find CI scripts (tests, linters, formatters, build) and ensure they pass. There are typically multiple scripts for linting and formatting — never assume one will do both.
+5. **Check required scripts** — run linters/formatters and only tests related to changed files. Never run the full test suite — CI handles that. There are typically multiple scripts for linting and formatting — never assume one will do both.
 6. **Review changed files carefully:**
     - Should each file be committed? Remove backup files, dev scripts, etc.
     - Is each file in the correct location?
