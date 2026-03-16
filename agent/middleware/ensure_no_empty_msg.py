@@ -66,7 +66,7 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
         tc_id = str(uuid4())
         last_msg.tool_calls = [{"name": "no_op", "args": {}, "id": tc_id}]
         no_op_tool_msg = ToolMessage(
-            content="No operation performed."
+            content="No operation performed. "
             + "Please continue with the task, ensuring you ALWAYS call at least one tool in"
             + " every message unless you are absolutely sure the task has been fully completed.",
             tool_call_id=tc_id,
@@ -90,7 +90,7 @@ def ensure_no_empty_msg(state: AgentState, runtime: Runtime) -> dict[str, Any] |
         tc_id = str(uuid4())
         last_msg.tool_calls = [{"name": "confirming_completion", "args": {}, "id": tc_id}]
         no_op_tool_msg = ToolMessage(
-            content="Confirming task completion. I see you did not call a tool, which would end the task, however you haven't called a tool to message the user or open a pull request."
+            content="Confirming task completion. I see you did not call a tool, which would end the task, however you haven't called a tool to message the user or open a pull request. "
             + "This may indicate premature termination - please ensure you fully complete the task before ending it. "
             + "If you do not call any tools it will end the task.",
             name="confirming_completion",

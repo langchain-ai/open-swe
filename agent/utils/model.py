@@ -1,9 +1,11 @@
+from typing import Any
+
 from langchain.chat_models import init_chat_model
 
 OPENAI_RESPONSES_WS_BASE_URL = "wss://api.openai.com/v1"
 
 
-def make_model(model_id: str, **kwargs: dict):
+def make_model(model_id: str, **kwargs: Any):
     model_kwargs = kwargs.copy()
 
     if model_id.startswith("openai:"):

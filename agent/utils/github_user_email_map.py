@@ -72,7 +72,7 @@ GITHUB_USER_EMAIL_MAP: dict[str, str] = {
     "j-broekhuizen": "jb@langchain.dev",
     "jacobalbert3": "jacob.albert@langchain.dev",
     "jacoblee93": "jacob@langchain.dev",
-    "jdrogers940 ": "josh@langchain.dev",
+    "jdrogers940": "josh@langchain.dev",
     "jeeyoonhyun": "jeeyoon@langchain.dev",
     "jessieibarra": "jessie.ibarra@langchain.dev",
     "jfglanc": "jan.glanc@langchain.dev",

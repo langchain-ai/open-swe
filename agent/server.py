@@ -2,7 +2,6 @@
 # ruff: noqa: E402
 
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
-# ruff: noqa: E402
 import logging
 import warnings
 

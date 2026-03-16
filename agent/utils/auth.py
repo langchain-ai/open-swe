@@ -111,7 +111,7 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
             response.raise_for_status()
             members = response.json()
 
-            if members and len(members) > 0:
+            if members:
                 member = members[0]
                 return {
                     "ls_user_id": member.get("ls_user_id"),
