@@ -1,4 +1,5 @@
 """Tool to list available GitHub repositories."""
+
 from __future__ import annotations
 
 import os
@@ -52,9 +53,7 @@ def list_repos(org: str | None = None) -> dict[str, Any]:
                 timeout=10,
             )
             if response.status_code == 200:
-                result["org_repos"] = [
-                    {"owner": org, "name": r["name"]} for r in response.json()
-                ]
+                result["org_repos"] = [{"owner": org, "name": r["name"]} for r in response.json()]
         except Exception:
             pass
 

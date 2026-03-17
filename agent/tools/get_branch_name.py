@@ -1,4 +1,5 @@
 """Tool to get the branch name for the current thread."""
+
 from __future__ import annotations
 
 from typing import Any
