@@ -8,7 +8,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from ..integrations.langsmith import create_langsmith_sandbox
+from .sandbox import create_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ async def get_sandbox_backend(thread_id: str) -> Any | None:
     if not sandbox_id:
         raise ValueError(f"Missing sandbox_id in thread metadata for {thread_id}")
 
-    sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
+    sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
     return sandbox_backend
 
