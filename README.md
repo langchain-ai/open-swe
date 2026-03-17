@@ -1,8 +1,8 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/docs/logo/dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="apps/docs/logo/light.svg">
-    <img src="apps/docs/logo/dark.svg" alt="Open SWE Logo" width="35%">
+    <source media="(prefers-color-scheme: dark)" srcset="static/dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="static/light.svg">
+    <img src="static/dark.svg" alt="Open SWE Logo" width="35%">
   </picture>
 </div>
 
