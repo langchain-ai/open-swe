@@ -4,11 +4,15 @@
     <source media="(prefers-color-scheme: light)" srcset="static/light.svg">
     <img src="static/dark.svg" alt="Open SWE Logo" width="35%">
   </picture>
-</div>
 
-<div align="center">
-  <h1>Open SWE</h1>
-  <p><strong>The open-source framework for building your org's internal coding agent</strong></p>
+### The open-source framework for building your org's internal coding agent.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Stars](https://img.shields.io/github/stars/langchain-ai/open-swe?style=social)](https://github.com/langchain-ai/open-swe)
+[![Twitter / X](https://img.shields.io/twitter/url/https/twitter.com/langchain.svg?style=social&label=Follow%20%40LangChain)](https://x.com/langchain)
+
+Built on [🦜🕸️ LangGraph](https://github.com/langchain-ai/langgraph) and [🤖 Deep Agents](https://github.com/langchain-ai/deepagents)
+
 </div>
 
 Elite engineering orgs like Stripe, Ramp, and Coinbase are building their own internal coding agents — Slackbots, CLIs, and web apps that meet engineers where they already work. These agents are connected to internal systems with the right context, permissioning, and safety boundaries to operate with minimal human oversight.
