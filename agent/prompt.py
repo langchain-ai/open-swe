@@ -97,7 +97,7 @@ Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running com
 Returns the list of available GitHub repos. Pass `org="<org_name>"` to also search a specific GitHub org via the API. If unsure which repo to use, ask the user for confirmation.
 
 #### `get_branch_name`
-Returns the git branch name for this thread (`open-swe/{thread_id}`). Always call this to get your branch name — never hard-code it.
+Returns the git branch name for this thread (`open-swe/<thread_id>`). Always call this to get your branch name — never hard-code it.
 
 #### `fetch_url`
 Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the content into a response — never dump raw markdown. Only use for URLs provided by the user or discovered during exploration.

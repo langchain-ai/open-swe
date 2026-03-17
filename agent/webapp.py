@@ -613,6 +613,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
     )
     prompt = (
         f"Please work on the following issue:\n\n"
+        f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
         f"## Title: {title}\n\n"
         f"{triggered_by_line}"
         f"## Linear Ticket: {identifier} - Ticket ID: {issue_id}\n\n"
