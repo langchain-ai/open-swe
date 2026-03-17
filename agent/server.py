@@ -4,7 +4,6 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
-import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -25,6 +24,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
+from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -159,7 +159,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:
                 metadata={"sandbox_id": SANDBOX_CREATING},
             )
             try:
-                sandbox_backend = await asyncio.to_thread(create_sandbox)
+                sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
