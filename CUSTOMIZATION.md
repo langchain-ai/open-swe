@@ -39,13 +39,13 @@ This is useful for pre-installing languages, frameworks, or internal tools that 
 
 Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
 
-| `SANDBOX_TYPE` | Integration file | Required env vars / packages |
+| `SANDBOX_TYPE` | Integration file | Required env vars |
 |---|---|---|
-| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY` |
-| `modal` | `agent/integrations/modal.py` | `pip install langchain-modal` |
-| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `pip install langchain-daytona` |
-| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `pip install langchain-runloop` |
-| `local` | `agent/integrations/local.py` | None (no isolation — development only) |
+| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
+| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
 > **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
