@@ -1131,7 +1131,7 @@ def build_github_issue_update_prompt(github_login: str, title: str, body: str) -
 
 async def _trigger_or_queue_run(
     thread_id: str,
-    prompt: str,
+    content_blocks: list[dict[str, Any]],
     *,
     github_login: str,
     repo_config: dict[str, str],
@@ -1141,7 +1141,7 @@ async def _trigger_or_queue_run(
     thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Thread %s is busy, queuing GitHub PR comment message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
+        await queue_message_for_thread(thread_id, content_blocks)
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
@@ -1149,7 +1149,7 @@ async def _trigger_or_queue_run(
     await langgraph_client.runs.create(
         thread_id,
         "agent",
-        input={"messages": [{"role": "user", "content": prompt}]},
+        input={"messages": [{"role": "user", "content": content_blocks}]},
         config={
             "configurable": {
                 "source": "github",
@@ -1260,9 +1260,20 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         return
 
     prompt = build_pr_prompt(comments, pr_url)
+    image_urls = dedupe_urls(
+        [url for c in comments for url in extract_image_urls(c.get("body", ""))]
+    )
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    if image_urls:
+        logger.info("Preparing %d image(s) for GitHub PR comment", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
     await _trigger_or_queue_run(
         thread_id,
-        prompt,
+        content_blocks,
         github_login=github_login,
         repo_config=repo_config,
         pr_number=pr_number,
@@ -1325,12 +1336,15 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
     if existing_thread:
         if event_type == "issue_comment":
+            comment_body = comment.get("body", "")
             prompt = build_github_issue_followup_prompt(
                 comment.get("user", {}).get("login", github_login) or github_login,
-                comment.get("body", ""),
+                comment_body,
             )
+            image_urls = dedupe_urls(extract_image_urls(comment_body))
         else:
             prompt = build_github_issue_update_prompt(github_login, title, description)
+            image_urls = dedupe_urls(extract_image_urls(description))
     else:
         comments = await fetch_issue_comments(
             repo_config, issue_number, token=github_token or app_token
@@ -1356,6 +1370,20 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
             github_login=github_login,
             issue_author=issue_author,
         )
+        image_urls = dedupe_urls(
+            extract_image_urls(description)
+            + [url for c in comments for url in extract_image_urls(c.get("body", ""))]
+        )
+
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    if image_urls:
+        logger.info("Preparing %d image(s) for GitHub issue", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
+
     configurable: dict[str, Any] = {
         "source": "github",
         "github_login": github_login,
@@ -1371,7 +1399,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     thread_active = await is_thread_active(thread_id)
     if thread_active:
         logger.info("Thread %s is busy, queuing GitHub issue message", thread_id)
-        await queue_message_for_thread(thread_id, prompt)
+        await queue_message_for_thread(thread_id, content_blocks)
         return
 
     logger.info("Creating LangGraph run for thread %s from GitHub issue", thread_id)
@@ -1379,7 +1407,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     await langgraph_client.runs.create(
         thread_id,
         "agent",
-        input={"messages": [{"role": "user", "content": prompt}]},
+        input={"messages": [{"role": "user", "content": content_blocks}]},
         config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
     )
