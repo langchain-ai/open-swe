@@ -19,9 +19,7 @@ IMAGE_URL_RE = re.compile(
     r"(https?://[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)",
     re.IGNORECASE,
 )
-GITHUB_ASSET_URL_RE = re.compile(
-    r"(https://github\.com/user-attachments/assets/[a-zA-Z0-9_-]+)"
-)
+GITHUB_ASSET_URL_RE = re.compile(r"(https://github\.com/user-attachments/assets/[a-zA-Z0-9_-]+)")
 
 
 def extract_image_urls(text: str) -> list[str]:

@@ -311,5 +311,8 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
         )
     )
 
-    assert captured["prompt"] == "**octocat:**\n@openswe please handle this"
-    assert "## Repository" not in captured["prompt"]
+    content = captured["prompt"]
+    assert isinstance(content, list)
+    assert content[0]["type"] == "text"
+    assert content[0]["text"] == "**octocat:**\n@openswe please handle this"
+    assert "## Repository" not in content[0]["text"]
