@@ -36,8 +36,7 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
-from .utils.langsmith import get_langsmith_trace_url
-from .utils.linear import comment_on_linear_issue
+from .utils.linear import comment_on_linear_issue, post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
@@ -47,6 +46,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
+    post_slack_trace_reply,
     select_slack_context_messages,
     strip_bot_mention,
     verify_slack_signature,
@@ -91,18 +91,6 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
     "🤖 **Agent Response**",
     "❌ **Agent Error**",
 )
-
-
-async def _post_linear_trace_comment(
-    issue_id: str, run_id: str, triggering_comment_id: str
-) -> None:
-    trace_url = await get_langsmith_trace_url(run_id)
-    if trace_url:
-        await comment_on_linear_issue(
-            issue_id,
-            f"On it! [View trace]({trace_url})",
-            parent_id=triggering_comment_id or None,
-        )
 
 
 def get_repo_config_from_team_mapping(
@@ -697,7 +685,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             langgraph_client = get_client(url=LANGGRAPH_URL)
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
-                await _post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
+                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
@@ -711,7 +699,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
-        await _post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
+        await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -827,11 +815,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
-    trace_url = await get_langsmith_trace_url(run["run_id"])
-    if trace_url:
-        await post_slack_thread_reply(
-            channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
-        )
+    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:

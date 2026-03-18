@@ -355,3 +355,12 @@ async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[d
 
     messages.sort(key=lambda item: _parse_ts(item.get("ts")))
     return messages
+
+
+async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -> None:
+    """Post a trace URL reply in a Slack thread."""
+    from agent.utils.langsmith import get_langsmith_trace_url
+
+    trace_url = await get_langsmith_trace_url(run_id)
+    if trace_url:
+        await post_slack_thread_reply(channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>")
