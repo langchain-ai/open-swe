@@ -363,4 +363,6 @@ async def post_slack_trace_reply(channel_id: str, thread_ts: str, run_id: str) -
 
     trace_url = await get_langsmith_trace_url(run_id)
     if trace_url:
-        await post_slack_thread_reply(channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>")
+        await post_slack_thread_reply(
+            channel_id, thread_ts, f"Working on it! <{trace_url}|View trace>"
+        )
