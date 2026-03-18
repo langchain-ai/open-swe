@@ -68,6 +68,12 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
 )
 
+_AGENT_VERSION_METADATA: dict[str, str] = (
+    {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
+    if os.environ.get("LANGCHAIN_REVISION_ID")
+    else {}
+)
+
 ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     org.strip().lower()
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
@@ -701,7 +707,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
-            config={"configurable": configurable},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
@@ -817,7 +823,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
@@ -1174,7 +1180,8 @@ async def _trigger_or_queue_run(
                 "github_login": github_login,
                 "repo": repo_config,
                 "pr_number": pr_number,
-            }
+            },
+            "metadata": _AGENT_VERSION_METADATA,
         },
         if_not_exists="create",
     )
@@ -1397,7 +1404,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": prompt}]},
-        config={"configurable": configurable},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
         if_not_exists="create",
     )
     logger.info("LangGraph run created for thread %s from GitHub issue", thread_id)

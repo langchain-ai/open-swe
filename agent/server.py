@@ -4,6 +4,7 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,6 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
-from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -43,6 +43,7 @@ from .tools import (
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
+from .utils.sandbox import create_sandbox
 
 client = get_client()
 
@@ -59,6 +60,7 @@ from .utils.github import (
     remove_directory,
     setup_git_credentials,
 )
+from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
@@ -88,9 +90,14 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         logger.error(msg)
         raise ValueError(msg)
 
-    repo_dir = f"/workspace/{repo}"
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
     clean_url = f"https://github.com/{owner}/{repo}.git"
     cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
+    safe_repo_dir = shlex.quote(repo_dir)
+    safe_clean_url = shlex.quote(clean_url)
+
+    logger.info("Resolved sandbox work dir to %s", work_dir)
 
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
@@ -147,7 +154,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         result = await loop.run_in_executor(
             None,
             sandbox_backend.execute,
-            f"git {cred_helper_arg} clone {clean_url} {repo_dir}",
+            f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
@@ -183,7 +190,7 @@ async def _recreate_sandbox(
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
-        sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+        sandbox_backend = await asyncio.to_thread(create_sandbox)
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name, github_token
         )
@@ -283,7 +290,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+            sandbox_backend = await asyncio.to_thread(create_sandbox)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
             repo_dir = None
@@ -310,7 +317,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
             # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
+            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
@@ -321,7 +328,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
-                sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
+                sandbox_backend = await asyncio.to_thread(create_sandbox)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
