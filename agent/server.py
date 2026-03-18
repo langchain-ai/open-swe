@@ -4,7 +4,6 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
-import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,7 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
+from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -42,8 +42,8 @@ from .tools import (
     slack_thread_reply,
 )
 from .utils.auth import resolve_github_token
+from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
-from .utils.sandbox import create_sandbox
 
 client = get_client()
 
@@ -53,30 +53,28 @@ SANDBOX_POLL_INTERVAL = 1.0
 
 from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
-    _CRED_FILE_PATH,
-    cleanup_git_credentials,
     git_has_uncommitted_changes,
     is_valid_git_repo,
     remove_directory,
-    setup_git_credentials,
 )
 from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
-async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
+async def _clone_or_pull_repo_in_sandbox(
     sandbox_backend: SandboxBackendProtocol,
     owner: str,
     repo: str,
-    github_token: str | None = None,
 ) -> str:
     """Clone a GitHub repo into the sandbox, or pull if it already exists.
+
+    Authentication is handled by the sandbox proxy (configured at sandbox creation
+    time), so no token is needed here.
 
     Args:
         sandbox_backend: The sandbox backend to execute commands in (LangSmithBackend)
         owner: GitHub repo owner
         repo: GitHub repo name
-        github_token: GitHub access token (from agent auth or env var)
 
     Returns:
         Path to the cloned/updated repo directory
@@ -84,18 +82,9 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     logger.info("_clone_or_pull_repo_in_sandbox called for %s/%s", owner, repo)
     loop = asyncio.get_event_loop()
 
-    token = github_token
-    if not token:
-        msg = "No GitHub token provided"
-        logger.error(msg)
-        raise ValueError(msg)
-
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
     repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
     clean_url = f"https://github.com/{owner}/{repo}.git"
-    cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
-    safe_repo_dir = shlex.quote(repo_dir)
-    safe_clean_url = shlex.quote(clean_url)
 
     logger.info("Resolved sandbox work dir to %s", work_dir)
 
@@ -125,12 +114,11 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
 
-        await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
         try:
             pull_result = await loop.run_in_executor(
                 None,
                 sandbox_backend.execute,
-                f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
+                f"cd {repo_dir} && git pull origin $(git rev-parse --abbrev-ref HEAD)",
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:
@@ -142,26 +130,21 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to execute git pull")
             raise
-        finally:
-            await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
         logger.info("Repo updated at %s", repo_dir)
         return repo_dir
 
     logger.info("Cloning repo %s/%s to %s", owner, repo, repo_dir)
-    await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
     try:
         result = await loop.run_in_executor(
             None,
             sandbox_backend.execute,
-            f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
+            f"git clone {clean_url} {repo_dir}",
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
         logger.exception("Failed to execute git clone")
         raise
-    finally:
-        await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
     if result.exit_code != 0:
         msg = f"Failed to clone repo {owner}/{repo}: {result.output}"
@@ -170,6 +153,17 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     logger.info("Repo cloned successfully at %s", repo_dir)
     return repo_dir
+
+
+async def _create_sandbox_with_proxy(github_token: str | None) -> SandboxBackendProtocol:
+    """Create a new sandbox with GitHub proxy auth configured.
+
+    Uses the GitHub App installation token as the proxy token (preferred),
+    falling back to the user's OAuth token if unavailable.
+    """
+    installation_token = await get_github_app_installation_token()
+    proxy_token = installation_token or github_token
+    return await asyncio.to_thread(create_langsmith_sandbox, None, proxy_token)
 
 
 async def _recreate_sandbox(
@@ -182,7 +176,7 @@ async def _recreate_sandbox(
     """Recreate a sandbox and clone the repo after a connection failure.
 
     Clears the stale cache entry, sets the SANDBOX_CREATING sentinel,
-    creates a fresh sandbox, and clones the repo.
+    creates a fresh sandbox (with proxy auth configured), and clones the repo.
     """
     SANDBOX_BACKENDS.pop(thread_id, None)
     await client.threads.update(
@@ -190,10 +184,8 @@ async def _recreate_sandbox(
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
-        sandbox_backend = await asyncio.to_thread(create_sandbox)
-        repo_dir = await _clone_or_pull_repo_in_sandbox(
-            sandbox_backend, repo_owner, repo_name, github_token
-        )
+        sandbox_backend = await _create_sandbox_with_proxy(github_token)
+        repo_dir = await _clone_or_pull_repo_in_sandbox(sandbox_backend, repo_owner, repo_name)
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
@@ -270,7 +262,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
             try:
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
+                    sandbox_backend, repo_owner, repo_name
                 )
             except SandboxClientError:
                 logger.warning(
@@ -289,15 +281,14 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 
         try:
-            # Create sandbox without context manager cleanup (sandbox persists)
-            sandbox_backend = await asyncio.to_thread(create_sandbox)
+            sandbox_backend = await _create_sandbox_with_proxy(github_token)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
             repo_dir = None
             if repo_owner and repo_name:
                 logger.info("Cloning repo %s/%s into sandbox", repo_owner, repo_name)
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
+                    sandbox_backend, repo_owner, repo_name
                 )
                 logger.info("Repo cloned to %s", repo_dir)
 
@@ -316,19 +307,19 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     else:
         logger.info("Connecting to existing sandbox %s", sandbox_id)
         try:
-            # Connect to existing sandbox without context manager cleanup
-            sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
+            # Connect to existing sandbox (no proxy reconfiguration needed)
+            sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
             logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
-            # Reset sandbox_id and create a new sandbox
+            # Reset sandbox_id and create a new sandbox with proxy auth configured
             await client.threads.update(
                 thread_id=thread_id,
                 metadata={"sandbox_id": SANDBOX_CREATING},
             )
 
             try:
-                sandbox_backend = await asyncio.to_thread(create_sandbox)
+                sandbox_backend = await _create_sandbox_with_proxy(github_token)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
@@ -342,7 +333,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             logger.info("Pulling latest changes for repo %s/%s", repo_owner, repo_name)
             try:
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
-                    sandbox_backend, repo_owner, repo_name, github_token
+                    sandbox_backend, repo_owner, repo_name
                 )
             except SandboxClientError:
                 logger.warning(

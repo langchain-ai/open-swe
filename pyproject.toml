@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents>=0.4.3",
+    "deepagents>=0.4.11",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "httpx>=0.25.0",
@@ -18,7 +18,7 @@ dependencies = [
     "markdownify>=1.2.2",
     "langchain-anthropic>1.1.0",
     "langgraph-cli[inmem]>=0.4.12",
-    "langsmith>=0.7.1",
+    "langsmith>=0.7.20",
     "langchain-openai==1.1.10",
     "langchain-daytona>=0.0.3",
     "langchain-modal>=0.0.2",

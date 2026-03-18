@@ -176,7 +176,7 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        push_result = git_push(sandbox_backend, repo_dir, target_branch)
         if push_result.exit_code != 0:
             return {
                 "success": False,
