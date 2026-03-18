@@ -128,11 +128,6 @@ def create_langsmith_sandbox(
                 "github_token" if not github_token else "api_key",
             )
         else:
-            logger.info(
-                "Attempting GitHub proxy config for sandbox %s (token_prefix=%s)",
-                backend.id,
-                github_token[:8] if github_token else "none",
-            )
             try:
                 _configure_github_proxy(backend.id, github_token, api_key)
             except Exception:
