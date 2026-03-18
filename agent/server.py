@@ -195,9 +195,7 @@ async def _recreate_sandbox(
     )
     try:
         sandbox_backend = await _create_sandbox_with_proxy(github_token)
-        repo_dir = await _clone_or_pull_repo_in_sandbox(
-            sandbox_backend, repo_owner, repo_name
-        )
+        repo_dir = await _clone_or_pull_repo_in_sandbox(sandbox_backend, repo_owner, repo_name)
     except Exception:
         logger.exception("Failed to recreate sandbox after connection failure")
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
