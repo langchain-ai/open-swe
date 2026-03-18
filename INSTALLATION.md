@@ -1,3 +1,4 @@
+
 # Installation Guide
 
 This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, and production deployment.
@@ -105,11 +106,13 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
-### 4a. Get your API key
+### 4a. Get your API key and project/tenant IDs
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
+4. Get your **Tenant ID**: go to **Settings → Organization** — copy the UUID listed as the organization/tenant ID. Save it as `LANGSMITH_TENANT_ID_PROD`
+5. Get your **Project ID**: open your project in LangSmith, go to **project Settings** (gear icon), copy the Project UUID. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
@@ -300,6 +303,9 @@ Create a `.env` file in the project root. Below is the full list — only fill i
 LANGSMITH_API_KEY_PROD=""              # From step 4a
 LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
+LANGSMITH_TENANT_ID_PROD=""           
+LANGSMITH_TRACING_PROJECT_ID_PROD=""  
+LANGSMITH_URL_PROD=""                 
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
