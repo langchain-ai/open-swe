@@ -112,7 +112,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 2. Go to **Settings → API Keys → Create API Key**
 3. Save it as `LANGSMITH_API_KEY_PROD`
 4. Get your **Tenant ID**: go to **Settings → Organization** — copy the UUID listed as the organization/tenant ID. Save it as `LANGSMITH_TENANT_ID_PROD`
-5. Get your **Project ID**: open your project in LangSmith, go to **project Settings** (gear icon), copy the Project UUID. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
+5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
