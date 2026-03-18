@@ -53,7 +53,26 @@ async def fetch_image_block(
                     "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
                     image_url,
                 )
-        response = await client.get(image_url, headers=headers)
+        elif "files.slack.com" in image_url:
+            slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            if slack_bot_token:
+                headers = {"Authorization": f"Bearer {slack_bot_token}"}
+            else:
+                logger.warning(
+                    "SLACK_BOT_TOKEN not set; cannot authenticate image fetch for %s",
+                    image_url,
+                )
+        # For Slack files, manually follow redirects to preserve the Authorization header
+        # (httpx drops auth headers on cross-domain redirects by default)
+        if headers and "files.slack.com" in image_url:
+            response = await client.get(image_url, headers=headers, follow_redirects=False)
+            if response.status_code in (301, 302, 303, 307, 308):
+                redirect_url = response.headers.get("location", "")
+                if redirect_url:
+                    logger.debug("Following Slack redirect to %s with auth", redirect_url)
+                    response = await client.get(redirect_url, headers=headers, follow_redirects=False)
+        else:
+            response = await client.get(image_url, headers=headers, follow_redirects=True)
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:
@@ -65,6 +84,15 @@ async def fetch_image_block(
                 )
                 return None
             content_type = guessed
+
+        supported_types = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+        if content_type not in supported_types:
+            logger.warning(
+                "Unsupported content type '%s' for %s; skipping image",
+                content_type,
+                image_url,
+            )
+            return None
 
         encoded = base64.b64encode(response.content).decode("ascii")
         logger.info(
