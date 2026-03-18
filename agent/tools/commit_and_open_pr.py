@@ -18,6 +18,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
+from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
 logger = logging.getLogger(__name__)
@@ -129,7 +130,7 @@ def commit_and_open_pr(
         if not sandbox_backend:
             return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
 
-        repo_dir = f"/workspace/{repo_name}"
+        repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
 
         has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
         git_fetch_origin(sandbox_backend, repo_dir)

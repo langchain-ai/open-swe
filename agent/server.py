@@ -4,6 +4,7 @@
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
+import shlex
 import warnings
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,6 @@ from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langsmith.sandbox import SandboxClientError
 
-from .integrations.langsmith import create_langsmith_sandbox
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -44,6 +44,7 @@ from .tools import (
 from .utils.auth import resolve_github_token
 from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
+from .utils.sandbox import create_sandbox
 
 client = get_client()
 
@@ -57,6 +58,7 @@ from .utils.github import (
     is_valid_git_repo,
     remove_directory,
 )
+from .utils.sandbox_paths import aresolve_repo_dir, aresolve_sandbox_work_dir
 from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
 
 
@@ -81,8 +83,20 @@ async def _clone_or_pull_repo_in_sandbox(
     logger.info("_clone_or_pull_repo_in_sandbox called for %s/%s", owner, repo)
     loop = asyncio.get_event_loop()
 
-    repo_dir = f"/workspace/{repo}"
+    token = github_token
+    if not token:
+        msg = "No GitHub token provided"
+        logger.error(msg)
+        raise ValueError(msg)
+
+    work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
+    repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
     clean_url = f"https://github.com/{owner}/{repo}.git"
+    cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
+    safe_repo_dir = shlex.quote(repo_dir)
+    safe_clean_url = shlex.quote(clean_url)
+
+    logger.info("Resolved sandbox work dir to %s", work_dir)
 
     is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 

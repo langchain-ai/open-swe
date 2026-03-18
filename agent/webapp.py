@@ -36,6 +36,7 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
@@ -45,6 +46,7 @@ from .utils.slack import (
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
+    post_slack_trace_reply,
     select_slack_context_messages,
     strip_bot_mention,
     verify_slack_signature,
@@ -680,12 +682,16 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
         if queued:
             logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
+            langgraph_client = get_client(url=LANGGRAPH_URL)
+            runs = await langgraph_client.runs.list(thread_id, limit=1)
+            if runs:
+                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
         langgraph_client = get_client(url=LANGGRAPH_URL)
-        await langgraph_client.runs.create(
+        run = await langgraph_client.runs.create(
             thread_id,
             "agent",
             input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -693,6 +699,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             if_not_exists="create",
         )
         logger.info("LangGraph run created successfully for thread %s", thread_id)
+        await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
@@ -800,7 +807,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
-    await langgraph_client.runs.create(
+    run = await langgraph_client.runs.create(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
@@ -808,6 +815,7 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
+    await post_slack_trace_reply(channel_id, thread_ts, run["run_id"])
 
 
 def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
