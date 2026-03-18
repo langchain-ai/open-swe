@@ -117,15 +117,24 @@ def create_langsmith_sandbox(
     )
     _update_thread_sandbox_metadata(backend.id)
 
-    if sandbox_id is None and github_token and api_key:
-        try:
-            _configure_github_proxy(backend.id, github_token, api_key)
-        except Exception:
-            logger.exception(
-                "Failed to configure GitHub proxy for sandbox %s; "
-                "git operations may fail without auth",
+    if sandbox_id is None:
+        if not github_token or not api_key:
+            logger.error(
+                "GitHub proxy NOT configured for sandbox %s: missing %s. "
+                "Git operations (clone/pull/push) will fail without auth.",
                 backend.id,
+                "github_token" if not github_token else "api_key",
             )
+        else:
+            try:
+                _configure_github_proxy(backend.id, github_token, api_key)
+            except Exception:
+                logger.error(
+                    "GitHub proxy NOT configured for sandbox %s — proxy PATCH request failed. "
+                    "Git operations (clone/pull/push) will fail without auth.",
+                    backend.id,
+                    exc_info=True,
+                )
 
     return backend
 

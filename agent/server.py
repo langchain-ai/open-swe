@@ -42,6 +42,7 @@ from .tools import (
     slack_thread_reply,
 )
 from .utils.auth import resolve_github_token
+from .utils.github_app import get_github_app_installation_token
 from .utils.model import make_model
 
 client = get_client()
@@ -168,8 +169,10 @@ async def _recreate_sandbox(
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
+        installation_token = await get_github_app_installation_token()
+        proxy_token = installation_token or github_token
         sandbox_backend = await asyncio.to_thread(
-            create_langsmith_sandbox, None, github_token
+            create_langsmith_sandbox, None, proxy_token
         )
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name
@@ -269,9 +272,11 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 
         try:
-            # Create sandbox and configure proxy for GitHub auth
+            # Create sandbox and configure proxy for GitHub auth (use installation token)
+            installation_token = await get_github_app_installation_token()
+            proxy_token = installation_token or github_token
             sandbox_backend = await asyncio.to_thread(
-                create_langsmith_sandbox, None, github_token
+                create_langsmith_sandbox, None, proxy_token
             )
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
@@ -310,8 +315,10 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
+                installation_token = await get_github_app_installation_token()
+                proxy_token = installation_token or github_token
                 sandbox_backend = await asyncio.to_thread(
-                    create_langsmith_sandbox, None, github_token
+                    create_langsmith_sandbox, None, proxy_token
                 )
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
