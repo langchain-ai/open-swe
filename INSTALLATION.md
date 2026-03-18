@@ -305,7 +305,7 @@ LANGCHAIN_TRACING_V2="true"
 LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
 LANGSMITH_TENANT_ID_PROD=""           
 LANGSMITH_TRACING_PROJECT_ID_PROD=""  
-LANGSMITH_URL_PROD=""                 
+LANGSMITH_URL_PROD="https://smith.langchain.com"                 
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
