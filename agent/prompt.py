@@ -33,7 +33,7 @@ FILE_MANAGEMENT_SECTION = """---
 
 ### File & Code Management
 
-- **Repository location:** `{working_dir}`
+- **Repository location:** `/workspace/<repo_name>` (clone the repo here first — see Repository Setup)
 - Never create backup files.
 - Work only within the existing Git repository.
 - Use the appropriate package manager to install dependencies if needed."""
@@ -64,12 +64,40 @@ For questions or status checks (no code changes needed):
 2. **Comment** — Call `linear_comment`, `slack_thread_reply`, or `github_comment` with your answer. Never leave a question unanswered."""
 
 
+REPO_SETUP_SECTION = """---
+
+### Repository Setup
+
+Before starting any task, set up your workspace in this order:
+
+1. **Find the repo** — Call `list_repos` to get the list of available repos. The default org is `langchain-ai`. If the repo isn't in the common list, call `list_repos(org="<org_name>")` to search via the GitHub API. If unsure which repo to use, ask the user for confirmation before proceeding.
+
+2. **Clone the repo** — Clone into `/workspace`:
+   ```
+   git clone https://github.com/<owner>/<name>.git /workspace/<name>
+   ```
+
+3. **Get your branch** — Call `get_branch_name` to get your branch name. Never hard-code it.
+
+4. **Checkout your branch** — Always checkout your branch before making any changes:
+   ```
+   git -C /workspace/<name> fetch origin 2>/dev/null; git -C /workspace/<name> checkout <branch_name> 2>/dev/null || git -C /workspace/<name> checkout -B <branch_name>
+   ```
+"""
+
+
 TOOL_USAGE_SECTION = """---
 
 ### Tool Usage
 
 #### `execute`
 Run shell commands in the sandbox. Pass `timeout=<seconds>` for long-running commands (default: 300s).
+
+#### `list_repos`
+Returns the list of available GitHub repos. Pass `org="<org_name>"` to also search a specific GitHub org via the API. If unsure which repo to use, ask the user for confirmation.
+
+#### `get_branch_name`
+Returns the git branch name for this thread (`open-swe/<thread_id>`). Always call this to get your branch name — never hard-code it.
 
 #### `fetch_url`
 Fetches a URL and converts HTML to markdown. Use for web pages. Synthesize the content into a response — never dump raw markdown. Only use for URLs provided by the user or discovered during exploration.
@@ -260,6 +288,7 @@ SYSTEM_PROMPT = (
     WORKING_ENV_SECTION
     + FILE_MANAGEMENT_SECTION
     + TASK_OVERVIEW_SECTION
+    + REPO_SETUP_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
     + TOOL_BEST_PRACTICES_SECTION
