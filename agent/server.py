@@ -151,6 +151,17 @@ async def _clone_or_pull_repo_in_sandbox(
     return repo_dir
 
 
+async def _create_sandbox_with_proxy(github_token: str | None) -> SandboxBackendProtocol:
+    """Create a new sandbox with GitHub proxy auth configured.
+
+    Uses the GitHub App installation token as the proxy token (preferred),
+    falling back to the user's OAuth token if unavailable.
+    """
+    installation_token = await get_github_app_installation_token()
+    proxy_token = installation_token or github_token
+    return await asyncio.to_thread(create_langsmith_sandbox, None, proxy_token)
+
+
 async def _recreate_sandbox(
     thread_id: str,
     repo_owner: str,
@@ -169,11 +180,7 @@ async def _recreate_sandbox(
         metadata={"sandbox_id": SANDBOX_CREATING},
     )
     try:
-        installation_token = await get_github_app_installation_token()
-        proxy_token = installation_token or github_token
-        sandbox_backend = await asyncio.to_thread(
-            create_langsmith_sandbox, None, proxy_token
-        )
+        sandbox_backend = await _create_sandbox_with_proxy(github_token)
         repo_dir = await _clone_or_pull_repo_in_sandbox(
             sandbox_backend, repo_owner, repo_name
         )
@@ -272,12 +279,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 
         try:
-            # Create sandbox and configure proxy for GitHub auth (use installation token)
-            installation_token = await get_github_app_installation_token()
-            proxy_token = installation_token or github_token
-            sandbox_backend = await asyncio.to_thread(
-                create_langsmith_sandbox, None, proxy_token
-            )
+            sandbox_backend = await _create_sandbox_with_proxy(github_token)
             logger.info("Sandbox created: %s", sandbox_backend.id)
 
             repo_dir = None
@@ -315,11 +317,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             )
 
             try:
-                installation_token = await get_github_app_installation_token()
-                proxy_token = installation_token or github_token
-                sandbox_backend = await asyncio.to_thread(
-                    create_langsmith_sandbox, None, proxy_token
-                )
+                sandbox_backend = await _create_sandbox_with_proxy(github_token)
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")

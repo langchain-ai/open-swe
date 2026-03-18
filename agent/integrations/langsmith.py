@@ -5,6 +5,7 @@ Copied from deepagents-cli to avoid requiring deepagents-cli as a dependency.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import logging
 import os
@@ -61,13 +62,14 @@ def _configure_github_proxy(sandbox_name: str, github_token: str, api_key: str) 
     """
     langsmith_endpoint = os.environ.get("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
     url = f"{langsmith_endpoint}/v2/sandboxes/boxes/{sandbox_name}"
+    basic_auth = base64.b64encode(f"x-access-token:{github_token}".encode()).decode()
     payload = {
         "proxy_config": {
             "rules": [
                 {
                     "name": "github",
-                    "match_hosts": ["github.com"],
-                    "inject_headers": {"Authorization": f"Bearer {github_token}"},
+                    "match_hosts": ["github.com", "*.github.com"],
+                    "inject_headers": {"Authorization": f"Basic {basic_auth}"},
                 }
             ]
         }
@@ -126,6 +128,11 @@ def create_langsmith_sandbox(
                 "github_token" if not github_token else "api_key",
             )
         else:
+            logger.info(
+                "Attempting GitHub proxy config for sandbox %s (token_prefix=%s)",
+                backend.id,
+                github_token[:8] if github_token else "none",
+            )
             try:
                 _configure_github_proxy(backend.id, github_token, api_key)
             except Exception:
@@ -195,7 +202,7 @@ class SandboxProvider(ABC):
 
 
 # Default template configuration
-DEFAULT_TEMPLATE_NAME = "open-swe"
+DEFAULT_TEMPLATE_NAME = "open-swe-new"
 DEFAULT_TEMPLATE_IMAGE = "python:3"
 
 
