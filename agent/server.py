@@ -291,6 +291,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 logger.exception("Failed to pull repo in cached sandbox")
                 raise
 
+            if repo_dir:
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata={"repo_dir": repo_dir},
+                )
+
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
         await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
@@ -362,6 +368,12 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             except Exception:
                 logger.exception("Failed to pull repo in existing sandbox")
                 raise
+
+            if repo_dir:
+                await client.threads.update(
+                    thread_id=thread_id,
+                    metadata={"repo_dir": repo_dir},
+                )
 
     SANDBOX_BACKENDS[thread_id] = sandbox_backend
 

@@ -623,6 +623,23 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         "source": "linear",
     }
 
+    # Store github_login in thread metadata so Baby SWE can filter runs by username.
+    # The reverse lookup converts the LangSmith email back to a GitHub username.
+    github_login = _reverse_lookup_github_login(user_email)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        await langgraph_client.threads.update(
+            thread_id=thread_id,
+            metadata={"github_login": github_login, "repo": repo_config, "source": "linear"},
+        )
+    except Exception:
+        # Thread may not exist yet — create it with the metadata
+        await langgraph_client.threads.create(
+            thread_id=thread_id,
+            if_exists="do_nothing",
+            metadata={"github_login": github_login, "repo": repo_config, "source": "linear"},
+        )
+
     logger.info("Checking if thread %s is active before creating run", thread_id)
     thread_active = await is_thread_active(thread_id)
     logger.info("Thread %s active status: %s", thread_id, thread_active)
@@ -761,6 +778,14 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+
+    # Store github_login in thread metadata so Baby SWE can filter runs by username.
+    github_login = _reverse_lookup_github_login(user_email)
+    await langgraph_client.threads.update(
+        thread_id=thread_id,
+        metadata={"github_login": github_login, "source": "slack"},
+    )
+
     await langgraph_client.runs.create(
         thread_id,
         "agent",
@@ -1007,6 +1032,141 @@ async def slack_webhook_verify() -> dict[str, str]:
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# ─── Baby SWE integration endpoints ──────────────────────────────────────────
+
+
+def _reverse_lookup_github_login(email: str | None) -> str | None:
+    """Return GitHub username for a given LangSmith email, or None if not found."""
+    if not email:
+        return None
+    return next((login for login, e in GITHUB_USER_EMAIL_MAP.items() if e == email), None)
+
+
+@app.get("/api/threads/{thread_id}/diff")
+async def get_sandbox_diff(thread_id: str) -> dict[str, Any]:
+    """Return per-file original + modified content for all files changed in the sandbox.
+
+    Runs a single Python script in the sandbox that diffs the working tree
+    against origin/main and returns structured JSON — one entry per changed file.
+    Baby SWE feeds this directly into its DiffPanelTile component.
+    """
+    from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_backend  # local import avoids circular
+
+    sandbox = SANDBOX_BACKENDS.get(thread_id)
+    if not sandbox:
+        # Try reconnecting via saved sandbox_id
+        try:
+            sandbox = await get_sandbox_backend(thread_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail="No active sandbox for this thread")
+
+    thread_data = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+    repo_dir = (thread_data.get("metadata") or {}).get("repo_dir", "")
+    if not repo_dir:
+        raise HTTPException(status_code=400, detail="No repo_dir in thread metadata")
+
+    # Single sandbox call: collect changed files + their before/after content.
+    # Falls back to "git diff HEAD" if origin/main isn't available (e.g. shallow clone).
+    script = f"""
+import subprocess, json, os, sys
+
+repo = {repr(repo_dir)}
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=repo, **kw)
+
+# Prefer diffing against origin/main so we capture committed changes too
+base = "origin/main"
+test = run(["git", "merge-base", "HEAD", base])
+if test.returncode != 0:
+    base = "HEAD"
+
+changed = run(["git", "diff", "--name-only", base]).stdout.strip()
+if not changed:
+    print(json.dumps([]))
+    sys.exit(0)
+
+files = []
+for rel_path in changed.split("\\n"):
+    rel_path = rel_path.strip()
+    if not rel_path:
+        continue
+
+    orig = run(["git", "show", f"{{base}}:{{rel_path}}"])
+    original_content = orig.stdout if orig.returncode == 0 else ""
+
+    full_path = os.path.join(repo, rel_path)
+    modified_content = open(full_path).read() if os.path.exists(full_path) else ""
+
+    files.append({{
+        "filePath": rel_path,
+        "originalContent": original_content,
+        "modifiedContent": modified_content,
+    }})
+
+print(json.dumps(files))
+"""
+
+    result = sandbox.execute(f"python3 -c {repr(script)}")
+    if result.exit_code != 0:
+        logger.error("Sandbox diff script failed: %s", result.output[:500])
+        raise HTTPException(status_code=500, detail="Failed to compute diff in sandbox")
+
+    try:
+        files = json.loads(result.output.strip())
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Sandbox returned invalid JSON")
+
+    return {"files": files, "threadId": thread_id}
+
+
+@app.post("/api/threads/{thread_id}/push-branch")
+async def push_sandbox_branch(thread_id: str) -> dict[str, Any]:
+    """Commit all sandbox changes and push to a remote branch without creating a PR.
+
+    Called by Baby SWE's "Edit Locally" flow: the user wants to pull the
+    branch to their machine, tweak things, and commit from Baby SWE's
+    SourceControlTile instead of letting Open SWE create the PR automatically.
+    """
+    from .utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_backend
+    from .utils.github_token import get_github_token
+    from .utils.github import git_add_all, git_commit, git_config_user, git_push
+
+    sandbox = SANDBOX_BACKENDS.get(thread_id)
+    if not sandbox:
+        try:
+            sandbox = await get_sandbox_backend(thread_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail="No active sandbox for this thread")
+
+    thread_data = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
+    repo_dir = (thread_data.get("metadata") or {}).get("repo_dir", "")
+    if not repo_dir:
+        raise HTTPException(status_code=400, detail="No repo_dir in thread metadata")
+
+    branch = f"open-swe/{thread_id}"
+
+    # Stage + commit (--allow-empty so we don't fail if already committed)
+    git_config_user(sandbox, repo_dir, "open-swe[bot]", "open-swe@users.noreply.github.com")
+    git_add_all(sandbox, repo_dir)
+    commit_result = sandbox.execute(
+        f"cd {repo_dir} && git commit -m 'wip: open-swe changes for baby-swe review' --allow-empty"
+    )
+    if commit_result.exit_code != 0:
+        logger.warning("Commit step returned non-zero (may already be committed): %s", commit_result.output[:200])
+
+    github_token = get_github_token()
+    if not github_token:
+        raise HTTPException(status_code=500, detail="GitHub token not available")
+
+    push_result = git_push(sandbox, repo_dir, branch, github_token)
+    if push_result.exit_code != 0:
+        raise HTTPException(status_code=500, detail=f"Git push failed: {push_result.output.strip()[:200]}")
+
+    logger.info("Pushed branch %s for thread %s (Baby SWE edit-locally flow)", branch, thread_id)
+    return {"branch": branch, "threadId": thread_id}
 
 
 _SUPPORTED_GH_EVENTS = frozenset(
