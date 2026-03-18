@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from langchain_core.messages.content import create_image_block
@@ -44,7 +45,8 @@ async def fetch_image_block(
     try:
         logger.debug("Fetching image from %s", image_url)
         headers = None
-        if "uploads.linear.app" in image_url:
+        host = (urlparse(image_url).hostname or "").lower()
+        if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
             linear_api_key = os.environ.get("LINEAR_API_KEY", "")
             if linear_api_key:
                 headers = {"Authorization": linear_api_key}
@@ -53,7 +55,7 @@ async def fetch_image_block(
                     "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
                     image_url,
                 )
-        elif "files.slack.com" in image_url:
+        elif host == "files.slack.com" or host.endswith(".files.slack.com"):
             slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
             if slack_bot_token:
                 headers = {"Authorization": f"Bearer {slack_bot_token}"}
