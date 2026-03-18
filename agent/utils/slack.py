@@ -312,6 +312,37 @@ async def get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
     return user_names
 
 
+async def get_slack_message_thread_ts(channel_id: str, message_ts: str) -> str | None:
+    """Get the thread_ts for a Slack message, returning None if not in a thread."""
+    if not SLACK_BOT_TOKEN:
+        return None
+
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.get(
+                f"{SLACK_API_BASE_URL}/conversations.history",
+                headers=_slack_headers(),
+                params={
+                    "channel": channel_id,
+                    "latest": message_ts,
+                    "oldest": message_ts,
+                    "inclusive": "true",
+                    "limit": 1,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("ok"):
+                logger.warning("Slack conversations.history failed: %s", data.get("error"))
+                return None
+            messages = data.get("messages", [])
+            if messages and isinstance(messages[0], dict):
+                return messages[0].get("thread_ts")
+        except httpx.HTTPError:
+            logger.exception("Slack conversations.history request failed")
+    return None
+
+
 async def fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
     """Fetch all messages for a Slack thread."""
     if not SLACK_BOT_TOKEN:

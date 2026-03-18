@@ -36,12 +36,14 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.langsmith_feedback import submit_langsmith_feedback
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
     format_slack_messages_for_prompt,
+    get_slack_message_thread_ts,
     get_slack_user_info,
     get_slack_user_names,
     post_slack_thread_reply,
@@ -695,6 +697,62 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         logger.info("LangGraph run created successfully for thread %s", thread_id)
 
 
+_POSITIVE_REACTIONS = frozenset({"thumbsup", "+1"})
+_NEGATIVE_REACTIONS = frozenset({"thumbsdown", "-1"})
+
+
+async def process_slack_reaction(event: dict[str, Any]) -> None:
+    """Process a Slack reaction event and submit LangSmith feedback."""
+    reaction = event.get("reaction", "")
+    if reaction in _POSITIVE_REACTIONS:
+        score = 1
+    elif reaction in _NEGATIVE_REACTIONS:
+        score = 0
+    else:
+        return
+
+    item = event.get("item", {})
+    channel_id = item.get("channel", "")
+    message_ts = item.get("ts", "")
+    if not channel_id or not message_ts:
+        logger.warning("Missing channel/ts in reaction event item")
+        return
+
+    parent_thread_ts = await get_slack_message_thread_ts(channel_id, message_ts)
+    thread_ts = parent_thread_ts or message_ts
+
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    try:
+        runs = await langgraph_client.runs.list(thread_id, limit=10)
+    except Exception:
+        logger.exception("Failed to list runs for thread %s", thread_id)
+        return
+
+    run_id = None
+    for run in runs:
+        if run.get("status") in ("success", "error", "interrupted"):
+            run_id = run.get("run_id")
+            break
+
+    if not run_id:
+        logger.info("No completed run found for thread %s, skipping feedback", thread_id)
+        return
+
+    user_id = event.get("user", "")
+    comment = "👍" if score == 1 else "👎"
+    success = await submit_langsmith_feedback(
+        run_id=str(run_id),
+        score=score,
+        comment=f"Slack reaction {comment} from user {user_id}",
+    )
+    if success:
+        logger.info("Submitted LangSmith feedback for run %s: score=%s", run_id, score)
+    else:
+        logger.warning("Failed to submit LangSmith feedback for run %s", run_id)
+
+
 async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating or interrupting a thread run."""
     channel_id = event_data.get("channel_id", "")
@@ -984,6 +1042,11 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> 
         return {"status": "ignored", "reason": "Not an event callback"}
 
     event = payload.get("event", {})
+
+    if event.get("type") == "reaction_added":
+        background_tasks.add_task(process_slack_reaction, event)
+        return {"status": "accepted", "message": "Slack reaction queued"}
+
     if event.get("type") != "app_mention":
         message_text = event.get("text", "")
         has_username_mention = bool(

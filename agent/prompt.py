@@ -58,6 +58,8 @@ For tasks that require code changes, follow this order:
 
 **Strict requirement:** You must call `commit_and_open_pr` before posting any completion message for a code change task. Only claim "PR updated/opened" if `commit_and_open_pr` returns `success` and a PR link. If it returns "No changes detected" or any error, you must state that explicitly and do not claim an update.
 
+**Slack feedback reactions:** For Slack-triggered tasks, your FINAL `slack_thread_reply` message (the completion summary) MUST end with a line asking the user to react with :+1: or :-1: to provide feedback. Example ending: "React with :+1: or :-1: to let me know how I did!"
+
 For questions or status checks (no code changes needed):
 
 1. **Answer** — Gather the information needed to respond.
