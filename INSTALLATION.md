@@ -106,7 +106,7 @@ Open SWE uses [LangSmith](https://smith.langchain.com/) for:
 - **Tracing**: all agent runs are logged for debugging and observability
 - **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
 
-### 4a. Get your API key and project/tenant IDs
+### 4a. Get your API key, project and tenant IDs
 
 1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
