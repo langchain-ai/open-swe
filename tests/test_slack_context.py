@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -321,3 +322,104 @@ def test_get_slack_repo_config_github_url_beats_thread_metadata(
     )
 
     assert repo == {"owner": "langchain-ai", "name": "langgraph-api"}
+
+
+def test_slack_followup_queue_preserves_order_and_dedupes(monkeypatch: pytest.MonkeyPatch) -> None:
+    queued_payloads: list[tuple[str, dict]] = []
+
+    class _FakeStore:
+        def __init__(self) -> None:
+            self.storage: dict[tuple[tuple[str, str], str], dict] = {}
+
+        async def get_item(self, namespace: tuple[str, str], key: str) -> dict | None:
+            return self.storage.get((namespace, key))
+
+        async def put_item(self, namespace: tuple[str, str], key: str, value: dict) -> None:
+            self.storage[(namespace, key)] = {"value": value}
+
+    class _FakeRuns:
+        def __init__(self) -> None:
+            self.created: list[tuple] = []
+
+        async def create(self, *args, **kwargs) -> None:  # noqa: ARG002
+            self.created.append((args, kwargs))
+
+    async def _fake_thread_update(*args, **kwargs) -> None:  # noqa: ARG002
+        return None
+
+    async def _fake_thread_create(*args, **kwargs) -> None:  # noqa: ARG002
+        return None
+
+    fake_client = SimpleNamespace(
+        store=_FakeStore(),
+        runs=_FakeRuns(),
+        threads=SimpleNamespace(update=_fake_thread_update, create=_fake_thread_create),
+    )
+
+    monkeypatch.setattr(webapp, "get_client", lambda url: fake_client)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USERNAME", "open-swe", raising=False)
+    monkeypatch.setattr(webapp, "SLACK_BOT_USER_ID", "UBOT", raising=False)
+    monkeypatch.setattr(webapp, "OPEN_SWE_TAGS", ("@openswe", "@open-swe", "@openswe-dev"), raising=False)
+
+    async def fake_add_slack_reaction(*args, **kwargs) -> bool:  # noqa: ARG002
+        return True
+
+    async def fake_get_slack_user_info(user_id: str) -> dict | None:  # noqa: ARG001
+        return {"profile": {"email": "user@example.com", "display_name": "Alice"}}
+
+    async def fake_fetch_slack_thread_messages(channel_id: str, thread_ts: str) -> list[dict]:  # noqa: ARG002
+        return []
+
+    async def fake_get_slack_user_names(user_ids: list[str]) -> dict[str, str]:
+        return {user_id: f"user-{user_id}" for user_id in user_ids}
+
+    async def fake_is_thread_active(thread_id: str) -> bool:  # noqa: ARG001
+        return True
+
+    original_queue = webapp.queue_message_for_thread
+
+    async def capture_queue(thread_id: str, message_content: dict | str | list[dict]) -> bool:
+        queued_payloads.append((thread_id, message_content))
+        return await original_queue(thread_id, message_content)
+
+    monkeypatch.setattr(webapp, "add_slack_reaction", fake_add_slack_reaction)
+    monkeypatch.setattr(webapp, "get_slack_user_info", fake_get_slack_user_info)
+    monkeypatch.setattr(webapp, "fetch_slack_thread_messages", fake_fetch_slack_thread_messages)
+    monkeypatch.setattr(webapp, "get_slack_user_names", fake_get_slack_user_names)
+    monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
+    monkeypatch.setattr(webapp, "queue_message_for_thread", capture_queue)
+
+    repo_config = {"owner": "langchain-ai", "name": "open-swe"}
+    channel_id = "C123"
+    thread_ts = "1700000000.0001"
+    base_event = {
+        "channel_id": channel_id,
+        "thread_ts": thread_ts,
+        "user_id": "U123",
+        "bot_user_id": "UBOT",
+    }
+
+    first_event = {**base_event, "event_ts": "1700000000.0002", "text": "<@UBOT> first follow up"}
+    second_event = {**base_event, "event_ts": "1700000000.0003", "text": "<@UBOT> second follow up"}
+    duplicate_event = {**base_event, "event_ts": "1700000000.0003", "text": "<@UBOT> second follow up"}
+
+    asyncio.run(webapp.process_slack_mention(first_event, repo_config))
+    asyncio.run(webapp.process_slack_mention(second_event, repo_config))
+    asyncio.run(webapp.process_slack_mention(duplicate_event, repo_config))
+
+    thread_id = webapp.generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    store_key = (("queue", thread_id), "pending_messages")
+    stored_entry = fake_client.store.storage.get(store_key)
+    assert stored_entry is not None
+
+    stored_messages = stored_entry["value"].get("messages", [])
+    assert len(stored_messages) == 2
+
+    stored_texts = [msg["content"]["text"] for msg in stored_messages]
+    assert "first follow up" in stored_texts[0]
+    assert "second follow up" in stored_texts[1]
+    assert sum("second follow up" in text for text in stored_texts) == 1
+
+    assert fake_client.runs.created == []
+    assert len(queued_payloads) == 3
+    assert queued_payloads[1][1]["text"] == queued_payloads[2][1]["text"]
