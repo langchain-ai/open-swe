@@ -136,6 +136,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **GitHub OAuth built-in** — authenticates with your GitHub account automatically
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks
+- **Multiple LLM providers** — supports Anthropic, OpenAI, Google, and [MiniMax](https://platform.minimaxi.com/) out of the box
 
 ---
 
