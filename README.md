@@ -144,6 +144,63 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
+## Local Fix Agent
+
+This repo also includes a standalone repair-focused CLI at [`local_fix_agent.py`](./local_fix_agent.py). It is meant for narrow, test-driven repair loops in a local repo or over SSH.
+
+### Quick Start
+
+Local run:
+
+```bash
+fixit pytest tests/test_x.py -q
+```
+
+Remote run:
+
+```bash
+fixit --target edge-01 --repo /srv/app "pytest -q"
+```
+
+Dry-run:
+
+```bash
+fixit --dry-run pytest tests/test_x.py -q
+```
+
+Explain-only:
+
+```bash
+python local_fix_agent.py --last --explain-only
+```
+
+Reuse recent state:
+
+```bash
+python local_fix_agent.py --continue
+python local_fix_agent.py --last
+python local_fix_agent.py --from-last-failure
+```
+
+### Mental Model
+
+`local_fix_agent.py` reasons locally, gathers targeted context, proposes edits through a tool layer, reruns validation, and commits only after additional checks pass.
+
+In remote mode:
+
+- reasoning, scoring, memory, and metrics stay local
+- commands, git operations, and file changes run remotely over SSH
+- one persistent SSH session is reused for the full run
+
+The tool reports blocked conditions directly instead of continuing with low-signal retries.
+
+### Docs
+
+- **[Operator Guide](./docs/README.md)** — overview, features, CLI usage, artifacts, architecture, and extension points
+- **[Remote Mode](./docs/REMOTE_MODE.md)** — SSH transport, multiplexing, safety model, and remote failure handling
+- **[Runbook](./docs/RUNBOOK.md)** — day-to-day workflow and review guidance
+- **[Troubleshooting](./docs/TROUBLESHOOTING.md)** — blocked states, SSH issues, validation rejection, and stagnation
+
 ## License
 
 MIT
