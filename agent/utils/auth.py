@@ -1,4 +1,4 @@
-"""GitHub OAuth and LangSmith authentication utilities."""
+"""GitHub/GitLab OAuth and LangSmith authentication utilities."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph_sdk import get_client
 
 from ..encryption import encrypt_token
+from .git_provider import GITLAB, get_git_provider
 from .github_app import get_github_app_installation_token
 from .github_token import get_github_token_from_thread
 from .github_user_email_map import GITHUB_USER_EMAIL_MAP
@@ -396,3 +397,26 @@ async def resolve_github_token(config: RunnableConfig, thread_id: str) -> tuple[
     except ValueError as exc:
         logger.error("GitHub auth failed for thread %s: %s", thread_id, str(exc))
         raise RuntimeError(str(exc)) from exc
+
+
+async def resolve_git_token(config: RunnableConfig, thread_id: str) -> tuple[str, str]:
+    """Resolve a git token based on the configured provider.
+
+    For GitHub: delegates to resolve_github_token (OAuth / App / bot-token).
+    For GitLab: reads GITLAB_TOKEN from environment.
+
+    Returns:
+        (token, encrypted_token) tuple.
+    """
+    provider = get_git_provider()
+
+    if provider == GITLAB:
+        gitlab_token = os.environ.get("GITLAB_TOKEN", "")
+        if not gitlab_token:
+            raise RuntimeError(
+                "GitLab auth failed: GITLAB_TOKEN environment variable is not set"
+            )
+        encrypted = encrypt_token(gitlab_token)
+        return gitlab_token, encrypted
+
+    return await resolve_github_token(config, thread_id)
