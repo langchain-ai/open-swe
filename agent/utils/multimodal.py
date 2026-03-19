@@ -19,6 +19,7 @@ IMAGE_URL_RE = re.compile(
     r"(https?://[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)",
     re.IGNORECASE,
 )
+GITHUB_ASSET_URL_RE = re.compile(r"(https://github\.com/user-attachments/assets/[a-zA-Z0-9_-]+)")
 
 
 def extract_image_urls(text: str) -> list[str]:
@@ -29,6 +30,7 @@ def extract_image_urls(text: str) -> list[str]:
     urls: list[str] = []
     urls.extend(IMAGE_MARKDOWN_RE.findall(text))
     urls.extend(IMAGE_URL_RE.findall(text))
+    urls.extend(GITHUB_ASSET_URL_RE.findall(text))
 
     deduped = dedupe_urls(urls)
     if deduped:
@@ -53,7 +55,7 @@ async def fetch_image_block(
                     "LINEAR_API_KEY not set; cannot authenticate image fetch for %s",
                     image_url,
                 )
-        response = await client.get(image_url, headers=headers)
+        response = await client.get(image_url, headers=headers, follow_redirects=True)
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "").split(";")[0].strip()
         if not content_type:
