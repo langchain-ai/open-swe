@@ -1,5 +1,6 @@
 import os
 
+from agent.integrations.coder import create_coder_sandbox
 from agent.integrations.daytona import create_daytona_sandbox
 from agent.integrations.langsmith import create_langsmith_sandbox
 from agent.integrations.local import create_local_sandbox
@@ -8,6 +9,7 @@ from agent.integrations.runloop import create_runloop_sandbox
 
 SANDBOX_FACTORIES = {
     "langsmith": create_langsmith_sandbox,
+    "coder": create_coder_sandbox,
     "daytona": create_daytona_sandbox,
     "modal": create_modal_sandbox,
     "runloop": create_runloop_sandbox,
