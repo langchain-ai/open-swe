@@ -1,0 +1,232 @@
+cat > ~/ai/open-swe/local_fix_agent.py <<'PY'
+from openai import OpenAI
+from pathlib import Path
+import argparse
+import json
+import re
+import subprocess
+import sys
+
+MODEL = "qwen2.5-coder:14b"
+DEFAULT_MAX_ATTEMPTS = 5
+DEFAULT_MAX_FILES = 12
+DEFAULT_MAX_CHARS_PER_FILE = 6000
+
+client = OpenAI(
+    base_url="http://127.0.0.1:11434/v1",
+    api_key="ollama",
+)
+
+IGNORE_DIRS = {
+    ".git", ".venv", "venv", "__pycache__", ".pytest_cache",
+    "node_modules", ".mypy_cache", ".ruff_cache", "dist", "build"
+}
+
+
+def run_command(cmd: str, cwd: Path) -> tuple[bool, str]:
+    proc = subprocess.run(
+        cmd,
+        cwd=cwd,
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    output = (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode == 0, output.strip()
+
+
+def strip_code_fences(text: str) -> str:
+    text = text.strip()
+    m = re.search(r"```(?:python|json)?\s*(.*?)```", text, re.S)
+    if m:
+        return m.group(1).strip()
+    return text
+
+
+def gather_candidate_files(repo: Path, max_files: int, max_chars: int) -> list[dict]:
+    candidates = []
+
+    for path in repo.rglob("*.py"):
+        rel = path.relative_to(repo)
+
+        if any(part in IGNORE_DIRS for part in rel.parts):
+            continue
+
+        try:
+            content = path.read_text()
+        except Exception:
+            continue
+
+        candidates.append({
+            "path": str(rel),
+            "content": content[:max_chars]
+        })
+
+    def sort_key(item: dict):
+        p = item["path"].lower()
+        score = 0
+        if "test" in p:
+            score += 10
+        if p.endswith("__init__.py"):
+            score += 5
+        return (score, len(p))
+
+    candidates.sort(key=sort_key)
+    return candidates[:max_files]
+
+
+def ask_model_to_choose_and_fix(
+    repo: Path,
+    test_cmd: str,
+    test_output: str,
+    candidates: list[dict],
+    attempt: int,
+) -> tuple[str, str]:
+    candidates_json = json.dumps(candidates, ensure_ascii=False)
+
+    prompt = f"""You are fixing a failing Python repository.
+
+Attempt number: {attempt}
+Repository root: {repo}
+Test command: {test_cmd}
+
+Latest test output:
+<test_output>
+{test_output}
+</test_output>
+
+Candidate Python files:
+<candidate_files_json>
+{candidates_json}
+</candidate_files_json>
+
+Choose the SINGLE most likely file to edit to fix the failure.
+
+Return JSON with exactly this shape:
+{{
+  "target_file": "relative/path/to/file.py",
+  "corrected_code": "full replacement contents of that file"
+}}
+
+Rules:
+- Return valid JSON only.
+- corrected_code must be the entire replacement file contents.
+- Do not include markdown fences.
+- Do not include explanations.
+"""
+
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a careful coding agent that reads failures, chooses the most relevant file, and returns valid JSON."
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+        max_tokens=1600,
+    )
+
+    content = (resp.choices[0].message.content or "").strip()
+    if not content:
+        raise RuntimeError("Model returned empty content.")
+
+    content = strip_code_fences(content)
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Model did not return valid JSON.\nRaw output:\n{content}") from e
+
+    target_file = data.get("target_file")
+    corrected_code = data.get("corrected_code")
+
+    if not isinstance(target_file, str) or not target_file.endswith(".py"):
+        raise RuntimeError(f"Invalid target_file from model: {target_file!r}")
+
+    if not isinstance(corrected_code, str) or not corrected_code.strip():
+        raise RuntimeError("Model returned empty corrected_code.")
+
+    corrected_code = strip_code_fences(corrected_code)
+    return target_file, corrected_code
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", required=True, help="Path to the repo")
+    parser.add_argument("--test-cmd", default="pytest -q", help="Command to run tests")
+    parser.add_argument("--max-attempts", type=int, default=DEFAULT_MAX_ATTEMPTS)
+    parser.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    parser.add_argument("--max-chars-per-file", type=int, default=DEFAULT_MAX_CHARS_PER_FILE)
+    args = parser.parse_args()
+
+    repo = Path(args.repo).expanduser().resolve()
+
+    if not repo.exists():
+        print(f"Missing repo path: {repo}", file=sys.stderr)
+        return 1
+
+    for attempt in range(1, args.max_attempts + 1):
+        passed, output = run_command(args.test_cmd, repo)
+
+        print(f"\n=== TEST RUN {attempt - 1} ===")
+        print(output or "(no test output)")
+
+        if passed:
+            print("\nSuccess: tests passed.")
+            return 0
+
+        candidates = gather_candidate_files(
+            repo=repo,
+            max_files=args.max_files,
+            max_chars=args.max_chars_per_file,
+        )
+
+        if not candidates:
+            print("No candidate Python files found.", file=sys.stderr)
+            return 1
+
+        print(f"\n=== MODEL ATTEMPT {attempt} ===")
+        try:
+            target_rel, new_code = ask_model_to_choose_and_fix(
+                repo=repo,
+                test_cmd=args.test_cmd,
+                test_output=output,
+                candidates=candidates,
+                attempt=attempt,
+            )
+        except Exception as e:
+            print(f"Model error: {e}", file=sys.stderr)
+            return 1
+
+        target_path = (repo / target_rel).resolve()
+
+        try:
+            target_path.relative_to(repo)
+        except ValueError:
+            print(f"Refusing to write outside repo: {target_path}", file=sys.stderr)
+            return 1
+
+        backup_path = target_path.with_suffix(target_path.suffix + ".bak")
+        if target_path.exists() and not backup_path.exists():
+            backup_path.write_text(target_path.read_text())
+
+        target_path.write_text(new_code.rstrip() + "\n")
+        print(f"Wrote updated code to {target_path}")
+
+    passed, output = run_command(args.test_cmd, repo)
+    print(f"\n=== FINAL TEST RUN ===")
+    print(output or "(no test output)")
+
+    if passed:
+        print("\nSuccess: tests passed.")
+        return 0
+
+    print("\nFailed: reached max attempts without passing tests.", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PY
