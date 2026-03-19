@@ -20,6 +20,9 @@ dependencies = [
     "langgraph-cli[inmem]>=0.4.12",
     "langsmith>=0.7.1",
     "langchain-openai==1.1.10",
+    "langchain-daytona>=0.0.3",
+    "langchain-modal>=0.0.2",
+    "langchain-runloop>=0.0.3",
 ]
 
 [project.optional-dependencies]

@@ -37,78 +37,48 @@ This is useful for pre-installing languages, frameworks, or internal tools that 
 
 ### Using a different sandbox provider
 
-The `deepagents` ecosystem includes several sandbox providers out of the box. To swap providers, replace the `create_langsmith_sandbox()` call in `agent/server.py` with one of the following:
+Set the `SANDBOX_TYPE` environment variable to switch providers. Each provider has a corresponding integration file in `agent/integrations/` and a factory function registered in `agent/utils/sandbox.py`:
 
-#### Modal
+| `SANDBOX_TYPE` | Integration file | Required env vars |
+|---|---|---|
+| `langsmith` (default) | `agent/integrations/langsmith.py` | `LANGSMITH_API_KEY_PROD`, `SANDBOX_TYPE="langsmith"` |
+| `daytona` | `agent/integrations/daytona.py` | `DAYTONA_API_KEY`, `SANDBOX_TYPE="daytona"` |
+| `runloop` | `agent/integrations/runloop.py` | `RUNLOOP_API_KEY`, `SANDBOX_TYPE="runloop"` |
+| `modal` | `agent/integrations/modal.py` | Modal credentials, `SANDBOX_TYPE="modal"` |
+| `local` | `agent/integrations/local.py` | None (no isolation — development only), `SANDBOX_TYPE="local"` |
 
-```bash
-pip install langchain-modal
-```
+> **Warning**: `local` runs commands directly on your host with no sandboxing. Only use for local development with human-in-the-loop enabled.
 
-```python
-import modal
-from langchain_modal import ModalSandbox
+### Adding a new sandbox provider
 
-app = modal.App.lookup("open-swe")
-sandbox_backend = ModalSandbox(sandbox=modal.Sandbox.create(app=app))
-```
-
-This is what Ramp uses for their Inspect agent — container-based isolation with fast spin-up.
-
-#### Daytona
-
-```bash
-pip install langchain-daytona
-```
+1. **Create an integration file** at `agent/integrations/my_provider.py` with a factory function matching this signature:
 
 ```python
-from daytona import Daytona
-from langchain_daytona import DaytonaSandbox
+def create_my_provider_sandbox(sandbox_id: str | None = None):
+    """Create or reconnect to a sandbox.
 
-sandbox = Daytona().create()
-sandbox_backend = DaytonaSandbox(sandbox=sandbox)
+    Args:
+        sandbox_id: Optional existing sandbox ID to reconnect to.
+            If None, creates a new sandbox.
+
+    Returns:
+        An object implementing SandboxBackendProtocol.
+    """
+    ...
 ```
 
-#### Runloop
-
-```bash
-pip install langchain-runloop
-```
+2. **Register it** in `agent/utils/sandbox.py` by importing your factory and adding it to `SANDBOX_FACTORIES`:
 
 ```python
-import os
-from runloop_api_client import RunloopSDK
-from langchain_runloop import RunloopSandbox
+from agent.integrations.my_provider import create_my_provider_sandbox
 
-client = RunloopSDK(bearer_token=os.environ["RUNLOOP_API_KEY"])
-devbox = client.devbox.create()
-sandbox_backend = RunloopSandbox(devbox=devbox)
+SANDBOX_FACTORIES = {
+    ...
+    "my_provider": create_my_provider_sandbox,
+}
 ```
 
-#### Local shell (no isolation — development only)
-
-```python
-from deepagents.backends import LocalShellBackend
-
-sandbox_backend = LocalShellBackend(
-    root_dir="/path/to/repo",
-    inherit_env=True,
-)
-```
-
-> **Warning**: `LocalShellBackend` runs commands directly on your host machine with no sandboxing. Only use for local development with human-in-the-loop enabled.
-
-#### Wiring it up
-
-All providers implement `SandboxBackendProtocol` and are interchangeable. Replace the sandbox creation in `agent/server.py`:
-
-```python
-# Before (LangSmith)
-sandbox_backend = await asyncio.to_thread(create_langsmith_sandbox)
-
-# After (any provider)
-sandbox_backend = await asyncio.to_thread(create_my_sandbox)
-```
+The factory must return an object implementing `SandboxBackendProtocol` from `deepagents`. See the existing integration files for reference.
 
 ### Building a custom sandbox provider
 

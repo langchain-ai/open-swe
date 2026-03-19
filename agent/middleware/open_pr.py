@@ -30,6 +30,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
+from ..utils.sandbox_paths import aresolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend
 
 logger = logging.getLogger(__name__)
@@ -92,10 +93,9 @@ async def open_pr_if_needed(
         repo_name = repo_config.get("name")
 
         sandbox_backend = await get_sandbox_backend(thread_id)
-        repo_dir = f"/workspace/{repo_name}"
-
-        if not sandbox_backend or not repo_dir:
+        if not sandbox_backend or not repo_name:
             return None
+        repo_dir = await aresolve_repo_dir(sandbox_backend, repo_name)
 
         has_uncommitted_changes = await asyncio.to_thread(
             git_has_uncommitted_changes, sandbox_backend, repo_dir
