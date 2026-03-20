@@ -1245,9 +1245,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         name = repo_config.get("name", "")
         stable_key = f"{owner}/{name}/pr/{pr_number}"
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
-        logger.info(
-            "Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name
-        )
+        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
         langgraph_client = get_client(url=LANGGRAPH_URL)
         try:
             await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})

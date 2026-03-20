@@ -146,9 +146,7 @@ def commit_and_open_pr(
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
-                result = sandbox_backend.execute(
-                    f"cd {repo_dir} && git checkout {target_branch}"
-                )
+                result = sandbox_backend.execute(f"cd {repo_dir} && git checkout {target_branch}")
                 if result.exit_code != 0:
                     return {
                         "success": False,
