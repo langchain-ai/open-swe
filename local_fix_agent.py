@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import ast
 import atexit
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -720,6 +721,65 @@ def classify_publishable_changes(repo: Path) -> dict:
     }
 
 
+def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) -> str:
+    meaningful_paths = list(publish_changes.get("meaningful_paths") or [])
+    if not meaningful_paths:
+        return ""
+    status_lines: list[str] = []
+    for line in str(publish_changes.get("status_output") or "").splitlines():
+        if extract_status_path(line) in meaningful_paths:
+            status_lines.append(line)
+    files: list[dict[str, str]] = []
+    for path in meaningful_paths:
+        file_path = repo / Path(path)
+        if file_path.exists() and file_path.is_file():
+            try:
+                content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            except OSError:
+                content_hash = "unreadable"
+        else:
+            content_hash = "__missing__"
+        files.append({"path": path, "content_hash": content_hash})
+    payload = json.dumps(
+        {"paths": meaningful_paths, "status_lines": status_lines, "files": files},
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) -> str:
+    meaningful_paths = list(publish_changes.get("meaningful_paths") or [])
+    if not meaningful_paths:
+        return ""
+    status_lines: list[str] = []
+    for line in str(publish_changes.get("status_output") or "").splitlines():
+        path = extract_status_path(line)
+        if path in meaningful_paths:
+            status_lines.append(line)
+    payload: list[dict[str, str]] = []
+    for path in meaningful_paths:
+        rel = Path(path)
+        file_path = repo / rel
+        if file_path.exists() and file_path.is_file():
+            try:
+                content = file_path.read_bytes()
+                content_hash = hashlib.sha256(content).hexdigest()
+            except OSError:
+                content_hash = "unreadable"
+        else:
+            content_hash = "__missing__"
+        payload.append({"path": path, "content_hash": content_hash})
+    serialized = json.dumps(
+        {
+            "paths": meaningful_paths,
+            "status_lines": status_lines,
+            "files": payload,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def repo_files(repo: Path) -> list[str]:
     if is_remote_repo(repo):
         code, output = run_subprocess(
@@ -1306,6 +1366,9 @@ def load_publish_state(repo: Path) -> dict:
         "last_commit": "",
         "last_pr_url": "",
         "last_success_timestamp": 0,
+        "last_publish_mode": "",
+        "last_meaningful_paths": [],
+        "last_meaningful_content_fingerprint": "",
         "last_target_repo": "",
         "last_control_path": "",
     }
@@ -1337,6 +1400,9 @@ def save_publish_state(repo: Path, state: dict) -> None:
         "last_commit": state.get("last_commit", ""),
         "last_pr_url": state.get("last_pr_url", ""),
         "last_success_timestamp": int(state.get("last_success_timestamp", 0) or 0),
+        "last_publish_mode": state.get("last_publish_mode", ""),
+        "last_meaningful_paths": list(state.get("last_meaningful_paths", []) or []),
+        "last_meaningful_content_fingerprint": state.get("last_meaningful_content_fingerprint", ""),
         "last_target_repo": state.get("last_target_repo", ""),
         "last_control_path": state.get("last_control_path", ""),
     }
@@ -3137,6 +3203,9 @@ def publish_validated_run(
             "last_commit": result.get("commit_sha", ""),
             "last_pr_url": result.get("pr_url", ""),
             "last_success_timestamp": int(time.time()) if result.get("final", {}).get("status") == "success" else 0,
+            "last_publish_mode": result.get("publish_scope", ""),
+            "last_meaningful_paths": list(result.get("meaningful_paths") or []),
+            "last_meaningful_content_fingerprint": result.get("meaningful_content_fingerprint", ""),
             "last_target_repo": result.get("target", {}).get("repo", ""),
             "last_control_path": result.get("control_path", ""),
         }
@@ -3210,6 +3279,7 @@ def publish_validated_run(
     result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
     result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
     result["ignored_changes"] = publish_changes.get("ignored_changes") or []
+    result["meaningful_content_fingerprint"] = compute_meaningful_content_fingerprint(repo, publish_changes)
     if not result["meaningful_changes_detected"]:
         result["control_path"] = "noop"
         result["summary_status"] = "no meaningful changes to publish"
@@ -3277,21 +3347,40 @@ def publish_validated_run(
         "branch": branch_to_push,
         "target_repo": result["target"].get("repo", ""),
     }
-    if (
-        publish_state.get("last_success")
-        and publish_state.get("last_branch") == branch_to_push
-        and publish_state.get("last_commit")
+    same_target = publish_state.get("last_target_repo") == result["target"].get("repo", "")
+    same_publish_mode = publish_state.get("last_publish_mode") == result.get("publish_scope")
+    clean_exact_match = (
+        bool(publish_state.get("last_success"))
+        and working_tree.get("clean")
+        and bool(publish_state.get("last_commit"))
         and publish_state.get("last_commit") == head_sha
-        and publish_state.get("last_target_repo") == result["target"].get("repo", "")
-    ):
+        and same_target
+        and same_publish_mode
+    )
+    meaningful_exact_match = (
+        bool(publish_state.get("last_success"))
+        and bool(publish_state.get("last_commit"))
+        and publish_state.get("last_commit") == head_sha
+        and bool(result.get("meaningful_content_fingerprint"))
+        and bool(publish_state.get("last_meaningful_content_fingerprint"))
+        and publish_state.get("last_meaningful_content_fingerprint") == result.get("meaningful_content_fingerprint")
+        and same_target
+        and same_publish_mode
+    )
+    if clean_exact_match or meaningful_exact_match:
         result["control_path"] = "noop"
         result["fingerprint"]["matched_previous_success"] = True
-        result["fingerprint"]["reason"] = "matched previous successful publish fingerprint"
+        if clean_exact_match:
+            result["fingerprint"]["reason"] = "previous_commit matched; current tree clean; target and publish mode matched"
+        else:
+            result["fingerprint"]["reason"] = "current meaningful content matched stored successful publish fingerprint; ignored-only changes were excluded"
         result["summary_status"] = "matched previous successful publish fingerprint"
         result["previous_publish_branch"] = str(publish_state.get("last_branch") or "")
         result["previous_pr_url"] = str(publish_state.get("last_pr_url") or "")
         result["previous_commit"] = str(publish_state.get("last_commit") or "")
         return finish("noop", "matched previous successful publish fingerprint")
+    if publish_state.get("last_success") and same_target and same_publish_mode:
+        result["fingerprint"]["reason"] = "fingerprint mismatch due to new meaningful changes"
     already_pushed, local_head = branch_already_up_to_date(repo, branch_to_push, result["target"]["url"] or "origin")
     if publish_current_mode and working_tree["clean"]:
         commit_ref = local_head or head_sha

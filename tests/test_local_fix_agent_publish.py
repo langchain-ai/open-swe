@@ -253,6 +253,8 @@ def test_repeat_publish_noop_from_previous_run(monkeypatch: pytest.MonkeyPatch) 
             "last_branch": "feature",
             "last_commit": "abc123",
             "last_pr_url": "https://github.com/octocat/demo/pull/7",
+            "last_publish_mode": "validated_run",
+            "last_meaningful_content_fingerprint": "fp-123",
             "origin_url": "git@github.com:octocat/demo.git",
             "timestamp": 1,
             "ssh_confirmed": True,
@@ -280,6 +282,7 @@ def test_repeat_publish_noop_from_previous_run(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc123"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "fp-123")
 
     result = lfa.publish_validated_run(
         repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
@@ -302,6 +305,8 @@ def test_repeat_publish_noop_from_previous_run_without_pr_metadata_falls_back_cl
             "last_success": True,
             "last_branch": "feature",
             "last_commit": "abc123",
+            "last_publish_mode": "validated_run",
+            "last_meaningful_content_fingerprint": "fp-123",
             "origin_url": "git@github.com:octocat/demo.git",
             "timestamp": 1,
             "ssh_confirmed": True,
@@ -329,6 +334,7 @@ def test_repeat_publish_noop_from_previous_run_without_pr_metadata_falls_back_cl
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc123"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "fp-123")
 
     result = lfa.publish_validated_run(
         repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
@@ -338,6 +344,247 @@ def test_repeat_publish_noop_from_previous_run_without_pr_metadata_falls_back_cl
     assert result["previous_publish_branch"] == "feature"
     assert result["previous_pr_url"] == ""
     assert result["previous_commit"] == "abc123"
+
+
+def test_same_clean_head_as_last_successful_publish_noops(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "load_publish_state",
+        lambda current_repo: {
+            "last_success": True,
+            "last_branch": "feature",
+            "last_commit": "abc123",
+            "last_publish_mode": "validated_run",
+            "origin_url": "git@github.com:octocat/demo.git",
+            "timestamp": 1,
+            "ssh_confirmed": True,
+            "last_target_repo": "octocat/demo",
+        },
+    )
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "",
+            "clean": True,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (True, "abc123"))
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["final"]["status"] == "noop"
+    assert result["fingerprint"]["matched_previous_success"] is True
+
+
+def test_new_meaningful_unstaged_changes_do_not_reuse_previous_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "load_publish_state",
+        lambda current_repo: {
+            "last_success": True,
+            "last_branch": "feature",
+            "last_commit": "abc123",
+            "last_publish_mode": "validated_run",
+            "last_meaningful_content_fingerprint": "old-fp",
+            "origin_url": "git@github.com:octocat/demo.git",
+            "timestamp": 1,
+            "ssh_confirmed": True,
+            "last_target_repo": "octocat/demo",
+        },
+    )
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": " M local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "new-fp")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["fingerprint"]["matched_previous_success"] is False
+    assert result["fingerprint"]["reason"] == "fingerprint mismatch due to new meaningful changes"
+
+
+def test_same_target_but_different_commit_does_not_reuse_previous_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "load_publish_state",
+        lambda current_repo: {
+            "last_success": True,
+            "last_branch": "feature",
+            "last_commit": "abc122",
+            "last_publish_mode": "validated_run",
+            "last_meaningful_content_fingerprint": "fp-123",
+            "origin_url": "git@github.com:octocat/demo.git",
+            "timestamp": 1,
+            "ssh_confirmed": True,
+            "last_target_repo": "octocat/demo",
+        },
+    )
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "",
+            "clean": True,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "fp-123")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["fingerprint"]["matched_previous_success"] is False
+
+
+def test_same_commit_but_different_meaningful_content_fingerprint_does_not_reuse(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "load_publish_state",
+        lambda current_repo: {
+            "last_success": True,
+            "last_branch": "feature",
+            "last_commit": "abc123",
+            "last_publish_mode": "validated_run",
+            "last_meaningful_content_fingerprint": "old-fp",
+            "origin_url": "git@github.com:octocat/demo.git",
+            "timestamp": 1,
+            "ssh_confirmed": True,
+            "last_target_repo": "octocat/demo",
+        },
+    )
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "new-fp")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["fingerprint"]["matched_previous_success"] is False
 
 
 def test_publish_validated_run_missing_auth_blocks(monkeypatch: pytest.MonkeyPatch) -> None:

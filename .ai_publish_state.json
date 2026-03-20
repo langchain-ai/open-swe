@@ -4,12 +4,14 @@
   "last_branch": "fix-agent/20260320-044503",
   "last_commit": "",
   "last_control_path": "noop",
+  "last_pr_url": "",
   "last_repo": "tophat1720/open-swe",
   "last_success": false,
+  "last_success_timestamp": 0,
   "last_target": "origin",
   "last_target_repo": "tophat1720/open-swe",
   "last_transport": "ssh",
   "origin_url": "git@github.com:tophat1720/open-swe.git",
   "ssh_confirmed": false,
-  "timestamp": 1773997123
+  "timestamp": 1773998072
 }
