@@ -167,6 +167,8 @@ python local_fix_agent.py --continue
 
 Validated runs publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
 
+Publish now includes a pre-publish docs gate after validation succeeds and before commit/push/PR work starts. The tool detects whether operator docs need to change, updates the affected docs in the same change set when possible, reruns validation, and blocks publish if docs refresh or revalidation fails.
+
 Publish ignores known local state/cache changes such as `.ai_publish_state.json` and `.fix_agent_docs_state.json` when deciding whether anything meaningful should be published. If only ignored files changed, the publish step reports `noop` and does not create a branch, push, or PR.
 
 If the publish step noops because the current fingerprint already matches a previous successful publish, the output includes the prior publish branch, commit, and PR URL when one was recorded.
@@ -207,6 +209,35 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 - publishes the current branch/repo state without requiring a recent failing test command
 - if started from `main` in non-interactive mode and meaningful changes exist, auto-creates a safe publish branch before pushing
 - if only ignored local state files changed, exits as `noop`
+- prints docs-gate fields including `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets`
+
+### Private training repo
+
+The script-pattern training repo is separate from the working repo and defaults to:
+
+```bash
+~/.codex/memories/local_fix_agent_private_patterns
+```
+
+The tool creates that repo automatically on first use and preserves it across runs. Use `--reset-pattern-repo` only when you explicitly want to delete and rebuild the training repo.
+
+Typical commands:
+
+```bash
+python local_fix_agent.py --import-pattern-files /path/to/example.py
+python local_fix_agent.py --list-pattern-sources
+python local_fix_agent.py --list-patterns
+python local_fix_agent.py --relearn-patterns
+python local_fix_agent.py --reset-pattern-repo
+```
+
+`--script /path/to/foo.py` does not import the script into training by default. To add it to training, use:
+
+```bash
+python local_fix_agent.py --script /path/to/foo.py --add-to-training
+```
+
+Imported scripts are sanitized before storage so obvious secrets and credential-bearing literals are replaced with placeholders while preserving the surrounding code structure and engineering patterns.
 
 ### Resolve settings only
 

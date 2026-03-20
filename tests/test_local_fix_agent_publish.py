@@ -1852,3 +1852,237 @@ def test_publish_current_repo_state_only_state_file_change_uses_real_classificat
     assert result["meaningful_paths"] == []
     assert result["ignored_changes"] == [".ai_publish_state.json"]
     assert commands == [["git", "status", "--short", "--untracked-files=all"]]
+
+
+def test_run_prepublish_docs_stage_no_docs_impact_returns_no_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_docs_impact",
+        lambda repo, changed_paths, publish_current_mode=False: {
+            "docs_required": False,
+            "docs_targets": [],
+            "docs_refresh_mode": "none",
+        },
+    )
+
+    result = lfa.run_prepublish_docs_stage(tmp_path, "pytest -q", ["local_fix_agent.py"])
+
+    assert result["docs_checked_at_publish"] is True
+    assert result["docs_required"] is False
+    assert result["docs_updated"] is False
+    assert result["docs_refresh_mode"] == "none"
+
+
+def test_run_prepublish_docs_stage_updates_and_revalidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_docs_impact",
+        lambda repo, changed_paths, publish_current_mode=False: {
+            "docs_required": True,
+            "docs_targets": ["README.md"],
+            "docs_refresh_mode": "patch",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "apply_publish_docs_updates",
+        lambda repo, docs_check: {"ok": True, "updated": True, "updated_targets": ["README.md"], "reason": ""},
+    )
+    monkeypatch.setattr(
+        lfa,
+        "revalidate_publish_docs",
+        lambda repo, test_cmd, publish_current_mode=False: {"ran": True, "ok": True, "command": "pytest -q", "output": ""},
+    )
+
+    result = lfa.run_prepublish_docs_stage(Path("/tmp/repo"), "pytest -q", ["local_fix_agent.py"])
+
+    assert result["docs_required"] is True
+    assert result["docs_updated"] is True
+    assert result["revalidated"] is True
+    assert result["revalidation_command"] == "pytest -q"
+    assert result["blocked"] is False
+
+
+def test_run_prepublish_docs_stage_update_failure_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_docs_impact",
+        lambda repo, changed_paths, publish_current_mode=False: {
+            "docs_required": True,
+            "docs_targets": ["README.md"],
+            "docs_refresh_mode": "patch",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "apply_publish_docs_updates",
+        lambda repo, docs_check: {"ok": False, "updated": False, "updated_targets": [], "reason": "docs refresh failed"},
+    )
+
+    result = lfa.run_prepublish_docs_stage(Path("/tmp/repo"), "pytest -q", ["local_fix_agent.py"])
+
+    assert result["blocked"] is True
+    assert result["reason"] == "docs refresh failed"
+
+
+def test_publish_validated_run_docs_update_is_included_in_published_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py", "README.md"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py\nM  README.md",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py", "README.md"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py\nM  README.md",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py\nM  README.md")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_prepublish_docs_stage",
+        lambda current_repo, test_cmd, changed_paths, publish_current_mode=False: {
+            "docs_checked_at_publish": True,
+            "docs_required": True,
+            "docs_updated": True,
+            "docs_refresh_mode": "patch",
+            "docs_targets": ["README.md"],
+            "blocked": False,
+            "reason": "",
+            "updated_targets": ["README.md"],
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "add", "-A", "--", "README.md", "local_fix_agent.py"] or command == ["git", "add", "-A", "--", "local_fix_agent.py", "README.md"]:
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["published"] is True
+    assert result["docs_checked_at_publish"] is True
+    assert result["docs_required"] is True
+    assert result["docs_updated"] is True
+    assert result["docs_refresh_mode"] == "patch"
+    assert result["docs_targets"] == ["README.md"]
+    assert any(cmd[:3] == ["git", "add", "-A"] for cmd in commands)
+
+
+def test_publish_validated_run_docs_failure_blocks_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_prepublish_docs_stage",
+        lambda current_repo, test_cmd, changed_paths, publish_current_mode=False: {
+            "docs_checked_at_publish": True,
+            "docs_required": True,
+            "docs_updated": False,
+            "docs_refresh_mode": "patch",
+            "docs_targets": ["README.md"],
+            "blocked": True,
+            "reason": "docs update completed, but revalidation failed: pytest failed",
+            "updated_targets": [],
+        },
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["published"] is False
+    assert result["final"]["status"] == "blocked"
+    assert result["reason"] == "docs update completed, but revalidation failed: pytest failed"
+
+
+def test_print_post_success_publish_summary_includes_docs_fields(capsys: pytest.CaptureFixture[str]) -> None:
+    summary = {
+        "validation_result": "success",
+        "publish_requested": True,
+        "publish_triggered": True,
+        "publish_mode": "validated-run",
+        "publish_result": "success",
+        "publish_reason": "",
+        "pr_created_or_reused": True,
+        "pr_merged": False,
+        "local_main_synced": False,
+        "docs_checked_at_publish": True,
+        "docs_required": True,
+        "docs_updated": True,
+        "docs_refresh_mode": "patch",
+        "docs_targets": ["README.md", "docs/RUNBOOK.md"],
+    }
+
+    lfa.print_post_success_publish_summary(summary)
+    out = capsys.readouterr().out
+
+    assert "docs_checked_at_publish: true" in out
+    assert "docs_required: true" in out
+    assert "docs_updated: true" in out
+    assert "docs_refresh_mode: patch" in out
+    assert "docs_targets: ['README.md', 'docs/RUNBOOK.md']" in out

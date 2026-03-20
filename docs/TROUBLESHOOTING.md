@@ -18,6 +18,8 @@ Real run output prints only current-run data in these sections:
 
 If validation succeeds but publish fails, the run prints that distinction explicitly and does not present the outcome as a full success.
 
+If the pre-publish docs gate detects docs drift, the publish summary now shows `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets`. If docs refresh or revalidation fails, publish is blocked before any push happens.
+
 If publish is requested from `main` in headless mode, the tool now checks for meaningful changes first. With no meaningful changes it reports `noop`. With meaningful changes it auto-creates a safe publish branch and continues.
 
 If publish reports `noop` because the fingerprint matches a previous successful publish, the output surfaces the stored branch, commit, and PR URL so you can jump directly to the existing review artifact.

@@ -188,7 +188,11 @@ python local_fix_agent.py --publish-only
 
 Validated runs now publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
 
+Before a real publish attempt, the agent now runs a pre-publish docs check. It decides whether docs are required, which docs targets are affected, and whether the refresh mode is `patch`, `rewrite`, or `none`. If docs drift is detected, the tool updates docs before publish, reruns validation when it has a validation command or discovered validation plan, and blocks publish if the docs refresh or revalidation fails.
+
 Before branch creation, push, or PR creation, publish filters out known machine-local state changes such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and other local state/cache files. If no meaningful changes remain, publish exits cleanly as `noop` with `reason: no meaningful changes to publish`.
+
+Real publish summaries now also print `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets` so it is obvious whether docs were part of the published change set.
 
 If publish noops because the current fingerprint matches a previous successful publish, the tool surfaces the previous publish branch, commit, and PR URL when available.
 
@@ -205,6 +209,19 @@ Headless publish of the current repo state:
 AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 ./scripts/publishcurrent.sh
 ```
+
+Private training repo for pattern learning:
+
+```bash
+python local_fix_agent.py --import-pattern-files /path/to/example.py
+python local_fix_agent.py --list-pattern-sources
+python local_fix_agent.py --list-patterns
+python local_fix_agent.py --reset-pattern-repo
+```
+
+The default private training repo lives at `~/.codex/memories/local_fix_agent_private_patterns`. The tool creates it automatically on first use and reuses it on later runs unless you explicitly reset it with `--reset-pattern-repo`.
+
+`--script /path/to/foo.py` uses script mode normally and does not add the script to training. To add a script to training, opt in explicitly with `--add-to-training`; the imported copy is sanitized before it is stored in the private training repo.
 
 ### Mental Model
 

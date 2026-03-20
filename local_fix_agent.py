@@ -26,6 +26,12 @@ MAX_SEARCHES_PER_ATTEMPT = 3
 MAX_SEARCH_MATCHES = 20
 MAX_SEARCH_OUTPUT_CHARS = 4000
 MEMORY_FILE_NAME = ".fix_agent_memory.json"
+SCRIPT_PATTERN_MEMORY_FILE_NAME = ".fix_agent_pattern_memory.json"
+SCRIPT_PATTERN_EFFECTIVENESS_FILE_NAME = ".fix_agent_pattern_effectiveness.json"
+PATTERN_EVAL_FILE_NAME = ".fix_agent_pattern_eval.json"
+PATTERN_REPO_SOURCE_CATALOG_FILE_NAME = "pattern_sources.json"
+DEFAULT_PATTERN_REPO_DIR_NAME = "local_fix_agent_pattern_repo"
+PATTERN_TRUST_LEVELS = {"trusted", "experimental"}
 METRICS_FILE_NAME = ".fix_agent_metrics.json"
 CONFIG_FILE_NAME = ".fix_agent_config.json"
 RECENT_STATE_FILE_NAME = ".fix_agent_recent.json"
@@ -52,6 +58,14 @@ FAILURE_RANK = {
     FAILURE_IMPORT_ERROR: 2,
     FAILURE_SYNTAX_ERROR: 2,
     FAILURE_ASSERTION_FAILURE: 3,
+}
+DOMAIN_PATTERN_FAMILIES = {
+    "proxy": {"proxy_handling", "request_session", "retry_backoff", "timeout", "rate_limit_handling", "error_handling"},
+    "network": {"proxy_handling", "request_session", "retry_backoff", "timeout", "rate_limit_handling", "error_handling"},
+    "cli": {"cli_style", "entrypoint"},
+    "streaming": {"request_session", "timeout", "error_handling", "rate_limit_handling"},
+    "scraping": {"request_session", "retry_backoff", "rate_limit_handling", "proxy_handling", "timeout"},
+    "local_utils": {"function_organization", "validation_strategy", "config_loading"},
 }
 
 client = OpenAI(
@@ -784,6 +798,186 @@ def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) ->
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def publish_docs_targets(repo: Path) -> list[str]:
+    candidates = [
+        repo / "README.md",
+        repo / "docs" / "RUNBOOK.md",
+        repo / "docs" / "TROUBLESHOOTING.md",
+    ]
+    targets: list[str] = []
+    for path in candidates:
+        if path.exists() and path.is_file():
+            try:
+                targets.append(str(path.resolve().relative_to(repo.resolve())))
+            except ValueError:
+                continue
+    return targets
+
+
+def is_docs_path(path: str) -> bool:
+    rel = path.strip()
+    return rel == "README.md" or rel.startswith("docs/") or rel.endswith(".md")
+
+
+def detect_publish_docs_impact(repo: Path, changed_paths: list[str], publish_current_mode: bool = False) -> dict:
+    normalized = sorted(dict.fromkeys(path for path in changed_paths if path))
+    docs_targets = publish_docs_targets(repo)
+    docs_changed = [path for path in normalized if path in docs_targets or is_docs_path(path)]
+    code_impacts: list[str] = []
+    for path in normalized:
+        if is_docs_path(path):
+            continue
+        suffix = Path(path).suffix.lower()
+        if path == "local_fix_agent.py":
+            code_impacts.append(path)
+            continue
+        if path.startswith("scripts/") or path.startswith("tests/"):
+            code_impacts.append(path)
+            continue
+        if suffix in {".py", ".sh", ".toml", ".ini", ".json", ".yaml", ".yml"}:
+            code_impacts.append(path)
+    docs_required = bool(code_impacts and docs_targets and not docs_changed)
+    refresh_mode = "none"
+    if docs_required:
+        refresh_mode = "rewrite" if "local_fix_agent.py" in code_impacts else "patch"
+    return {
+        "docs_required": docs_required,
+        "docs_targets": docs_targets if docs_required else docs_changed,
+        "docs_refresh_mode": refresh_mode,
+        "docs_changed": docs_changed,
+        "code_impacts": code_impacts,
+        "publish_current_mode": publish_current_mode,
+    }
+
+
+def upsert_managed_markdown_block(path: Path, marker: str, content: str) -> bool:
+    start = f"<!-- {marker}:start -->"
+    end = f"<!-- {marker}:end -->"
+    block = f"{start}\n{content.rstrip()}\n{end}\n"
+    try:
+        existing = path.read_text()
+    except OSError:
+        return False
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end) + r"\n?", re.S)
+    if pattern.search(existing):
+        updated = pattern.sub(block, existing, count=1)
+    else:
+        updated = existing.rstrip() + "\n\n" + block
+    if updated == existing:
+        return False
+    try:
+        path.write_text(updated)
+    except OSError:
+        return False
+    return True
+
+
+def docs_publish_block_for_target(target: str, refresh_mode: str) -> str:
+    if target == "README.md":
+        return "\n".join(
+            [
+                "## Pre-Publish Docs Gate",
+                "",
+                "Before a real publish, the agent now runs a documentation impact check.",
+                "If code or operator-facing behavior changed and docs are stale, it updates the tracked docs before publish, reruns validation, and only then continues with push/PR work.",
+                f"Current docs refresh policy: `{refresh_mode}` when docs drift is detected.",
+            ]
+        )
+    if target == "docs/RUNBOOK.md":
+        return "\n".join(
+            [
+                "## Pre-Publish Docs Check",
+                "",
+                "Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.",
+                "The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.",
+                f"Default docs refresh mode when triggered: `{refresh_mode}`.",
+            ]
+        )
+    if target == "docs/TROUBLESHOOTING.md":
+        return "\n".join(
+            [
+                "## Publish Blocked By Docs Drift",
+                "",
+                "If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.",
+                "The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.",
+            ]
+        )
+    return ""
+
+
+def apply_publish_docs_updates(repo: Path, docs_check: dict) -> dict:
+    updated_targets: list[str] = []
+    for target in docs_check.get("docs_targets", []) or []:
+        content = docs_publish_block_for_target(target, str(docs_check.get("docs_refresh_mode") or "patch"))
+        if not content:
+            continue
+        marker = "fix-agent-prepublish-docs"
+        if target.endswith("RUNBOOK.md"):
+            marker = "fix-agent-prepublish-runbook"
+        elif target.endswith("TROUBLESHOOTING.md"):
+            marker = "fix-agent-prepublish-troubleshooting"
+        path = repo / target
+        if upsert_managed_markdown_block(path, marker, content):
+            updated_targets.append(target)
+    return {
+        "ok": True,
+        "updated": bool(updated_targets),
+        "updated_targets": updated_targets,
+        "reason": "" if updated_targets or docs_check.get("docs_targets") else "no docs targets available for update",
+    }
+
+
+def revalidate_publish_docs(repo: Path, test_cmd: str, publish_current_mode: bool = False) -> dict:
+    if CURRENT_VALIDATION_PLAN.get("active"):
+        validation = run_validation_stack(repo, CURRENT_VALIDATION_PLAN, include_syntax=True)
+        return {
+            "ran": True,
+            "ok": bool(validation.get("ok")),
+            "command": CURRENT_VALIDATION_PLAN.get("primary_command", ""),
+            "output": validation.get("output", ""),
+        }
+    stripped = str(test_cmd or "").strip()
+    if stripped and not stripped.startswith("n/a (publish current repo state)"):
+        code, output = run_subprocess(stripped, repo, shell=True)
+        return {"ran": True, "ok": code == 0, "command": stripped, "output": output.strip()}
+    return {"ran": False, "ok": True, "command": "", "output": ""}
+
+
+def run_prepublish_docs_stage(repo: Path, test_cmd: str, changed_paths: list[str], publish_current_mode: bool = False) -> dict:
+    docs_check = detect_publish_docs_impact(repo, changed_paths, publish_current_mode=publish_current_mode)
+    result = {
+        "docs_checked_at_publish": True,
+        "docs_required": bool(docs_check.get("docs_required")),
+        "docs_updated": False,
+        "docs_refresh_mode": str(docs_check.get("docs_refresh_mode") or "none"),
+        "docs_targets": list(docs_check.get("docs_targets") or []),
+        "blocked": False,
+        "reason": "",
+        "revalidated": False,
+        "revalidation_command": "",
+        "updated_targets": [],
+    }
+    if not result["docs_required"]:
+        return result
+    update_result = apply_publish_docs_updates(repo, docs_check)
+    if not update_result.get("ok"):
+        result["blocked"] = True
+        result["reason"] = update_result.get("reason") or "docs update failed before publish"
+        return result
+    result["docs_updated"] = bool(update_result.get("updated"))
+    result["updated_targets"] = list(update_result.get("updated_targets") or [])
+    revalidation = revalidate_publish_docs(repo, test_cmd, publish_current_mode=publish_current_mode)
+    result["revalidated"] = bool(revalidation.get("ran"))
+    result["revalidation_command"] = str(revalidation.get("command") or "")
+    if not revalidation.get("ok"):
+        result["blocked"] = True
+        result["reason"] = (
+            "docs update completed, but revalidation failed: "
+            + (str(revalidation.get("output") or "").strip() or "(no output)")
+        )
+    return result
+
+
 def repo_files(repo: Path) -> list[str]:
     if is_remote_repo(repo):
         code, output = run_subprocess(
@@ -1285,6 +1479,196 @@ def save_pattern_memory(repo: Path, memory: dict) -> None:
         return
 
 
+def default_pattern_repo_path() -> Path:
+    return Path.home() / ".codex" / "memories" / DEFAULT_PATTERN_REPO_DIR_NAME
+
+
+def normalize_pattern_repo_path(path_value: str | Path | None) -> Path:
+    if isinstance(path_value, Path):
+        path = path_value
+    elif path_value:
+        path = Path(path_value)
+    else:
+        path = default_pattern_repo_path()
+    return path.expanduser().resolve()
+
+
+def pattern_repo_storage_path(pattern_repo: Path, name: str) -> Path:
+    return normalize_pattern_repo_path(pattern_repo) / name
+
+
+def pattern_effectiveness_path(pattern_repo: Path) -> Path:
+    return pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_EFFECTIVENESS_FILE_NAME)
+
+
+def load_pattern_effectiveness(pattern_repo: Path) -> dict:
+    path = pattern_effectiveness_path(pattern_repo)
+    if not path.exists():
+        return {"families": {}, "repos": {}, "task_types": {}, "updated_at": 0}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"families": {}, "repos": {}, "task_types": {}, "updated_at": 0}
+    if not isinstance(data, dict):
+        return {"families": {}, "repos": {}, "task_types": {}, "updated_at": 0}
+    return {
+        "families": data.get("families", {}) if isinstance(data.get("families"), dict) else {},
+        "repos": data.get("repos", {}) if isinstance(data.get("repos"), dict) else {},
+        "task_types": data.get("task_types", {}) if isinstance(data.get("task_types"), dict) else {},
+        "updated_at": int(data.get("updated_at", 0) or 0),
+    }
+
+
+def save_pattern_effectiveness(pattern_repo: Path, effectiveness: dict) -> None:
+    path = pattern_effectiveness_path(pattern_repo)
+    payload = {
+        "families": effectiveness.get("families", {}) if isinstance(effectiveness.get("families"), dict) else {},
+        "repos": effectiveness.get("repos", {}) if isinstance(effectiveness.get("repos"), dict) else {},
+        "task_types": effectiveness.get("task_types", {}) if isinstance(effectiveness.get("task_types"), dict) else {},
+        "updated_at": int(effectiveness.get("updated_at", int(time.time())) or int(time.time())),
+    }
+    try:
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def effectiveness_stats_view(record: dict | None, task_type: str) -> tuple[float, float, float]:
+    if not isinstance(record, dict):
+        return 0.0, 0.0, 0.0
+    task_stats = record.get("task_types", {}).get(task_type, {}) if isinstance(record.get("task_types"), dict) else {}
+    times_applied = float(task_stats.get("times_applied", record.get("times_applied", 0)) or 0)
+    times_successful = float(task_stats.get("times_successful", record.get("times_successful", 0)) or 0)
+    times_overapplied = float(task_stats.get("times_overapplied", record.get("times_overapplied", 0)) or 0)
+    success_rate = (times_successful / times_applied) if times_applied else 0.0
+    overapply_rate = (times_overapplied / times_applied) if times_applied else 0.0
+    avg_delta = float(task_stats.get("score_delta_total", record.get("score_delta_total", 0.0)) or 0.0) / times_applied if times_applied else 0.0
+    return success_rate, overapply_rate, avg_delta
+
+
+def update_effectiveness_stats(record: dict, task_type: str, *, considered: bool = False, applied: bool = False, successful: bool = False, overapplied: bool = False, score_delta: float = 0.0) -> None:
+    if considered:
+        record["times_considered"] = int(record.get("times_considered", 0) or 0) + 1
+    if applied:
+        record["times_applied"] = int(record.get("times_applied", 0) or 0) + 1
+        record["score_delta_total"] = float(record.get("score_delta_total", 0.0) or 0.0) + float(score_delta)
+    if successful:
+        record["times_successful"] = int(record.get("times_successful", 0) or 0) + 1
+    if overapplied:
+        record["times_overapplied"] = int(record.get("times_overapplied", 0) or 0) + 1
+    task_types = record.setdefault("task_types", {})
+    task_record = task_types.setdefault(task_type, {})
+    if considered:
+        task_record["times_considered"] = int(task_record.get("times_considered", 0) or 0) + 1
+    if applied:
+        task_record["times_applied"] = int(task_record.get("times_applied", 0) or 0) + 1
+        task_record["score_delta_total"] = float(task_record.get("score_delta_total", 0.0) or 0.0) + float(score_delta)
+    if successful:
+        task_record["times_successful"] = int(task_record.get("times_successful", 0) or 0) + 1
+    if overapplied:
+        task_record["times_overapplied"] = int(task_record.get("times_overapplied", 0) or 0) + 1
+
+
+def ensure_pattern_repo(pattern_repo: Path) -> Path:
+    resolved = normalize_pattern_repo_path(pattern_repo)
+    resolved.mkdir(parents=True, exist_ok=True)
+    (resolved / "candidates").mkdir(parents=True, exist_ok=True)
+    (resolved / "curated" / "trusted").mkdir(parents=True, exist_ok=True)
+    (resolved / "curated" / "experimental").mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
+def ensure_pattern_repo_status(pattern_repo: Path) -> tuple[Path, bool]:
+    resolved = normalize_pattern_repo_path(pattern_repo)
+    created = not resolved.exists()
+    ensured = ensure_pattern_repo(resolved)
+    return ensured, created
+
+
+def reset_pattern_repo(pattern_repo: Path) -> tuple[Path, bool]:
+    resolved = normalize_pattern_repo_path(pattern_repo)
+    existed = resolved.exists()
+    if existed:
+        shutil.rmtree(resolved)
+    ensured = ensure_pattern_repo(resolved)
+    return ensured, existed
+
+
+def pattern_repo_source_catalog_path(pattern_repo: Path) -> Path:
+    return pattern_repo_storage_path(pattern_repo, PATTERN_REPO_SOURCE_CATALOG_FILE_NAME)
+
+
+def load_pattern_source_catalog(pattern_repo: Path) -> dict:
+    path = pattern_repo_source_catalog_path(pattern_repo)
+    if not path.exists():
+        return {"sources": []}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"sources": []}
+    if not isinstance(data, dict) or not isinstance(data.get("sources"), list):
+        return {"sources": []}
+    return {"sources": [item for item in data.get("sources", []) if isinstance(item, dict)]}
+
+
+def save_pattern_source_catalog(pattern_repo: Path, catalog: dict) -> None:
+    path = pattern_repo_source_catalog_path(pattern_repo)
+    payload = {"sources": catalog.get("sources", []) if isinstance(catalog.get("sources"), list) else []}
+    try:
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def load_script_pattern_memory(pattern_repo: Path) -> dict:
+    path = pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_MEMORY_FILE_NAME)
+    if not path.exists():
+        return {"patterns": [], "sources": [], "updated_at": 0}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"patterns": [], "sources": [], "updated_at": 0}
+    if not isinstance(data, dict):
+        return {"patterns": [], "sources": [], "updated_at": 0}
+    patterns = data.get("patterns", [])
+    sources = data.get("sources", [])
+    return {
+        "patterns": patterns if isinstance(patterns, list) else [],
+        "sources": sources if isinstance(sources, list) else [],
+        "updated_at": int(data.get("updated_at", 0) or 0),
+    }
+
+
+def save_script_pattern_memory(pattern_repo: Path, memory: dict) -> None:
+    path = pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_MEMORY_FILE_NAME)
+    payload = {
+        "patterns": memory.get("patterns", []),
+        "sources": memory.get("sources", []),
+        "updated_at": int(memory.get("updated_at", int(time.time())) or int(time.time())),
+    }
+    try:
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def append_pattern_eval_history(repo: Path, run_result: dict) -> None:
+    path = state_storage_path(repo, PATTERN_EVAL_FILE_NAME)
+    existing = {"runs": []}
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text())
+            if isinstance(loaded, dict) and isinstance(loaded.get("runs"), list):
+                existing = loaded
+        except (OSError, json.JSONDecodeError):
+            existing = {"runs": []}
+    existing["runs"].append(run_result)
+    try:
+        path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
 def append_run_metrics(repo: Path, metrics: dict) -> None:
     path = state_storage_path(repo, METRICS_FILE_NAME)
     existing = {"runs": []}
@@ -1321,6 +1705,287 @@ def load_agent_config(explicit_path: str | None, cwd: Path) -> tuple[dict, Path]
         return load_json_file(candidate, {}), candidate
     fallback = script_state_path(CONFIG_FILE_NAME)
     return load_json_file(fallback, {}), fallback
+
+
+def resolve_pattern_repo_path(config: dict, cli_value: str | None) -> Path:
+    configured = ""
+    if isinstance(config, dict):
+        configured = str(config.get("pattern_repo", "") or "").strip()
+    return normalize_pattern_repo_path(cli_value or configured or default_pattern_repo_path())
+
+
+def empty_script_pattern_memory() -> dict:
+    return {"patterns": [], "sources": [], "updated_at": 0}
+
+
+def configured_pattern_repo_specs(config: dict | None) -> dict[str, dict]:
+    specs: dict[str, dict] = {}
+    configured_default = ""
+    if isinstance(config, dict):
+        configured_default = str(config.get("pattern_repo", "") or "").strip()
+    specs["default"] = {
+        "name": "default",
+        "path": normalize_pattern_repo_path(configured_default or default_pattern_repo_path()),
+        "tags": [],
+    }
+    raw_named = config.get("pattern_repos", {}) if isinstance(config, dict) else {}
+    if not isinstance(raw_named, dict):
+        return specs
+    for raw_name, raw_value in raw_named.items():
+        name = str(raw_name or "").strip()
+        if not name or name == "default":
+            continue
+        repo_path = ""
+        repo_tags: list[str] = []
+        if isinstance(raw_value, str):
+            repo_path = raw_value.strip()
+        elif isinstance(raw_value, dict):
+            repo_path = str(raw_value.get("path", "") or "").strip()
+            for tag in raw_value.get("tags", []) if isinstance(raw_value.get("tags"), list) else []:
+                candidate = str(tag or "").strip().lower()
+                if candidate and candidate not in repo_tags:
+                    repo_tags.append(candidate)
+        if not repo_path:
+            continue
+        specs[name] = {
+            "name": name,
+            "path": normalize_pattern_repo_path(repo_path),
+            "tags": repo_tags,
+        }
+    return specs
+
+
+def domain_pattern_families(name: str, tags: list[str] | None = None) -> set[str]:
+    families: set[str] = set()
+    tokens = set(pattern_keywords_from_text(name))
+    for tag in tags or []:
+        tokens.update(pattern_keywords_from_text(str(tag)))
+    for token in tokens:
+        families.update(DOMAIN_PATTERN_FAMILIES.get(token, set()))
+    return families
+
+
+def load_pattern_repo_profile(pattern_repo: Path, spec_tags: list[str] | None = None) -> dict:
+    resolved = normalize_pattern_repo_path(pattern_repo)
+    if not resolved.exists():
+        return {
+            "path": resolved,
+            "curated_sources": [],
+            "trusted_count": 0,
+            "experimental_count": 0,
+            "tags": list(spec_tags or []),
+            "terms": set(pattern_keywords_from_text(" ".join(spec_tags or []))),
+            "pattern_types": set(),
+            "families": set(),
+            "effectiveness": load_pattern_effectiveness(resolved),
+        }
+    catalog = load_pattern_source_catalog(resolved)
+    curated_sources = [
+        item
+        for item in catalog.get("sources", [])
+        if isinstance(item, dict) and str(item.get("promotion_state", "")) == "curated"
+    ]
+    memory = load_script_pattern_memory(resolved)
+    tags: list[str] = []
+    for tag in spec_tags or []:
+        candidate = str(tag or "").strip().lower()
+        if candidate and candidate not in tags:
+            tags.append(candidate)
+    trusted_count = 0
+    experimental_count = 0
+    terms = set(pattern_keywords_from_text(resolved.name))
+    pattern_types: set[str] = set()
+    families: set[str] = set()
+    for source in curated_sources:
+        for tag in source.get("tags", []) if isinstance(source.get("tags"), list) else []:
+            candidate = str(tag or "").strip().lower()
+            if candidate and candidate not in tags:
+                tags.append(candidate)
+        terms.update(pattern_keywords_from_text(str(source.get("repo_rel_path", ""))))
+        terms.update(pattern_keywords_from_text(str(source.get("origin_path", ""))))
+    for pattern in memory.get("patterns", []):
+        if not isinstance(pattern, dict):
+            continue
+        trust_level = str(pattern.get("trust_level", "trusted") or "trusted")
+        if trust_level == "trusted":
+            trusted_count += 1
+        else:
+            experimental_count += 1
+        pattern_type = str(pattern.get("pattern_type", "") or "")
+        family = str(pattern.get("family", pattern_type) or pattern_type)
+        if pattern_type:
+            pattern_types.add(pattern_type)
+            terms.update(pattern_keywords_from_text(pattern_type.replace("_", " ")))
+        if family:
+            families.add(family)
+            terms.update(pattern_keywords_from_text(family.replace("_", " ")))
+        for keyword in pattern.get("keywords", []) if isinstance(pattern.get("keywords"), list) else []:
+            candidate = str(keyword or "").strip().lower()
+            if candidate:
+                terms.add(candidate)
+    terms.update(pattern_keywords_from_text(" ".join(tags)))
+    return {
+        "path": resolved,
+        "curated_sources": curated_sources,
+        "trusted_count": trusted_count,
+        "experimental_count": experimental_count,
+        "tags": tags,
+        "terms": terms,
+        "pattern_types": pattern_types,
+        "families": families,
+        "effectiveness": load_pattern_effectiveness(resolved),
+    }
+
+
+def infer_pattern_repo_selection_context(args: argparse.Namespace, resolved_mode: str) -> tuple[str, str, Path | None]:
+    if getattr(args, "new_script", ""):
+        output_path = Path(args.new_script)
+        return "new-script", str(args.new_script_purpose or output_path.stem), output_path
+    if getattr(args, "eval_pattern_learning", False):
+        return "eval", str(args.pattern_eval_tasks or "pattern learning eval"), None
+    if getattr(args, "script", ""):
+        script_path = Path(args.script)
+        return "debug", " ".join(part for part in [script_path.stem, getattr(args, "test_cmd", ""), resolved_mode] if part).strip(), script_path
+    if getattr(args, "publish_only", False):
+        return "publish", "publish current repo state", None
+    if getattr(args, "test_cmd", ""):
+        return "debug", str(args.test_cmd), None
+    return resolved_mode or "debug", resolved_mode or "agent run", None
+
+
+def select_pattern_repo(
+    config: dict | None,
+    cli_value: str | None,
+    task_type: str,
+    task_text: str,
+    script_path: Path | None = None,
+    require_repo: bool = False,
+) -> dict:
+    specs = configured_pattern_repo_specs(config)
+    raw_override = str(cli_value or "").strip()
+    normalized_override = raw_override.lower()
+    if normalized_override == "none":
+        return {
+            "selected": "none",
+            "path": None,
+            "reason": "operator disabled pattern repo usage",
+            "confidence": "high",
+            "available": sorted(specs),
+            "tags": [],
+        }
+    if normalized_override and normalized_override != "auto":
+        if raw_override in specs:
+            spec = specs[raw_override]
+            return {
+                "selected": raw_override,
+                "path": spec["path"],
+                "reason": f"operator override selected named pattern repo '{raw_override}'",
+                "confidence": "high",
+                "available": sorted(specs),
+                "tags": list(spec.get("tags", []) or []),
+            }
+        return {
+            "selected": Path(raw_override).expanduser().name or raw_override,
+            "path": normalize_pattern_repo_path(raw_override),
+            "reason": "operator override selected explicit pattern repo path",
+            "confidence": "high",
+            "available": sorted(specs),
+            "tags": [],
+        }
+    if require_repo:
+        spec = specs.get("default")
+        return {
+            "selected": "default",
+            "path": spec["path"] if spec else default_pattern_repo_path(),
+            "reason": "management workflow requires a concrete training repo; using default",
+            "confidence": "high",
+            "available": sorted(specs),
+            "tags": list(spec.get("tags", []) or []) if spec else [],
+        }
+
+    query_text = " ".join(part for part in [task_type, task_text, script_path.name if script_path else "", script_path.stem if script_path else ""] if part).strip()
+    query_keywords = set(pattern_keywords_from_text(query_text))
+    candidates: list[dict] = []
+    for name, spec in specs.items():
+        profile = load_pattern_repo_profile(spec["path"], spec.get("tags"))
+        score = 0.0
+        reasons: list[str] = []
+        if profile["curated_sources"]:
+            score += 1.0
+            reasons.append("has curated sources")
+        if profile["trusted_count"]:
+            score += min(2.5, 0.25 * float(profile["trusted_count"]))
+            reasons.append("trusted curated patterns available")
+        if not profile["trusted_count"] and profile["experimental_count"]:
+            score -= 1.0
+            reasons.append("only experimental patterns available")
+        overlap = sorted(query_keywords & set(profile["terms"]))
+        if overlap:
+            score += min(5.0, float(len(overlap)) * 1.5)
+            reasons.append("matched " + ", ".join(overlap[:4]))
+        if name != "default" and name.lower() in query_keywords:
+            score += 2.5
+            reasons.append(f"repo name matched task domain '{name}'")
+        success_rate, overapply_rate, avg_delta = effectiveness_stats_view(profile.get("effectiveness", {}).get("repos", {}).get(name, {}), task_type)
+        if success_rate:
+            score += min(1.5, success_rate * 1.5)
+            reasons.append(f"repo effectiveness success_rate={success_rate:.2f}")
+        if avg_delta:
+            score += max(-0.75, min(0.75, avg_delta / 20.0))
+        if overapply_rate:
+            score -= min(1.5, overapply_rate * 1.5)
+            reasons.append(f"repo overapplication penalty={overapply_rate:.2f}")
+        if not overlap and not profile["curated_sources"]:
+            reasons.append("no curated matches")
+        candidates.append(
+            {
+                "name": name,
+                "path": spec["path"],
+                "score": score,
+                "reasons": reasons,
+                "profile": profile,
+            }
+        )
+    candidates.sort(key=lambda item: (-item["score"], 0 if item["name"] != "default" else 1, item["name"]))
+    best = candidates[0] if candidates else None
+    default_candidate = next((item for item in candidates if item["name"] == "default"), None)
+    if best and best["profile"]["curated_sources"] and best["score"] >= 3.0:
+        confidence = "high" if best["score"] >= 5.0 else "medium"
+        return {
+            "selected": best["name"],
+            "path": best["path"],
+            "reason": "; ".join(best["reasons"][:3]) or "highest relevance score among available repos",
+            "confidence": confidence,
+            "available": sorted(specs),
+            "tags": list(specs.get(best["name"], {}).get("tags", []) or []),
+        }
+    if default_candidate and default_candidate["profile"]["curated_sources"] and default_candidate["score"] >= 2.0:
+        confidence = "medium" if default_candidate["score"] >= 3.5 else "low"
+        return {
+            "selected": "default",
+            "path": default_candidate["path"],
+            "reason": "; ".join(default_candidate["reasons"][:3]) or "default repo had the best available relevance",
+            "confidence": confidence,
+            "available": sorted(specs),
+            "tags": list(specs.get("default", {}).get("tags", []) or []),
+        }
+    return {
+        "selected": "none",
+        "path": None,
+        "reason": "no relevant curated training repo was confident enough for this task",
+        "confidence": "low",
+        "available": sorted(specs),
+        "tags": [],
+    }
+
+
+def cli_option_value(argv: list[str], option_name: str) -> str | None:
+    for index, item in enumerate(argv):
+        if item == option_name and index + 1 < len(argv):
+            return argv[index + 1]
+        if item.startswith(option_name + "="):
+            return item.split("=", 1)[1]
+    return None
 
 
 def load_recent_state() -> dict:
@@ -1940,7 +2605,7 @@ def run_import_validation(repo: Path, step: dict) -> tuple[int, str]:
 
 
 def run_function_validation(repo: Path, step: dict) -> tuple[int, str]:
-    script_rel = CURRENT_VALIDATION_PLAN.get("script_rel_path", "")
+    script_rel = step.get("source") or CURRENT_VALIDATION_PLAN.get("script_rel_path", "")
     function_name = step.get("function_name", "")
     sample_args = json.dumps(step.get("sample_args", []))
     harness = (
@@ -2022,6 +2687,1380 @@ def format_validation_plan_summary(plan: dict) -> str:
     if plan.get("limited_reason"):
         lines.append(plan["limited_reason"])
     return "\n".join(lines)
+
+
+def pattern_keywords_from_text(text: str) -> list[str]:
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text.lower()):
+        if token in seen:
+            continue
+        seen.add(token)
+        keywords.append(token)
+    return keywords
+
+
+def relative_or_name(path: Path, repo: Path) -> str:
+    resolved = path.resolve()
+    repo_resolved = repo.resolve()
+    if resolved.is_relative_to(repo_resolved):
+        return str(resolved.relative_to(repo_resolved))
+    return path.name
+
+
+def detect_cli_style(features: dict) -> str:
+    if features.get("uses_typer"):
+        return "typer"
+    if features.get("uses_click"):
+        return "click"
+    if features.get("uses_argparse"):
+        return "argparse"
+    return "manual"
+
+
+def infer_script_pattern_task_tags(pattern_type: str, text: str) -> list[str]:
+    tags = {
+        "debug",
+        "refactor",
+    }
+    if pattern_type in {"cli_style", "entrypoint", "logging_style", "config_loading", "validation_strategy"}:
+        tags.update({"new-script", "validation_discovery"})
+    if pattern_type in {"proxy_handling", "request_session", "retry_backoff", "timeout", "rate_limit_handling"}:
+        tags.update({"new-script", "validation_discovery"})
+    if pattern_type == "function_organization":
+        tags.update({"new-script", "validation_discovery"})
+    if "local" in text.lower() or "filesystem" in text.lower():
+        tags.add("new-script")
+    return sorted(tags)
+
+
+def make_script_pattern_entry(
+    repo: Path,
+    script_path: Path,
+    pattern_type: str,
+    summary: str,
+    confidence: float,
+    keywords: list[str],
+    source_record: dict | None = None,
+    normalized_examples: dict | None = None,
+    anti_pattern_note: str = "",
+) -> dict:
+    source_rel = relative_or_name(script_path, repo)
+    suffix = ""
+    if normalized_examples and normalized_examples.get("style"):
+        suffix = f"-{normalized_examples['style']}"
+    pattern_id = re.sub(r"[^a-z0-9_.-]+", "-", f"{source_rel}-{pattern_type}{suffix}".lower()).strip("-")
+    return {
+        "id": pattern_id,
+        "name": pattern_type.replace("_", " "),
+        "family": pattern_type,
+        "source_files": [source_rel],
+        "source_repo_path": str((source_record or {}).get("repo_rel_path") or source_rel),
+        "source_origin": str((source_record or {}).get("origin_path") or ""),
+        "trust_level": str((source_record or {}).get("trust_level") or "trusted"),
+        "tags": list((source_record or {}).get("tags") or []),
+        "pattern_type": pattern_type,
+        "summary": summary,
+        "applicability_context": infer_script_pattern_task_tags(pattern_type, summary),
+        "confidence": round(confidence, 2),
+        "keywords": sorted(set(keywords))[:16],
+        "normalized_examples": normalized_examples or {},
+        "anti_pattern_note": anti_pattern_note,
+        "success_count": 0,
+    }
+
+
+def extract_script_patterns(repo: Path, script_path: Path) -> list[dict]:
+    return extract_script_patterns_with_metadata(repo, script_path, None)
+
+
+def extract_script_patterns_with_metadata(repo: Path, script_path: Path, source_record: dict | None) -> list[dict]:
+    features = extract_script_features(script_path)
+    if not features.get("text"):
+        return []
+    text = features.get("text", "")
+    lowered = text.lower()
+    source_rel = relative_or_name(script_path, repo)
+    plan = build_script_validation_plan(repo, script_path)
+    patterns: list[dict] = []
+    base_keywords = pattern_keywords_from_text(f"{source_rel} {script_path.stem} {lowered[:4000]}")
+
+    def add(
+        pattern_type: str,
+        summary: str,
+        confidence: float,
+        extra_keywords: list[str],
+        normalized_examples: dict | None = None,
+        anti_pattern_note: str = "",
+    ) -> None:
+        patterns.append(
+            make_script_pattern_entry(
+                repo,
+                script_path,
+                pattern_type,
+                summary,
+                confidence,
+                base_keywords + extra_keywords,
+                source_record=source_record,
+                normalized_examples=normalized_examples,
+                anti_pattern_note=anti_pattern_note,
+            )
+        )
+
+    cli_style = detect_cli_style(features)
+    if cli_style != "manual":
+        add(
+            "cli_style",
+            f"Uses {cli_style} for command-line parsing and operator-facing help output.",
+            0.95,
+            ["cli", "help", cli_style],
+            normalized_examples={"style": cli_style, "validation_kind": "cli_help"},
+        )
+    if features.get("has_main_guard") or features.get("entrypoints"):
+        entrypoint_name = (features.get("entrypoints") or ["main"])[0]
+        add(
+            "entrypoint",
+            f"Uses a {entrypoint_name}() entrypoint behind a __main__ guard.",
+            0.9,
+            ["entrypoint", entrypoint_name, "main"],
+            normalized_examples={"style": entrypoint_name},
+        )
+    if "logging" in lowered:
+        add(
+            "logging_style",
+            "Uses structured logging calls instead of print-only status output.",
+            0.8,
+            ["logging", "log", "logger"],
+            normalized_examples={"style": "logging"},
+        )
+    if any(token in lowered for token in ["os.getenv", "os.environ", "json.load", "tomllib", "configparser", "yaml.safe_load"]):
+        add(
+            "config_loading",
+            "Loads configuration from environment variables or config files.",
+            0.75,
+            ["config", "env", "settings"],
+            normalized_examples={"style": "env_or_file"},
+        )
+    if any(token in lowered for token in ["proxy", "http_proxy", "https_proxy", "proxyhandler"]):
+        add(
+            "proxy_handling",
+            "Handles outbound proxy configuration explicitly.",
+            0.9,
+            ["proxy", "network", "http_proxy", "https_proxy"],
+            normalized_examples={"style": "proxy_aware"},
+        )
+    if any(token in lowered for token in ["request.", "urlopen(", "build_opener(", "session(", "proxyhandler("]):
+        add(
+            "request_session",
+            "Wraps outbound requests in a dedicated request/opening helper.",
+            0.72,
+            ["network", "request", "http", "url"],
+            normalized_examples={"style": "request_helper"},
+        )
+    if any(token in lowered for token in ["timeout=", "socket.setdefaulttimeout", "timeout: float", "--timeout"]):
+        add(
+            "timeout",
+            "Sets explicit timeout values for external work.",
+            0.82,
+            ["timeout", "latency", "network"],
+            normalized_examples={"style": "explicit_timeout"},
+        )
+    if any(token in lowered for token in ["retry", "backoff", "attempt", "time.sleep("]):
+        add(
+            "retry_backoff",
+            "Uses retry/backoff loops around flaky external operations.",
+            0.88,
+            ["retry", "backoff", "attempt", "sleep"],
+            normalized_examples={"style": "loop_retry"},
+        )
+    if any(token in lowered for token in ["429", "retry-after", "rate limit", "too many requests", "ratelimit"]):
+        add(
+            "rate_limit_handling",
+            "Recognizes rate-limit responses and handles them explicitly.",
+            0.86,
+            ["429", "retry-after", "rate", "limit"],
+            normalized_examples={"style": "rate_limit"},
+        )
+    if "try:" in lowered and "except" in lowered:
+        anti_pattern = "Avoid broad bare except blocks." if re.search(r"except\s*:\s*", text) else ""
+        add(
+            "error_handling",
+            "Uses explicit exception handling around risky operations.",
+            0.7,
+            ["error", "except", "failure"],
+            normalized_examples={"style": "try_except"},
+            anti_pattern_note=anti_pattern,
+        )
+    if features.get("functions"):
+        helper_names = [
+            func.name for func in features.get("functions", [])
+            if func.name not in {"main", "run", "cli"} and not func.name.startswith("__")
+        ]
+        if helper_names:
+            add(
+                "function_organization",
+                "Breaks implementation into named helper functions instead of a single monolith.",
+                0.68,
+                helper_names[:4] + ["helpers", "functions"],
+                normalized_examples={"style": "helper_functions"},
+            )
+
+    validation_kind = ""
+    validation_source = ""
+    if plan.get("function_validation", {}).get("used"):
+        validation_kind = "function"
+        validation_source = plan.get("script_rel_path", "")
+    else:
+        for step in plan.get("chosen_stack", []):
+            kind = step.get("kind", "")
+            if kind != "syntax":
+                validation_kind = kind
+                validation_source = step.get("source", "")
+                break
+    if validation_kind:
+        add(
+            "validation_strategy",
+            f"Prefers {validation_kind} validation for this script shape.",
+            0.83,
+            ["validation", validation_kind, validation_source or script_path.stem],
+            normalized_examples={"style": validation_kind, "validation_kind": validation_kind},
+        )
+    return patterns
+
+
+def import_pattern_tags(pattern_tags: str | None) -> list[str]:
+    if not pattern_tags:
+        return []
+    tags = []
+    for item in str(pattern_tags).split(","):
+        candidate = item.strip()
+        if candidate and candidate not in tags:
+            tags.append(candidate)
+    return tags
+
+
+def slugify_pattern_import_name(path: Path) -> str:
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", path.stem).strip("-").lower() or "script"
+    return stem[:60]
+
+
+def pattern_repo_source_id(path: Path, trust_level: str) -> str:
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:10]
+    return f"{trust_level}-{slugify_pattern_import_name(path)}-{digest}"
+
+
+def infer_pattern_import_destination(pattern_repo: Path, source_path: Path, trust_level: str) -> Path:
+    suffix = source_path.suffix or ".py"
+    slug = slugify_pattern_import_name(source_path)
+    digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:10]
+    return ensure_pattern_repo(pattern_repo) / "candidates" / f"{slug}-{digest}{suffix}"
+
+
+def infer_curated_pattern_destination(pattern_repo: Path, source_path: Path, trust_level: str) -> Path:
+    suffix = source_path.suffix or ".py"
+    slug = slugify_pattern_import_name(source_path)
+    digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:10]
+    return ensure_pattern_repo(pattern_repo) / "curated" / trust_level / f"{slug}-{digest}{suffix}"
+
+
+def sanitize_pattern_script_content(content: str) -> tuple[str, bool]:
+    sanitized = content
+    replacements = [
+        (
+            re.compile(r"(?i)\b(authorization\s*[:=]\s*[\"']?bearer\s+)[A-Za-z0-9._~+/=-]+([\"']?)"),
+            r"\1<REDACTED_BEARER_TOKEN>\2",
+        ),
+        (
+            re.compile(r"(?i)\b(cookie\s*[:=]\s*[\"']?)[^\"'\n]+([\"']?)"),
+            r"\1<REDACTED_COOKIE>\2",
+        ),
+        (
+            re.compile(r"(?i)\b(api[_-]?key|token|password|passwd|secret)\b(\s*[:=]\s*[\"']?)([^\"'\n]+)([\"']?)"),
+            r"\1\2<REDACTED_SECRET>\4",
+        ),
+        (
+            re.compile(r"(?i)\b(http_proxy|https_proxy)\b(\s*[:=]\s*[\"']?)(https?://)([^:@/\s]+):([^@/\s]+)@"),
+            r"\1\2\3<REDACTED_USER>:<REDACTED_PASS>@",
+        ),
+        (
+            re.compile(r"(?i)\b(sk-[A-Za-z0-9]{12,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b"),
+            "<REDACTED_TOKEN>",
+        ),
+        (
+            re.compile(r"(?i)\b(authorization|cookie|set-cookie)\b"),
+            lambda match: match.group(0),
+        ),
+        (
+            re.compile(r"(?i)\b([A-Za-z_][A-Za-z0-9_]*_?(?:key|token|password|secret))\b(\s*=\s*os\.getenv\(\s*[\"'])([^\"']+)([\"']\s*\))"),
+            r"\1\2<REDACTED_ENV_NAME>\4",
+        ),
+        (
+            re.compile(r"(?i)\b(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?\b"),
+            "<REDACTED_HOST>",
+        ),
+    ]
+    for pattern, replacement in replacements:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized, sanitized != content
+
+
+def run_candidate_validation(pattern_repo: Path, candidate_path: Path) -> dict:
+    plan = build_script_validation_plan(pattern_repo, candidate_path)
+    result = run_validation_stack(pattern_repo, plan)
+    return {
+        "plan": plan,
+        "result": result,
+        "passed": bool(result.get("ok")),
+        "limited_validation": bool(plan.get("limited_validation") or plan.get("only_syntax_import_validation")),
+        "validation_command": plan.get("primary_command", ""),
+    }
+
+
+def repair_training_candidate(pattern_repo: Path, candidate_path: Path) -> dict:
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--script",
+        str(candidate_path),
+        "--dry-run",
+        "--no-publish-on-success",
+    ]
+    code, output = run_subprocess(command, pattern_repo)
+    return {"ok": code == 0, "output": output.strip(), "command": command}
+
+
+def import_pattern_files(
+    pattern_repo: Path,
+    file_paths: list[str],
+    trust_level: str = "trusted",
+    tags: list[str] | None = None,
+    note: str = "",
+) -> dict:
+    trust = trust_level if trust_level in PATTERN_TRUST_LEVELS else "trusted"
+    repo_root, created_repo = ensure_pattern_repo_status(pattern_repo)
+    catalog = load_pattern_source_catalog(repo_root)
+    imported: list[dict] = []
+    sources = [item for item in catalog.get("sources", []) if isinstance(item, dict)]
+    existing_by_id = {item.get("id", ""): item for item in sources}
+    pattern_count_before = len(load_script_pattern_memory(repo_root).get("patterns", []))
+    for file_value in file_paths:
+        src = Path(file_value).expanduser().resolve()
+        if not src.exists() or not src.is_file():
+            continue
+        candidate_path = infer_pattern_import_destination(repo_root, src, trust)
+        candidate_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_content = src.read_text()
+        sanitized_content, changed = sanitize_pattern_script_content(raw_content)
+        candidate_path.write_text(sanitized_content)
+        source_id = pattern_repo_source_id(candidate_path.relative_to(repo_root), trust)
+        validation = run_candidate_validation(repo_root, candidate_path)
+        repaired = False
+        repair_result = {"ok": False, "output": "", "command": []}
+        if not validation.get("passed"):
+            repair_result = repair_training_candidate(repo_root, candidate_path)
+            if repair_result.get("ok"):
+                repaired = True
+                validation = run_candidate_validation(repo_root, candidate_path)
+        blocked = not validation.get("passed")
+        promote = bool(validation.get("passed")) and not blocked and not validation.get("limited_validation")
+        final_trust = trust
+        curated_rel = ""
+        if promote:
+            curated_path = infer_curated_pattern_destination(repo_root, src, trust)
+            curated_path.parent.mkdir(parents=True, exist_ok=True)
+            curated_path.write_text(candidate_path.read_text())
+            curated_rel = str(curated_path.relative_to(repo_root))
+        record = {
+            "id": source_id,
+            "repo_rel_path": curated_rel or str(candidate_path.relative_to(repo_root)),
+            "candidate_path": str(candidate_path.relative_to(repo_root)),
+            "origin_path": str(src),
+            "sanitized_path": str(candidate_path),
+            "trust_level": final_trust,
+            "tags": list(tags or []),
+            "note": note,
+            "imported_at": int(time.time()),
+            "sanitized_changed": changed,
+            "validation_status": "passed" if validation.get("passed") else ("blocked" if blocked else "failed"),
+            "validation_command": validation.get("validation_command", ""),
+            "repair_needed": repaired,
+            "repair_output": repair_result.get("output", ""),
+            "promotion_state": "curated" if promote else "candidate",
+            "promoted": promote,
+            "candidate_imported": True,
+            "limited_validation": bool(validation.get("limited_validation")),
+        }
+        existing_by_id[source_id] = record
+        imported.append(record)
+    catalog["sources"] = sorted(existing_by_id.values(), key=lambda item: item.get("repo_rel_path", ""))
+    save_pattern_source_catalog(repo_root, catalog)
+    promoted_trusted = any(item.get("promoted") and item.get("trust_level") == "trusted" for item in imported)
+    learn_result = relearn_patterns_from_repo(repo_root) if promoted_trusted else {"learned_patterns": [], "memory": load_script_pattern_memory(repo_root)}
+    return {
+        "pattern_repo": str(repo_root),
+        "created_repo": created_repo,
+        "imported_sources": imported,
+        "learned_patterns": learn_result.get("learned_patterns", []),
+        "learned_pattern_delta": len(learn_result.get("memory", {}).get("patterns", [])) - pattern_count_before,
+        "relearn_triggered": promoted_trusted,
+    }
+
+
+def scan_pattern_repo_sources(pattern_repo: Path) -> list[dict]:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    catalog = load_pattern_source_catalog(repo_root)
+    sources = [
+        item for item in catalog.get("sources", [])
+        if isinstance(item, dict) and str(item.get("promotion_state", "")) == "curated"
+    ]
+    if sources:
+        return sources
+    discovered: list[dict] = []
+    for trust_level in sorted(PATTERN_TRUST_LEVELS):
+        root = repo_root / "curated" / trust_level
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            discovered.append(
+                {
+                    "id": pattern_repo_source_id(path.relative_to(repo_root), trust_level),
+                    "repo_rel_path": str(path.relative_to(repo_root)),
+                    "origin_path": "",
+                    "sanitized_path": str(path),
+                    "trust_level": trust_level,
+                    "tags": [],
+                    "note": "",
+                    "imported_at": 0,
+                    "validation_status": "passed",
+                    "repair_needed": False,
+                    "promotion_state": "curated",
+                    "sanitized_changed": False,
+                }
+            )
+    if discovered:
+        save_pattern_source_catalog(repo_root, {"sources": discovered})
+    return discovered
+
+
+def relearn_patterns_from_repo(pattern_repo: Path) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    memory = {"patterns": [], "sources": [], "updated_at": 0}
+    learned_patterns: list[dict] = []
+    for source_record in scan_pattern_repo_sources(repo_root):
+        repo_rel = str(source_record.get("repo_rel_path") or "").strip()
+        if not repo_rel:
+            continue
+        script_path = repo_root / repo_rel
+        if not script_path.exists() or not script_path.is_file():
+            continue
+        learned_patterns.extend(extract_script_patterns_with_metadata(repo_root, script_path, source_record))
+    memory = upsert_script_patterns(memory, learned_patterns)
+    save_script_pattern_memory(repo_root, memory)
+    return {
+        "pattern_repo": str(repo_root),
+        "learned_patterns": learned_patterns,
+        "memory": memory,
+    }
+
+
+def list_pattern_sources(pattern_repo: Path) -> list[dict]:
+    return scan_pattern_repo_sources(pattern_repo)
+
+
+def list_patterns(pattern_repo: Path) -> list[dict]:
+    memory = load_script_pattern_memory(pattern_repo)
+    return [item for item in memory.get("patterns", []) if isinstance(item, dict)]
+
+
+def forget_pattern(pattern_repo: Path, pattern_id: str) -> dict:
+    memory = load_script_pattern_memory(pattern_repo)
+    retained = [item for item in memory.get("patterns", []) if isinstance(item, dict) and item.get("id") != pattern_id]
+    removed = len(retained) != len(memory.get("patterns", []))
+    memory["patterns"] = retained
+    memory["updated_at"] = int(time.time())
+    save_script_pattern_memory(pattern_repo, memory)
+    return {"removed": removed, "pattern_id": pattern_id, "remaining_patterns": len(retained)}
+
+
+def upsert_script_patterns(memory: dict, patterns: list[dict]) -> dict:
+    existing = {
+        pattern.get("id", ""): pattern
+        for pattern in memory.get("patterns", [])
+        if isinstance(pattern, dict) and pattern.get("id")
+    }
+    for pattern in patterns:
+        prior = existing.get(pattern["id"], {})
+        if isinstance(prior, dict) and prior.get("success_count"):
+            pattern["success_count"] = int(prior.get("success_count", 0) or 0)
+        existing[pattern["id"]] = pattern
+    sources: set[str] = set(memory.get("sources", []))
+    for pattern in existing.values():
+        for source in pattern.get("source_files", []):
+            sources.add(source)
+    memory["patterns"] = sorted(existing.values(), key=lambda item: item.get("id", ""))
+    memory["sources"] = sorted(sources)
+    memory["updated_at"] = int(time.time())
+    return memory
+
+
+def learn_from_scripts(
+    repo: Path,
+    script_paths: list[str],
+    pattern_repo: Path | None = None,
+    trust_level: str = "trusted",
+    tags: list[str] | None = None,
+) -> dict:
+    pattern_root = ensure_pattern_repo(pattern_repo or repo)
+    memory = load_script_pattern_memory(pattern_root)
+    learned_patterns: list[dict] = []
+    learned_sources: list[str] = []
+    for candidate in script_paths:
+        path = Path(candidate)
+        if not path.is_absolute():
+            path = (repo / path).resolve()
+        if not path.exists() or not path.is_file():
+            continue
+        learned_sources.append(relative_or_name(path, repo))
+        source_record = {
+            "repo_rel_path": relative_or_name(path, repo),
+            "origin_path": str(path),
+            "trust_level": trust_level if trust_level in PATTERN_TRUST_LEVELS else "trusted",
+            "tags": list(tags or []),
+        }
+        learned_patterns.extend(extract_script_patterns_with_metadata(repo, path, source_record))
+    memory = upsert_script_patterns(memory, learned_patterns)
+    save_script_pattern_memory(pattern_root, memory)
+    return {
+        "pattern_repo": str(pattern_root),
+        "learned_sources": sorted(set(learned_sources)),
+        "learned_patterns": learned_patterns,
+        "memory": memory,
+    }
+
+
+def retrieve_script_patterns(
+    memory: dict,
+    task_type: str,
+    task_text: str,
+    script_path: Path | None = None,
+    task: dict | None = None,
+    include_experimental: bool = False,
+    limit: int = 5,
+    effectiveness: dict | None = None,
+) -> dict:
+    query_text = f"{task_type} {task_text}"
+    if script_path:
+        query_text += f" {script_path.name} {script_path.stem}"
+    query_keywords = set(pattern_keywords_from_text(query_text))
+    family_candidates: dict[str, dict] = {}
+    rejected: list[dict] = []
+    forbidden_types = set(task.get("forbidden_pattern_types", [])) if isinstance(task, dict) else set()
+    required_types = set(task.get("expected_pattern_types", [])) if isinstance(task, dict) else set()
+    for pattern in memory.get("patterns", []):
+        if not isinstance(pattern, dict):
+            continue
+        pattern_type = str(pattern.get("pattern_type", "") or "")
+        family = str(pattern.get("family", pattern_type) or pattern_type)
+        trust_level = str(pattern.get("trust_level", "trusted") or "trusted")
+        score = 0.0
+        reasons: list[str] = []
+        reject_reasons: list[str] = []
+        applicable = task_type in pattern.get("applicability_context", [])
+        if task_type in pattern.get("applicability_context", []):
+            score += 3.0
+            reasons.append(f"context matched {task_type}")
+        overlap = sorted(query_keywords & set(pattern.get("keywords", [])))
+        if overlap:
+            score += min(4.0, float(len(overlap)))
+            reasons.append("keyword overlap: " + ", ".join(overlap[:4]))
+        if required_types and pattern_type in required_types:
+            score += 2.0
+            reasons.append("required by task expectations")
+        normalized = pattern.get("normalized_examples", {}) if isinstance(pattern.get("normalized_examples"), dict) else {}
+        if task_type == "new-script" and pattern.get("pattern_type") in {"cli_style", "entrypoint", "logging_style", "config_loading", "function_organization"}:
+            score += 1.5
+            reasons.append("useful for new-script scaffolding")
+        if task_type == "validation_discovery" and normalized.get("validation_kind"):
+            score += 1.5
+            reasons.append(f"validation preference: {normalized.get('validation_kind')}")
+        if task_type in {"debug", "refactor"} and pattern.get("pattern_type") in {"proxy_handling", "request_session", "retry_backoff", "timeout", "rate_limit_handling", "error_handling"}:
+            score += 1.0
+            reasons.append("operational pattern relevant to maintenance tasks")
+        if task_type == "refactor" and pattern.get("pattern_type") in {"proxy_handling", "request_session", "retry_backoff", "timeout", "rate_limit_handling"}:
+            if not ({"retry", "backoff", "rate", "limit", "proxy", "timeout"} & query_keywords):
+                score -= 3.5
+                reject_reasons.append("rejected because operational pattern was unsupported by refactor prompt")
+        if "local" in query_keywords and pattern.get("pattern_type") in {"proxy_handling", "request_session", "retry_backoff", "rate_limit_handling"}:
+            score -= 4.5
+            reject_reasons.append("rejected for local-only task")
+        if trust_level == "trusted":
+            score += 1.5
+            reasons.append("trusted source")
+        else:
+            score -= 1.5
+            if not include_experimental:
+                reject_reasons.append("experimental pattern not applied by default")
+            else:
+                reasons.append("experimental source allowed")
+        confidence = float(pattern.get("confidence", 0) or 0)
+        success_count = int(pattern.get("success_count", 0) or 0)
+        score += min(2.0, success_count * 0.5)
+        family_effectiveness = (effectiveness or {}).get("families", {}).get(family, {})
+        success_rate, overapply_rate, avg_delta = effectiveness_stats_view(family_effectiveness, task_type)
+        if success_rate:
+            score += min(1.5, success_rate * 1.5)
+            reasons.append(f"family success_rate={success_rate:.2f}")
+        if avg_delta:
+            score += max(-0.75, min(0.75, avg_delta / 20.0))
+        if overapply_rate:
+            score -= min(2.0, overapply_rate * 2.0)
+            reject_reasons.append(f"family overapplication penalty={overapply_rate:.2f}") if overapply_rate >= 0.75 else reasons.append(f"family overapplication penalty={overapply_rate:.2f}")
+        strict_override = confidence >= 0.92 and len(overlap) >= 2
+        if forbidden_types and pattern_type in forbidden_types:
+            score -= 6.0
+            reject_reasons.append("forbidden for this task")
+        if not applicable and not strict_override:
+            reject_reasons.append("task-type gating rejected pattern")
+        if score <= 0 or reject_reasons:
+            rejected.append(
+                {
+                    "pattern_type": pattern_type,
+                    "family": family,
+                    "score": round(score + confidence, 2),
+                    "reasons": reject_reasons or ["score below threshold"],
+                }
+            )
+            continue
+        entry = family_candidates.get(family)
+        candidate_score = round(score + confidence, 2)
+        if entry is None or candidate_score > entry.get("score", 0):
+            family_candidates[family] = {
+                "id": pattern.get("id", ""),
+                "pattern_type": pattern_type,
+                "family": family,
+                "summary": pattern.get("summary", ""),
+                "source_files": sorted(set(pattern.get("source_files", []))),
+                "source_repo_path": pattern.get("source_repo_path", ""),
+                "trust_level": trust_level,
+                "tags": list(pattern.get("tags", []) or []),
+                "confidence": confidence,
+                "score": candidate_score,
+                "reasons": reasons,
+                "normalized_examples": normalized,
+                "anti_pattern_note": pattern.get("anti_pattern_note", ""),
+                "success_count": success_count,
+            }
+        else:
+            entry["source_files"] = sorted(set(entry.get("source_files", []) + pattern.get("source_files", [])))
+            entry["reasons"] = sorted(set(entry.get("reasons", []) + reasons))
+            entry["success_count"] = max(entry.get("success_count", 0), success_count)
+    considered = sorted(family_candidates.values(), key=lambda item: (item.get("score", 0), item.get("confidence", 0), item.get("success_count", 0)), reverse=True)
+    applied: list[dict] = []
+    preferred_order = list(task.get("required_applied_patterns", [])) if isinstance(task, dict) else []
+    seen_applied: set[str] = set()
+    for required_pattern in preferred_order:
+        candidate = next((item for item in considered if item.get("pattern_type") == required_pattern), None)
+        if not candidate:
+            continue
+        if candidate.get("score", 0) < 4.5 or candidate.get("confidence", 0) < 0.7:
+            continue
+        applied.append(candidate)
+        seen_applied.add(required_pattern)
+        if len(applied) >= 3:
+            break
+    for item in considered:
+        pattern_type = item.get("pattern_type", "")
+        if pattern_type in seen_applied:
+            continue
+        threshold = 4.8 if pattern_type not in required_types else 4.5
+        if item.get("score", 0) < threshold or item.get("confidence", 0) < 0.7:
+            continue
+        applied.append(item)
+        seen_applied.add(pattern_type)
+        if len(applied) >= 3:
+            break
+    return {
+        "considered": considered[:limit],
+        "applied": applied,
+        "rejected": sorted(rejected, key=lambda item: item.get("score", 0), reverse=True)[:limit],
+        "source_scripts": sorted({source for item in applied for source in item.get("source_files", [])}),
+    }
+
+
+def assess_pattern_repo_coverage(selection: dict, repo_selection: dict) -> dict:
+    selected_name = str(repo_selection.get("selected", "none") or "none")
+    selected_tags = list(repo_selection.get("tags", []) or [])
+    selected_domain_families = domain_pattern_families(selected_name, selected_tags)
+    applied_items = [item for item in selection.get("applied", []) if isinstance(item, dict)]
+    rejected_items = [item for item in selection.get("rejected", []) if isinstance(item, dict)]
+    applied_families = {str(item.get("family", item.get("pattern_type", "")) or item.get("pattern_type", "")) for item in applied_items}
+    domain_specific = sorted(
+        {
+            str(item.get("pattern_type", ""))
+            for item in applied_items
+            if str(item.get("family", item.get("pattern_type", "")) or item.get("pattern_type", "")) in selected_domain_families
+        }
+    )
+    general = sorted(
+        {
+            str(item.get("pattern_type", ""))
+            for item in applied_items
+            if str(item.get("family", item.get("pattern_type", "")) or item.get("pattern_type", "")) not in selected_domain_families
+        }
+    )
+    rejected = sorted({str(item.get("pattern_type", "")) for item in rejected_items})
+    is_domain_repo = selected_name not in {"default", "none"} and bool(selected_domain_families)
+    domain_coverage_ok = (not is_domain_repo) or bool(domain_specific)
+    note = ""
+    if is_domain_repo and not domain_coverage_ok:
+        note = f"selected repo '{selected_name}' only contributed generic patterns"
+    elif is_domain_repo and domain_coverage_ok:
+        note = f"selected repo '{selected_name}' contributed domain-specific patterns"
+    return {
+        "selected_pattern_repo": selected_name,
+        "selected_pattern_repo_tags": selected_tags,
+        "domain_specific_patterns_applied": domain_specific,
+        "general_patterns_applied": general,
+        "rejected_patterns": rejected,
+        "domain_pattern_families": sorted(selected_domain_families),
+        "domain_coverage_ok": domain_coverage_ok,
+        "domain_coverage_note": note,
+        "is_domain_repo": is_domain_repo,
+        "applied_families": sorted(applied_families),
+    }
+
+
+def compare_pattern_baseline(plan: dict, selection: dict) -> dict:
+    learned_plan = select_validation_stack(plan, selection)
+    baseline_command = plan.get("primary_command", "")
+    learned_command = learned_plan.get("primary_command", "")
+    patterns_added = [item.get("pattern_type", "") for item in selection.get("applied", []) if item.get("pattern_type")]
+    return {
+        "baseline_validation_command": baseline_command,
+        "learned_validation_command": learned_command,
+        "patterns_added": patterns_added,
+        "improved_fit": bool(patterns_added) or (learned_command != baseline_command),
+    }
+
+
+def serializable_repo_selection(repo_selection: dict) -> dict:
+    serializable = dict(repo_selection)
+    if isinstance(serializable.get("path"), Path):
+        serializable["path"] = str(serializable["path"])
+    return serializable
+
+
+def refine_repo_confidence(confidence: str, coverage: dict, repo_selection: dict, effectiveness: dict | None, task_type: str) -> str:
+    levels = ["low", "medium", "high"]
+    current_index = levels.index(confidence) if confidence in levels else 0
+    selected_name = str(repo_selection.get("selected", "none") or "none")
+    if coverage.get("is_domain_repo") and not coverage.get("domain_coverage_ok"):
+        current_index = max(0, current_index - 1)
+    repo_effectiveness = ((effectiveness or {}).get("repos", {}) or {}).get(selected_name, {})
+    success_rate, overapply_rate, _avg_delta = effectiveness_stats_view(repo_effectiveness, task_type)
+    if success_rate >= 0.75 and overapply_rate <= 0.25:
+        current_index = min(len(levels) - 1, current_index + 1)
+    if overapply_rate >= 0.5:
+        current_index = max(0, current_index - 1)
+    return levels[current_index]
+
+
+def resolve_pattern_selection(
+    config: dict | None,
+    repo_selection: dict,
+    task_type: str,
+    task_text: str,
+    script_path: Path | None = None,
+    task: dict | None = None,
+    include_experimental: bool = False,
+) -> tuple[dict, dict]:
+    pattern_repo = repo_selection.get("path")
+    if pattern_repo is None:
+        empty_selection = retrieve_script_patterns(empty_script_pattern_memory(), task_type, task_text, script_path=script_path, task=task, include_experimental=include_experimental)
+        coverage = assess_pattern_repo_coverage(empty_selection, repo_selection)
+        empty_selection["coverage"] = coverage
+        empty_selection["repo_selection"] = serializable_repo_selection(repo_selection)
+        return empty_selection, repo_selection
+    repo_path = normalize_pattern_repo_path(pattern_repo)
+    effectiveness = load_pattern_effectiveness(repo_path)
+    memory = load_script_pattern_memory(repo_path)
+    selection = retrieve_script_patterns(
+        memory,
+        task_type,
+        task_text,
+        script_path=script_path,
+        task=task,
+        include_experimental=include_experimental,
+        effectiveness=effectiveness,
+    )
+    coverage = assess_pattern_repo_coverage(selection, repo_selection)
+    repo_selection = dict(repo_selection)
+    repo_selection["confidence"] = refine_repo_confidence(str(repo_selection.get("confidence", "low") or "low"), coverage, repo_selection, effectiveness, task_type)
+    if coverage.get("is_domain_repo") and not coverage.get("domain_coverage_ok"):
+        fallback_selection = select_pattern_repo(config, "default", task_type, task_text, script_path=script_path)
+        fallback_path = fallback_selection.get("path")
+        if fallback_selection.get("selected") == "default" and fallback_path and normalize_pattern_repo_path(fallback_path) != repo_path:
+            fallback_memory = load_script_pattern_memory(fallback_path)
+            fallback_effectiveness = load_pattern_effectiveness(fallback_path)
+            candidate = retrieve_script_patterns(
+                fallback_memory,
+                task_type,
+                task_text,
+                script_path=script_path,
+                task=task,
+                include_experimental=include_experimental,
+                effectiveness=fallback_effectiveness,
+            )
+            candidate_coverage = assess_pattern_repo_coverage(candidate, fallback_selection)
+            if candidate.get("applied"):
+                candidate["coverage"] = candidate_coverage
+                candidate["repo_selection"] = serializable_repo_selection(fallback_selection)
+                candidate["fallback_reason"] = "domain repo lacked domain-specific coverage; fell back to default repo"
+                fallback_selection["confidence"] = refine_repo_confidence(str(fallback_selection.get("confidence", "low") or "low"), candidate_coverage, fallback_selection, fallback_effectiveness, task_type)
+                return candidate, fallback_selection
+        empty_repo_selection = {
+            "selected": "none",
+            "path": None,
+            "reason": "domain repo lacked domain-specific coverage and no cleaner fallback was available",
+            "confidence": "low",
+            "tags": [],
+        }
+        empty_selection = retrieve_script_patterns(empty_script_pattern_memory(), task_type, task_text, script_path=script_path, task=task, include_experimental=include_experimental)
+        empty_selection["coverage"] = assess_pattern_repo_coverage(empty_selection, empty_repo_selection)
+        empty_selection["repo_selection"] = serializable_repo_selection(empty_repo_selection)
+        empty_selection["fallback_reason"] = "domain repo lacked domain-specific coverage; fell back to no pattern repo"
+        return empty_selection, empty_repo_selection
+    selection["coverage"] = coverage
+    selection["repo_selection"] = serializable_repo_selection(repo_selection)
+    return selection, repo_selection
+
+
+def format_script_pattern_transparency(selection: dict) -> str:
+    considered = selection.get("considered", [])
+    applied = selection.get("applied", [])
+    rejected = selection.get("rejected", [])
+    coverage = selection.get("coverage", {}) if isinstance(selection.get("coverage"), dict) else {}
+    repo_selection = selection.get("repo_selection", {}) if isinstance(selection.get("repo_selection"), dict) else {}
+    lines = [
+        "selected pattern repo: " + str(repo_selection.get("selected", "none") or "none"),
+        "selected pattern repo confidence: " + str(repo_selection.get("confidence", "low") or "low"),
+        "selected pattern repo reason: " + str(repo_selection.get("reason", "") or ""),
+        "learned patterns considered: "
+        + (str([item.get("pattern_type", "") for item in considered]) if considered else "[]"),
+        "learned patterns rejected: "
+        + (str([item.get("pattern_type", "") for item in rejected]) if rejected else "[]"),
+        "learned patterns applied: "
+        + (str([item.get("pattern_type", "") for item in applied]) if applied else "[]"),
+        "source scripts: " + (str(selection.get("source_scripts", []) or [])),
+        "domain-specific patterns applied: " + str(coverage.get("domain_specific_patterns_applied", []) or []),
+        "general patterns applied: " + str(coverage.get("general_patterns_applied", []) or []),
+        "rejected patterns: " + str(coverage.get("rejected_patterns", []) or []),
+        "domain_coverage_ok: " + format_bool(coverage.get("domain_coverage_ok")),
+    ]
+    if selection.get("fallback_reason"):
+        lines.append("pattern repo fallback: " + str(selection.get("fallback_reason", "")))
+    if coverage.get("domain_coverage_note"):
+        lines.append("domain coverage note: " + str(coverage.get("domain_coverage_note", "")))
+    if rejected:
+        why_rejected = [f"{item.get('pattern_type')}: {'; '.join(item.get('reasons', [])[:2])}" for item in rejected]
+        lines.append("why they were rejected: " + " | ".join(why_rejected))
+    if applied:
+        why = [
+            f"{item.get('pattern_type')} "
+            f"(source={item.get('source_repo_path') or (item.get('source_files') or [''])[0]}, "
+            f"trust={item.get('trust_level', 'trusted')}): "
+            f"{'; '.join(item.get('reasons', [])[:2])}"
+            for item in applied
+        ]
+        lines.append("why they were chosen: " + " | ".join(why))
+    else:
+        lines.append("why they were chosen: no relevant learned patterns")
+    return "\n".join(lines)
+
+
+def select_validation_stack(plan: dict, selection: dict) -> dict:
+    preferred_kind = ""
+    for item in selection.get("applied", []):
+        normalized = item.get("normalized_examples", {}) if isinstance(item.get("normalized_examples"), dict) else {}
+        if normalized.get("validation_kind"):
+            preferred_kind = str(normalized["validation_kind"])
+            break
+    if not preferred_kind:
+        return plan
+    chosen = next((step for step in plan.get("chosen_stack", []) if step.get("kind") == preferred_kind), None)
+    if not chosen:
+        function_step = plan.get("function_validation", {}).get("step")
+        if preferred_kind == "function" and isinstance(function_step, dict):
+            chosen = function_step
+    if not chosen:
+        return plan
+    copied = dict(plan)
+    copied["chosen_stack"] = [plan.get("chosen_stack", [])[0], chosen] if chosen.get("kind") != "syntax" else [chosen]
+    copied["primary_command"] = chosen.get("command", copied.get("primary_command", ""))
+    return copied
+
+
+def summarize_style_match(style_signals: dict, expected_conventions: list[str]) -> tuple[int, str]:
+    if not expected_conventions:
+        return 10, "no explicit convention expectations"
+    matched = [item for item in expected_conventions if style_signals.get(item)]
+    score = int(round((len(matched) / max(1, len(expected_conventions))) * 10))
+    summary = "matched conventions: " + (", ".join(matched) if matched else "(none)")
+    return score, summary
+
+
+def analyze_generated_script_style(script_path: Path) -> dict:
+    features = extract_script_features(script_path)
+    text = features.get("text", "")
+    return {
+        "argparse": bool(features.get("uses_argparse")),
+        "click": bool(features.get("uses_click")),
+        "typer": bool(features.get("uses_typer")),
+        "main_guard": bool(features.get("has_main_guard")),
+        "logging": "logging" in text.lower(),
+        "proxy": "proxy" in text.lower(),
+        "retry": "retry" in text.lower() or "attempt" in text.lower(),
+    }
+
+
+def render_new_script(repo: Path, output_path: Path, purpose: str, selection: dict) -> dict:
+    applied_types = {item.get("pattern_type", "") for item in selection.get("applied", [])}
+    cli_style = "argparse"
+    for item in selection.get("applied", []):
+        normalized = item.get("normalized_examples", {}) if isinstance(item.get("normalized_examples"), dict) else {}
+        if item.get("pattern_type") == "cli_style" and normalized.get("style") in {"argparse", "manual"}:
+            cli_style = normalized["style"]
+            break
+    use_logging = "logging_style" in applied_types
+    entrypoint = "main"
+    if any(item.get("pattern_type") == "entrypoint" for item in selection.get("applied", [])):
+        entrypoint = "main"
+    docstring = purpose.strip() or f"Local utility generated for {output_path.stem}."
+    lines = [f'""" {docstring} """'.replace('" ', '"').replace(' "', '"')]
+    imports = ["import argparse"]
+    if "config_loading" in applied_types:
+        imports.extend(["import json", "from pathlib import Path"])
+    if "proxy_handling" in applied_types:
+        imports.append("import os")
+    if use_logging:
+        imports.append("import logging")
+    lines.extend(imports)
+    lines.append("")
+    if "config_loading" in applied_types:
+        lines.append("def load_aliases(path: str) -> dict[str, str]:")
+        lines.append("    config_path = Path(path)")
+        lines.append("    if not config_path.exists():")
+        lines.append("        return {}")
+        lines.append("    return json.loads(config_path.read_text())")
+        lines.append("")
+    if "proxy_handling" in applied_types:
+        lines.append("def configured_proxy() -> str:")
+        lines.append("    return os.getenv('HTTP_PROXY') or os.getenv('http_proxy') or ''")
+        lines.append("")
+    lines.append("def normalize_name(value: str) -> str:")
+    lines.append('    normalized = value.strip().lower().replace("_", "-").replace(" ", "-")')
+    lines.append('    return "-".join(part for part in normalized.split("-") if part)')
+    lines.append("")
+    lines.append(f"def {entrypoint}() -> int:")
+    if cli_style == "argparse":
+        lines.append("    parser = argparse.ArgumentParser()")
+        lines.append('    parser.add_argument("value")')
+        lines.append('    parser.add_argument("--prefix", default="")')
+        if "config_loading" in applied_types:
+            lines.append('    parser.add_argument("--config", default="")')
+        lines.append("    args = parser.parse_args()")
+    else:
+        lines.append("    import sys")
+        lines.append("    args = argparse.Namespace(value=sys.argv[1] if len(sys.argv) > 1 else '', prefix='')")
+    if use_logging:
+        lines.append("    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')")
+        lines.append("    logging.info('normalizing value')")
+    if "config_loading" in applied_types:
+        lines.append("    aliases = load_aliases(args.config) if args.config else {}")
+        lines.append("    value = aliases.get(args.value, args.value)")
+    else:
+        lines.append("    value = args.value")
+    lines.append("    normalized = normalize_name(args.value)")
+    if "config_loading" in applied_types:
+        lines.append("    normalized = normalize_name(value)")
+    lines.append("    if args.prefix:")
+    lines.append("        normalized = normalize_name(args.prefix) + '-' + normalized")
+    if "proxy_handling" in applied_types:
+        lines.append("    proxy_value = configured_proxy()")
+        lines.append("    if proxy_value:")
+        lines.append("        print(f'proxy={proxy_value}')")
+    lines.append("    print(normalized)")
+    lines.append("    return 0")
+    lines.append("")
+    lines.append('if __name__ == "__main__":')
+    lines.append(f"    raise SystemExit({entrypoint}())")
+    content = "\n".join(lines) + "\n"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content)
+    return {
+        "path": str(output_path),
+        "content": content,
+        "selection": selection,
+    }
+
+
+def load_pattern_eval_tasks(repo: Path, tasks_path: str | None) -> tuple[list[dict], Path]:
+    default_path = repo / "evals" / "pattern_learning" / "tasks.json"
+    path = Path(tasks_path).expanduser().resolve() if tasks_path else default_path.resolve()
+    if not path.exists():
+        return [], path
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return [], path
+    tasks = loaded.get("tasks", []) if isinstance(loaded, dict) else []
+    return [task for task in tasks if isinstance(task, dict)], path
+
+
+def apply_eval_setup_files(root: Path, task: dict) -> None:
+    setup_files = task.get("correctness_setup_files", {})
+    if not isinstance(setup_files, dict):
+        return
+    for rel_path, content in setup_files.items():
+        target = root / str(rel_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(content))
+
+
+def evaluate_pattern_eval_correctness(
+    root: Path,
+    task: dict,
+    record: dict,
+    chosen_kind: str,
+) -> tuple[bool, str]:
+    if not record.get("validation_success"):
+        return False, "validation failed"
+    required_kind = str(task.get("required_validation_kind", "") or "")
+    if required_kind and chosen_kind != required_kind:
+        return False, f"required validation kind {required_kind}, got {chosen_kind or 'none'}"
+    required_patterns = set(task.get("required_applied_patterns", []))
+    applied_patterns = set(record.get("patterns_applied", []))
+    if required_patterns and not required_patterns.issubset(applied_patterns):
+        missing = sorted(required_patterns - applied_patterns)
+        return False, "missing required patterns: " + ", ".join(missing)
+    forbidden_patterns = set(task.get("forbidden_applied_patterns", []))
+    if forbidden_patterns & applied_patterns:
+        return False, "forbidden patterns applied: " + ", ".join(sorted(forbidden_patterns & applied_patterns))
+    command = str(task.get("correctness_command", "") or "")
+    if not command:
+        return True, "no extra correctness check"
+    apply_eval_setup_files(root, task)
+    formatted = command.format(script=task.get("output_name", task.get("script", "")))
+    code, output = run_subprocess(formatted, root, shell=True)
+    if code != int(task.get("correctness_expected_exit", 0) or 0):
+        return False, output.strip() or f"correctness command exited {code}"
+    expected_contains = task.get("correctness_expected_contains", [])
+    if isinstance(expected_contains, str):
+        expected_contains = [expected_contains]
+    for token in expected_contains:
+        if str(token) not in output:
+            return False, f"correctness output missing token: {token}"
+    return True, "correctness check passed"
+
+
+def score_pattern_eval_task(task: dict, record: dict) -> dict:
+    expected = set(task.get("expected_pattern_types", []))
+    forbidden = set(task.get("forbidden_pattern_types", []))
+    applied = set(record.get("patterns_applied", []))
+    considered = set(record.get("patterns_considered", []))
+    correctness = 50 if record.get("correctness_pass") else 0
+    relevance = 20 if not expected else int(round(20 * len(expected & considered) / max(1, len(expected))))
+    matched_task = 15 if not expected else int(round(15 * len(expected & applied) / max(1, len(expected))))
+    over_application_count = len(forbidden & applied)
+    avoided_irrelevant = 15 if not over_application_count else max(-20, 15 - 18 * over_application_count)
+    style_score = int(record.get("style_match_score", 0) or 0)
+    total = correctness + relevance + matched_task + avoided_irrelevant + style_score
+    return {
+        "correctness": correctness,
+        "correctness_pass": bool(record.get("correctness_pass")),
+        "relevance": relevance,
+        "matched_task_type": matched_task,
+        "avoided_irrelevant": avoided_irrelevant,
+        "style_score": style_score,
+        "over_application_penalty": min(0, avoided_irrelevant),
+        "total": total,
+    }
+
+
+def run_pattern_eval_mode(
+    repo: Path,
+    task: dict,
+    memory: dict,
+    use_learned_patterns: bool,
+    pattern_repo_selection: dict | None = None,
+    pattern_effectiveness: dict | None = None,
+    config: dict | None = None,
+) -> dict:
+    task_type = str(task.get("task_type", "") or "debug")
+    task_prompt = str(task.get("prompt", "") or "")
+    eval_root = repo / "evals" / "pattern_learning"
+    script_path = eval_root / str(task.get("script", "")).strip() if task.get("script") else None
+    if use_learned_patterns:
+        selected = pattern_repo_selection or {"selected": "default", "path": repo, "reason": "eval default", "confidence": "medium", "tags": []}
+        selection, selected = resolve_pattern_selection(config or {}, selected, task_type, task_prompt, script_path=script_path, task=task)
+    else:
+        selection = retrieve_script_patterns(empty_script_pattern_memory(), task_type, task_prompt, script_path=script_path, task=task)
+        empty_repo_selection = {"selected": "none", "path": None, "reason": "baseline disabled learned patterns", "confidence": "high", "tags": []}
+        selection["coverage"] = assess_pattern_repo_coverage(selection, empty_repo_selection)
+        selection["repo_selection"] = empty_repo_selection
+    validation_command = ""
+    validation_success = False
+    validation_output = ""
+    files_changed: list[str] = []
+    style_match_score = 0
+    style_summary = "no style summary"
+    chosen_validation_kind = ""
+    correctness_pass = False
+    correctness_reason = ""
+
+    if task_type == "new-script":
+        workspace = Path(tempfile.mkdtemp(prefix="lfa-pattern-eval-", dir=str(repo)))
+        output_name = str(task.get("output_name", "generated_tool.py"))
+        output_path = workspace / output_name
+        render_new_script(workspace, output_path, task_prompt, selection)
+        plan = build_script_validation_plan(workspace, output_path)
+        chosen_plan = select_validation_stack(plan, selection) if use_learned_patterns else plan
+        validation_command = chosen_plan.get("primary_command", "")
+        chosen_validation_kind = next((step.get("kind", "") for step in chosen_plan.get("chosen_stack", []) if step.get("kind") != "syntax"), "syntax")
+        validation_result = run_validation_stack(workspace, chosen_plan)
+        validation_success = bool(validation_result.get("ok"))
+        validation_output = validation_result.get("output", "")
+        files_changed = [str(Path(output_name))]
+        style_signals = analyze_generated_script_style(output_path)
+        style_match_score, style_summary = summarize_style_match(style_signals, task.get("expected_conventions", []))
+        correctness_pass, correctness_reason = evaluate_pattern_eval_correctness(workspace, task, {
+            "validation_success": validation_success,
+            "patterns_applied": [item.get("pattern_type", "") for item in selection.get("applied", [])],
+        }, chosen_validation_kind)
+    else:
+        if script_path is None:
+            return {
+                "task_id": task.get("id", ""),
+                "task_type": task_type,
+                "patterns_considered": [],
+                "patterns_applied": [],
+                "validation_command": "",
+                "validation_success": False,
+                "validation_output": "missing eval script",
+                "files_changed": [],
+                "final_outcome": "failed",
+                "style_match_score": 0,
+                "style_match_summary": "missing eval script",
+                "selection": selection,
+            }
+        plan = build_script_validation_plan(eval_root, script_path)
+        chosen_plan = select_validation_stack(plan, selection) if use_learned_patterns else plan
+        validation_command = chosen_plan.get("primary_command", "")
+        chosen_validation_kind = next((step.get("kind", "") for step in chosen_plan.get("chosen_stack", []) if step.get("kind") != "syntax"), "syntax")
+        validation_result = run_validation_stack(eval_root, chosen_plan)
+        validation_success = bool(validation_result.get("ok"))
+        validation_output = validation_result.get("output", "")
+        style_signals = analyze_generated_script_style(script_path)
+        style_match_score, style_summary = summarize_style_match(style_signals, task.get("expected_conventions", []))
+        correctness_pass, correctness_reason = evaluate_pattern_eval_correctness(eval_root, task, {
+            "validation_success": validation_success,
+            "patterns_applied": [item.get("pattern_type", "") for item in selection.get("applied", [])],
+        }, chosen_validation_kind)
+
+    record = {
+        "task_id": task.get("id", ""),
+        "task_type": task_type,
+        "patterns_considered": [item.get("pattern_type", "") for item in selection.get("considered", [])],
+        "patterns_rejected": [item.get("pattern_type", "") for item in selection.get("rejected", [])],
+        "patterns_applied": [item.get("pattern_type", "") for item in selection.get("applied", [])],
+        "validation_command": validation_command,
+        "validation_kind": chosen_validation_kind,
+        "validation_success": validation_success,
+        "validation_output": validation_output,
+        "files_changed": files_changed,
+        "correctness_pass": correctness_pass,
+        "correctness_reason": correctness_reason,
+        "final_outcome": "success" if correctness_pass else "failed",
+        "style_match_score": style_match_score,
+        "style_match_summary": style_summary,
+        "selection": selection,
+    }
+    record["score"] = score_pattern_eval_task(task, record)
+    return record
+
+
+def summarize_pattern_eval_comparison(baseline_runs: list[dict], learned_runs: list[dict]) -> dict:
+    def pass_rate(items: list[dict]) -> float:
+        return sum(1 for item in items if item.get("validation_success")) / len(items) if items else 0.0
+
+    def correctness_rate(items: list[dict]) -> float:
+        return sum(1 for item in items if item.get("correctness_pass")) / len(items) if items else 0.0
+
+    def avg_score(items: list[dict]) -> float:
+        values = [float((item.get("score") or {}).get("total", 0)) for item in items]
+        return (sum(values) / len(values)) if values else 0.0
+
+    improved: list[str] = []
+    regressed: list[str] = []
+    over_applied: list[str] = []
+    changed_outcome: list[str] = []
+    baseline_by_id = {item.get("task_id", ""): item for item in baseline_runs}
+    for learned in learned_runs:
+        task_id = learned.get("task_id", "")
+        base = baseline_by_id.get(task_id, {})
+        if bool(learned.get("correctness_pass")) != bool(base.get("correctness_pass")):
+            changed_outcome.append(task_id)
+        if float((learned.get("score") or {}).get("total", 0)) > float((base.get("score") or {}).get("total", 0)):
+            improved.append(task_id)
+        elif float((learned.get("score") or {}).get("total", 0)) < float((base.get("score") or {}).get("total", 0)):
+            regressed.append(task_id)
+        if (not learned.get("correctness_pass") and learned.get("patterns_applied")) or (
+            set(learned.get("patterns_applied", [])) & set((baseline_by_id.get(task_id, {}) or {}).get("patterns_rejected", []))
+        ):
+            over_applied.append(task_id)
+    return {
+        "baseline_pass_rate": round(pass_rate(baseline_runs), 2),
+        "learned_pass_rate": round(pass_rate(learned_runs), 2),
+        "baseline_correctness_rate": round(correctness_rate(baseline_runs), 2),
+        "learned_correctness_rate": round(correctness_rate(learned_runs), 2),
+        "baseline_average_score": round(avg_score(baseline_runs), 2),
+        "learned_average_score": round(avg_score(learned_runs), 2),
+        "tasks_improved": improved,
+        "tasks_regressed": regressed,
+        "over_application_cases": over_applied,
+        "tasks_changed_outcome": changed_outcome,
+    }
+
+
+def record_pattern_effectiveness(pattern_repo: Path | None, learned_runs: list[dict], baseline_runs: list[dict] | None = None) -> None:
+    if pattern_repo is None:
+        return
+    repo_root = ensure_pattern_repo(pattern_repo)
+    effectiveness = load_pattern_effectiveness(repo_root)
+    baseline_by_id = {item.get("task_id", ""): item for item in baseline_runs or []}
+    for run in learned_runs:
+        task_type = str(run.get("task_type", "") or "debug")
+        score_delta = float((run.get("score") or {}).get("total", 0) or 0) - float(((baseline_by_id.get(run.get("task_id", ""), {}) or {}).get("score") or {}).get("total", 0) or 0)
+        selected_repo = ((run.get("selection") or {}).get("repo_selection", {}) or {}).get("selected", "none")
+        coverage = ((run.get("selection") or {}).get("coverage", {}) or {})
+        repo_record = effectiveness.setdefault("repos", {}).setdefault(str(selected_repo), {})
+        update_effectiveness_stats(
+            repo_record,
+            task_type,
+            considered=True,
+            applied=bool(run.get("patterns_applied")),
+            successful=bool(run.get("correctness_pass")),
+            overapplied=bool(not run.get("correctness_pass") and run.get("patterns_applied")) or bool((coverage.get("is_domain_repo") and not coverage.get("domain_coverage_ok"))),
+            score_delta=score_delta,
+        )
+        if coverage.get("is_domain_repo") and not coverage.get("domain_coverage_ok"):
+            repo_record["times_domain_coverage_failed"] = int(repo_record.get("times_domain_coverage_failed", 0) or 0) + 1
+        for family in run.get("patterns_considered", []):
+            family_record = effectiveness.setdefault("families", {}).setdefault(str(family), {})
+            update_effectiveness_stats(family_record, task_type, considered=True)
+        applied_families = set((run.get("selection") or {}).get("coverage", {}).get("applied_families", []) or run.get("patterns_applied", []))
+        overapplied_families = set(run.get("patterns_applied", [])) if not run.get("correctness_pass") else set()
+        for family in applied_families:
+            family_record = effectiveness.setdefault("families", {}).setdefault(str(family), {})
+            update_effectiveness_stats(
+                family_record,
+                task_type,
+                applied=True,
+                successful=bool(run.get("correctness_pass")),
+                overapplied=family in overapplied_families,
+                score_delta=score_delta,
+            )
+        task_record = effectiveness.setdefault("task_types", {}).setdefault(task_type, {})
+        update_effectiveness_stats(
+            task_record,
+            task_type,
+            considered=True,
+            applied=bool(run.get("patterns_applied")),
+            successful=bool(run.get("correctness_pass")),
+            overapplied=bool(not run.get("correctness_pass") and run.get("patterns_applied")),
+            score_delta=score_delta,
+        )
+    effectiveness["updated_at"] = int(time.time())
+    save_pattern_effectiveness(repo_root, effectiveness)
+
+
+def record_pattern_family_success(repo: Path, learned_runs: list[dict]) -> None:
+    memory = load_script_pattern_memory(repo)
+    updated = False
+    for pattern in memory.get("patterns", []):
+        if not isinstance(pattern, dict):
+            continue
+        family = pattern.get("family", pattern.get("pattern_type", ""))
+        successes = 0
+        for run in learned_runs:
+            if run.get("correctness_pass") and family in run.get("patterns_applied", []):
+                successes += 1
+        if successes:
+            pattern["success_count"] = int(pattern.get("success_count", 0) or 0) + successes
+            updated = True
+    if updated:
+        save_script_pattern_memory(repo, memory)
+
+
+def run_pattern_learning_eval(repo: Path, tasks_path: str | None, pattern_repo: Path | None = None) -> dict:
+    tasks, resolved_tasks_path = load_pattern_eval_tasks(repo, tasks_path)
+    selected_pattern_repo = pattern_repo or repo
+    memory = load_script_pattern_memory(selected_pattern_repo)
+    effectiveness = load_pattern_effectiveness(selected_pattern_repo)
+    baseline_runs: list[dict] = []
+    learned_runs: list[dict] = []
+    for task in tasks:
+        baseline_runs.append(run_pattern_eval_mode(repo, task, memory, use_learned_patterns=False))
+        learned_runs.append(run_pattern_eval_mode(repo, task, memory, use_learned_patterns=True, pattern_repo_selection={"selected": "default", "path": selected_pattern_repo, "reason": "eval pattern repo", "confidence": "medium", "tags": []}, pattern_effectiveness=effectiveness, config={}))
+    record_pattern_family_success(selected_pattern_repo, learned_runs)
+    record_pattern_effectiveness(selected_pattern_repo, learned_runs, baseline_runs)
+    summary = summarize_pattern_eval_comparison(baseline_runs, learned_runs)
+    result = {
+        "tasks_path": str(resolved_tasks_path),
+        "task_count": len(tasks),
+        "baseline_runs": baseline_runs,
+        "learned_runs": learned_runs,
+        "summary": summary,
+        "ran_at": int(time.time()),
+    }
+    append_pattern_eval_history(repo, result)
+    return result
+
+
+def print_pattern_eval_report(result: dict) -> None:
+    print("=== PATTERN LEARNING EVAL ===")
+    print(f"tasks_path: {result.get('tasks_path', '')}")
+    print(f"task_count: {result.get('task_count', 0)}")
+    for label, runs in [("baseline", result.get("baseline_runs", [])), ("learned", result.get("learned_runs", []))]:
+        print(f"\n--- {label.upper()} ---")
+        for record in runs:
+            print(f"task_id: {record.get('task_id', '')}")
+            print(f"task_type: {record.get('task_type', '')}")
+            print(f"patterns considered: {record.get('patterns_considered', [])}")
+            print(f"patterns rejected: {record.get('patterns_rejected', [])}")
+            print(f"patterns applied: {record.get('patterns_applied', [])}")
+            print(f"validation command chosen: {record.get('validation_command', '')}")
+            print(f"validation success: {record.get('validation_success')}")
+            print(f"correctness_pass: {record.get('correctness_pass')}")
+            print(f"correctness_reason: {record.get('correctness_reason', '')}")
+            print(f"files changed: {record.get('files_changed', [])}")
+            print(f"final outcome: {record.get('final_outcome', '')}")
+            print(f"style match: {record.get('style_match_summary', '')}")
+            if label == "learned":
+                print(format_script_pattern_transparency(record.get("selection", {})))
+            print(f"score: {record.get('score', {}).get('total', 0)}")
+    print("\n=== PATTERN EVAL SUMMARY ===")
+    summary = result.get("summary", {})
+    print(f"baseline_pass_rate: {summary.get('baseline_pass_rate', 0)}")
+    print(f"learned_pass_rate: {summary.get('learned_pass_rate', 0)}")
+    print(f"baseline_correctness_rate: {summary.get('baseline_correctness_rate', 0)}")
+    print(f"learned_correctness_rate: {summary.get('learned_correctness_rate', 0)}")
+    print(f"baseline_average_score: {summary.get('baseline_average_score', 0)}")
+    print(f"learned_average_score: {summary.get('learned_average_score', 0)}")
+    print(f"tasks_improved: {summary.get('tasks_improved', [])}")
+    print(f"tasks_regressed: {summary.get('tasks_regressed', [])}")
+    print(f"over_application_cases: {summary.get('over_application_cases', [])}")
+    print(f"tasks_changed_outcome: {summary.get('tasks_changed_outcome', [])}")
 
 
 def detect_blocked_state(
@@ -2718,6 +4757,11 @@ def make_publish_result() -> dict:
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
         "ignored_changes": [],
+        "docs_checked_at_publish": False,
+        "docs_required": False,
+        "docs_updated": False,
+        "docs_refresh_mode": "none",
+        "docs_targets": [],
         "previous_publish_branch": "",
         "previous_pr_url": "",
         "previous_commit": "",
@@ -3283,11 +5327,27 @@ def publish_validated_run(
     result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
     result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
     result["ignored_changes"] = publish_changes.get("ignored_changes") or []
-    result["meaningful_content_fingerprint"] = compute_meaningful_content_fingerprint(repo, publish_changes)
     if not result["meaningful_changes_detected"]:
         result["control_path"] = "noop"
         result["summary_status"] = "no meaningful changes to publish"
         return finish("noop", "no meaningful changes to publish")
+    docs_stage = run_prepublish_docs_stage(repo, test_cmd, result["meaningful_paths"], publish_current_mode=publish_current_mode)
+    result["docs_checked_at_publish"] = bool(docs_stage.get("docs_checked_at_publish"))
+    result["docs_required"] = bool(docs_stage.get("docs_required"))
+    result["docs_updated"] = bool(docs_stage.get("docs_updated"))
+    result["docs_refresh_mode"] = str(docs_stage.get("docs_refresh_mode") or "none")
+    result["docs_targets"] = list(docs_stage.get("docs_targets") or [])
+    if docs_stage.get("blocked"):
+        result["control_path"] = "blocked_docs"
+        return finish("blocked", str(docs_stage.get("reason") or "docs update blocked publish"))
+    if docs_stage.get("docs_updated"):
+        publish_changes = classify_publishable_changes(repo)
+        result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
+        result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
+        result["ignored_changes"] = publish_changes.get("ignored_changes") or []
+        if not publish_current_mode:
+            changed_paths = sorted(set(changed_paths) | set(docs_stage.get("updated_targets") or []))
+    result["meaningful_content_fingerprint"] = compute_meaningful_content_fingerprint(repo, publish_changes)
     result["triggered"] = True
 
     branch_is_default = current_branch in {"main", "master", default_branch}
@@ -3614,6 +5674,11 @@ def run_post_success_publish(
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
         "ignored_changes": [],
+        "docs_checked_at_publish": False,
+        "docs_required": False,
+        "docs_updated": False,
+        "docs_refresh_mode": "none",
+        "docs_targets": [],
         "previous_publish_branch": "",
         "previous_pr_url": "",
         "previous_commit": "",
@@ -3677,6 +5742,11 @@ def run_post_success_publish(
     summary["meaningful_changes_detected"] = bool(publish_result.get("meaningful_changes_detected"))
     summary["meaningful_paths"] = publish_result.get("meaningful_paths") or []
     summary["ignored_changes"] = publish_result.get("ignored_changes") or []
+    summary["docs_checked_at_publish"] = bool(publish_result.get("docs_checked_at_publish"))
+    summary["docs_required"] = bool(publish_result.get("docs_required"))
+    summary["docs_updated"] = bool(publish_result.get("docs_updated"))
+    summary["docs_refresh_mode"] = str(publish_result.get("docs_refresh_mode") or "none")
+    summary["docs_targets"] = publish_result.get("docs_targets") or []
     summary["previous_publish_branch"] = publish_result.get("previous_publish_branch") or ""
     summary["previous_pr_url"] = publish_result.get("previous_pr_url") or ""
     summary["previous_commit"] = publish_result.get("previous_commit") or ""
@@ -3690,6 +5760,11 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"publish_requested: {format_bool(summary.get('publish_requested'))}")
     print(f"publish_triggered: {format_bool(summary.get('publish_triggered'))}")
     print(f"publish_mode: {summary.get('publish_mode') or 'validated-run'}")
+    print(f"docs_checked_at_publish: {format_bool(summary.get('docs_checked_at_publish'))}")
+    print(f"docs_required: {format_bool(summary.get('docs_required'))}")
+    print(f"docs_updated: {format_bool(summary.get('docs_updated'))}")
+    print(f"docs_refresh_mode: {summary.get('docs_refresh_mode') or 'none'}")
+    print(f"docs_targets: {summary.get('docs_targets') or []}")
     print(f"meaningful_changes_detected: {format_bool(summary.get('meaningful_changes_detected'))}")
     print(f"ignored_changes: {summary.get('ignored_changes') or []}")
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
@@ -6140,6 +8215,23 @@ def main():
     parser.add_argument("--publish-merge", action="store_true", help="After publish, auto-merge only when the PR is a safe self-owned fork PR.")
     parser.add_argument("--publish-merge-local-main", action="store_true", help="After a successful safe auto-merge, sync local main with origin/main.")
     parser.add_argument("--publish-message", help="Commit message to use for publish mode.")
+    parser.add_argument("--learn-from", nargs="+", help="Learn reusable script patterns from trusted example scripts.")
+    parser.add_argument("--pattern-repo", help="Pattern repo override: auto, none, a configured repo name, or an explicit path.")
+    parser.add_argument("--reset-pattern-repo", action="store_true", help="Delete and recreate the private training repo before continuing.")
+    parser.add_argument("--import-pattern-files", nargs="+", help="Import external scripts into the private pattern repository and learn from them.")
+    parser.add_argument("--add-to-training", action="store_true", help="When used with --script, sanitize and import that script into the training repo before continuing.")
+    parser.add_argument("--pattern-trust", choices=sorted(PATTERN_TRUST_LEVELS), default="trusted", help="Trust level for imported or directly learned pattern scripts.")
+    parser.add_argument("--pattern-tags", help="Comma-separated tags to attach to imported pattern sources.")
+    parser.add_argument("--pattern-note", help="Optional note recorded with imported pattern sources.")
+    parser.add_argument("--list-patterns", action="store_true", help="List learned patterns from the private pattern repository.")
+    parser.add_argument("--list-pattern-sources", action="store_true", help="List source files tracked in the private pattern repository.")
+    parser.add_argument("--relearn-patterns", action="store_true", help="Rebuild pattern memory by scanning the private pattern repository.")
+    parser.add_argument("--forget-pattern", help="Remove a learned pattern by id from the private pattern memory.")
+    parser.add_argument("--new-script", help="Generate a new script using learned conventions when relevant patterns exist.")
+    parser.add_argument("--new-script-purpose", help="Short purpose statement for --new-script generation.")
+    parser.add_argument("--compare-pattern-baseline", action="store_true", help="For learned runs, compare the selected pattern-repo plan against a no-pattern baseline.")
+    parser.add_argument("--eval-pattern-learning", action="store_true", help="Run baseline vs learned evals for the script-pattern memory.")
+    parser.add_argument("--pattern-eval-tasks", help="Optional path to a pattern-learning eval task JSON file.")
     parser.add_argument("--http-proxy", help="HTTP proxy for subprocess-driven tasks.")
     parser.add_argument("--https-proxy", help="HTTPS proxy for subprocess-driven tasks.")
     parser.add_argument("--api-budget-run", type=int, help="Optional likely API-failure budget for the full run.")
@@ -6148,10 +8240,28 @@ def main():
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--max-file-chars", type=int)
     args = parser.parse_args()
+    raw_argv = sys.argv[1:]
+    if not args.config:
+        args.config = cli_option_value(raw_argv, "--config")
+    if not args.pattern_repo:
+        args.pattern_repo = cli_option_value(raw_argv, "--pattern-repo")
+
+    pattern_special_mode = bool(
+        args.learn_from
+        or args.new_script
+        or args.eval_pattern_learning
+        or args.import_pattern_files
+        or args.reset_pattern_repo
+        or args.list_patterns
+        or args.list_pattern_sources
+        or args.relearn_patterns
+        or args.forget_pattern
+        or (args.script and args.add_to_training)
+    )
 
     repo, args.test_cmd, args.max_steps, args.max_file_chars, resolved_mode, mode_source, config_path, recent_state_path, safety_settings, target = resolve_run_settings(
         args,
-        require_test_cmd=not args.publish_only,
+        require_test_cmd=not args.publish_only and not pattern_special_mode,
     )
     if not target and not repo.exists():
         print(f"Missing repo path: {repo}", file=sys.stderr)
@@ -6161,8 +8271,46 @@ def main():
     configure_subprocess_safety(safety_settings)
     config_values, _ = load_agent_config(args.config, Path.cwd())
     configure_publish_ignore_paths(config_values)
+    pattern_repo_management_mode = bool(
+        args.learn_from
+        or args.import_pattern_files
+        or args.reset_pattern_repo
+        or args.list_patterns
+        or args.list_pattern_sources
+        or args.relearn_patterns
+        or args.forget_pattern
+        or (args.script and args.add_to_training)
+    )
+    selection_task_type, selection_task_text, selection_script_path = infer_pattern_repo_selection_context(args, resolved_mode)
+    pattern_repo_selection = select_pattern_repo(
+        config_values,
+        args.pattern_repo,
+        selection_task_type,
+        selection_task_text,
+        script_path=selection_script_path,
+        require_repo=pattern_repo_management_mode,
+    )
+    pattern_repo = pattern_repo_selection.get("path")
+    created_pattern_repo = False
+    reset_existing = False
+    if pattern_repo_management_mode:
+        if pattern_repo is None:
+            print("Pattern repo management requires a concrete pattern repo.", file=sys.stderr)
+            raise SystemExit(2)
+        if args.reset_pattern_repo:
+            pattern_repo, reset_existing = reset_pattern_repo(pattern_repo)
+        else:
+            pattern_repo, created_pattern_repo = ensure_pattern_repo_status(pattern_repo)
     publish_requested = resolve_publish_requested(args)
-    if args.publish_only:
+    if args.learn_from:
+        startup_signal("Mode: learn trusted script patterns")
+    elif args.import_pattern_files or args.list_patterns or args.list_pattern_sources or args.relearn_patterns or args.forget_pattern:
+        startup_signal("Mode: manage private pattern repository")
+    elif args.new_script:
+        startup_signal("Mode: generate new script from learned patterns")
+    elif args.eval_pattern_learning:
+        startup_signal("Mode: evaluate learned script patterns")
+    elif args.publish_only:
         startup_signal("Mode: publish current repo state")
     else:
         startup_signal("Mode: publish validated run" if publish_requested else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
@@ -6174,6 +8322,8 @@ def main():
     )
     if args.publish_only:
         startup_signal("Skipping repair loop; publish-only mode active.")
+    elif pattern_special_mode:
+        startup_signal("Skipping repair loop; pattern-learning workflow active.")
     else:
         startup_signal("Starting repair loop...")
     print(f"Execution: {'remote' if target else 'local'}")
@@ -6182,6 +8332,177 @@ def main():
     print(f"Repository: {repo}")
     if CURRENT_VALIDATION_PLAN.get("active"):
         print(format_validation_plan_summary(CURRENT_VALIDATION_PLAN))
+    print(f"selected pattern repo: {pattern_repo_selection.get('selected', 'none')}")
+    print(f"pattern repo reason: {pattern_repo_selection.get('reason', '')}")
+    print(f"pattern repo confidence: {pattern_repo_selection.get('confidence', 'low')}")
+    if pattern_special_mode:
+        print(f"Pattern repo: {pattern_repo if pattern_repo else 'none'}")
+        if args.reset_pattern_repo:
+            print("=== PATTERN REPO RESET ===")
+            print(f"pattern_repo: {pattern_repo}")
+            print(f"reset_existing: {format_bool(reset_existing)}")
+            if not (
+                args.import_pattern_files
+                or args.learn_from
+                or args.new_script
+                or args.eval_pattern_learning
+                or args.list_patterns
+                or args.list_pattern_sources
+                or args.relearn_patterns
+                or args.forget_pattern
+                or args.add_to_training
+            ):
+                return
+    if args.import_pattern_files:
+        imported = import_pattern_files(
+            pattern_repo,
+            args.import_pattern_files,
+            trust_level=args.pattern_trust,
+            tags=import_pattern_tags(args.pattern_tags),
+            note=args.pattern_note or "",
+        )
+        print("=== PATTERN IMPORT ===")
+        print(f"pattern_repo: {imported.get('pattern_repo', '')}")
+        print(f"created_repo: {format_bool(imported.get('created_repo'))}")
+        print(f"imported_count: {len(imported.get('imported_sources', []))}")
+        for source in imported.get("imported_sources", []):
+            print(
+                f"- candidate_imported={format_bool(source.get('candidate_imported'))} "
+                f"source={source.get('candidate_path', '')} promoted_path={source.get('repo_rel_path', '')} "
+                f"origin={source.get('origin_path', '')} trust={source.get('trust_level', '')} "
+                f"tags={source.get('tags', [])} sanitized={format_bool(source.get('sanitized_changed'))} "
+                f"validation_passed={format_bool(source.get('validation_status') == 'passed')} "
+                f"repaired={format_bool(source.get('repair_needed'))} "
+                f"promoted_to_training={format_bool(source.get('promoted'))}"
+            )
+        print(f"learned_pattern_count: {len(imported.get('learned_patterns', []))}")
+        print(f"learned_pattern_delta: {imported.get('learned_pattern_delta', 0)}")
+        print(f"relearn_triggered: {format_bool(imported.get('relearn_triggered'))}")
+        return
+    if args.script and args.add_to_training:
+        imported = import_pattern_files(
+            pattern_repo,
+            [args.script],
+            trust_level=args.pattern_trust,
+            tags=import_pattern_tags(args.pattern_tags),
+            note=args.pattern_note or "",
+        )
+        print("=== SCRIPT TRAINING IMPORT ===")
+        print(f"training_repo: {imported.get('pattern_repo', '')}")
+        print(f"created_repo: {format_bool(imported.get('created_repo'))}")
+        print(f"imported_count: {len(imported.get('imported_sources', []))}")
+        for source in imported.get("imported_sources", []):
+            print(
+                f"- candidate_imported={format_bool(source.get('candidate_imported'))} "
+                f"source={source.get('candidate_path', '')} promoted_path={source.get('repo_rel_path', '')} "
+                f"origin={source.get('origin_path', '')} trust={source.get('trust_level', '')} "
+                f"sanitized={format_bool(source.get('sanitized_changed'))} "
+                f"validation_passed={format_bool(source.get('validation_status') == 'passed')} "
+                f"repaired={format_bool(source.get('repair_needed'))} "
+                f"promoted_to_training={format_bool(source.get('promoted'))}"
+            )
+        print(f"learned_pattern_delta: {imported.get('learned_pattern_delta', 0)}")
+        print(f"relearn_triggered: {format_bool(imported.get('relearn_triggered'))}")
+        return
+    if args.relearn_patterns:
+        relearned = relearn_patterns_from_repo(pattern_repo)
+        print("=== PATTERN RELEARN ===")
+        print(f"pattern_repo: {relearned.get('pattern_repo', '')}")
+        print(f"learned_pattern_count: {len(relearned.get('learned_patterns', []))}")
+        return
+    if args.list_pattern_sources:
+        print("=== PATTERN SOURCES ===")
+        for source in list_pattern_sources(pattern_repo):
+            print(
+                f"- path={source.get('repo_rel_path', '')} trust={source.get('trust_level', '')} "
+                f"tags={source.get('tags', [])} origin={source.get('origin_path', '')}"
+            )
+        return
+    if args.list_patterns:
+        print("=== PATTERNS ===")
+        for pattern in list_patterns(pattern_repo):
+            print(
+                f"- id={pattern.get('id', '')} type={pattern.get('pattern_type', '')} "
+                f"trust={pattern.get('trust_level', '')} source={pattern.get('source_repo_path', '')} "
+                f"tags={pattern.get('tags', [])} confidence={pattern.get('confidence', 0)}"
+            )
+        return
+    if args.forget_pattern:
+        forgotten = forget_pattern(pattern_repo, args.forget_pattern)
+        print("=== FORGET PATTERN ===")
+        print(f"pattern_id: {forgotten.get('pattern_id', '')}")
+        print(f"removed: {forgotten.get('removed')}")
+        print(f"remaining_patterns: {forgotten.get('remaining_patterns', 0)}")
+        return
+    if args.learn_from:
+        learned = learn_from_scripts(
+            repo,
+            args.learn_from,
+            pattern_repo=pattern_repo,
+            trust_level=args.pattern_trust,
+            tags=import_pattern_tags(args.pattern_tags),
+        )
+        print("=== PATTERN LEARNING ===")
+        print(f"learned_sources: {learned.get('learned_sources', [])}")
+        print(f"learned_pattern_count: {len(learned.get('learned_patterns', []))}")
+        print(f"pattern_memory_path: {pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_MEMORY_FILE_NAME)}")
+        for pattern in learned.get("learned_patterns", [])[:12]:
+            print(
+                f"- [{pattern.get('pattern_type')}] {pattern.get('summary')} "
+                f"(source={pattern.get('source_repo_path', '')}; trust={pattern.get('trust_level', '')}; confidence={pattern.get('confidence', 0)})"
+            )
+        if not args.eval_pattern_learning and not args.new_script:
+            return
+    if args.new_script:
+        output_path = Path(args.new_script)
+        if not output_path.is_absolute():
+            output_path = (repo / output_path).resolve()
+        selection, pattern_repo_selection = resolve_pattern_selection(
+            config_values,
+            pattern_repo_selection,
+            "new-script",
+            args.new_script_purpose or output_path.stem,
+            script_path=output_path,
+        )
+        rendered = render_new_script(repo, output_path, args.new_script_purpose or output_path.stem, selection)
+        plan = build_script_validation_plan(output_path.parent, output_path)
+        chosen_plan = select_validation_stack(plan, selection)
+        validation_result = run_validation_stack(output_path.parent, chosen_plan)
+        baseline_comparison = compare_pattern_baseline(plan, selection) if args.compare_pattern_baseline else {}
+        if pattern_repo_selection.get("path"):
+            learned_record = {
+                "task_id": "live-new-script",
+                "task_type": "new-script",
+                "patterns_considered": [item.get("family", item.get("pattern_type", "")) for item in selection.get("considered", [])],
+                "patterns_applied": [item.get("family", item.get("pattern_type", "")) for item in selection.get("applied", [])],
+                "correctness_pass": bool(validation_result.get("ok")),
+                "selection": selection,
+                "score": {"total": 5 if validation_result.get("ok") else -5},
+            }
+            baseline_record = {
+                "task_id": "live-new-script",
+                "score": {"total": 0},
+            }
+            record_pattern_effectiveness(pattern_repo_selection.get("path"), [learned_record], [baseline_record])
+        print("=== NEW SCRIPT RESULT ===")
+        print(f"path: {output_path}")
+        print(format_script_pattern_transparency(selection))
+        print(f"validation_command: {chosen_plan.get('primary_command', '')}")
+        print(f"validation_success: {validation_result.get('ok')}")
+        if args.compare_pattern_baseline:
+            print("=== PATTERN BASELINE COMPARISON ===")
+            print(f"baseline_validation_command: {baseline_comparison.get('baseline_validation_command', '')}")
+            print(f"learned_validation_command: {baseline_comparison.get('learned_validation_command', '')}")
+            print(f"patterns_added_by_learning: {baseline_comparison.get('patterns_added', [])}")
+            print(f"learned_path_improved_fit: {format_bool(baseline_comparison.get('improved_fit'))}")
+        if validation_result.get("output"):
+            print(f"validation_output: {validation_result.get('output')}")
+        if not args.eval_pattern_learning:
+            return
+    if args.eval_pattern_learning:
+        eval_result = run_pattern_learning_eval(repo, args.pattern_eval_tasks, pattern_repo=pattern_repo)
+        print_pattern_eval_report(eval_result)
+        return
     if args.publish_only:
         print("Active mode: publish current repo state")
     elif publish_requested:
