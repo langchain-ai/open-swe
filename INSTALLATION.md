@@ -143,7 +143,7 @@ LangSmith sandboxes provide the isolated execution environment for each agent ru
 
 ## 5. Set up triggers
 
-Open SWE can be triggered from GitHub, Linear, and/or Slack. **Configure whichever surfaces your team uses — you don't need all of them.**
+Open SWE can be triggered from GitHub, Linear, Slack, and/or Webex. **Configure whichever surfaces your team uses — you don't need all of them.**
 
 ### GitHub
 
@@ -309,11 +309,17 @@ Open SWE can be triggered from Webex spaces when a user @mentions the bot.
 
 **Create a webhook:**
 
-Use the Webex API to register a webhook. Run this `curl` command, replacing the placeholders:
+First, generate a webhook secret and save it as `WEBEX_WEBHOOK_SECRET`:
+
+```bash
+openssl rand -hex 32
+```
+
+Then register the webhook using the Webex API. Replace `<your-ngrok-url>` with the URL from step 2, and `<your-webhook-secret>` with the secret you just generated:
 
 ```bash
 curl -X POST https://webexapis.com/v1/webhooks \
-  -H "Authorization: Bearer $WEBEX_BOT_TOKEN" \
+  -H "Authorization: Bearer YOUR_BOT_TOKEN_HERE" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "open-swe-mentions",
@@ -325,15 +331,11 @@ curl -X POST https://webexapis.com/v1/webhooks \
   }'
 ```
 
-Generate the webhook secret with:
-
-```bash
-openssl rand -hex 32
-```
-
-Save this secret as `WEBEX_WEBHOOK_SECRET`.
-
 The `mentionedPeople=me` filter ensures the bot only receives messages where it is @mentioned.
+
+**Add the bot to a Webex space:**
+
+Before you can test, add the bot to a Webex space (room) where you want to use it. In the Webex app, open the space → click the People icon → Add People → search for the bot's email address.
 
 **Credentials you'll need:**
 
@@ -352,67 +354,13 @@ WEBEX_REPO_NAME="my-repo"      # Default GitHub repo
 
 ## 6. Environment variables
 
-Create a `.env` file in the project root. Below is the full list — only fill in the sections relevant to the triggers you configured.
+Copy the provided `.env.example` to `.env` and fill in the values for the triggers you configured:
 
 ```bash
-# === LangSmith ===
-LANGSMITH_API_KEY_PROD=""              # From step 4a
-LANGCHAIN_TRACING_V2="true"
-LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
-LANGSMITH_TENANT_ID_PROD=""           
-LANGSMITH_TRACING_PROJECT_ID_PROD=""  
-LANGSMITH_URL_PROD="https://smith.langchain.com"                 
-
-# === LLM ===
-ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
-
-# === GitHub App (required) ===
-GITHUB_APP_ID=""                       # From step 3c
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-...
------END RSA PRIVATE KEY-----
-"
-GITHUB_APP_INSTALLATION_ID=""          # From step 3d
-
-# === GitHub Webhook (required) ===
-GITHUB_WEBHOOK_SECRET=""               # The secret you generated in step 3b
-
-# === GitHub OAuth via LangSmith (optional) ===
-# Without these, all operations use the GitHub App's bot token.
-# With these, each user authenticates with their own GitHub account.
-GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
-
-# === Org Allowlist (optional) ===
-# Comma-separated list of GitHub orgs the agent is allowed to operate on.
-# Leave empty to allow all orgs.
-ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
-
-# === Linear (if using Linear trigger) ===
-LINEAR_API_KEY=""                      # From step 5
-LINEAR_WEBHOOK_SECRET=""               # From step 5
-
-# === Slack (if using Slack trigger) ===
-SLACK_BOT_TOKEN=""                     # From step 5
-SLACK_BOT_USER_ID=""
-SLACK_BOT_USERNAME=""
-SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
-SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
-
-# === Webex (if using Webex trigger) ===
-WEBEX_BOT_TOKEN=""                    # From step 5
-WEBEX_BOT_EMAIL=""                    # Bot's email address
-WEBEX_WEBHOOK_SECRET=""               # From step 5
-WEBEX_REPO_OWNER=""                   # Default org for Webex-triggered tasks
-WEBEX_REPO_NAME=""                    # Default repo for Webex-triggered tasks
-
-# === Sandbox (optional) ===
-DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
-DEFAULT_SANDBOX_TEMPLATE_IMAGE=""      # Custom Docker image (default: python:3)
-
-# === Token Encryption ===
-TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
+cp .env.example .env
 ```
+
+The file is organized by section (LangSmith, LLM, GitHub App, Linear, Slack, Webex, Sandbox) with inline comments explaining where each value comes from. Only fill in the sections relevant to the triggers you set up — leave the rest empty.
 
 ## 7. Start the server
 
@@ -463,6 +411,13 @@ The server runs on `http://localhost:2024` with these endpoints:
    - An 👀 reaction on your message
    - A reply in the thread with the agent's response
 
+### Webex
+
+1. In any Webex space where the bot has been added, send a message mentioning the bot: `@open-swe what's in the repo?`
+2. You should see:
+   - A new run in your LangSmith project
+   - The agent replies in the same Webex thread with its response
+
 ## 9. Production deployment
 
 For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.github.io/langgraph/cloud/) instead of running locally:
@@ -470,7 +425,7 @@ For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.githu
 1. Push your code to a GitHub repository
 2. Connect the repo to LangGraph Cloud
 3. Set all environment variables from step 6 in the deployment config
-4. Update your webhook URLs (Linear, Slack, GitHub App) to point to your production URL (replace the ngrok URL)
+4. Update your webhook URLs (Linear, Slack, GitHub App, Webex) to point to your production URL (replace the ngrok URL). For Webex, you'll need to delete the old webhook and create a new one with the production URL using the same `curl` command from step 5.
 
 The `langgraph.json` at the project root already defines the graph entry point and HTTP app:
 
@@ -485,21 +440,15 @@ The `langgraph.json` at the project root already defines the graph entry point a
 }
 ```
 
-### Webex
-
-1. In any Webex space where the bot has been added, send a message mentioning the bot: `@open-swe what's in the repo?`
-2. You should see:
-   - A new run in your LangSmith project
-   - The agent replies in the same Webex thread with its response
-
 ## Troubleshooting
 
 ### Webhook not receiving events
 
-- Verify ngrok is running and the URL matches what's configured in GitHub/Linear/Slack
+- Verify ngrok is running and the URL matches what's configured in GitHub/Linear/Slack/Webex
 - Check the ngrok web inspector at `http://localhost:4040` for incoming requests
-- Ensure you enabled the correct event types (Comments → Create for Linear, `app_mention` for Slack, Issues + Issue comment for GitHub)
-- **Webhook secrets are required** — if `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or `SLACK_SIGNING_SECRET` is not set, all requests to that endpoint will be rejected with 401
+- Ensure you enabled the correct event types (Comments → Create for Linear, `app_mention` for Slack, Issues + Issue comment for GitHub, `messages:created` with `mentionedPeople=me` for Webex)
+- **Webhook secrets are required** — if `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, `SLACK_SIGNING_SECRET`, or `WEBEX_WEBHOOK_SECRET` is not set, all requests to that endpoint will be rejected with 401
+- **Webex webhook not firing?** — verify the webhook was created successfully by listing your webhooks: `curl -H "Authorization: Bearer $WEBEX_BOT_TOKEN" https://webexapis.com/v1/webhooks`. Confirm the `targetUrl` matches your ngrok URL and the `status` is `active`.
 
 ### GitHub authentication errors
 
@@ -519,6 +468,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 - For GitHub: ensure the comment or issue contains `@openswe` (case-insensitive), and the commenter's GitHub username is in `GITHUB_USER_EMAIL_MAP`
 - For Linear: ensure the comment contains `@openswe` (case-insensitive)
 - For Slack: ensure the bot is invited to the channel and the message is an `@mention`
+- For Webex: ensure the bot has been added to the space and the message is an `@mention`. Verify `WEBEX_BOT_EMAIL` matches the bot's actual email address — a mismatch will cause the bot to process its own messages in a loop.
 - Check server logs for webhook processing errors
 
 ### Token encryption errors
