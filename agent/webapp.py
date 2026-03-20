@@ -361,7 +361,7 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
             if "/" in value:
                 owner, name = value.split("/", 1)
             else:
-                owner = "langchain-ai"
+                owner = default_owner
                 name = value
 
     if not owner or not name:

@@ -289,7 +289,7 @@ SLACK_REPO_OWNER="my-org"
 SLACK_REPO_NAME="my-repo"
 ```
 
-Users can override per-message with `repo:owner/name` syntax in their Slack message.
+Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to the value of `SLACK_REPO_OWNER`.
 
 ### Adding a new trigger
 
