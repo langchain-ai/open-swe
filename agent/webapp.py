@@ -56,10 +56,11 @@ from .utils.webex import (
     fetch_webex_thread_messages,
     format_webex_messages_for_prompt,
     get_webex_person,
-    post_webex_message,
     post_webex_trace_reply,
-    strip_bot_mention as strip_webex_bot_mention,
     verify_webex_signature,
+)
+from .utils.webex import (
+    strip_bot_mention as strip_webex_bot_mention,
 )
 
 logger = logging.getLogger(__name__)
@@ -1582,9 +1583,7 @@ async def process_webex_mention(  # noqa: PLR0912, PLR0915
         if thread_messages:
             thread_context = format_webex_messages_for_prompt(thread_messages)
 
-    context_section = (
-        f"## Conversation Context\n{thread_context}\n\n" if thread_context else ""
-    )
+    context_section = f"## Conversation Context\n{thread_context}\n\n" if thread_context else ""
 
     prompt = (
         "You were mentioned in Webex.\n\n"
