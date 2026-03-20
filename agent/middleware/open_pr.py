@@ -114,11 +114,22 @@ async def open_pr_if_needed(
 
         logger.info("Changes detected, preparing PR for thread %s", thread_id)
 
+        metadata = config.get("metadata", {})
+        branch_name = metadata.get("branch_name")
         current_branch = await asyncio.to_thread(git_current_branch, sandbox_backend, repo_dir)
-        target_branch = f"open-swe/{thread_id}"
+        target_branch = branch_name if branch_name else f"open-swe/{thread_id}"
 
         if current_branch != target_branch:
-            await asyncio.to_thread(git_checkout_branch, sandbox_backend, repo_dir, target_branch)
+            if branch_name:
+                # Existing branch — plain checkout, do not create or reset
+                await asyncio.to_thread(
+                    sandbox_backend.execute,
+                    f"cd {repo_dir} && git checkout {target_branch}",
+                )
+            else:
+                await asyncio.to_thread(
+                    git_checkout_branch, sandbox_backend, repo_dir, target_branch
+                )
 
         await asyncio.to_thread(
             git_config_user,

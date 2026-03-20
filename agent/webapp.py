@@ -1253,8 +1253,29 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
 
     thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
     if not thread_id:
-        logger.warning("Could not extract thread_id from branch '%s', skipping", branch_name)
-        return
+        if not pr_number:
+            logger.warning(
+                "Could not determine thread_id for branch '%s' (no pr_number), skipping",
+                branch_name,
+            )
+            return
+        owner = repo_config.get("owner", "")
+        name = repo_config.get("name", "")
+        stable_key = f"{owner}/{name}/pr/{pr_number}"
+        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        try:
+            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+        except Exception as exc:  # noqa: BLE001
+            if _is_not_found_error(exc):
+                await langgraph_client.threads.create(
+                    thread_id=thread_id,
+                    if_exists="do_nothing",
+                    metadata={"branch_name": branch_name},
+                )
+            else:
+                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
