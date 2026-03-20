@@ -5,7 +5,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import uuid
 from typing import Any
 
@@ -39,6 +38,7 @@ from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     add_slack_reaction,
     fetch_slack_thread_messages,
@@ -61,8 +61,10 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
+DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
+SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -96,20 +98,11 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
-    """
-    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+    """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
 
-    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
-
-    Args:
-        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
-        project_name: Name of the project (e.g., "deepagents")
-
-    Returns:
-        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
-    """
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return {"owner": "langchain-ai", "name": "langchainplus"}
+        return fallback
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
@@ -124,7 +117,7 @@ def get_repo_config_from_team_mapping(
     if "default" in config:
         return config["default"]
 
-    return {"owner": "langchain-ai", "name": "langchainplus"}
+    return fallback
 
 
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
@@ -346,36 +339,19 @@ async def check_if_using_repo_msg_sent(
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
-    default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    default_name = SLACK_REPO_NAME.strip() or "langchainplus"
+    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
-    owner: str | None = None
-    name: str | None = None
+    repo_config = extract_repo_from_text(message, default_owner=default_owner)
 
-    if "repo:" in message or "repo " in message:
-        match = re.search(r"repo[: ]([a-zA-Z0-9_.\-/]+)", message)
-        if match:
-            value = match.group(1).rstrip("/")
-            if "/" in value:
-                owner, name = value.split("/", 1)
-            else:
-                owner = default_owner
-                name = value
-
-    if not owner or not name:
-        github_match = re.search(r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
-        if github_match:
-            owner, name = github_match.group(1).split("/", 1)
-
-    if not owner or not name:
+    if not repo_config:
         try:
             thread = await langgraph_client.threads.get(thread_id)
             thread_repo_config = _extract_repo_config_from_thread(thread)
             if thread_repo_config:
-                owner = thread_repo_config["owner"]
-                name = thread_repo_config["name"]
+                repo_config = thread_repo_config
         except Exception as exc:  # noqa: BLE001
             if not _is_not_found_error(exc):
                 logger.exception(
@@ -383,15 +359,14 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
                     thread_id,
                 )
 
-    if not owner or not name:
-        owner = default_owner
-        name = default_name
+    if not repo_config:
+        repo_config = {"owner": default_owner, "name": default_name}
 
-    using_repo_str = f"Using repository: `{owner}/{name}`"
+    using_repo_str = f"Using repository: `{repo_config['owner']}/{repo_config['name']}`"
     if not await check_if_using_repo_msg_sent(channel_id, thread_ts, using_repo_str):
         await post_slack_thread_reply(channel_id, thread_ts, using_repo_str)
 
-    return {"owner": owner, "name": name}
+    return repo_config
 
 
 async def is_thread_active(thread_id: str) -> bool:
@@ -931,24 +906,33 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    team = full_issue.get("team", {})
-    team_name = team.get("name", "") if team else ""
-    project = full_issue.get("project")
-    project_name = project.get("name", "") if project else ""
+    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
 
-    team_identifier = team_name.strip() if team_name else ""
-    project_key = project_name.strip() if project_name else ""
+    if repo_config:
+        logger.debug(
+            "Using repo from comment body: %s/%s",
+            repo_config["owner"],
+            repo_config["name"],
+        )
+    else:
+        team = full_issue.get("team", {})
+        team_name = team.get("name", "") if team else ""
+        project = full_issue.get("project")
+        project_name = project.get("name", "") if project else ""
 
-    repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+        team_identifier = team_name.strip() if team_name else ""
+        project_key = project_name.strip() if project_name else ""
 
-    logger.debug(
-        "Team/project lookup result",
-        extra={
-            "team_name": team_identifier,
-            "project_name": project_key,
-            "repo_config": repo_config,
-        },
-    )
+        repo_config = get_repo_config_from_team_mapping(team_identifier, project_key)
+
+        logger.debug(
+            "Team/project lookup result",
+            extra={
+                "team_name": team_identifier,
+                "project_name": project_key,
+                "repo_config": repo_config,
+            },
+        )
 
     if not _is_repo_org_allowed(repo_config):
         logger.warning(
