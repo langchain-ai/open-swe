@@ -180,6 +180,23 @@ Reuse recent state:
 python local_fix_agent.py --continue
 python local_fix_agent.py --last
 python local_fix_agent.py --from-last-failure
+python local_fix_agent.py --publish
+python local_fix_agent.py --last --publish
+python local_fix_agent.py --publish-only
+```
+
+Headless publish of the last validated run:
+
+```bash
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+./scripts/fixpublish.sh
+```
+
+Headless publish of the current repo state:
+
+```bash
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
+./scripts/publishcurrent.sh
 ```
 
 ### Mental Model
@@ -199,6 +216,8 @@ The tool reports blocked conditions directly instead of continuing with low-sign
 - **[Operator Guide](./docs/README.md)** — overview, features, CLI usage, artifacts, architecture, and extension points
 - **[Remote Mode](./docs/REMOTE_MODE.md)** — SSH transport, multiplexing, safety model, and remote failure handling
 - **[Runbook](./docs/RUNBOOK.md)** — day-to-day workflow and review guidance
+- **[`scripts/fixpublish.sh`](./scripts/fixpublish.sh)** — publish the last validated agent run
+- **[`scripts/publishcurrent.sh`](./scripts/publishcurrent.sh)** — publish the current branch/repo state
 - **[Troubleshooting](./docs/TROUBLESHOOTING.md)** — blocked states, SSH issues, validation rejection, and stagnation
 
 ## License

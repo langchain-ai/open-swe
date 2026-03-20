@@ -163,6 +163,37 @@ python local_fix_agent.py --from-last-failure
 python local_fix_agent.py --continue
 ```
 
+### Headless daily publish
+
+Publish the last validated agent run:
+
+```bash
+python local_fix_agent.py --publish
+python local_fix_agent.py --last --publish
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+./scripts/fixpublish.sh
+```
+
+Publish the current repo or branch state directly:
+
+```bash
+python local_fix_agent.py --publish-only
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
+./scripts/publishcurrent.sh
+```
+
+`fixpublish.sh`:
+
+- changes into the repo root
+- sets `AI_PUBLISH_ALLOW_FORK=1`
+- publishes the last validated agent run
+
+`publishcurrent.sh`:
+
+- changes into the repo root
+- sets `AI_PUBLISH_ALLOW_FORK=1`
+- publishes the current branch/repo state without requiring a recent failing test command
+
 ### Resolve settings only
 
 ```bash
