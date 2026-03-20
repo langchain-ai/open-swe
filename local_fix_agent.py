@@ -28,6 +28,7 @@ METRICS_FILE_NAME = ".fix_agent_metrics.json"
 CONFIG_FILE_NAME = ".fix_agent_config.json"
 RECENT_STATE_FILE_NAME = ".fix_agent_recent.json"
 PUBLISH_STATE_FILE_NAME = ".ai_publish_state.json"
+DOCS_STATE_FILE_NAME = ".fix_agent_docs_state.json"
 RUN_ARTIFACTS_DIR_NAME = ".fix_agent_runs"
 RUN_MODES = {
     "quick": {"max_steps": 20, "max_file_chars": 12000},
@@ -50,6 +51,13 @@ FAILURE_RANK = {
     FAILURE_SYNTAX_ERROR: 2,
     FAILURE_ASSERTION_FAILURE: 3,
 }
+PRIMARY_OPERATOR_DOC_FILES = [
+    "README.md",
+    "docs/README.md",
+    "docs/RUNBOOK.md",
+    "docs/REMOTE_MODE.md",
+    "docs/TROUBLESHOOTING.md",
+]
 
 client = OpenAI(
     base_url="http://127.0.0.1:11434/v1",
@@ -1190,9 +1198,18 @@ def save_recent_state(state: dict) -> None:
         return
 
 
-def update_recent_state(repo: Path, test_cmd: str, mode: str, success: bool, artifact_dir: Path | None = None, target: str = "") -> Path:
+def update_recent_state(
+    repo: Path,
+    test_cmd: str,
+    mode: str,
+    success: bool,
+    artifact_dir: Path | None = None,
+    target: str = "",
+    docs_info: dict | None = None,
+) -> Path:
     state = load_recent_state()
     runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
+    docs_info = docs_info or {}
     runs.append(
         {
             "repo": str(repo),
@@ -1201,12 +1218,648 @@ def update_recent_state(repo: Path, test_cmd: str, mode: str, success: bool, art
             "success": success,
             "artifact_dir": str(artifact_dir) if artifact_dir else "",
             "target": target,
+            "docs_required": bool(docs_info.get("docs_required")),
+            "docs_targets": list(docs_info.get("docs_targets") or []),
+            "docs_reason": docs_info.get("docs_reason") or "",
+            "docs_refresh_mode": docs_info.get("docs_refresh_mode") or "none",
             "ts": int(time.time()),
         }
     )
     state["recent_runs"] = runs[-10:]
     save_recent_state(state)
     return script_state_path(RECENT_STATE_FILE_NAME)
+
+
+def load_docs_state(repo: Path) -> dict:
+    path = state_storage_path(repo, DOCS_STATE_FILE_NAME)
+    return load_json_file(
+        path,
+        {
+            "last_refresh_mode": "",
+            "last_targets": [],
+            "last_reason": "",
+            "ts": 0,
+        },
+    )
+
+
+def save_docs_state(repo: Path, state: dict) -> None:
+    path = state_storage_path(repo, DOCS_STATE_FILE_NAME)
+    try:
+        path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def operator_doc_paths(repo: Path, targets: list[str] | None = None) -> list[Path]:
+    names = targets or PRIMARY_OPERATOR_DOC_FILES
+    return [repo / name for name in names]
+
+
+def read_operator_docs(repo: Path, targets: list[str] | None = None) -> dict[str, str]:
+    docs: dict[str, str] = {}
+    for path in operator_doc_paths(repo, targets):
+        rel = str(path.relative_to(repo))
+        try:
+            docs[rel] = path.read_text()
+        except OSError:
+            docs[rel] = ""
+    return docs
+
+
+def operator_docs_corpus(repo: Path, targets: list[str] | None = None) -> str:
+    docs = read_operator_docs(repo, targets)
+    return "\n".join(docs.values())
+
+
+def current_wrapper_scripts(repo: Path) -> list[str]:
+    scripts_dir = repo / "scripts"
+    if not scripts_dir.exists():
+        return []
+    return sorted(path.name for path in scripts_dir.glob("*.sh") if path.is_file())
+
+
+def current_cli_flags() -> list[str]:
+    try:
+        source = Path(__file__).resolve().read_text()
+    except OSError:
+        return []
+    flags = re.findall(r'parser\.add_argument\("(?P<flag>--[^"]+)"', source)
+    return sorted(dict.fromkeys(flags))
+
+
+def current_control_paths() -> list[str]:
+    try:
+        source = Path(__file__).resolve().read_text()
+    except OSError:
+        return []
+    paths = re.findall(r'result\["control_path"\]\s*=\s*"([^"]+)"', source)
+    return sorted(dict.fromkeys(paths))
+
+
+def operator_diff_text(repo: Path, changed_paths: list[str]) -> str:
+    if not changed_paths:
+        return ""
+    command = ["git", "diff", "--", *changed_paths]
+    code, output = run_subprocess(command, repo)
+    return output if code == 0 else ""
+
+
+def extract_operator_doc_change_categories(diff_text: str, changed_paths: list[str]) -> list[str]:
+    categories: set[str] = set()
+    changed_set = set(changed_paths)
+    lowered = diff_text.lower()
+
+    if any(path.startswith("scripts/") for path in changed_set):
+        categories.add("wrappers")
+    if "local_fix_agent.py" in changed_set:
+        if re.search(r"parser\.add_argument|help=", diff_text):
+            categories.add("cli")
+        if "RUN_MODES" in diff_text or re.search(r"--mode|Mode:", diff_text):
+            categories.add("run_modes")
+        if re.search(r"publish_|--publish|PUBLISH SUMMARY|pr_merge|recommended_publish", diff_text):
+            categories.add("publish")
+        if re.search(r'control_path|blocked|BLOCKED:|next_action|summary_status', diff_text, re.I):
+            categories.add("blocked_state")
+        if re.search(r"remote|ssh|controlpath|REMOTE_EXECUTION_STATE|CURRENT_REMOTE_", diff_text, re.I):
+            categories.add("remote")
+        if re.search(r"write_run_artifacts|format_run_artifact_summary|build_action_summary|update_recent_state|summarize_run_metrics", diff_text):
+            categories.add("workflow")
+    if any(path in PRIMARY_OPERATOR_DOC_FILES for path in changed_set):
+        categories.add("workflow")
+    if "scripts/" in lowered:
+        categories.add("wrappers")
+    return sorted(categories)
+
+
+def detect_stale_doc_signals(repo: Path) -> list[str]:
+    docs_text = operator_docs_corpus(repo)
+    if not docs_text.strip():
+        return ["operator docs missing or unreadable"]
+
+    signals: list[str] = []
+    missing_wrappers = [name for name in current_wrapper_scripts(repo) if name not in docs_text]
+    if missing_wrappers:
+        signals.append(f"wrapper scripts undocumented: {', '.join(missing_wrappers)}")
+
+    missing_flags = [flag for flag in current_cli_flags() if flag not in docs_text]
+    if missing_flags:
+        signals.append(f"CLI flags undocumented: {', '.join(missing_flags[:6])}")
+
+    missing_modes = [name for name in RUN_MODES if re.search(rf"\b{name}\b", docs_text) is None]
+    if missing_modes:
+        signals.append(f"run modes undocumented: {', '.join(missing_modes)}")
+
+    missing_control_paths = [name for name in current_control_paths() if name not in docs_text]
+    if missing_control_paths:
+        signals.append(f"control paths undocumented: {', '.join(missing_control_paths[:6])}")
+
+    publish_examples = [
+        "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr",
+        "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr",
+    ]
+    missing_examples = [cmd for cmd in publish_examples if cmd not in docs_text]
+    if missing_examples:
+        signals.append("publish examples do not match current commands")
+
+    return signals
+
+
+def choose_docs_targets(categories: list[str], stale_signals: list[str], refresh_mode: str) -> list[str]:
+    if refresh_mode == "rewrite":
+        return PRIMARY_OPERATOR_DOC_FILES[:]
+
+    targets: set[str] = set()
+    if stale_signals:
+        targets.update(["README.md", "docs/README.md", "docs/RUNBOOK.md"])
+    if any(name in categories for name in ["cli", "run_modes", "wrappers", "workflow"]):
+        targets.update(["README.md", "docs/README.md", "docs/RUNBOOK.md"])
+    if any(name in categories for name in ["publish", "blocked_state"]):
+        targets.update(["README.md", "docs/README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"])
+    if "remote" in categories:
+        targets.update(["README.md", "docs/README.md", "docs/REMOTE_MODE.md", "docs/TROUBLESHOOTING.md"])
+    return [name for name in PRIMARY_OPERATOR_DOC_FILES if name in targets]
+
+
+def choose_docs_refresh_mode(repo: Path, categories: list[str], stale_signals: list[str]) -> str:
+    if not categories and not stale_signals:
+        return "none"
+
+    docs_state = load_docs_state(repo)
+    if not docs_state.get("last_refresh_mode"):
+        return "rewrite"
+    if len(categories) >= 2:
+        return "rewrite"
+    if any(name in categories for name in ["publish", "remote", "blocked_state", "run_modes", "wrappers"]):
+        return "rewrite"
+    if len(stale_signals) >= 2:
+        return "rewrite"
+    return "patch"
+
+
+def assess_docs_impact(repo: Path, changed_paths: list[str]) -> dict:
+    normalized_paths = sorted(dict.fromkeys(path for path in changed_paths if path))
+    diff_text = operator_diff_text(repo, normalized_paths)
+    categories = extract_operator_doc_change_categories(diff_text, normalized_paths)
+    stale_signals = detect_stale_doc_signals(repo)
+    docs_required = bool(categories or stale_signals)
+    refresh_mode = choose_docs_refresh_mode(repo, categories, stale_signals) if docs_required else "none"
+    targets = choose_docs_targets(categories, stale_signals, refresh_mode) if docs_required else []
+
+    reason_parts: list[str] = []
+    if categories:
+        reason_parts.append("operator workflow changed in: " + ", ".join(categories))
+    if stale_signals:
+        reason_parts.append(stale_signals[0])
+
+    return {
+        "docs_required": docs_required,
+        "docs_targets": targets,
+        "docs_reason": "; ".join(reason_parts) if reason_parts else "",
+        "docs_refresh_mode": refresh_mode,
+        "docs_categories": categories,
+        "docs_stale_signals": stale_signals,
+    }
+
+
+def render_operator_docs() -> dict[str, str]:
+    return {
+        "README.md": """# Open SWE Operator Docs
+
+This repository currently centers on `local_fix_agent.py`: a guarded repair CLI for local or SSH-backed repositories. The operator docs below describe the tool as it behaves today.
+
+## Start Here
+
+- Local repair: `fixit pytest tests/test_x.py -q`
+- Remote repair: `fixit --target edge-01 --repo /srv/app "pytest -q"`
+- Reuse recent state: `python local_fix_agent.py --last`
+- Publish validated run: `AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr`
+- Publish current repo state: `AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr`
+- Safe self-fork merge: add `--publish-merge`
+- Sync local main after merge: add `--publish-merge-local-main`
+
+## Operator Docs
+
+- [Operator Guide](./docs/README.md)
+- [Runbook](./docs/RUNBOOK.md)
+- [Remote Mode](./docs/REMOTE_MODE.md)
+- [Troubleshooting](./docs/TROUBLESHOOTING.md)
+- [Wrapper: scripts/fixpublish.sh](./scripts/fixpublish.sh)
+- [Wrapper: scripts/publishcurrent.sh](./scripts/publishcurrent.sh)
+
+## Current Workflow Summary
+
+- The repair loop reasons locally, edits through guarded tools, reruns validation, and only commits after extra checks pass.
+- Remote mode keeps reasoning local and executes shell/file/git operations over one SSH session.
+- Publish validated-run mode and publish-current mode are separate workflows.
+- Publish summaries report target resolution, control path, PR status, merge status, and next actions.
+- Blocked states are reported directly with explicit evidence and operator actions.
+""",
+        "docs/README.md": """# Operator Guide
+
+`local_fix_agent.py` is a repair-focused CLI. It takes a reproducible command, gathers targeted context, edits conservatively, reruns validation, and reports either a successful fix or an explicit blocked state.
+
+## Core Modes
+
+- Normal repair: run the agent against a failing command.
+- `--publish`: publish the last validated repair result.
+- `--publish-only`: publish the current repo state without running the repair loop.
+- `--explain-only`: show resolved settings and artifact locations without running the loop.
+
+## Quick Commands
+
+```bash
+fixit pytest tests/test_x.py -q
+fixit --dry-run pytest tests/test_x.py -q
+fixit --target edge-01 --repo /srv/app "pytest -q"
+python local_fix_agent.py --last
+python local_fix_agent.py --continue
+python local_fix_agent.py --from-last-failure
+python local_fix_agent.py --reuse-last-test --repo /path/to/repo
+python local_fix_agent.py --last --explain-only
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge --publish-merge-local-main
+./scripts/fixpublish.sh
+./scripts/publishcurrent.sh
+```
+
+## CLI Reference
+
+### Context and execution
+
+- `--repo`
+- `--target`
+- `--test-cmd`
+- positional test command support
+- `--mode`
+- `--last`
+- `--continue`
+- `--from-last-failure`
+- `--reuse-last-test`
+- `--dry-run`
+- `--explain-only`
+- `--show-diff`
+
+### Publish and docs
+
+- `--publish`
+- `--publish-only`
+- `--publish-branch`
+- `--publish-pr`
+- `--publish-merge`
+- `--publish-merge-local-main`
+- `--publish-message`
+- `--update-docs`
+
+### Advanced/operator controls
+
+- `--http-proxy`
+- `--https-proxy`
+- `--api-budget-run`
+- `--api-budget-attempt`
+- `--config`
+- `--max-steps`
+- `--max-file-chars`
+
+## Run Modes
+
+- `quick`: tighter, faster loop for narrow failures
+- `safe`: default operator mode
+- `deep`: broader diagnosis and escalation path
+- `benchmark`: comparative/stress-style runs
+
+## Wrappers
+
+- `scripts/fixpublish.sh`
+  - changes to repo root
+  - exports `AI_PUBLISH_ALLOW_FORK=1`
+  - runs `python local_fix_agent.py --last --publish --publish-pr`
+- `scripts/publishcurrent.sh`
+  - changes to repo root
+  - exports `AI_PUBLISH_ALLOW_FORK=1`
+  - runs `python local_fix_agent.py --publish-only --publish-pr`
+
+## Publish Workflows
+
+### Validated-run publish
+
+Use `--publish` after a successful repair run. The tool publishes only the validated repair change set and blocks if unrelated working tree changes would be included.
+
+### Publish-current workflow
+
+Use `--publish-only` to stage and publish the current repo state. This mode is for operator-driven publishing when you already know what should be committed.
+
+### PR and merge behavior
+
+- `--publish-pr` creates or reuses a PR with GitHub CLI.
+- `--publish-merge` creates or reuses the PR and then attempts a safe auto-merge.
+- `--publish-merge-local-main` checks out `main` and pulls `origin main` after a successful auto-merge.
+- Auto-merge is only allowed for self-owned fork PRs targeting `main`.
+- Auto-merge uses squash merge and does not delete branches.
+
+### Publish summary fields
+
+- `resolved_target`
+- `control_path`
+- `state_loaded`
+- `state_reset`
+- `reused_fork`
+- `transport_locked`
+- `state_confidence`
+- `pr_already_exists`
+- `pr_merge_attempted`
+- `pr_merge_success`
+- `pr_merge_block_reason`
+- `merged_pr_url`
+- `local_main_synced`
+- `final_status`
+- `reason`
+- `next_action`
+
+## Blocked and Control-Path Semantics
+
+Current control paths include:
+
+- `blocked_missing_origin`
+- `blocked_auth`
+- `fork_push`
+- `direct_origin_push`
+- `noop`
+
+Blocked summaries are explicit operator messages, not silent retries.
+
+## Docs Drift Summary
+
+The tool tracks documentation drift with:
+
+- `docs_required`
+- `docs_targets`
+- `docs_reason`
+- `docs_refresh_mode`
+
+`docs_refresh_mode` is one of `none`, `patch`, or `rewrite`.
+""",
+        "docs/RUNBOOK.md": """# Runbook
+
+This runbook is for day-to-day operation of `local_fix_agent.py`.
+
+## Standard Repair Flow
+
+1. Choose the smallest reproducible command.
+2. Run locally first when possible.
+3. Start with `safe` unless the scope is obviously tiny.
+4. Review the summary, diff, and next actions.
+5. Run broader validation yourself after a successful narrow fix.
+
+## Common Commands
+
+```bash
+fixit pytest tests/test_x.py::test_parse -q
+fixit --dry-run pytest tests/test_x.py -q
+fixit --target edge-01 --repo /srv/app "pytest tests/test_x.py -q"
+python local_fix_agent.py --continue
+python local_fix_agent.py --from-last-failure
+python local_fix_agent.py --last --explain-only
+```
+
+## Publish Commands
+
+Validated-run publish:
+
+```bash
+python local_fix_agent.py --publish
+python local_fix_agent.py --last --publish
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge --publish-merge-local-main
+./scripts/fixpublish.sh
+```
+
+Publish current repo state:
+
+```bash
+python local_fix_agent.py --publish-only
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
+./scripts/publishcurrent.sh
+```
+
+## Choosing Between Publish Modes
+
+- Use validated-run publish when the agent just completed a successful repair and you want only that validated change set.
+- Use publish-current when you want to stage and publish the repo state that already exists in the working tree.
+
+## Safe Auto-Merge Rules
+
+Auto-merge only proceeds when all of the following are true:
+
+- authenticated GitHub user is known
+- PR base repo owner matches the authenticated user
+- PR head repo owner matches the authenticated user
+- PR base branch is `main`
+- PR state is `OPEN`
+- PR is not draft and not conflicted
+- required review is not blocking
+- required checks are passing, or there are no required checks
+
+If any condition fails, merge is skipped and the exact block reason is printed.
+
+## When Docs Need Refresh
+
+Operator docs are considered impacted when changes affect:
+
+- CLI flags or help text
+- run modes
+- wrapper scripts in `scripts/`
+- publish behavior or publish summaries
+- blocked-state behavior or user-facing messages
+- remote execution behavior
+- operator workflow semantics reflected in the docs set
+
+If `--update-docs` is set:
+
+- `patch` updates only the relevant operator docs
+- `rewrite` replaces the full operator docs set from a clean baseline
+
+## Review Checklist
+
+- inspect the diff
+- confirm the target command still passes
+- run a broader suite if the repo warrants it
+- read blocked evidence carefully before retrying
+- check docs summary fields when operator-visible behavior changed
+""",
+        "docs/REMOTE_MODE.md": """# Remote Mode
+
+Remote mode lets the agent reason locally while operating on a repository over SSH.
+
+## Basic Usage
+
+```bash
+python local_fix_agent.py --target edge-01 --repo /srv/app --test-cmd "pytest tests/test_x.py -q"
+fixit --target edge-01 --repo /srv/app "pytest -q"
+```
+
+## What Happens Where
+
+- Local machine:
+  - model calls
+  - planning and scoring
+  - pattern memory
+  - recent state
+  - metrics
+  - run artifacts
+- Remote machine:
+  - shell commands
+  - git commands
+  - file reads and writes
+  - validation commands
+
+## SSH Session Model
+
+- one SSH master session per run
+- one control socket per run
+- reused for commands and file transfer
+- one reopen attempt if the session drops unexpectedly
+
+## Remote Blocked Behavior
+
+Blocked remote conditions stop the run early and print a structured blocked summary. Typical categories include:
+
+- remote connectivity issue
+- remote SSH auth issue
+- remote repo path not found
+- remote repo path permission issue
+- remote file write permission issue
+- remote command timed out
+- remote session dropped
+
+## Operator Guidance
+
+- verify raw `ssh <target>` before debugging the agent
+- prefer a narrow target command
+- use `--dry-run` first on sensitive remote repos
+- inspect local artifacts after the run because memory and metrics remain local
+""",
+        "docs/TROUBLESHOOTING.md": """# Troubleshooting
+
+This page covers operator-visible blocked states, publish blocks, and summary interpretation.
+
+## Blocked States
+
+### Remote blocked kinds
+
+- `remote connectivity issue`
+- `remote SSH auth issue`
+- `remote repo path not found`
+- `remote repo path permission issue`
+- `remote file write permission issue`
+- `remote command timed out`
+- `remote session dropped`
+
+### Publish control paths
+
+- `blocked_missing_origin`
+- `blocked_auth`
+- `fork_push`
+- `direct_origin_push`
+- `noop`
+
+## Common Publish Blocks
+
+- origin missing or malformed
+- GitHub CLI unavailable or unauthenticated
+- unrelated working tree changes in validated-run publish
+- branch setup failure
+- staging failure
+- push authentication failure
+- missing fork target
+- PR creation failure
+- auto-merge blocked because the PR is not a self-owned fork merge
+- auto-merge blocked by conflicts, review, or checks
+
+## Auto-Merge Block Reasons
+
+Typical messages include:
+
+- authenticated GitHub user is unknown
+- PR details could not be loaded from GitHub CLI
+- PR base repo owner does not match authenticated user; this is not a self-owned fork merge
+- PR head repo owner does not match authenticated user
+- PR base branch is not `main`
+- PR state is not `OPEN`
+- PR is still a draft
+- PR has merge conflicts
+- PR mergeability is unknown
+- required review changes were requested
+- required review approval is still missing
+- required checks pending
+- required checks failing
+- required reviews or checks are still blocking merge
+
+## Docs Drift Signals
+
+The tool also reports operator-doc drift:
+
+- wrapper script added but not documented
+- CLI flag added but not documented
+- examples no longer match current commands
+- publish flow changed but docs still reflect older behavior
+- control-path names differ from docs
+
+Summary fields:
+
+- `docs_required`
+- `docs_targets`
+- `docs_reason`
+- `docs_refresh_mode`
+""",
+    }
+
+
+def refresh_operator_docs(repo: Path, docs_plan: dict) -> dict:
+    refresh_mode = docs_plan.get("docs_refresh_mode", "none")
+    if refresh_mode == "none" or not docs_plan.get("docs_required"):
+        docs_plan["docs_updated"] = False
+        return docs_plan
+
+    targets = docs_plan.get("docs_targets") or []
+    rendered = render_operator_docs()
+    for rel_path in targets:
+        content = rendered.get(rel_path)
+        if content is None:
+            continue
+        path = repo / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.rstrip() + "\n")
+
+    save_docs_state(
+        repo,
+        {
+            "last_refresh_mode": refresh_mode,
+            "last_targets": targets,
+            "last_reason": docs_plan.get("docs_reason") or "",
+            "ts": int(time.time()),
+        },
+    )
+    docs_plan["docs_updated"] = True
+    return docs_plan
+
+
+def maybe_refresh_operator_docs(repo: Path, changed_paths: list[str], update_docs: bool) -> dict:
+    docs_plan = assess_docs_impact(repo, changed_paths)
+    docs_plan["docs_updated"] = False
+    if docs_plan.get("docs_required") and update_docs:
+        refresh_operator_docs(repo, docs_plan)
+    return docs_plan
+
+
+def print_docs_summary(docs_plan: dict) -> None:
+    print("Docs impact: " + ("yes" if docs_plan.get("docs_required") else "no"))
+    print(f"Docs mode: {docs_plan.get('docs_refresh_mode') or 'none'}")
+    print("Suggested docs: " + (", ".join(docs_plan.get("docs_targets") or []) if docs_plan.get("docs_targets") else "(none)"))
+    print(f"Reason: {docs_plan.get('docs_reason') or '(none)'}")
 
 
 def load_publish_state(repo: Path) -> dict:
@@ -1538,6 +2191,10 @@ def summarize_run_metrics(run_metrics: dict) -> str:
         f"cooldowns_triggered: {run_metrics.get('cooldowns_triggered', 0)}",
         f"remote_blocked_kind: {run_metrics.get('remote_blocked_kind') or 'none'}",
         f"blocked_reason: {run_metrics.get('blocked_reason') or 'none'}",
+        f"docs_required: {bool(run_metrics.get('docs_required'))}",
+        "docs_targets: " + (", ".join(run_metrics.get("docs_targets") or []) if run_metrics.get("docs_targets") else "none"),
+        f"docs_reason: {run_metrics.get('docs_reason') or 'none'}",
+        f"docs_refresh_mode: {run_metrics.get('docs_refresh_mode') or 'none'}",
         "most_successful_strategies: "
         + (", ".join(f"{name}={count}" for name, count in most_successful) if most_successful else "none"),
     ]
@@ -1866,6 +2523,7 @@ def make_publish_result() -> dict:
         "branch": "",
         "commit_sha": "",
         "pr_url": "",
+        "merged_pr_url": "",
         "reason": "",
         "remote_url": "",
         "normalized_origin": "",
@@ -1902,6 +2560,10 @@ def make_publish_result() -> dict:
             "target_repo": "",
         },
         "pr_already_exists": False,
+        "pr_merge_attempted": False,
+        "pr_merge_success": False,
+        "pr_merge_block_reason": "",
+        "local_main_synced": False,
         "recommended_command": "",
         "target": {
             "type": "blocked",
@@ -2090,6 +2752,156 @@ def detect_existing_pr(repo: Path, branch: str) -> str:
     return ""
 
 
+def gh_pr_view(repo: Path, pr_ref: str) -> dict:
+    fields = ",".join(
+        [
+            "url",
+            "state",
+            "isDraft",
+            "mergeable",
+            "mergeStateStatus",
+            "reviewDecision",
+            "baseRefName",
+            "baseRepository",
+            "headRepository",
+            "statusCheckRollup",
+        ]
+    )
+    code, output = run_subprocess(["gh", "pr", "view", pr_ref, "--json", fields], repo)
+    if code != 0:
+        return {}
+    try:
+        data = json.loads(output or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def github_repo_owner(data: dict | None) -> str:
+    if not isinstance(data, dict):
+        return ""
+    owner = data.get("owner")
+    if isinstance(owner, dict):
+        return str(owner.get("login") or owner.get("name") or "").strip()
+    return str(data.get("owner") or "").strip()
+
+
+def iter_status_check_rollup(status_rollup: object) -> list[dict]:
+    if isinstance(status_rollup, list):
+        return [item for item in status_rollup if isinstance(item, dict)]
+    if isinstance(status_rollup, dict):
+        nodes = status_rollup.get("nodes")
+        if isinstance(nodes, list):
+            return [item for item in nodes if isinstance(item, dict)]
+    return []
+
+
+def status_check_label(entry: dict) -> str:
+    for key in ["name", "context", "displayName", "workflowName", "title"]:
+        value = entry.get(key)
+        if value:
+            return str(value).strip()
+    return "unknown-check"
+
+
+def evaluate_status_checks(pr_data: dict) -> tuple[bool, str]:
+    entries = iter_status_check_rollup(pr_data.get("statusCheckRollup"))
+    if not entries:
+        return True, ""
+
+    failing: list[str] = []
+    pending: list[str] = []
+    for entry in entries:
+        label = status_check_label(entry)
+        state = str(entry.get("state") or "").upper()
+        status = str(entry.get("status") or "").upper()
+        conclusion = str(entry.get("conclusion") or "").upper()
+
+        if any(token in {state, status, conclusion} for token in {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}):
+            pending.append(label)
+            continue
+        if any(token in {state, status, conclusion} for token in {"ERROR", "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"}):
+            failing.append(label)
+            continue
+        if conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
+            continue
+        if state == "SUCCESS" or status == "SUCCESS":
+            continue
+        if status == "COMPLETED" and not conclusion and not state:
+            continue
+
+    if failing:
+        return False, f"auto-merge blocked: required checks failing ({', '.join(sorted(dict.fromkeys(failing)))})"
+    if pending:
+        return False, f"auto-merge blocked: required checks pending ({', '.join(sorted(dict.fromkeys(pending)))})"
+    return True, ""
+
+
+def evaluate_pr_merge_safety(repo: Path, pr_ref: str, authenticated_user: str) -> tuple[bool, str, dict]:
+    if not authenticated_user.strip():
+        return False, "auto-merge blocked: authenticated GitHub user is unknown.", {}
+
+    pr_data = gh_pr_view(repo, pr_ref)
+    if not pr_data:
+        return False, "auto-merge blocked: PR details could not be loaded from GitHub CLI.", {}
+
+    base_owner = github_repo_owner(pr_data.get("baseRepository"))
+    head_owner = github_repo_owner(pr_data.get("headRepository"))
+    state = str(pr_data.get("state") or "").upper()
+    base_ref = str(pr_data.get("baseRefName") or "").strip()
+    mergeable = str(pr_data.get("mergeable") or "").upper()
+    merge_state = str(pr_data.get("mergeStateStatus") or "").upper()
+    review_decision = str(pr_data.get("reviewDecision") or "").upper()
+
+    if base_owner.lower() != authenticated_user.lower():
+        return False, (
+            f"auto-merge blocked: PR base repo owner '{base_owner or '(unknown)'}' does not match authenticated user "
+            f"'{authenticated_user}'; this is not a self-owned fork merge."
+        ), pr_data
+    if head_owner.lower() != authenticated_user.lower():
+        return False, (
+            f"auto-merge blocked: PR head repo owner '{head_owner or '(unknown)'}' does not match authenticated user "
+            f"'{authenticated_user}'."
+        ), pr_data
+    if base_ref != "main":
+        return False, f"auto-merge blocked: PR base branch is '{base_ref or '(unknown)'}', not 'main'.", pr_data
+    if state != "OPEN":
+        return False, f"auto-merge blocked: PR state is '{state or '(unknown)'}', not 'OPEN'.", pr_data
+    if bool(pr_data.get("isDraft")) or merge_state == "DRAFT":
+        return False, "auto-merge blocked: PR is still a draft.", pr_data
+    if mergeable == "CONFLICTING" or merge_state == "DIRTY":
+        return False, "auto-merge blocked: PR has merge conflicts.", pr_data
+    if mergeable == "UNKNOWN" or merge_state == "UNKNOWN":
+        return False, "auto-merge blocked: PR mergeability is unknown.", pr_data
+    if review_decision == "CHANGES_REQUESTED":
+        return False, "auto-merge blocked: required review changes were requested.", pr_data
+    if review_decision == "REVIEW_REQUIRED":
+        return False, "auto-merge blocked: required review approval is still missing.", pr_data
+    checks_ok, checks_reason = evaluate_status_checks(pr_data)
+    if not checks_ok:
+        return False, checks_reason, pr_data
+    if merge_state == "BLOCKED":
+        return False, "auto-merge blocked: required reviews or checks are still blocking merge.", pr_data
+    return True, "", pr_data
+
+
+def merge_pull_request(repo: Path, pr_ref: str) -> tuple[bool, str]:
+    code, output = run_subprocess(["gh", "pr", "merge", pr_ref, "--squash"], repo)
+    if code != 0:
+        return False, output
+    return True, output
+
+
+def sync_local_main_branch(repo: Path) -> tuple[bool, str]:
+    code, output = run_subprocess(["git", "checkout", "main"], repo)
+    if code != 0:
+        return False, f"local main sync failed during checkout: {output}"
+    code, output = run_subprocess(["git", "pull", "origin", "main"], repo)
+    if code != 0:
+        return False, f"local main sync failed during pull: {output}"
+    return True, ""
+
+
 def target_remote_exists(repo: Path, target: dict) -> tuple[bool, str]:
     target_url = target.get("url", "")
     if not target_url:
@@ -2207,6 +3019,8 @@ def publish_validated_run(
     changed_paths: list[str],
     publish_branch: str,
     publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
     publish_message: str,
     target: str,
     blocked_reason: str | None,
@@ -2221,7 +3035,7 @@ def publish_validated_run(
     result["state_loaded"] = bool(publish_state.get("timestamp"))
     result["transport_locked"] = bool(publish_state.get("ssh_confirmed"))
     result["environment"] = detect_publish_environment()
-    result["recommended_command"] = recommended_publish_command(include_pr=publish_pr)
+    result["recommended_command"] = recommended_publish_command(include_pr=publish_pr or publish_merge)
 
     def finish(status: str, reason: str = "", next_action: str = "") -> dict:
         if reason or next_action:
@@ -2456,7 +3270,7 @@ def publish_validated_run(
         return finish("failed", f"Publish blocked because push failed: {output}", "Inspect the resolved target URL, auth, and branch permissions before retrying.")
 
     pr_url = ""
-    if publish_pr:
+    if publish_pr or publish_merge:
         if not result["preflight"]["gh_available"]:
             result["reason"] = "Publish succeeded, but PR creation could not proceed because GitHub CLI is not installed."
         elif not result["preflight"]["gh_auth"]:
@@ -2486,6 +3300,38 @@ def publish_validated_run(
                 else:
                     result["reason"] = f"Publish succeeded, but PR creation could not proceed: {pr_output}"
 
+    if publish_merge:
+        result["pr_merge_attempted"] = True
+        if not pr_url:
+            result["pr_merge_block_reason"] = "auto-merge blocked: no pull request was available to merge."
+        elif not result["preflight"]["gh_available"]:
+            result["pr_merge_block_reason"] = "auto-merge blocked: GitHub CLI is not installed."
+        elif not result["preflight"]["gh_auth"]:
+            result["pr_merge_block_reason"] = "auto-merge blocked: GitHub CLI is not authenticated."
+        else:
+            safe_to_merge, merge_reason, pr_data = evaluate_pr_merge_safety(
+                repo,
+                pr_url,
+                result["preflight"].get("current_user", ""),
+            )
+            if not safe_to_merge:
+                result["pr_merge_block_reason"] = merge_reason
+            else:
+                merged, merge_output = merge_pull_request(repo, pr_url)
+                if not merged:
+                    result["pr_merge_block_reason"] = f"auto-merge blocked: gh pr merge failed: {merge_output}"
+                else:
+                    result["pr_merge_success"] = True
+                    result["merged_pr_url"] = str(pr_data.get("url") or pr_url).strip() or pr_url
+                    result["actions"].append("merged pr with gh")
+                    if publish_merge_local_main:
+                        synced, sync_reason = sync_local_main_branch(repo)
+                        if synced:
+                            result["local_main_synced"] = True
+                            result["actions"].append("synced local main")
+                        else:
+                            result["pr_merge_block_reason"] = sync_reason
+
     set_publish_final(result, "success", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=pr_url or None)
     return finish("success")
 
@@ -2494,6 +3340,8 @@ def publish_current_repo_state(
     repo: Path,
     publish_branch: str,
     publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
     publish_message: str,
     target: str,
     dry_run_mode: bool,
@@ -2507,6 +3355,8 @@ def publish_current_repo_state(
         [],
         publish_branch,
         publish_pr,
+        publish_merge,
+        publish_merge_local_main,
         publish_message.strip() or "chore: publish current repo state",
         target,
         None,
@@ -2514,7 +3364,7 @@ def publish_current_repo_state(
         dry_run_mode,
         True,
     )
-    result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr)
+    result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr or publish_merge)
     return result
 
 
@@ -2575,6 +3425,11 @@ def print_publish_summary(publish_result: dict) -> None:
         f"reason={fingerprint.get('reason') or '(none)'}"
     )
     print(f"pr_already_exists: {bool(publish_result.get('pr_already_exists'))}")
+    print(f"pr_merge_attempted: {bool(publish_result.get('pr_merge_attempted'))}")
+    print(f"pr_merge_success: {bool(publish_result.get('pr_merge_success'))}")
+    print(f"pr_merge_block_reason: {publish_result.get('pr_merge_block_reason') or '(none)'}")
+    print(f"merged_pr_url: {publish_result.get('merged_pr_url') or '(none)'}")
+    print(f"local_main_synced: {bool(publish_result.get('local_main_synced'))}")
     print(f"noop: {bool(publish_result.get('noop'))}")
     print(f"final_status: {final.get('status') or 'failed'}")
     print(f"commit_sha: {publish_result.get('commit_sha') or '(none)'}")
@@ -4913,7 +5768,10 @@ def main():
     parser.add_argument("--publish-only", action="store_true", help="Publish the current repo state without running the repair loop or requiring a failing test command.")
     parser.add_argument("--publish-branch", help="Branch name to use for publish mode.")
     parser.add_argument("--publish-pr", action="store_true", help="After publish, attempt to open a pull request with GitHub CLI.")
+    parser.add_argument("--publish-merge", action="store_true", help="After creating or reusing a PR, attempt a safe auto-merge for self-owned fork PRs.")
+    parser.add_argument("--publish-merge-local-main", action="store_true", help="After a successful safe auto-merge, update local main with `git checkout main` and `git pull origin main`.")
     parser.add_argument("--publish-message", help="Commit message to use for publish mode.")
+    parser.add_argument("--update-docs", action="store_true", help="Refresh operator docs when the current repo state indicates documentation drift.")
     parser.add_argument("--http-proxy", help="HTTP proxy for subprocess-driven tasks.")
     parser.add_argument("--https-proxy", help="HTTPS proxy for subprocess-driven tasks.")
     parser.add_argument("--api-budget-run", type=int, help="Optional likely API-failure budget for the full run.")
@@ -4958,17 +5816,23 @@ def main():
     if args.explain_only:
         print("Explain-only mode: resolved settings only, no repair attempt will run.")
         print(format_run_artifact_summary(repo, recent_state_path, config_path))
+        docs_plan = maybe_refresh_operator_docs(repo, meaningful_changed_paths(repo), args.update_docs)
+        print_docs_summary(docs_plan)
         return
     if args.publish_only:
+        docs_plan = maybe_refresh_operator_docs(repo, meaningful_changed_paths(repo), args.update_docs)
         publish_result = publish_current_repo_state(
             repo,
             args.publish_branch or "",
             args.publish_pr,
+            args.publish_merge,
+            args.publish_merge_local_main,
             args.publish_message or "",
             target,
             args.dry_run,
         )
         print_publish_summary(publish_result)
+        print_docs_summary(docs_plan)
         return
     if target:
         ok, error = ensure_remote_session()
@@ -4992,6 +5856,10 @@ def main():
                 "proxy_enabled": API_SAFETY_STATE["proxy_enabled"],
                 "likely_rate_limit_hits": API_SAFETY_STATE["likely_rate_limit_hits"],
                 "cooldowns_triggered": API_SAFETY_STATE["cooldowns_triggered"],
+                "docs_required": False,
+                "docs_targets": [],
+                "docs_reason": "",
+                "docs_refresh_mode": "none",
                 "attempts": [],
             }
             print(summarize_run_metrics(early_metrics))
@@ -5018,6 +5886,10 @@ def main():
                 "proxy_enabled": API_SAFETY_STATE["proxy_enabled"],
                 "likely_rate_limit_hits": API_SAFETY_STATE["likely_rate_limit_hits"],
                 "cooldowns_triggered": API_SAFETY_STATE["cooldowns_triggered"],
+                "docs_required": False,
+                "docs_targets": [],
+                "docs_reason": "",
+                "docs_refresh_mode": "none",
                 "attempts": [],
             }
             print(summarize_run_metrics(early_metrics))
@@ -5119,6 +5991,10 @@ def main():
         "proxy_enabled": API_SAFETY_STATE["proxy_enabled"],
         "likely_rate_limit_hits": 0,
         "cooldowns_triggered": 0,
+        "docs_required": False,
+        "docs_targets": [],
+        "docs_reason": "",
+        "docs_refresh_mode": "none",
         "attempts": [],
     }
     last_attempt_score = 0
@@ -5480,6 +6356,11 @@ def main():
                 run_metrics["total_attempts"] = max(run_metrics["total_attempts"], step)
                 run_metrics["likely_rate_limit_hits"] = API_SAFETY_STATE["likely_rate_limit_hits"]
                 run_metrics["cooldowns_triggered"] = API_SAFETY_STATE["cooldowns_triggered"]
+                docs_plan = assess_docs_impact(repo, finalization.get("changed_paths", []))
+                run_metrics["docs_required"] = docs_plan["docs_required"]
+                run_metrics["docs_targets"] = docs_plan["docs_targets"]
+                run_metrics["docs_reason"] = docs_plan["docs_reason"]
+                run_metrics["docs_refresh_mode"] = docs_plan["docs_refresh_mode"]
                 summary_text = summarize_run_metrics(run_metrics)
                 print(summary_text)
                 append_run_metrics(repo, run_metrics)
@@ -5487,7 +6368,7 @@ def main():
                 outcome_label = "dry-run" if args.dry_run else "success"
                 action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, outcome_label, args.dry_run)
                 write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-                update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target)
+                update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target, docs_plan)
                 print(comparison_text)
                 print(action_text)
                 print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
@@ -5501,6 +6382,8 @@ def main():
                         finalization.get("changed_paths", []),
                         args.publish_branch or "",
                         args.publish_pr,
+                        args.publish_merge,
+                        args.publish_merge_local_main,
                         args.publish_message or "",
                         target,
                         run_metrics.get("blocked_reason"),
@@ -5508,6 +6391,9 @@ def main():
                         args.dry_run,
                     )
                     print_publish_summary(publish_result)
+                if args.update_docs and docs_plan.get("docs_required"):
+                    refresh_operator_docs(repo, docs_plan)
+                print_docs_summary(docs_plan)
                 return
 
             if ran_tests and latest_test_output:
@@ -6393,6 +7279,11 @@ def main():
                         run_metrics["total_attempts"] = max(run_metrics["total_attempts"], step)
                         run_metrics["likely_rate_limit_hits"] = API_SAFETY_STATE["likely_rate_limit_hits"]
                         run_metrics["cooldowns_triggered"] = API_SAFETY_STATE["cooldowns_triggered"]
+                        docs_plan = assess_docs_impact(repo, finalization.get("changed_paths", []))
+                        run_metrics["docs_required"] = docs_plan["docs_required"]
+                        run_metrics["docs_targets"] = docs_plan["docs_targets"]
+                        run_metrics["docs_reason"] = docs_plan["docs_reason"]
+                        run_metrics["docs_refresh_mode"] = docs_plan["docs_refresh_mode"]
                         summary_text = summarize_run_metrics(run_metrics)
                         print(summary_text)
                         append_run_metrics(repo, run_metrics)
@@ -6400,7 +7291,7 @@ def main():
                         outcome_label = "dry-run" if args.dry_run else "success"
                         action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, outcome_label, args.dry_run)
                         write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-                        update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target)
+                        update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target, docs_plan)
                         print(comparison_text)
                         print(action_text)
                         print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
@@ -6414,6 +7305,8 @@ def main():
                                 finalization.get("changed_paths", []),
                                 args.publish_branch or "",
                                 args.publish_pr,
+                                args.publish_merge,
+                                args.publish_merge_local_main,
                                 args.publish_message or "",
                                 target,
                                 run_metrics.get("blocked_reason"),
@@ -6421,6 +7314,9 @@ def main():
                                 args.dry_run,
                             )
                             print_publish_summary(publish_result)
+                        if args.update_docs and docs_plan.get("docs_required"):
+                            refresh_operator_docs(repo, docs_plan)
+                        print_docs_summary(docs_plan)
                         return
 
                 continue
@@ -6455,16 +7351,24 @@ def main():
         run_metrics["blocked_reason"] = blocked["reason"]
         run_metrics["remote_blocked_kind"] = blocked.get("kind")
         print(format_blocked_message(blocked))
+    docs_plan = assess_docs_impact(repo, meaningful_changed_paths(repo))
+    run_metrics["docs_required"] = docs_plan["docs_required"]
+    run_metrics["docs_targets"] = docs_plan["docs_targets"]
+    run_metrics["docs_reason"] = docs_plan["docs_reason"]
+    run_metrics["docs_refresh_mode"] = docs_plan["docs_refresh_mode"]
     summary_text = summarize_run_metrics(run_metrics)
     print(summary_text)
     append_run_metrics(repo, run_metrics)
     comparison_text = analyze_run_comparison(load_recent_run_metrics(repo))
     action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, "failure", args.dry_run)
     write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-    update_recent_state(repo, args.test_cmd, resolved_mode, False, artifact_dir, target)
+    update_recent_state(repo, args.test_cmd, resolved_mode, False, artifact_dir, target, docs_plan)
     print(comparison_text)
     print(action_text)
     print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
+    if args.update_docs and docs_plan.get("docs_required"):
+        refresh_operator_docs(repo, docs_plan)
+    print_docs_summary(docs_plan)
     print("\nFailed: reached max steps without confirmed passing tests.", file=sys.stderr)
     raise SystemExit(1)
 
