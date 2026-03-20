@@ -43,7 +43,7 @@ Rather than forking an existing agent or building from scratch, Open SWE **compo
 create_deep_agent(
     model="anthropic:claude-opus-4-6",
     system_prompt=construct_system_prompt(repo_dir, ...),
-    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply, webex_reply],
+    tools=[http_request, fetch_url, commit_and_open_pr, linear_comment, slack_thread_reply, webex_reply],  # NEW: webex_reply
     backend=sandbox_backend,
     middleware=[ToolErrorMiddleware(), check_message_queue_before_model, ...],
 )
@@ -73,7 +73,7 @@ Stripe's key insight: *tool curation matters more than tool quantity.* Open SWE 
 | `commit_and_open_pr` | Git commit + open a GitHub draft PR |
 | `linear_comment` | Post updates to Linear tickets |
 | `slack_thread_reply` | Reply in Slack threads |
-| `webex_reply` | Reply in Webex threads |
+| `webex_reply` | Reply in Webex threads **`NEW`** |
 
 Plus the built-in Deep Agents tools: `read_file`, `write_file`, `edit_file`, `ls`, `glob`, `grep`, `write_todos`, and `task` (subagent spawning).
 
@@ -96,14 +96,14 @@ Open SWE's orchestration has two layers:
 - **`open_pr_if_needed`** — After-agent safety net that commits and opens a PR if the agent didn't do it itself. This is a lightweight version of Stripe's deterministic nodes — ensuring critical steps happen regardless of LLM behavior.
 - **`ToolErrorMiddleware`** — Catches and handles tool errors gracefully.
 
-### 6. Invocation — Slack, Linear, GitHub, and Webex
+### 6. Invocation — Slack, Linear, GitHub, and Webex **`NEW`**
 
 All three companies in the article converge on **Slack as the primary invocation surface**. Open SWE supports that and more:
 
 - **Slack** — Mention the bot in any thread. Supports `repo:owner/name` syntax to specify which repo to work on. The agent replies in-thread with status updates and PR links.
 - **Linear** — Comment `@openswe` on any issue. The agent reads the full issue context, reacts with 👀 to acknowledge, and posts results back as comments.
 - **GitHub** — Tag `@openswe` in PR comments on agent-created PRs to have it address review feedback and push fixes to the same branch.
-- **Webex** — Mention the bot in any Webex space. The agent fetches the message, builds thread context, and replies in the same thread.
+- **Webex** **`NEW`** — Mention the bot in any Webex space. The agent fetches the message, builds thread context, and replies in the same thread.
 
 Each invocation creates a deterministic thread ID, so follow-up messages on the same issue or thread route to the same running agent.
 
@@ -124,14 +124,14 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 | **Tools** | ~15, curated | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
-| **Invocation** | Slack, Linear, GitHub, Webex | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
+| **Invocation** | Slack, Linear, GitHub, **Webex `NEW`** | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
 | **Validation** | Prompt-driven + PR safety net | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
 
 ---
 
 ## Features
 
-- **Trigger from Linear, Slack, GitHub, or Webex** — mention `@openswe` in a comment to kick off a task
+- **Trigger from Linear, Slack, GitHub, or Webex `NEW`** — mention `@openswe` in a comment to kick off a task
 - **Instant acknowledgement** — reacts with 👀 the moment it picks up your message
 - **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
 - **Run multiple tasks in parallel** — each task runs in its own isolated cloud sandbox
