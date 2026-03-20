@@ -167,6 +167,10 @@ python local_fix_agent.py --continue
 
 Validated runs publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
 
+Publish ignores known local state/cache changes such as `.ai_publish_state.json` and `.fix_agent_docs_state.json` when deciding whether anything meaningful should be published. If only ignored files changed, the publish step reports `noop` and does not create a branch, push, or PR.
+
+If the publish step noops because the current fingerprint already matches a previous successful publish, the output includes the prior publish branch, commit, and PR URL when one was recorded.
+
 Run the agent and publish the validated result:
 
 ```bash
@@ -201,6 +205,8 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 - changes into the repo root
 - sets `AI_PUBLISH_ALLOW_FORK=1`
 - publishes the current branch/repo state without requiring a recent failing test command
+- if started from `main` in non-interactive mode and meaningful changes exist, auto-creates a safe publish branch before pushing
+- if only ignored local state files changed, exits as `noop`
 
 ### Resolve settings only
 

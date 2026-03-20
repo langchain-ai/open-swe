@@ -188,6 +188,10 @@ python local_fix_agent.py --publish-only
 
 Validated runs now publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
 
+Before branch creation, push, or PR creation, publish filters out known machine-local state changes such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and other local state/cache files. If no meaningful changes remain, publish exits cleanly as `noop` with `reason: no meaningful changes to publish`.
+
+If publish noops because the current fingerprint matches a previous successful publish, the tool surfaces the previous publish branch, commit, and PR URL when available.
+
 Headless validated run with PR creation:
 
 ```bash
@@ -212,6 +216,8 @@ On a normal validated run, success means:
 - then run the guarded validated-run publish flow by default
 
 Use `--no-publish-on-success` when you want validation without publish.
+
+In headless publish from `main`, the tool first checks for meaningful changes. If none exist, it noops. If meaningful changes exist, it automatically creates a safe publish branch and continues with the existing publish workflow.
 
 In remote mode:
 

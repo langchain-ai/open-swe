@@ -28,6 +28,7 @@ MEMORY_FILE_NAME = ".fix_agent_memory.json"
 METRICS_FILE_NAME = ".fix_agent_metrics.json"
 CONFIG_FILE_NAME = ".fix_agent_config.json"
 RECENT_STATE_FILE_NAME = ".fix_agent_recent.json"
+DOCS_STATE_FILE_NAME = ".fix_agent_docs_state.json"
 PUBLISH_STATE_FILE_NAME = ".ai_publish_state.json"
 RUN_ARTIFACTS_DIR_NAME = ".fix_agent_runs"
 RUN_MODES = {
@@ -84,6 +85,7 @@ CURRENT_REMOTE_SESSION_REOPENED = False
 CURRENT_REMOTE_SESSION_REGISTERED = False
 REMOTE_EXECUTION_STATE: dict[str, dict | None] = {"blocked": None}
 CURRENT_VALIDATION_PLAN: dict = {}
+CURRENT_PUBLISH_IGNORE_PATHS: set[str] = set()
 API_SAFETY_STATE = {
     "proxy_enabled": False,
     "http_proxy": "",
@@ -128,6 +130,17 @@ def configure_subprocess_safety(settings: dict) -> None:
     API_SAFETY_STATE["attempt_rate_limit_hits"] = 0
     API_SAFETY_STATE["cooldowns_triggered"] = 0
     API_SAFETY_STATE["last_rate_limit_output"] = ""
+
+
+def configure_publish_ignore_paths(config: dict) -> None:
+    CURRENT_PUBLISH_IGNORE_PATHS.clear()
+    configured = config.get("publish_ignore_paths", []) if isinstance(config, dict) else []
+    if not isinstance(configured, list):
+        return
+    for item in configured:
+        candidate = str(item or "").strip()
+        if candidate:
+            CURRENT_PUBLISH_IGNORE_PATHS.add(candidate)
 
 
 def configure_execution_target(target: str, repo: Path) -> None:
@@ -606,6 +619,30 @@ def is_ignored_change_path(path: str) -> bool:
     )
 
 
+def is_publish_ignored_change_path(path: str) -> bool:
+    if not path:
+        return True
+    rel = Path(path)
+    path_str = str(rel)
+    built_in = {
+        MEMORY_FILE_NAME,
+        METRICS_FILE_NAME,
+        RECENT_STATE_FILE_NAME,
+        DOCS_STATE_FILE_NAME,
+        PUBLISH_STATE_FILE_NAME,
+    }
+    if path_str in built_in or path_str in CURRENT_PUBLISH_IGNORE_PATHS:
+        return True
+    return is_ignored_change_path(path_str)
+
+
+def raw_git_status_output(repo: Path) -> str:
+    code, output = run_subprocess(["git", "status", "--short", "--untracked-files=all"], repo)
+    if code != 0:
+        return output
+    return output.rstrip()
+
+
 def filter_status_lines(output: str, ignore_all_ignored_dirs: bool = False) -> list[str]:
     filtered = []
     for line in output.splitlines():
@@ -617,9 +654,7 @@ def filter_status_lines(output: str, ignore_all_ignored_dirs: bool = False) -> l
 
 
 def filtered_git_status_output(repo: Path, ignore_all_ignored_dirs: bool = False) -> str:
-    code, output = run_subprocess(["git", "status", "--short", "--untracked-files=all"], repo)
-    if code != 0:
-        return output
+    output = raw_git_status_output(repo)
     return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs)).strip()
 
 
@@ -656,6 +691,32 @@ def classify_git_working_tree(repo: Path) -> dict:
         "has_unstaged": has_unstaged,
         "has_staged": has_staged,
         "has_untracked": has_untracked,
+    }
+
+
+def classify_publishable_changes(repo: Path) -> dict:
+    status_output = raw_git_status_output(repo)
+    meaningful_paths: list[str] = []
+    ignored_changes: list[str] = []
+    seen_meaningful: set[str] = set()
+    seen_ignored: set[str] = set()
+    for line in status_output.splitlines():
+        path = extract_status_path(line)
+        if not path:
+            continue
+        if is_publish_ignored_change_path(path):
+            if path not in seen_ignored:
+                seen_ignored.add(path)
+                ignored_changes.append(path)
+            continue
+        if path not in seen_meaningful:
+            seen_meaningful.add(path)
+            meaningful_paths.append(path)
+    return {
+        "status_output": status_output,
+        "meaningful_changes_detected": bool(meaningful_paths),
+        "meaningful_paths": meaningful_paths,
+        "ignored_changes": ignored_changes,
     }
 
 
@@ -1243,6 +1304,8 @@ def load_publish_state(repo: Path) -> dict:
         "ssh_confirmed": False,
         "last_branch": "",
         "last_commit": "",
+        "last_pr_url": "",
+        "last_success_timestamp": 0,
         "last_target_repo": "",
         "last_control_path": "",
     }
@@ -1272,6 +1335,8 @@ def save_publish_state(repo: Path, state: dict) -> None:
         "ssh_confirmed": bool(state.get("ssh_confirmed")),
         "last_branch": state.get("last_branch", ""),
         "last_commit": state.get("last_commit", ""),
+        "last_pr_url": state.get("last_pr_url", ""),
+        "last_success_timestamp": int(state.get("last_success_timestamp", 0) or 0),
         "last_target_repo": state.get("last_target_repo", ""),
         "last_control_path": state.get("last_control_path", ""),
     }
@@ -2579,6 +2644,13 @@ def make_publish_result() -> dict:
         "pr_requested": False,
         "pr_status": "not_requested",
         "pr_reason": "",
+        "triggered": False,
+        "meaningful_changes_detected": False,
+        "meaningful_paths": [],
+        "ignored_changes": [],
+        "previous_publish_branch": "",
+        "previous_pr_url": "",
+        "previous_commit": "",
         "final": {
             "status": "failed",
             "branch": "",
@@ -2700,6 +2772,9 @@ def summarize_publish_result(summary: dict) -> str:
     if not summary.get("publish_requested"):
         return "not_requested"
     if not summary.get("publish_triggered"):
+        status = str((result.get("final") or {}).get("status") or "").strip()
+        if status == "noop":
+            return "noop"
         return "failed"
     status = str((result.get("final") or {}).get("status") or "").strip()
     if status == "success":
@@ -2736,17 +2811,26 @@ def format_final_operator_summary(summary: dict) -> str:
     validation_result = str(summary.get("validation_result") or "failed").strip()
     publish_result = str(summary.get("publish_result") or "not_requested").strip()
     publish_requested = bool(summary.get("publish_requested"))
+    reason = str(summary.get("publish_reason") or "").strip().lower()
+    previous_pr_url = str(summary.get("previous_pr_url") or "").strip()
     if validation_result == "success":
         if publish_result == "success":
             return "FINAL: validation succeeded, publish succeeded"
         if publish_result == "noop":
-            reason = str(summary.get("publish_reason") or "").strip().lower()
+            if "matched previous successful publish fingerprint" in reason:
+                if previous_pr_url:
+                    return f"FINAL: already published — PR: {previous_pr_url}"
+                return "FINAL: already published — reusing previous result"
             if "already published" in reason or "already up to date" in reason or "no changes to publish" in reason:
                 return "FINAL: publish noop (already up to date)"
             return "FINAL: validation succeeded, publish noop"
         if publish_requested:
             return f"FINAL: validation succeeded, publish {publish_result}"
         return "FINAL: validation succeeded"
+    if publish_result == "noop" and "matched previous successful publish fingerprint" in reason:
+        if previous_pr_url:
+            return f"FINAL: already published — PR: {previous_pr_url}"
+        return "FINAL: already published — reusing previous result"
     if validation_result == "blocked":
         if publish_result in {"success", "failed", "noop", "blocked", "failed_verification"}:
             return f"FINAL: validation blocked, publish {publish_result}"
@@ -3051,6 +3135,8 @@ def publish_validated_run(
             "ssh_confirmed": bool(result.get("auth_transport") == "ssh" and result.get("final", {}).get("status") == "success"),
             "last_branch": result.get("branch", ""),
             "last_commit": result.get("commit_sha", ""),
+            "last_pr_url": result.get("pr_url", ""),
+            "last_success_timestamp": int(time.time()) if result.get("final", {}).get("status") == "success" else 0,
             "last_target_repo": result.get("target", {}).get("repo", ""),
             "last_control_path": result.get("control_path", ""),
         }
@@ -3119,6 +3205,16 @@ def publish_validated_run(
         result["state_confidence"] = "low"
         return finish("blocked", "Publish blocked because GitHub authentication could not be verified during preflight.", "Run `gh auth status` and `gh auth login`, then rerun `--publish`.")
     result["control_path"] = "fork_push" if result["target"]["type"] == "fork" else "direct_origin_push"
+
+    publish_changes = classify_publishable_changes(repo)
+    result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
+    result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
+    result["ignored_changes"] = publish_changes.get("ignored_changes") or []
+    if not result["meaningful_changes_detected"]:
+        result["control_path"] = "noop"
+        result["summary_status"] = "no meaningful changes to publish"
+        return finish("noop", "no meaningful changes to publish")
+    result["triggered"] = True
 
     branch_is_default = current_branch in {"main", "master", default_branch}
     if requested_branch:
@@ -3191,8 +3287,11 @@ def publish_validated_run(
         result["control_path"] = "noop"
         result["fingerprint"]["matched_previous_success"] = True
         result["fingerprint"]["reason"] = "matched previous successful publish fingerprint"
-        result["summary_status"] = "already published in previous run"
-        return finish("noop", "Publish noop: already published in previous run.")
+        result["summary_status"] = "matched previous successful publish fingerprint"
+        result["previous_publish_branch"] = str(publish_state.get("last_branch") or "")
+        result["previous_pr_url"] = str(publish_state.get("last_pr_url") or "")
+        result["previous_commit"] = str(publish_state.get("last_commit") or "")
+        return finish("noop", "matched previous successful publish fingerprint")
     already_pushed, local_head = branch_already_up_to_date(repo, branch_to_push, result["target"]["url"] or "origin")
     if publish_current_mode and working_tree["clean"]:
         commit_ref = local_head or head_sha
@@ -3419,6 +3518,12 @@ def run_post_success_publish(
         "publish_result": "not_requested",
         "publish_result_detail": None,
         "publish_reason": "",
+        "meaningful_changes_detected": False,
+        "meaningful_paths": [],
+        "ignored_changes": [],
+        "previous_publish_branch": "",
+        "previous_pr_url": "",
+        "previous_commit": "",
     }
     if publish_mode == "current-repo-state":
         summary["publish_requested"] = True
@@ -3432,7 +3537,7 @@ def run_post_success_publish(
             target,
             dry_run_mode,
         )
-        summary["publish_triggered"] = True
+        summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
     elif validation_succeeded and publish_requested:
         summary["publish_requested"] = True
@@ -3453,18 +3558,19 @@ def run_post_success_publish(
             baseline_paths,
             dry_run_mode,
         )
-        summary["publish_triggered"] = True
+        summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
     elif publish_requested and not validation_succeeded:
         summary["publish_requested"] = True
         summary["publish_result"] = "not_requested"
         summary["publish_reason"] = f"publish not run because validation_result={validation_result}"
-    if summary["publish_requested"] and validation_succeeded and not summary["publish_triggered"]:
+    publish_result = summary.get("publish_result_detail") or {}
+    publish_status = str((publish_result.get("final") or {}).get("status") or "").strip()
+    if summary["publish_requested"] and validation_succeeded and not summary["publish_triggered"] and publish_status != "noop":
         summary["publish_result"] = "failed"
         summary["publish_reason"] = "publish requested after validation success, but publish flow did not run"
-    elif summary.get("publish_result") != "not_requested" or summary.get("publish_result_detail"):
+    elif summary.get("publish_result") != "not_requested" or publish_result:
         summary["publish_result"] = summarize_publish_result(summary)
-    publish_result = summary.get("publish_result_detail") or {}
     if not summary["publish_reason"]:
         summary["publish_reason"] = (
             publish_result.get("reason")
@@ -3475,6 +3581,12 @@ def run_post_success_publish(
     summary["pr_created_or_reused"] = bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists"))
     summary["pr_merged"] = bool(publish_result.get("pr_merged"))
     summary["local_main_synced"] = bool(publish_result.get("local_main_synced"))
+    summary["meaningful_changes_detected"] = bool(publish_result.get("meaningful_changes_detected"))
+    summary["meaningful_paths"] = publish_result.get("meaningful_paths") or []
+    summary["ignored_changes"] = publish_result.get("ignored_changes") or []
+    summary["previous_publish_branch"] = publish_result.get("previous_publish_branch") or ""
+    summary["previous_pr_url"] = publish_result.get("previous_pr_url") or ""
+    summary["previous_commit"] = publish_result.get("previous_commit") or ""
     return summary
 
 
@@ -3485,6 +3597,9 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"publish_requested: {format_bool(summary.get('publish_requested'))}")
     print(f"publish_triggered: {format_bool(summary.get('publish_triggered'))}")
     print(f"publish_mode: {summary.get('publish_mode') or 'validated-run'}")
+    print(f"meaningful_changes_detected: {format_bool(summary.get('meaningful_changes_detected'))}")
+    print(f"ignored_changes: {summary.get('ignored_changes') or []}")
+    print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
     if summary.get("publish_reason"):
         print(f"publish_reason: {summary['publish_reason']}")
     if not summary.get("publish_result_detail"):
@@ -3538,6 +3653,10 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"retry_performed: {bool(publish_result.get('retry_performed'))}")
     print(f"retry_success: {bool(publish_result.get('retry_success'))}")
     print(f"retry_reason: {publish_result.get('retry_reason') or '(none)'}")
+    print(f"meaningful_changes_detected: {format_bool(publish_result.get('meaningful_changes_detected'))}")
+    print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
+    print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
+    print(f"publish_reason: {publish_result.get('reason') or '(none)'}")
     if publish_result.get("publish_scope") == "current_repo_state":
         working_tree = publish_result.get("working_tree") or {}
         print(
@@ -3560,6 +3679,9 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"final_status: {final.get('status') or 'failed'}")
     print(f"commit_sha: {publish_result.get('commit_sha') or '(none)'}")
     print(f"pr_url: {publish_result.get('pr_url') or '(none)'}")
+    print(f"previous_publish_branch: {publish_result.get('previous_publish_branch') or '(none)'}")
+    print(f"previous_pr_url: {publish_result.get('previous_pr_url') or '(none)'}")
+    print(f"previous_commit: {publish_result.get('previous_commit') or '(none)'}")
     verification = publish_result.get("verification") or {}
     print(f"current_branch: {verification.get('current_branch') or '(none)'}")
     print(f"upstream_branch: {verification.get('upstream_branch') or '(none)'}")
@@ -5944,6 +6066,8 @@ def main():
 
     configure_execution_target(target, repo)
     configure_subprocess_safety(safety_settings)
+    config_values, _ = load_agent_config(args.config, Path.cwd())
+    configure_publish_ignore_paths(config_values)
     publish_requested = resolve_publish_requested(args)
     if args.publish_only:
         startup_signal("Mode: publish current repo state")
@@ -5988,7 +6112,7 @@ def main():
             {
                 "validation_result": "blocked",
                 "publish_requested": True,
-                "publish_triggered": True,
+                "publish_triggered": bool(publish_result.get("triggered")),
                 "publish_mode": "current-repo-state",
                 "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
                 "publish_result_detail": publish_result,
@@ -5996,6 +6120,12 @@ def main():
                 "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
                 "pr_merged": bool(publish_result.get("pr_merged")),
                 "local_main_synced": bool(publish_result.get("local_main_synced")),
+                "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
+                "meaningful_paths": publish_result.get("meaningful_paths") or [],
+                "ignored_changes": publish_result.get("ignored_changes") or [],
+                "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
+                "previous_pr_url": publish_result.get("previous_pr_url") or "",
+                "previous_commit": publish_result.get("previous_commit") or "",
             }
         )
         print_publish_summary(publish_result)
@@ -6003,7 +6133,7 @@ def main():
             {
                 "validation_result": "blocked",
                 "publish_requested": True,
-                "publish_triggered": True,
+                "publish_triggered": bool(publish_result.get("triggered")),
                 "publish_mode": "current-repo-state",
                 "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
                 "publish_result_detail": publish_result,
@@ -6011,6 +6141,12 @@ def main():
                 "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
                 "pr_merged": bool(publish_result.get("pr_merged")),
                 "local_main_synced": bool(publish_result.get("local_main_synced")),
+                "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
+                "meaningful_paths": publish_result.get("meaningful_paths") or [],
+                "ignored_changes": publish_result.get("ignored_changes") or [],
+                "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
+                "previous_pr_url": publish_result.get("previous_pr_url") or "",
+                "previous_commit": publish_result.get("previous_commit") or "",
             }
         ))
         return

@@ -1,9 +1,9 @@
 {
   "fork_created": false,
   "fork_repo": "",
-  "last_branch": "main",
+  "last_branch": "fix-agent/20260320-044503",
   "last_commit": "",
-  "last_control_path": "direct_origin_push",
+  "last_control_path": "noop",
   "last_repo": "tophat1720/open-swe",
   "last_success": false,
   "last_target": "origin",
@@ -11,5 +11,5 @@
   "last_transport": "ssh",
   "origin_url": "git@github.com:tophat1720/open-swe.git",
   "ssh_confirmed": false,
-  "timestamp": 1773996132
+  "timestamp": 1773997123
 }

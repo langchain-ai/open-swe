@@ -8,6 +8,8 @@ Validated runs now attempt the guarded validated-run publish flow automatically 
 
 Use `--no-publish-on-success` when you want to stop after validation and skip publish.
 
+Known local state files such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and similar machine-local cache/state files are ignored when publish decides whether there is anything meaningful to publish.
+
 Real run output prints only current-run data in these sections:
 
 - `=== VALIDATION RESULT ===`
@@ -15,6 +17,10 @@ Real run output prints only current-run data in these sections:
 - `=== PUBLISH RESULT ===`
 
 If validation succeeds but publish fails, the run prints that distinction explicitly and does not present the outcome as a full success.
+
+If publish is requested from `main` in headless mode, the tool now checks for meaningful changes first. With no meaningful changes it reports `noop`. With meaningful changes it auto-creates a safe publish branch and continues.
+
+If publish reports `noop` because the fingerprint matches a previous successful publish, the output surfaces the stored branch, commit, and PR URL so you can jump directly to the existing review artifact.
 
 ## Blocked-state summary
 
