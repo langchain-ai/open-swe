@@ -609,7 +609,7 @@ def backup_file(target: Path) -> None:
 
 
 def extract_status_path(line: str) -> str:
-    body = line[3:] if len(line) > 3 else ""
+    body = line[2:].lstrip() if len(line) > 2 else ""
     if " -> " in body:
         return body.split(" -> ", 1)[1].strip()
     return body.strip()

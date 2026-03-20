@@ -130,6 +130,10 @@ def test_classify_publishable_changes_ignores_known_state_files(monkeypatch: pyt
     ]
 
 
+def test_extract_status_path_preserves_leading_dot_for_staged_files() -> None:
+    assert lfa.extract_status_path("M .ai_publish_state.json") == ".ai_publish_state.json"
+
+
 def test_classify_publishable_changes_treats_docs_code_and_tests_as_meaningful(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         lfa,
