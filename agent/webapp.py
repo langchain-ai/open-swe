@@ -771,6 +771,25 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
+    image_urls = dedupe_urls(
+        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
+        + [
+            f["url_private"]
+            for msg in context_messages
+            for f in msg.get("files", [])
+            if isinstance(f, dict)
+            and f.get("mimetype", "").startswith("image/")
+            and f.get("url_private")
+        ]
+    )
+    if image_urls:
+        logger.info("Preparing %d image(s) for Slack mention", len(image_urls))
+        async with httpx.AsyncClient() as http_client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, http_client)
+                if image_block:
+                    content_blocks.append(image_block)
+
     configurable: dict[str, Any] = {
         "repo": repo_config,
         "slack_thread": {
