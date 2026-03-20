@@ -1,0 +1,19 @@
+{
+  "recent_runs": [
+    {
+      "artifact_dir": "/home/tom/ai/open-swe/.fix_agent_runs/20260320-140950",
+      "blocked_reason": "no relevant files identified with enough confidence",
+      "commit_hash": "c7e573ad1b555c82bb2ac6d86a4ce11c8164976b",
+      "confidence": "",
+      "files_changed": [],
+      "mode": "quick",
+      "repo": "/home/tom/ai/open-swe",
+      "success": false,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "ts": 1774030196,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "validation_result": "blocked"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "patterns": [
+    {
+      "failed_strategies": [],
+      "failure_type": "unknown",
+      "successful_files": [],
+      "successful_strategy": "",
+      "successful_symbols": [],
+      "symbols": [],
+      "test_name": ""
+    }
+  ]
+}
