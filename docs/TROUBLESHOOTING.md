@@ -2,6 +2,20 @@
 
 This page is for operator-visible failures and blocked states.
 
+## Publish-on-success default
+
+Validated runs now attempt the guarded validated-run publish flow automatically after `validation_result: success`.
+
+Use `--no-publish-on-success` when you want to stop after validation and skip publish.
+
+Real run output prints only current-run data in these sections:
+
+- `=== VALIDATION RESULT ===`
+- `=== POST-SUCCESS PUBLISH ===`
+- `=== PUBLISH RESULT ===`
+
+If validation succeeds but publish fails, the run prints that distinction explicitly and does not present the outcome as a full success.
+
 ## Blocked-state summary
 
 | Blocked type | Meaning | Suggested next action |

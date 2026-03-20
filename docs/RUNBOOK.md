@@ -165,13 +165,21 @@ python local_fix_agent.py --continue
 
 ### Headless daily publish
 
-Publish the last validated agent run:
+Validated runs publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
+
+Run the agent and publish the validated result:
 
 ```bash
-python local_fix_agent.py --publish
-python local_fix_agent.py --last --publish
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+python local_fix_agent.py
+python local_fix_agent.py --last
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish-pr
 ./scripts/fixpublish.sh
+```
+
+Disable automatic publish for a validated run:
+
+```bash
+python local_fix_agent.py --no-publish-on-success
 ```
 
 Publish the current repo or branch state directly:
@@ -186,7 +194,7 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 
 - changes into the repo root
 - sets `AI_PUBLISH_ALLOW_FORK=1`
-- publishes the last validated agent run
+- runs a validated publish flow with PR creation enabled
 
 `publishcurrent.sh`:
 

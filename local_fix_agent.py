@@ -1,5 +1,6 @@
 from openai import OpenAI
 from pathlib import Path, PurePosixPath
+import ast
 import atexit
 import argparse
 import json
@@ -64,6 +65,8 @@ IGNORE_DIRS = {
 ALLOWED_COMMAND_PREFIXES = [
     "pytest",
     "python -m pytest",
+    "python ",
+    "python3 ",
     "ls",
     "cat",
     "grep",
@@ -80,6 +83,7 @@ CURRENT_REMOTE_SESSION_ACTIVE = False
 CURRENT_REMOTE_SESSION_REOPENED = False
 CURRENT_REMOTE_SESSION_REGISTERED = False
 REMOTE_EXECUTION_STATE: dict[str, dict | None] = {"blocked": None}
+CURRENT_VALIDATION_PLAN: dict = {}
 API_SAFETY_STATE = {
     "proxy_enabled": False,
     "http_proxy": "",
@@ -803,8 +807,10 @@ def validate_patch_in_sandbox(repo: Path, test_cmd: str, failure_context: dict) 
             }
 
         targeted_cmd = build_targeted_test_command(test_cmd, failure_context)
+        validation_results = []
         if targeted_cmd:
             code, output = run_subprocess(targeted_cmd, sandbox, shell=True)
+            validation_results = [{"ok": code == 0, "kind": "targeted_test", "command": targeted_cmd, "output": output.strip()}]
             if code != 0:
                 sandbox_failure_context = extract_failure_context(output, sandbox)
                 return {
@@ -814,6 +820,19 @@ def validate_patch_in_sandbox(repo: Path, test_cmd: str, failure_context: dict) 
                     "failure_type": classify_failure_type(output),
                     "reason": "targeted failing test did not validate in sandbox",
                 }
+        elif CURRENT_VALIDATION_PLAN.get("active"):
+            validation_result = run_validation_stack(sandbox, CURRENT_VALIDATION_PLAN, include_syntax=True)
+            validation_results = validation_result.get("results", [])
+            if not validation_result.get("ok"):
+                failed_step = validation_result.get("failed_step", {})
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "output": validation_result.get("output", ""),
+                    "failure_type": validation_result.get("failure_type", FAILURE_UNKNOWN),
+                    "reason": f"discovered validation failed at {failed_step.get('kind', 'unknown')} step",
+                    "validation_results": validation_result.get("results", []),
+                }
 
         return {
             "ok": True,
@@ -821,6 +840,7 @@ def validate_patch_in_sandbox(repo: Path, test_cmd: str, failure_context: dict) 
             "output": "",
             "failure_type": FAILURE_UNKNOWN,
             "reason": "pre-commit validation passed",
+            "validation_results": validation_results,
         }
 
 
@@ -1281,6 +1301,594 @@ def missing_test_command_message(repo: Path | None) -> str:
     )
 
 
+def detect_repo_for_script(script_path: Path) -> Path:
+    detected = detect_current_repo(script_path.parent.resolve())
+    return detected.resolve() if detected else script_path.parent.resolve()
+
+
+def read_text_limited(path: Path, max_chars: int = 16000) -> str:
+    try:
+        return path.read_text()[:max_chars]
+    except OSError:
+        return ""
+
+
+def relative_script_path(repo: Path, script_path: Path) -> str:
+    try:
+        return str(script_path.resolve().relative_to(repo.resolve()))
+    except ValueError:
+        return script_path.name
+
+
+def infer_module_name(repo: Path, script_path: Path) -> str:
+    try:
+        rel = script_path.resolve().relative_to(repo.resolve())
+    except ValueError:
+        return ""
+    if rel.suffix != ".py":
+        return ""
+    if any(not part.replace("_", "").isalnum() for part in rel.with_suffix("").parts):
+        return ""
+    return ".".join(rel.with_suffix("").parts)
+
+
+def has_main_guard(node: ast.Module) -> bool:
+    for stmt in node.body:
+        if not isinstance(stmt, ast.If):
+            continue
+        test = stmt.test
+        if not isinstance(test, ast.Compare):
+            continue
+        if not isinstance(test.left, ast.Name) or test.left.id != "__name__":
+            continue
+        if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq):
+            continue
+        if len(test.comparators) != 1:
+            continue
+        comparator = test.comparators[0]
+        if isinstance(comparator, ast.Constant) and comparator.value == "__main__":
+            return True
+    return False
+
+
+def extract_script_features(script_path: Path) -> dict:
+    text = read_text_limited(script_path)
+    if not text.strip():
+        return {
+            "text": "",
+            "tree": None,
+            "has_main_guard": False,
+            "uses_argparse": False,
+            "uses_click": False,
+            "uses_typer": False,
+            "entrypoints": [],
+            "top_level_calls": False,
+            "functions": [],
+        }
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {
+            "text": text,
+            "tree": None,
+            "has_main_guard": "__main__" in text,
+            "uses_argparse": "argparse" in text,
+            "uses_click": "click" in text,
+            "uses_typer": "typer" in text,
+            "entrypoints": [],
+            "top_level_calls": False,
+            "functions": [],
+        }
+
+    imported_names = set()
+    entrypoints: list[str] = []
+    functions: list[ast.FunctionDef] = []
+    top_level_calls = False
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                imported_names.add(alias.name.split(".")[0])
+        elif isinstance(stmt, ast.ImportFrom) and stmt.module:
+            imported_names.add(stmt.module.split(".")[0])
+        elif isinstance(stmt, ast.FunctionDef):
+            functions.append(stmt)
+            if stmt.name in {"main", "run", "cli"}:
+                entrypoints.append(stmt.name)
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            top_level_calls = True
+        elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
+            top_level_calls = True
+
+    lowered = text.lower()
+    return {
+        "text": text,
+        "tree": tree,
+        "has_main_guard": has_main_guard(tree),
+        "uses_argparse": "argparse" in imported_names or "argparse." in text,
+        "uses_click": "click" in imported_names or "@click.command" in lowered or "click.command" in lowered,
+        "uses_typer": "typer" in imported_names or "typer.Typer" in text or "typer()" in lowered,
+        "entrypoints": sorted(set(entrypoints)),
+        "top_level_calls": top_level_calls,
+        "functions": functions,
+    }
+
+
+def find_nearby_pytest_targets(repo: Path, script_path: Path) -> list[dict]:
+    script_stem = script_path.stem
+    candidates: list[dict] = []
+    patterns = [
+        repo / "tests" / f"test_{script_stem}.py",
+        repo / f"test_{script_stem}.py",
+        script_path.parent / f"test_{script_stem}.py",
+        script_path.parent / "tests" / f"test_{script_stem}.py",
+    ]
+    seen: set[str] = set()
+    for path in patterns:
+        if not path.exists() or not path.is_file():
+            continue
+        rel = str(path.resolve().relative_to(repo.resolve())) if path.is_relative_to(repo.resolve()) else path.name
+        if rel in seen:
+            continue
+        seen.add(rel)
+        candidates.append(
+            {
+                "command": f"pytest {shlex.quote(rel)} -q",
+                "kind": "pytest",
+                "confidence": 0.95,
+                "reason": f"Nearby pytest target matches script stem `{script_stem}`.",
+                "source": rel,
+            }
+        )
+    return candidates
+
+
+def discover_context_candidates(repo: Path, script_rel: str, module_name: str, script_stem: str) -> list[dict]:
+    candidates: list[dict] = []
+    tokens = [script_rel, script_stem]
+    if module_name:
+        tokens.append(module_name)
+    context_files = [
+        repo / "README.md",
+        repo / "docs" / "README.md",
+        repo / "Makefile",
+        repo / "pyproject.toml",
+        repo / "tox.ini",
+        repo / "noxfile.py",
+    ]
+    workflows = repo / ".github" / "workflows"
+    if workflows.exists():
+        for path in sorted(workflows.glob("*.y*ml")):
+            context_files.append(path)
+
+    seen_commands: set[str] = set()
+    for path in context_files:
+        if not path.exists() or not path.is_file():
+            continue
+        text = read_text_limited(path, max_chars=12000)
+        lowered = text.lower()
+        if not any(token.lower() in lowered for token in tokens if token):
+            continue
+        rel = str(path.resolve().relative_to(repo.resolve())) if path.is_relative_to(repo.resolve()) else path.name
+        for line in text.splitlines():
+            stripped = line.strip()
+            lowered_line = stripped.lower()
+            if not any(token.lower() in lowered_line for token in tokens if token):
+                continue
+            if "pytest" in lowered_line:
+                command = "pytest -q"
+            elif "python -m" in lowered_line and "--help" in lowered_line:
+                match = re.search(r"python -m ([A-Za-z0-9_\.]+).*--help", stripped)
+                command = f"python -m {match.group(1)} --help" if match else ""
+            elif "python " in lowered_line and "--help" in lowered_line and script_stem in lowered_line:
+                command = f"python {shlex.quote(script_rel)} --help"
+            else:
+                command = ""
+            if command and command not in seen_commands:
+                seen_commands.add(command)
+                candidates.append(
+                    {
+                        "command": command,
+                        "kind": "context",
+                        "confidence": 0.65,
+                        "reason": f"Repository docs/config mention a related command in `{rel}`.",
+                        "source": rel,
+                    }
+                )
+    return candidates
+
+
+PURE_FUNCTION_NAME_HINTS = {
+    "add",
+    "build",
+    "calc",
+    "clean",
+    "combine",
+    "compute",
+    "format",
+    "join",
+    "merge",
+    "normalize",
+    "parse",
+    "slugify",
+    "split",
+    "strip",
+    "sum",
+}
+SIDE_EFFECT_NAME_TOKENS = {
+    "connect",
+    "db",
+    "delete",
+    "download",
+    "fetch",
+    "file",
+    "http",
+    "insert",
+    "load",
+    "network",
+    "open",
+    "path",
+    "post",
+    "put",
+    "read",
+    "request",
+    "save",
+    "send",
+    "socket",
+    "sql",
+    "subprocess",
+    "update",
+    "upload",
+    "url",
+    "write",
+}
+IMPURE_CALL_NAMES = {
+    "open",
+    "print",
+    "input",
+    "exec",
+    "eval",
+    "system",
+    "popen",
+    "run",
+    "request",
+    "get",
+    "post",
+    "connect",
+    "read_text",
+    "write_text",
+    "unlink",
+    "mkdir",
+}
+
+
+def callable_name(expr: ast.AST) -> str:
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        base = callable_name(expr.value)
+        return f"{base}.{expr.attr}" if base else expr.attr
+    return ""
+
+
+def infer_sample_value(arg_name: str, annotation: ast.AST | None) -> object | None:
+    normalized = arg_name.lower()
+    annotation_name = callable_name(annotation) if annotation else ""
+    if any(token in normalized for token in SIDE_EFFECT_NAME_TOKENS):
+        return None
+    if annotation_name in {"int", "float"} or normalized in {"a", "b", "x", "y", "n"}:
+        return 3
+    if annotation_name == "bool":
+        return True
+    if annotation_name in {"list", "tuple"} or normalized.endswith("s") or normalized in {"items", "values"}:
+        return [1, 2, 3]
+    if annotation_name in {"dict", "mapping"}:
+        return {"key": "value"}
+    if annotation_name == "str" or any(token in normalized for token in ["text", "name", "value", "word", "slug"]):
+        return "Hello World"
+    if normalized in {"sep", "delimiter"}:
+        return "-"
+    return None
+
+
+def function_has_obvious_side_effects(node: ast.FunctionDef) -> bool:
+    lowered_name = node.name.lower()
+    if any(token in lowered_name for token in SIDE_EFFECT_NAME_TOKENS):
+        return True
+    banned_nodes = (ast.With, ast.AsyncWith, ast.Try, ast.Raise, ast.Yield, ast.YieldFrom, ast.Await, ast.Global, ast.Nonlocal)
+    for child in ast.walk(node):
+        if isinstance(child, banned_nodes):
+            return True
+        if isinstance(child, ast.Call):
+            name = callable_name(child.func).lower()
+            if any(part in name for part in IMPURE_CALL_NAMES):
+                return True
+    return False
+
+
+def module_safe_to_import_for_function_checks(features: dict) -> bool:
+    return bool(features.get("tree")) and not features.get("top_level_calls")
+
+
+def discover_function_validation(script_path: Path, script_rel: str, features: dict) -> dict:
+    result = {
+        "considered": False,
+        "used": False,
+        "confidence": "low",
+        "reason": "No high-confidence pure helper functions found.",
+        "functions": [],
+        "step": None,
+    }
+    if not module_safe_to_import_for_function_checks(features):
+        result["reason"] = "Skipped function-level validation because the module may execute code on import."
+        return result
+
+    for func in features.get("functions", []):
+        if func.name.startswith("__") or func.name in {"main", "run", "cli"}:
+            continue
+        if function_has_obvious_side_effects(func):
+            continue
+        required_args = [
+            arg for arg in func.args.args
+            if arg.arg != "self"
+        ]
+        if len(required_args) > 3 or func.args.vararg or func.args.kwarg or func.args.kwonlyargs:
+            continue
+        samples = []
+        for arg in required_args:
+            sample = infer_sample_value(arg.arg, arg.annotation)
+            if sample is None:
+                samples = []
+                break
+            samples.append(sample)
+        if len(required_args) == 0:
+            samples = []
+        if required_args and not samples:
+            continue
+        lowered_name = func.name.lower()
+        confidence = 0.75 if lowered_name in PURE_FUNCTION_NAME_HINTS or any(hint in lowered_name for hint in PURE_FUNCTION_NAME_HINTS) else 0.68
+        command = f"function:{func.name}"
+        result["considered"] = True
+        result["functions"] = [func.name]
+        result["used"] = confidence >= 0.75
+        result["confidence"] = "high" if confidence >= 0.8 else "medium"
+        result["reason"] = f"Detected a likely pure helper `{func.name}` with safely inferred sample arguments."
+        result["step"] = {
+            "command": command,
+            "kind": "function",
+            "confidence": confidence,
+            "reason": result["reason"],
+            "source": script_rel,
+            "function_name": func.name,
+            "sample_args": samples,
+        }
+        return result
+    return result
+
+
+def build_script_validation_plan(repo: Path, script_path: Path) -> dict:
+    repo = repo.resolve()
+    script_path = script_path.resolve()
+    script_rel = relative_script_path(repo, script_path)
+    module_name = infer_module_name(repo, script_path)
+    features = extract_script_features(script_path)
+    candidates: list[dict] = []
+
+    syntax_candidate = {
+        "command": f"python -m py_compile {shlex.quote(script_rel)}",
+        "kind": "syntax",
+        "confidence": 1.0,
+        "reason": "Syntax validation is always included for script mode.",
+        "source": script_rel,
+    }
+    candidates.append(syntax_candidate)
+
+    pytest_candidates = find_nearby_pytest_targets(repo, script_path)
+    candidates.extend(pytest_candidates)
+
+    executable = bool(features.get("has_main_guard") or features.get("entrypoints"))
+    cli_like = bool(features.get("uses_argparse") or features.get("uses_click") or features.get("uses_typer"))
+    if executable:
+        candidates.append(
+            {
+                "command": f"python {shlex.quote(script_rel)} --help",
+                "kind": "cli_help",
+                "confidence": 0.85 if cli_like else 0.55,
+                "reason": "The script looks executable and `--help` is usually safe.",
+                "source": script_rel,
+            }
+        )
+        candidates.append(
+            {
+                "command": f"python {shlex.quote(script_rel)}",
+                "kind": "cli_run",
+                "confidence": 0.4 if cli_like else 0.3,
+                "reason": "The script has an executable entrypoint, but running it without arguments may be risky.",
+                "source": script_rel,
+            }
+        )
+    if module_name:
+        candidates.append(
+            {
+                "command": f"python -m {module_name} --help",
+                "kind": "module_help",
+                "confidence": 0.7 if cli_like else 0.45,
+                "reason": "The script can be addressed as a Python module.",
+                "source": module_name,
+            }
+        )
+        candidates.append(
+            {
+                "command": f"python -m {module_name}",
+                "kind": "module_run",
+                "confidence": 0.35,
+                "reason": "Module execution is available but may require arguments.",
+                "source": module_name,
+            }
+        )
+
+    import_candidate = {
+        "command": (
+            "python -c "
+            "\"import importlib.util, pathlib, sys; "
+            "p = pathlib.Path(sys.argv[1]); "
+            "spec = importlib.util.spec_from_file_location('_lfa_script', p); "
+            "mod = importlib.util.module_from_spec(spec); "
+            "spec.loader.exec_module(mod)\" "
+            f"{shlex.quote(script_rel)}"
+        ),
+        "kind": "import",
+        "confidence": 0.5,
+        "reason": "Fallback import/module-load validation when no stronger runtime command is available.",
+        "source": script_rel,
+    }
+    candidates.append(import_candidate)
+    candidates.extend(discover_context_candidates(repo, script_rel, module_name, script_path.stem))
+
+    function_validation = discover_function_validation(script_path, script_rel, features)
+    if function_validation.get("step") and function_validation.get("used"):
+        candidates.append(function_validation["step"])
+
+    ranked = sorted(candidates, key=lambda item: item.get("confidence", 0), reverse=True)
+    non_syntax = [item for item in ranked if item.get("kind") != "syntax"]
+    primary_candidates = [item for item in non_syntax if item.get("kind") != "function"]
+    chosen_extra = primary_candidates[0] if primary_candidates else None
+    if chosen_extra and chosen_extra.get("kind") == "cli_run":
+        safer_cli = next((item for item in primary_candidates if item.get("kind") in {"cli_help", "module_help"}), None)
+        if safer_cli and safer_cli.get("confidence", 0) >= 0.45:
+            chosen_extra = safer_cli
+    limited_validation = not chosen_extra or chosen_extra.get("kind") == "import"
+    chosen_stack = [syntax_candidate]
+    if chosen_extra and chosen_extra["command"] != syntax_candidate["command"]:
+        chosen_stack.append(chosen_extra)
+    if function_validation.get("step") and function_validation.get("used"):
+        chosen_stack.append(function_validation["step"])
+
+    primary_command = chosen_extra["command"] if chosen_extra else syntax_candidate["command"]
+    confidence_value = chosen_extra.get("confidence", 0.5) if chosen_extra else 0.5
+    confidence_level = "high" if confidence_value >= 0.85 else ("medium" if confidence_value >= 0.6 else "low")
+    only_syntax_import = all(step.get("kind") in {"syntax", "import"} for step in chosen_stack)
+    return {
+        "active": True,
+        "mode": "script",
+        "repo": str(repo),
+        "script_path": str(script_path),
+        "script_rel_path": script_rel,
+        "module_name": module_name,
+        "candidates": ranked,
+        "chosen_stack": chosen_stack,
+        "primary_command": primary_command,
+        "confidence_level": confidence_level,
+        "function_validation": function_validation,
+        "limited_validation": limited_validation,
+        "only_syntax_import_validation": only_syntax_import,
+        "limited_reason": (
+            "Validation is limited to syntax/import checks; no strong runtime or test command was found."
+            if limited_validation
+            else ""
+        ),
+    }
+
+
+def run_import_validation(repo: Path, step: dict) -> tuple[int, str]:
+    script_rel = step.get("source") or CURRENT_VALIDATION_PLAN.get("script_rel_path", "")
+    import_code = (
+        "import importlib.util, pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "spec = importlib.util.spec_from_file_location('_lfa_script', path)\n"
+        "if spec is None or spec.loader is None:\n"
+        "    raise RuntimeError(f'Could not load module from {path}')\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "print(f'import-ok:{path.name}')\n"
+    )
+    return run_subprocess([sys.executable, "-c", import_code, script_rel], repo)
+
+
+def run_function_validation(repo: Path, step: dict) -> tuple[int, str]:
+    script_rel = CURRENT_VALIDATION_PLAN.get("script_rel_path", "")
+    function_name = step.get("function_name", "")
+    sample_args = json.dumps(step.get("sample_args", []))
+    harness = (
+        "import importlib.util, json, pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "func_name = sys.argv[2]\n"
+        "args = json.loads(sys.argv[3])\n"
+        "spec = importlib.util.spec_from_file_location('_lfa_script', path)\n"
+        "if spec is None or spec.loader is None:\n"
+        "    raise RuntimeError(f'Could not load module from {path}')\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        "fn = getattr(module, func_name)\n"
+        "first = fn(*args)\n"
+        "second = fn(*args)\n"
+        "assert first == second, 'function output changed across identical calls'\n"
+        "print(json.dumps({'function': func_name, 'result': repr(first)[:120]}))\n"
+    )
+    return run_subprocess([sys.executable, "-c", harness, script_rel, function_name, sample_args], repo)
+
+
+def run_validation_stack(repo: Path, validation_plan: dict, include_syntax: bool = True) -> dict:
+    steps = validation_plan.get("chosen_stack", [])
+    results: list[dict] = []
+    for step in steps:
+        kind = step.get("kind", "")
+        if kind == "syntax" and not include_syntax:
+            continue
+        if kind == "import":
+            code, output = run_import_validation(repo, step)
+        elif kind == "function":
+            code, output = run_function_validation(repo, step)
+        else:
+            code, output = run_subprocess(step.get("command", ""), repo, shell=True)
+        result = {
+            "ok": code == 0,
+            "kind": kind,
+            "command": step.get("command", ""),
+            "output": output.strip(),
+            "failure_type": classify_failure_type(output),
+        }
+        results.append(result)
+        if code != 0:
+            return {
+                "ok": False,
+                "results": results,
+                "failed_step": result,
+                "output": output.strip(),
+                "failure_type": result["failure_type"],
+            }
+    return {"ok": True, "results": results, "failed_step": {}, "output": "", "failure_type": FAILURE_UNKNOWN}
+
+
+def format_validation_plan_summary(plan: dict) -> str:
+    lines = [
+        "=== SCRIPT VALIDATION DISCOVERY ===",
+        "Discovered validation candidates:",
+    ]
+    for candidate in plan.get("candidates", [])[:8]:
+        lines.append(
+            f"- [{candidate.get('kind')}] {candidate.get('command')} "
+            f"(confidence={candidate.get('confidence', 0):.2f}; source={candidate.get('source', '')})"
+        )
+    lines.append("Chosen validation stack:")
+    for step in plan.get("chosen_stack", []):
+        lines.append(f"- [{step.get('kind')}] {step.get('command')}")
+    func_info = plan.get("function_validation", {})
+    lines.append(
+        "Function-level validation: "
+        + (
+            f"used ({', '.join(func_info.get('functions', []))})"
+            if func_info.get("used")
+            else ("considered but skipped" if func_info.get("considered") else "not used")
+        )
+    )
+    lines.append(f"Chosen validation confidence: {plan.get('confidence_level', 'low')}")
+    if plan.get("only_syntax_import_validation"):
+        lines.append("Validation coverage: limited to syntax/import checks.")
+    if plan.get("limited_reason"):
+        lines.append(plan["limited_reason"])
+    return "\n".join(lines)
+
+
 def detect_blocked_state(
     failure_type: str,
     latest_test_output: str,
@@ -1361,6 +1969,7 @@ def format_blocked_message(blocked: dict) -> str:
 
 
 def resolve_run_settings(args, require_test_cmd: bool = True) -> tuple[Path, str, int, int, str, str, Path, Path, dict, str]:
+    global CURRENT_VALIDATION_PLAN
     cwd = Path.cwd().resolve()
     config, config_path = load_agent_config(args.config, cwd)
     recent_state = load_recent_state()
@@ -1370,6 +1979,31 @@ def resolve_run_settings(args, require_test_cmd: bool = True) -> tuple[Path, str
     last_successful_run = next((item for item in reversed(recent_runs) if item.get("success") is True), {})
     target = (args.target or last_run.get("target", "") or config.get("target", "")).strip()
 
+    if getattr(args, "script", ""):
+        script_path = Path(args.script).expanduser().resolve()
+        if not script_path.exists():
+            raise SystemExit(f"Missing script path: {script_path}")
+        repo = detect_repo_for_script(script_path)
+        CURRENT_VALIDATION_PLAN = build_script_validation_plan(repo, script_path)
+        test_cmd = args.test_cmd or CURRENT_VALIDATION_PLAN.get("primary_command", "")
+        mode = args.mode or "quick"
+        mode_source = "script discovery" if not args.mode else "explicit"
+        mode_settings = RUN_MODES.get(mode, RUN_MODES["quick"])
+        max_steps = args.max_steps if args.max_steps is not None else int(config.get("max_steps", mode_settings["max_steps"]))
+        max_file_chars = (
+            args.max_file_chars if args.max_file_chars is not None else int(config.get("max_file_chars", mode_settings["max_file_chars"]))
+        )
+        safety_settings = {
+            "HTTP_PROXY": args.http_proxy or config.get("HTTP_PROXY") or os.environ.get("HTTP_PROXY", ""),
+            "HTTPS_PROXY": args.https_proxy or config.get("HTTPS_PROXY") or os.environ.get("HTTPS_PROXY", ""),
+            "run_budget": args.api_budget_run if args.api_budget_run is not None else int(config.get("api_budget_run", 0) or 0),
+            "attempt_budget": (
+                args.api_budget_attempt if args.api_budget_attempt is not None else int(config.get("api_budget_attempt", 0) or 0)
+            ),
+        }
+        return repo, test_cmd, max_steps, max_file_chars, mode, mode_source, config_path, script_state_path(RECENT_STATE_FILE_NAME), safety_settings, ""
+
+    CURRENT_VALIDATION_PLAN = {}
     repo_value = args.repo
     if not repo_value and (args.last or args.continue_run):
         repo_value = last_run.get("repo", "")
@@ -1866,6 +2500,9 @@ def make_publish_result() -> dict:
         "branch": "",
         "commit_sha": "",
         "pr_url": "",
+        "pr_created_or_reused": False,
+        "pr_merged": False,
+        "local_main_synced": False,
         "reason": "",
         "remote_url": "",
         "normalized_origin": "",
@@ -1928,6 +2565,20 @@ def make_publish_result() -> dict:
         },
         "summary_status": "",
         "noop": False,
+        "requested": False,
+        "attempted": False,
+        "verification": {
+            "current_branch": "",
+            "upstream_branch": "",
+            "upstream_exists": False,
+            "local_head": "",
+            "remote_head": "",
+            "synced": False,
+            "reason": "",
+        },
+        "pr_requested": False,
+        "pr_status": "not_requested",
+        "pr_reason": "",
         "final": {
             "status": "failed",
             "branch": "",
@@ -1999,6 +2650,108 @@ def branch_already_up_to_date(repo: Path, branch: str, remote_ref: str = "origin
     if code != 0 or not remote_sha:
         return False, local_head
     return remote_sha == local_head, local_head
+
+
+def current_upstream_branch(repo: Path, branch: str) -> str:
+    code, output = run_subprocess(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", f"{branch}@{{upstream}}"],
+        repo,
+    )
+    if code != 0:
+        return ""
+    return output.strip()
+
+
+def verify_publish_sync(repo: Path, branch: str, remote_ref: str = "origin") -> dict:
+    current_branch = current_git_branch(repo)
+    local_head = parse_head_commit(repo)
+    upstream_branch = current_upstream_branch(repo, branch)
+    code, remote_head, output = remote_branch_head(repo, remote_ref, branch)
+    upstream_exists = code == 0 and bool(remote_head)
+    synced = bool(local_head and remote_head and local_head == remote_head)
+    reason = ""
+    if not branch:
+        reason = "publish verification failed: branch name is empty"
+    elif not upstream_branch:
+        reason = f"publish verification failed: no upstream is configured for branch '{branch}'"
+    elif not upstream_exists:
+        if code != 0:
+            reason = f"publish verification failed: could not read remote branch '{branch}': {output.strip()}"
+        else:
+            reason = f"publish verification failed: upstream branch '{branch}' does not exist on {remote_ref}"
+    elif not synced:
+        reason = (
+            f"publish verification failed: local HEAD {local_head or '(none)'} "
+            f"does not match {remote_ref}/{branch} {remote_head or '(none)'}"
+        )
+    return {
+        "current_branch": current_branch,
+        "upstream_branch": upstream_branch,
+        "upstream_exists": upstream_exists,
+        "local_head": local_head,
+        "remote_head": remote_head,
+        "synced": synced,
+        "reason": reason,
+    }
+
+
+def summarize_publish_result(summary: dict) -> str:
+    result = summary.get("publish_result_detail") or {}
+    if not summary.get("publish_requested"):
+        return "not_requested"
+    if not summary.get("publish_triggered"):
+        return "failed"
+    status = str((result.get("final") or {}).get("status") or "").strip()
+    if status == "success":
+        return "success"
+    if status == "noop":
+        return "noop"
+    if status == "blocked":
+        return "blocked"
+    if status == "failed_verification":
+        return "failed_verification"
+    if status:
+        return "failed"
+    return "failed"
+
+
+def publish_summary_requires_failure(summary: dict) -> bool:
+    publish_result = str(summary.get("publish_result") or "not_requested").strip()
+    return publish_result not in {"success", "noop", "not_requested"}
+
+
+def resolve_publish_requested(args: argparse.Namespace) -> bool:
+    if getattr(args, "publish_only", False):
+        return True
+    if getattr(args, "no_publish_on_success", False):
+        return False
+    return True
+
+
+def format_bool(value: object) -> str:
+    return "true" if bool(value) else "false"
+
+
+def format_final_operator_summary(summary: dict) -> str:
+    validation_result = str(summary.get("validation_result") or "failed").strip()
+    publish_result = str(summary.get("publish_result") or "not_requested").strip()
+    publish_requested = bool(summary.get("publish_requested"))
+    if validation_result == "success":
+        if publish_result == "success":
+            return "FINAL: validation succeeded, publish succeeded"
+        if publish_result == "noop":
+            reason = str(summary.get("publish_reason") or "").strip().lower()
+            if "already published" in reason or "already up to date" in reason or "no changes to publish" in reason:
+                return "FINAL: publish noop (already up to date)"
+            return "FINAL: validation succeeded, publish noop"
+        if publish_requested:
+            return f"FINAL: validation succeeded, publish {publish_result}"
+        return "FINAL: validation succeeded"
+    if validation_result == "blocked":
+        if publish_result in {"success", "failed", "noop", "blocked", "failed_verification"}:
+            return f"FINAL: validation blocked, publish {publish_result}"
+        return "FINAL: validation blocked"
+    return "FINAL: validation failed"
 
 
 def resolve_publish_target(preflight: dict, publish_state: dict) -> dict:
@@ -2088,6 +2841,57 @@ def detect_existing_pr(repo: Path, branch: str) -> str:
         if isinstance(first, dict):
             return str(first.get("url") or "").strip()
     return ""
+
+
+def can_auto_merge_publish_result(result: dict) -> tuple[bool, str]:
+    target = result.get("target") or {}
+    preflight = result.get("preflight") or {}
+    current_user = str(preflight.get("current_user") or "").strip().lower()
+    origin_owner = str(preflight.get("origin_owner") or "").strip().lower()
+    target_repo = str(target.get("repo") or "").strip()
+    target_owner = target_repo.split("/", 1)[0].lower() if "/" in target_repo else ""
+    if not result.get("pr_url"):
+        return False, "Auto-merge skipped because no PR URL is available."
+    if target.get("type") != "fork":
+        return False, "Auto-merge is only allowed for self-owned fork PRs."
+    if not current_user or target_owner != current_user:
+        return False, "Auto-merge skipped because the fork owner could not be verified as the authenticated user."
+    if not origin_owner or origin_owner == current_user:
+        return False, "Auto-merge skipped because the PR does not target an upstream repo from a self-owned fork."
+    return True, ""
+
+
+def merge_published_pr(repo: Path, result: dict) -> tuple[bool, str]:
+    ok, reason = can_auto_merge_publish_result(result)
+    if not ok:
+        return False, reason
+    code, output = run_subprocess(["gh", "pr", "merge", result["pr_url"], "--merge", "--delete-branch"], repo)
+    if code != 0:
+        return False, f"Auto-merge failed: {output}"
+    result["pr_merged"] = True
+    result["actions"].append("pr merged")
+    return True, ""
+
+
+def sync_local_main_after_merge(repo: Path) -> tuple[bool, str]:
+    current_branch = current_git_branch(repo)
+    code, output = run_subprocess(["git", "rev-parse", "--verify", "main"], repo)
+    if code != 0:
+        return False, "Local main sync skipped because the `main` branch does not exist locally."
+    switched = False
+    if current_branch != "main":
+        code, output = run_subprocess(["git", "checkout", "main"], repo)
+        if code != 0:
+            return False, f"Local main sync failed during checkout: {output}"
+        switched = True
+    code, output = run_subprocess(["git", "pull", "--ff-only", "origin", "main"], repo)
+    if switched:
+        restore_code, restore_output = run_subprocess(["git", "checkout", current_branch], repo)
+        if restore_code != 0:
+            return False, f"Local main sync restored main, but could not switch back to {current_branch}: {restore_output}"
+    if code != 0:
+        return False, f"Local main sync failed: {output}"
+    return True, ""
 
 
 def target_remote_exists(repo: Path, target: dict) -> tuple[bool, str]:
@@ -2207,6 +3011,8 @@ def publish_validated_run(
     changed_paths: list[str],
     publish_branch: str,
     publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
     publish_message: str,
     target: str,
     blocked_reason: str | None,
@@ -2216,14 +3022,21 @@ def publish_validated_run(
 ) -> dict:
     result = make_publish_result()
     result["publish_scope"] = "current_repo_state" if publish_current_mode else "validated_run"
+    result["requested"] = True
     publish_state = load_publish_state(repo)
     result["publish_state"] = publish_state
     result["state_loaded"] = bool(publish_state.get("timestamp"))
     result["transport_locked"] = bool(publish_state.get("ssh_confirmed"))
     result["environment"] = detect_publish_environment()
-    result["recommended_command"] = recommended_publish_command(include_pr=publish_pr)
+    result["recommended_command"] = recommended_publish_command(include_pr=publish_pr or publish_merge)
 
     def finish(status: str, reason: str = "", next_action: str = "") -> dict:
+        if result.get("attempted"):
+            verification_reason = (result.get("verification") or {}).get("reason") or ""
+            if status == "success" and verification_reason:
+                status = "failed_verification"
+                if not reason:
+                    reason = verification_reason
         if reason or next_action:
             set_publish_outcome(result, status, reason, next_action)
         state_payload = {
@@ -2320,21 +3133,30 @@ def publish_validated_run(
     elif branch_is_default:
         auto_branch = make_publish_branch_name()
         if not sys.stdin.isatty():
-            return finish(
-                "blocked",
-                f"Publish requested on default branch '{current_branch}' in non-interactive mode. Use --publish-branch to publish safely.",
-                "Use --publish-branch to publish safely.",
-            )
-        if not prompt_yes_no(
-            f"Publish is requested from default branch '{current_branch}'. Create and switch to '{auto_branch}'?",
-            default=True,
-        ):
-            return finish("blocked", "Publish cancelled because branch creation was not confirmed.")
-        code, output = run_subprocess(["git", "checkout", "-b", auto_branch], repo)
-        if code != 0:
-            return finish("blocked", f"Publish blocked because safe branch creation failed: {output}")
-        branch_to_push = auto_branch
-        result["branch"] = branch_to_push
+            code, output = run_subprocess(["git", "checkout", "-b", auto_branch], repo)
+            if code != 0:
+                return finish(
+                    "blocked",
+                    (
+                        f"Publish blocked because automatic safe branch creation from default branch "
+                        f"'{current_branch}' failed in non-interactive mode: {output}"
+                    ),
+                    "Resolve branch creation failure or pass --publish-branch explicitly.",
+                )
+            result["actions"].append("auto-created publish branch from default branch")
+            branch_to_push = auto_branch
+            result["branch"] = branch_to_push
+        else:
+            if not prompt_yes_no(
+                f"Publish is requested from default branch '{current_branch}'. Create and switch to '{auto_branch}'?",
+                default=True,
+            ):
+                return finish("blocked", "Publish cancelled because branch creation was not confirmed.")
+            code, output = run_subprocess(["git", "checkout", "-b", auto_branch], repo)
+            if code != 0:
+                return finish("blocked", f"Publish blocked because safe branch creation failed: {output}")
+            branch_to_push = auto_branch
+            result["branch"] = branch_to_push
 
     result["preflight"]["branch"] = branch_to_push
     ok, preflight_fix_output, preflight_next_action = prepare_publish_target(repo, result)
@@ -2454,17 +3276,27 @@ def publish_validated_run(
         if "repository not found" in lowered and result["target"]["type"] == "fork":
             return finish("missing_fork", f"Publish blocked because the resolved fork target was not found: {output}", f"Create or verify fork `{result['target']['repo']}`, then set origin with `git remote set-url origin {result['target']['url']}` and retry.")
         return finish("failed", f"Publish blocked because push failed: {output}", "Inspect the resolved target URL, auth, and branch permissions before retrying.")
+    result["attempted"] = True
+    result["verification"] = verify_publish_sync(repo, branch_to_push, "origin")
 
     pr_url = ""
-    if publish_pr:
+    want_pr = publish_pr or publish_merge
+    result["pr_requested"] = publish_pr
+    if want_pr:
         if not result["preflight"]["gh_available"]:
-            result["reason"] = "Publish succeeded, but PR creation could not proceed because GitHub CLI is not installed."
+            result["pr_status"] = "blocked"
+            result["pr_reason"] = "PR creation could not proceed because GitHub CLI is not installed."
+            result["reason"] = f"Publish succeeded, but {result['pr_reason']}"
         elif not result["preflight"]["gh_auth"]:
-            result["reason"] = "Publish succeeded, but PR creation could not proceed because GitHub CLI is not authenticated."
+            result["pr_status"] = "blocked"
+            result["pr_reason"] = "PR creation could not proceed because GitHub CLI is not authenticated."
+            result["reason"] = f"Publish succeeded, but {result['pr_reason']}"
         else:
             existing_pr = detect_existing_pr(repo, branch_to_push)
             if existing_pr:
                 result["pr_already_exists"] = True
+                result["pr_created_or_reused"] = True
+                result["pr_status"] = "reused"
                 pr_url = existing_pr
                 result["actions"].append("reused existing pr")
             else:
@@ -2483,8 +3315,41 @@ def publish_validated_run(
                 )
                 if code == 0:
                     pr_url = pr_output.strip().splitlines()[-1] if pr_output.strip() else ""
+                    result["pr_created_or_reused"] = bool(pr_url)
+                    result["pr_status"] = "created" if pr_url else "blocked"
+                    if not pr_url:
+                        result["pr_reason"] = "PR creation command succeeded but no PR URL was returned."
+                    if pr_url:
+                        result["actions"].append("created pr")
                 else:
-                    result["reason"] = f"Publish succeeded, but PR creation could not proceed: {pr_output}"
+                    result["pr_status"] = "failed"
+                    result["pr_reason"] = f"PR creation could not proceed: {pr_output}"
+                    result["reason"] = f"Publish succeeded, but {result['pr_reason']}"
+        if not pr_url and not result["pr_reason"] and result["pr_status"] in {"blocked", "failed"}:
+            result["pr_reason"] = "PR requested but no PR URL is available."
+    else:
+        result["pr_status"] = "not_requested"
+
+    if publish_merge:
+        result["pr_url"] = pr_url
+        merged, merge_reason = merge_published_pr(repo, result)
+        if merged:
+            result["pr_merged"] = True
+        elif merge_reason:
+            result["reason"] = merge_reason
+
+    if publish_merge_local_main and result.get("pr_merged"):
+        synced, sync_reason = sync_local_main_after_merge(repo)
+        if synced:
+            result["local_main_synced"] = True
+            result["actions"].append("local main synced")
+        elif sync_reason:
+            result["reason"] = sync_reason
+
+    if publish_pr and not pr_url and not result.get("pr_reason"):
+        result["pr_reason"] = "PR requested but no PR URL is available."
+        if result["pr_status"] == "not_requested":
+            result["pr_status"] = "failed"
 
     set_publish_final(result, "success", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=pr_url or None)
     return finish("success")
@@ -2494,6 +3359,8 @@ def publish_current_repo_state(
     repo: Path,
     publish_branch: str,
     publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
     publish_message: str,
     target: str,
     dry_run_mode: bool,
@@ -2507,6 +3374,8 @@ def publish_current_repo_state(
         [],
         publish_branch,
         publish_pr,
+        publish_merge,
+        publish_merge_local_main,
         publish_message.strip() or "chore: publish current repo state",
         target,
         None,
@@ -2514,8 +3383,116 @@ def publish_current_repo_state(
         dry_run_mode,
         True,
     )
-    result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr)
+    result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr or publish_merge)
     return result
+
+
+def run_post_success_publish(
+    repo: Path,
+    test_cmd: str,
+    attempt_number: int,
+    confidence_level: str,
+    artifact_dir: Path | None,
+    changed_paths: list[str],
+    publish_branch: str,
+    publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
+    publish_message: str,
+    target: str,
+    blocked_reason: str | None,
+    baseline_paths: list[str],
+    dry_run_mode: bool,
+    publish_mode: str,
+    validation_succeeded: bool,
+    publish_requested: bool,
+) -> dict:
+    validation_result = "success" if validation_succeeded else ("blocked" if blocked_reason else "failed")
+    summary = {
+        "validation_result": validation_result,
+        "publish_requested": False,
+        "publish_triggered": False,
+        "publish_mode": publish_mode,
+        "pr_created_or_reused": False,
+        "pr_merged": False,
+        "local_main_synced": False,
+        "publish_result": "not_requested",
+        "publish_result_detail": None,
+        "publish_reason": "",
+    }
+    if publish_mode == "current-repo-state":
+        summary["publish_requested"] = True
+        publish_result = publish_current_repo_state(
+            repo,
+            publish_branch,
+            publish_pr,
+            publish_merge,
+            publish_merge_local_main,
+            publish_message,
+            target,
+            dry_run_mode,
+        )
+        summary["publish_triggered"] = True
+        summary["publish_result_detail"] = publish_result
+    elif validation_succeeded and publish_requested:
+        summary["publish_requested"] = True
+        publish_result = publish_validated_run(
+            repo,
+            test_cmd,
+            attempt_number,
+            confidence_level,
+            artifact_dir,
+            changed_paths,
+            publish_branch,
+            publish_pr,
+            publish_merge,
+            publish_merge_local_main,
+            publish_message,
+            target,
+            blocked_reason,
+            baseline_paths,
+            dry_run_mode,
+        )
+        summary["publish_triggered"] = True
+        summary["publish_result_detail"] = publish_result
+    elif publish_requested and not validation_succeeded:
+        summary["publish_requested"] = True
+        summary["publish_result"] = "not_requested"
+        summary["publish_reason"] = f"publish not run because validation_result={validation_result}"
+    if summary["publish_requested"] and validation_succeeded and not summary["publish_triggered"]:
+        summary["publish_result"] = "failed"
+        summary["publish_reason"] = "publish requested after validation success, but publish flow did not run"
+    elif summary.get("publish_result") != "not_requested" or summary.get("publish_result_detail"):
+        summary["publish_result"] = summarize_publish_result(summary)
+    publish_result = summary.get("publish_result_detail") or {}
+    if not summary["publish_reason"]:
+        summary["publish_reason"] = (
+            publish_result.get("reason")
+            or (publish_result.get("verification") or {}).get("reason")
+            or publish_result.get("pr_reason")
+            or ""
+        )
+    summary["pr_created_or_reused"] = bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists"))
+    summary["pr_merged"] = bool(publish_result.get("pr_merged"))
+    summary["local_main_synced"] = bool(publish_result.get("local_main_synced"))
+    return summary
+
+
+def print_post_success_publish_summary(summary: dict) -> None:
+    print("\n=== VALIDATION RESULT ===")
+    print(f"validation_result: {summary.get('validation_result', 'failed')}")
+    print("\n=== POST-SUCCESS PUBLISH ===")
+    print(f"publish_requested: {format_bool(summary.get('publish_requested'))}")
+    print(f"publish_triggered: {format_bool(summary.get('publish_triggered'))}")
+    print(f"publish_mode: {summary.get('publish_mode') or 'validated-run'}")
+    if summary.get("publish_reason"):
+        print(f"publish_reason: {summary['publish_reason']}")
+    if not summary.get("publish_result_detail"):
+        print("\n=== PUBLISH RESULT ===")
+        print(f"publish_result: {summary.get('publish_result', 'not_requested')}")
+    print(f"pr_created_or_reused: {format_bool(summary.get('pr_created_or_reused'))}")
+    print(f"pr_merged: {format_bool(summary.get('pr_merged'))}")
+    print(f"local_main_synced: {format_bool(summary.get('local_main_synced'))}")
 
 
 def print_publish_summary(publish_result: dict) -> None:
@@ -2525,7 +3502,8 @@ def print_publish_summary(publish_result: dict) -> None:
     environment = publish_result.get("environment") or {}
     fingerprint = publish_result.get("fingerprint") or {}
     actions = publish_result.get("actions") or []
-    print("\n=== PUBLISH SUMMARY ===")
+    print("\n=== PUBLISH RESULT ===")
+    print(f"publish_result: {final.get('status') or 'failed'}")
     print(
         f"resolved_target: {target.get('type') or 'blocked'} "
         f"{target.get('repo') or '(none)'}"
@@ -2575,10 +3553,24 @@ def print_publish_summary(publish_result: dict) -> None:
         f"reason={fingerprint.get('reason') or '(none)'}"
     )
     print(f"pr_already_exists: {bool(publish_result.get('pr_already_exists'))}")
+    print(f"pr_created_or_reused: {bool(publish_result.get('pr_created_or_reused') or publish_result.get('pr_already_exists'))}")
+    print(f"pr_merged: {bool(publish_result.get('pr_merged'))}")
+    print(f"local_main_synced: {bool(publish_result.get('local_main_synced'))}")
     print(f"noop: {bool(publish_result.get('noop'))}")
     print(f"final_status: {final.get('status') or 'failed'}")
     print(f"commit_sha: {publish_result.get('commit_sha') or '(none)'}")
     print(f"pr_url: {publish_result.get('pr_url') or '(none)'}")
+    verification = publish_result.get("verification") or {}
+    print(f"current_branch: {verification.get('current_branch') or '(none)'}")
+    print(f"upstream_branch: {verification.get('upstream_branch') or '(none)'}")
+    print(f"upstream_exists: {bool(verification.get('upstream_exists'))}")
+    print(f"local_head: {verification.get('local_head') or '(none)'}")
+    print(f"remote_head: {verification.get('remote_head') or '(none)'}")
+    print(f"sync_verified: {bool(verification.get('synced'))}")
+    print(f"pr_requested: {bool(publish_result.get('pr_requested'))}")
+    print(f"pr_status: {publish_result.get('pr_status') or 'not_requested'}")
+    if publish_result.get("pr_reason"):
+        print(f"pr_reason: {publish_result['pr_reason']}")
     if publish_result.get("publish_scope") == "current_repo_state":
         summary_status = publish_result.get("summary_status") or publish_result.get("reason") or "(none)"
         print(f"mode_summary: {summary_status}")
@@ -2644,12 +3636,16 @@ def compute_success_confidence(
         reasons.append("broader change set")
     if len(candidate_results) <= 1:
         reasons.append("limited validation coverage")
+    if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("limited_validation"):
+        reasons.append("script validation was limited to syntax/import or weak runtime signals")
 
     if changed_paths and len(changed_paths) <= 2 and diff_size <= 2000 and all(item.get("ok") for item in candidate_results):
         level = "HIGH"
     elif diff_size > 5000 or len(changed_paths) > 3:
         level = "LOW"
     else:
+        level = "MEDIUM"
+    if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("limited_validation") and level == "HIGH":
         level = "MEDIUM"
 
     if not reasons:
@@ -3531,10 +4527,20 @@ def build_user_prompt(
     current_plan: dict | None = None,
     memory_hint: dict | None = None,
 ) -> str:
+    validation_note = ""
+    if CURRENT_VALIDATION_PLAN.get("active"):
+        stack_commands = [step.get("command", "") for step in CURRENT_VALIDATION_PLAN.get("chosen_stack", [])]
+        validation_note = (
+            "Script validation plan:\n"
+            f"- primary validation: {CURRENT_VALIDATION_PLAN.get('primary_command', test_cmd)}\n"
+            f"- chosen stack: {', '.join(stack_commands)}\n"
+            f"- confidence: {CURRENT_VALIDATION_PLAN.get('confidence_level', 'low')}\n"
+        )
     return (
         f"Repository: {repo}\n"
         f"Current branch: {branch_name or '(unknown or no git branch)'}\n"
         f"Goal: make this pass: {test_cmd}\n"
+        f"{validation_note}"
         f"{build_strategy_guidance(strategy_mode, failure_type, precision_patch, diversification, hypothesis, current_plan, memory_hint)}\n\n"
         "Suggested workflow:\n"
         "1. Run tests.\n"
@@ -4898,6 +5904,7 @@ def finalize_success(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", help="Path to repo")
+    parser.add_argument("--script", help="Path to a Python script; validation commands are discovered automatically.")
     parser.add_argument("--target", help="SSH host for remote execution.")
     parser.add_argument("--test-cmd", help="Test command")
     parser.add_argument("test_cmd_positional", nargs=argparse.REMAINDER, help="Optional test command for wrapper usage.")
@@ -4909,10 +5916,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Run the agent but skip commit.")
     parser.add_argument("--explain-only", action="store_true", help="Print resolved settings and exit.")
     parser.add_argument("--show-diff", action="store_true", help="Show the resulting diff automatically after a successful run.")
-    parser.add_argument("--publish", action="store_true", help="After validated success, publish the run's changes from the local machine. If no repo/test is provided, recent state is reused.")
+    parser.add_argument("--publish", action="store_true", help="Compatibility flag for the default validated-run publish behavior.")
+    parser.add_argument("--publish-on-success", action="store_true", help="Compatibility flag; publish-on-success is already the default for validated runs.")
+    parser.add_argument("--no-publish-on-success", action="store_true", help="Disable the default publish-after-validation-success behavior for validated runs.")
     parser.add_argument("--publish-only", action="store_true", help="Publish the current repo state without running the repair loop or requiring a failing test command.")
     parser.add_argument("--publish-branch", help="Branch name to use for publish mode.")
     parser.add_argument("--publish-pr", action="store_true", help="After publish, attempt to open a pull request with GitHub CLI.")
+    parser.add_argument("--publish-merge", action="store_true", help="After publish, auto-merge only when the PR is a safe self-owned fork PR.")
+    parser.add_argument("--publish-merge-local-main", action="store_true", help="After a successful safe auto-merge, sync local main with origin/main.")
     parser.add_argument("--publish-message", help="Commit message to use for publish mode.")
     parser.add_argument("--http-proxy", help="HTTP proxy for subprocess-driven tasks.")
     parser.add_argument("--https-proxy", help="HTTPS proxy for subprocess-driven tasks.")
@@ -4933,10 +5944,11 @@ def main():
 
     configure_execution_target(target, repo)
     configure_subprocess_safety(safety_settings)
+    publish_requested = resolve_publish_requested(args)
     if args.publish_only:
         startup_signal("Mode: publish current repo state")
     else:
-        startup_signal("Mode: publish validated run" if args.publish else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
+        startup_signal("Mode: publish validated run" if publish_requested else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
         startup_signal(f"Using test: {args.test_cmd}")
     startup_signal(
         "Proxy support: enabled"
@@ -4951,9 +5963,11 @@ def main():
     if target:
         print(f"🌐 Target: {target}")
     print(f"Repository: {repo}")
+    if CURRENT_VALIDATION_PLAN.get("active"):
+        print(format_validation_plan_summary(CURRENT_VALIDATION_PLAN))
     if args.publish_only:
         print("Active mode: publish current repo state")
-    elif args.publish:
+    elif publish_requested:
         print("Active mode: publish validated run")
     if args.explain_only:
         print("Explain-only mode: resolved settings only, no repair attempt will run.")
@@ -4964,11 +5978,41 @@ def main():
             repo,
             args.publish_branch or "",
             args.publish_pr,
+            args.publish_merge,
+            args.publish_merge_local_main,
             args.publish_message or "",
             target,
             args.dry_run,
         )
+        print_post_success_publish_summary(
+            {
+                "validation_result": "blocked",
+                "publish_requested": True,
+                "publish_triggered": True,
+                "publish_mode": "current-repo-state",
+                "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
+                "publish_result_detail": publish_result,
+                "publish_reason": publish_result.get("reason") or (publish_result.get("verification") or {}).get("reason") or "",
+                "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
+                "pr_merged": bool(publish_result.get("pr_merged")),
+                "local_main_synced": bool(publish_result.get("local_main_synced")),
+            }
+        )
         print_publish_summary(publish_result)
+        print(format_final_operator_summary(
+            {
+                "validation_result": "blocked",
+                "publish_requested": True,
+                "publish_triggered": True,
+                "publish_mode": "current-repo-state",
+                "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
+                "publish_result_detail": publish_result,
+                "publish_reason": publish_result.get("reason") or (publish_result.get("verification") or {}).get("reason") or "",
+                "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
+                "pr_merged": bool(publish_result.get("pr_merged")),
+                "local_main_synced": bool(publish_result.get("local_main_synced")),
+            }
+        ))
         return
     if target:
         ok, error = ensure_remote_session()
@@ -5491,23 +6535,33 @@ def main():
                 print(comparison_text)
                 print(action_text)
                 print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
-                if args.publish:
-                    publish_result = publish_validated_run(
-                        repo,
-                        args.test_cmd,
-                        step,
-                        finalization.get("confidence_level", ""),
-                        artifact_dir,
-                        finalization.get("changed_paths", []),
-                        args.publish_branch or "",
-                        args.publish_pr,
-                        args.publish_message or "",
-                        target,
-                        run_metrics.get("blocked_reason"),
-                        publish_baseline_paths,
-                        args.dry_run,
-                    )
-                    print_publish_summary(publish_result)
+                publish_summary = run_post_success_publish(
+                    repo,
+                    args.test_cmd,
+                    step,
+                    finalization.get("confidence_level", ""),
+                    artifact_dir,
+                    finalization.get("changed_paths", []),
+                    args.publish_branch or "",
+                    args.publish_pr,
+                    args.publish_merge,
+                    args.publish_merge_local_main,
+                    args.publish_message or "",
+                    target,
+                    run_metrics.get("blocked_reason"),
+                    publish_baseline_paths,
+                    args.dry_run,
+                    "validated-run",
+                    True,
+                    publish_requested,
+                )
+                print_post_success_publish_summary(publish_summary)
+                if publish_summary.get("publish_result_detail"):
+                    print_publish_summary(publish_summary["publish_result_detail"])
+                print(format_final_operator_summary(publish_summary))
+                if publish_summary_requires_failure(publish_summary):
+                    print("\nFailed: validation succeeded but publish did not complete successfully.", file=sys.stderr)
+                    raise SystemExit(1)
                 return
 
             if ran_tests and latest_test_output:
@@ -6404,23 +7458,33 @@ def main():
                         print(comparison_text)
                         print(action_text)
                         print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
-                        if args.publish:
-                            publish_result = publish_validated_run(
-                                repo,
-                                args.test_cmd,
-                                step,
-                                finalization.get("confidence_level", ""),
-                                artifact_dir,
-                                finalization.get("changed_paths", []),
-                                args.publish_branch or "",
-                                args.publish_pr,
-                                args.publish_message or "",
-                                target,
-                                run_metrics.get("blocked_reason"),
-                                publish_baseline_paths,
-                                args.dry_run,
-                            )
-                            print_publish_summary(publish_result)
+                        publish_summary = run_post_success_publish(
+                            repo,
+                            args.test_cmd,
+                            step,
+                            finalization.get("confidence_level", ""),
+                            artifact_dir,
+                            finalization.get("changed_paths", []),
+                            args.publish_branch or "",
+                            args.publish_pr,
+                            args.publish_merge,
+                            args.publish_merge_local_main,
+                            args.publish_message or "",
+                            target,
+                            run_metrics.get("blocked_reason"),
+                            publish_baseline_paths,
+                            args.dry_run,
+                            "validated-run",
+                            True,
+                            publish_requested,
+                        )
+                        print_post_success_publish_summary(publish_summary)
+                        if publish_summary.get("publish_result_detail"):
+                            print_publish_summary(publish_summary["publish_result_detail"])
+                        print(format_final_operator_summary(publish_summary))
+                        if publish_summary_requires_failure(publish_summary):
+                            print("\nFailed: validation succeeded but publish did not complete successfully.", file=sys.stderr)
+                            raise SystemExit(1)
                         return
 
                 continue
@@ -6465,6 +7529,34 @@ def main():
     print(comparison_text)
     print(action_text)
     print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
+    print_post_success_publish_summary(
+        {
+            "validation_result": "failed",
+            "publish_requested": publish_requested,
+            "publish_triggered": False,
+            "publish_mode": "validated-run",
+            "publish_result": "not_requested" if not publish_requested else "not_requested",
+            "publish_reason": (f"publish not run because validation_result=failed" if publish_requested else ""),
+            "pr_created_or_reused": False,
+            "pr_merged": False,
+            "local_main_synced": False,
+        }
+    )
+    print(
+        format_final_operator_summary(
+            {
+                "validation_result": "failed",
+                "publish_requested": publish_requested,
+                "publish_triggered": False,
+                "publish_mode": "validated-run",
+                "publish_result": "not_requested",
+                "publish_reason": (f"publish not run because validation_result=failed" if publish_requested else ""),
+                "pr_created_or_reused": False,
+                "pr_merged": False,
+                "local_main_synced": False,
+            }
+        )
+    )
     print("\nFailed: reached max steps without confirmed passing tests.", file=sys.stderr)
     raise SystemExit(1)
 

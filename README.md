@@ -180,15 +180,18 @@ Reuse recent state:
 python local_fix_agent.py --continue
 python local_fix_agent.py --last
 python local_fix_agent.py --from-last-failure
-python local_fix_agent.py --publish
-python local_fix_agent.py --last --publish
+python local_fix_agent.py
+python local_fix_agent.py --last
+python local_fix_agent.py --no-publish-on-success
 python local_fix_agent.py --publish-only
 ```
 
-Headless publish of the last validated run:
+Validated runs now publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
+
+Headless validated run with PR creation:
 
 ```bash
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
+AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish-pr
 ./scripts/fixpublish.sh
 ```
 
@@ -202,6 +205,13 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 ### Mental Model
 
 `local_fix_agent.py` reasons locally, gathers targeted context, proposes edits through a tool layer, reruns validation, and commits only after additional checks pass.
+
+On a normal validated run, success means:
+
+- validate
+- then run the guarded validated-run publish flow by default
+
+Use `--no-publish-on-success` when you want validation without publish.
 
 In remote mode:
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
@@ -170,7 +171,7 @@ def test_origin_change_resets_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc123"))
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
     )
 
     assert result["state_reset"] is True
@@ -218,7 +219,7 @@ def test_repeat_publish_noop_from_previous_run(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
     )
 
     assert result["control_path"] == "noop"
@@ -249,7 +250,7 @@ def test_publish_validated_run_missing_auth_blocks(monkeypatch: pytest.MonkeyPat
     )
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
     )
 
     assert result["control_path"] == "blocked_auth"
@@ -290,7 +291,7 @@ def test_publish_validated_run_fork_required_non_interactive_blocks(monkeypatch:
     )
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
     )
 
     assert result["control_path"] == "fork_push"
@@ -346,6 +347,30 @@ def test_existing_pr_prevents_duplicate_creation(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
     monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "https://github.com/octocat/demo/pull/7")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -360,7 +385,7 @@ def test_existing_pr_prevents_duplicate_creation(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, False, False, "", "", None, [], False
     )
 
     assert result["published"] is True
@@ -392,7 +417,7 @@ def test_publish_current_clean_tree_results_in_noop(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
-    result = lfa.publish_current_repo_state(repo, "", False, "", "", False)
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["control_path"] == "noop"
     assert result["reason"] == "no changes to publish"
@@ -416,9 +441,33 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
     monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
     monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
     monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: " M local_fix_agent.py")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+        },
+    )
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -434,7 +483,7 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
-    result = lfa.publish_current_repo_state(repo, "", False, "", "", False)
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["published"] is True
     assert result["summary_status"] == "staged current repo state"
@@ -459,9 +508,33 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
     monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
     monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["new_file.txt"])
     monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "?? new_file.txt")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "?? new_file.txt",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": True,
+        },
+    )
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -477,7 +550,7 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
-    result = lfa.publish_current_repo_state(repo, "", False, "", "", False)
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["published"] is True
     assert result["working_tree"]["has_untracked"] is True
@@ -516,7 +589,7 @@ def test_publish_current_does_not_reference_specific_files(monkeypatch: pytest.M
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
-    result = lfa.publish_current_repo_state(repo, "", False, "", "", False)
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["control_path"] == "noop"
     assert commands == [["git", "add", "-A"], ["git", "diff", "--cached", "--quiet"]]
@@ -536,9 +609,33 @@ def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pyte
     monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
     monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
     monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=False: "M  local_fix_agent.py")
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -553,7 +650,7 @@ def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pyte
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
 
     result = lfa.publish_validated_run(
-        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, "", "", None, [], False
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
     )
 
     assert result["published"] is True
@@ -617,6 +714,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
         changed_paths: list[str],
         publish_branch: str,
         publish_pr: bool,
+        publish_merge: bool,
+        publish_merge_local_main: bool,
         publish_message: str,
         target: str,
         blocked_reason: str | None,
@@ -634,6 +733,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
                 "changed_paths": changed_paths,
                 "publish_branch": publish_branch,
                 "publish_pr": publish_pr,
+                "publish_merge": publish_merge,
+                "publish_merge_local_main": publish_merge_local_main,
                 "publish_message": publish_message,
                 "target": target,
                 "blocked_reason": blocked_reason,
@@ -646,7 +747,7 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(lfa, "publish_validated_run", fake_publish_validated_run)
 
-    result = lfa.publish_current_repo_state(repo, "feature/publish", True, "", "", False)
+    result = lfa.publish_current_repo_state(repo, "feature/publish", True, False, False, "", "", False)
 
     assert captured["repo"] == repo
     assert captured["test_cmd"] == "n/a (publish current repo state)"
@@ -656,6 +757,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
     assert captured["changed_paths"] == []
     assert captured["publish_branch"] == "feature/publish"
     assert captured["publish_pr"] is True
+    assert captured["publish_merge"] is False
+    assert captured["publish_merge_local_main"] is False
     assert captured["publish_message"] == "chore: publish current repo state"
     assert captured["target"] == ""
     assert captured["blocked_reason"] is None
@@ -663,3 +766,496 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
     assert captured["dry_run_mode"] is False
     assert captured["publish_current_mode"] is True
     assert result["recommended_command"] == "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr"
+
+
+def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    captured: dict[str, object] = {}
+
+    def fake_publish_validated_run(
+        current_repo: Path,
+        test_cmd: str,
+        attempt_number: int,
+        confidence_level: str,
+        artifact_dir: Path | None,
+        changed_paths: list[str],
+        publish_branch: str,
+        publish_pr: bool,
+        publish_merge: bool,
+        publish_merge_local_main: bool,
+        publish_message: str,
+        target: str,
+        blocked_reason: str | None,
+        baseline_paths: list[str],
+        dry_run_mode: bool,
+        publish_current_mode: bool = False,
+    ) -> dict:
+        captured["repo"] = current_repo
+        captured["test_cmd"] = test_cmd
+        return {
+            "published": True,
+            "publish_scope": "validated_run",
+            "final": {"status": "success"},
+            "verification": {"reason": ""},
+        }
+
+    monkeypatch.setattr(lfa, "publish_validated_run", fake_publish_validated_run)
+
+    summary = lfa.run_post_success_publish(
+        repo,
+        "pytest -q",
+        2,
+        "HIGH",
+        None,
+        ["local_fix_agent.py"],
+        "",
+        False,
+        False,
+        False,
+        "",
+        "",
+        None,
+        [],
+        False,
+        "validated-run",
+        True,
+        True,
+    )
+
+    assert summary["validation_result"] == "success"
+    assert summary["publish_triggered"] is True
+    assert summary["publish_result"] == "success"
+    assert summary["publish_mode"] == "validated-run"
+    assert captured["repo"] == repo
+    assert captured["test_cmd"] == "pytest -q"
+
+
+def test_resolve_publish_requested_defaults_to_true() -> None:
+    args = argparse.Namespace(publish_only=False, no_publish_on_success=False, publish=False, publish_on_success=False)
+    assert lfa.resolve_publish_requested(args) is True
+
+
+def test_resolve_publish_requested_honors_no_publish_on_success() -> None:
+    args = argparse.Namespace(publish_only=False, no_publish_on_success=True, publish=False, publish_on_success=False)
+    assert lfa.resolve_publish_requested(args) is False
+
+
+def test_resolve_publish_requested_preserves_publish_only_mode() -> None:
+    args = argparse.Namespace(publish_only=True, no_publish_on_success=True, publish=False, publish_on_success=False)
+    assert lfa.resolve_publish_requested(args) is True
+
+
+def test_run_post_success_publish_skips_on_validation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "publish_validated_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("publish should not run after failed validation")),
+    )
+
+    summary = lfa.run_post_success_publish(
+        Path("/tmp/repo"),
+        "pytest -q",
+        1,
+        "MEDIUM",
+        None,
+        [],
+        "",
+        False,
+        False,
+        False,
+        "",
+        "",
+        None,
+        [],
+        False,
+        "validated-run",
+        False,
+        True,
+    )
+
+    assert summary["validation_result"] == "failed"
+    assert summary["publish_requested"] is True
+    assert summary["publish_triggered"] is False
+    assert summary["publish_result"] == "not_requested"
+    assert summary["publish_reason"] == "publish not run because validation_result=failed"
+    assert summary["pr_created_or_reused"] is False
+
+
+def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_publish_current_repo_state(
+        repo: Path,
+        publish_branch: str,
+        publish_pr: bool,
+        publish_merge: bool,
+        publish_merge_local_main: bool,
+        publish_message: str,
+        target: str,
+        dry_run_mode: bool,
+    ) -> dict:
+        captured["repo"] = repo
+        captured["publish_branch"] = publish_branch
+        return {
+            "published": True,
+            "publish_scope": "current_repo_state",
+            "final": {"status": "success"},
+            "verification": {"reason": ""},
+        }
+
+    monkeypatch.setattr(lfa, "publish_current_repo_state", fake_publish_current_repo_state)
+
+    summary = lfa.run_post_success_publish(
+        Path("/tmp/repo"),
+        "n/a",
+        0,
+        "n/a",
+        None,
+        [],
+        "feature/publish",
+        True,
+        False,
+        False,
+        "",
+        "",
+        None,
+        [],
+        False,
+        "current-repo-state",
+        True,
+        True,
+    )
+
+    assert summary["publish_triggered"] is True
+    assert summary["publish_result"] == "success"
+    assert summary["publish_mode"] == "current-repo-state"
+    assert captured["publish_branch"] == "feature/publish"
+
+
+def test_run_post_success_publish_without_publish_flag_does_not_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "publish_validated_run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("publish should not run when not requested")),
+    )
+
+    summary = lfa.run_post_success_publish(
+        Path("/tmp/repo"),
+        "pytest -q",
+        1,
+        "MEDIUM",
+        None,
+        ["local_fix_agent.py"],
+        "",
+        False,
+        False,
+        False,
+        "",
+        "",
+        None,
+        [],
+        False,
+        "validated-run",
+        True,
+        False,
+    )
+
+    assert summary["validation_result"] == "success"
+    assert summary["publish_requested"] is False
+    assert summary["publish_triggered"] is False
+    assert summary["publish_result"] == "not_requested"
+
+
+def test_print_post_success_publish_summary_uses_required_real_run_banners(capsys: pytest.CaptureFixture[str]) -> None:
+    summary = {
+        "validation_result": "success",
+        "publish_requested": True,
+        "publish_triggered": True,
+        "publish_mode": "validated-run",
+        "publish_result": "success",
+        "publish_reason": "",
+        "pr_created_or_reused": True,
+        "pr_merged": False,
+        "local_main_synced": False,
+    }
+
+    lfa.print_post_success_publish_summary(summary)
+    print(lfa.format_final_operator_summary(summary))
+
+    out = capsys.readouterr().out
+    assert "=== VALIDATION RESULT ===" in out
+    assert "=== POST-SUCCESS PUBLISH ===" in out
+    assert "=== PUBLISH RESULT ===" in out
+    assert "validation_result: success" in out
+    assert "publish_requested: true" in out
+    assert "publish_triggered: true" in out
+    assert "publish_result: success" in out
+    assert "FINAL: validation succeeded, publish succeeded" in out
+    assert "Example successful repair + publish summary" not in out
+    assert "https://github.com/example/repo/pull/123" not in out
+    assert "fix-agent/20260320-123456" not in out
+
+
+def test_run_post_success_publish_requested_but_publish_flow_returns_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_publish_validated_run(*args, **kwargs) -> dict:
+        return {
+            "publish_scope": "validated_run",
+            "reason": "publish flow was skipped because no executor ran",
+            "final": {"status": "failed"},
+            "verification": {"reason": ""},
+        }
+
+    monkeypatch.setattr(lfa, "publish_validated_run", fake_publish_validated_run)
+
+    summary = lfa.run_post_success_publish(
+        Path("/tmp/repo"),
+        "pytest -q",
+        1,
+        "MEDIUM",
+        None,
+        ["local_fix_agent.py"],
+        "",
+        False,
+        False,
+        False,
+        "",
+        "",
+        None,
+        [],
+        False,
+        "validated-run",
+        True,
+        True,
+    )
+
+    assert summary["publish_requested"] is True
+    assert summary["publish_triggered"] is True
+    assert summary["publish_result"] == "failed"
+    assert summary["publish_reason"] == "publish flow was skipped because no executor ran"
+
+
+def test_format_final_operator_summary_distinguishes_publish_failure() -> None:
+    summary = {
+        "validation_result": "success",
+        "publish_requested": True,
+        "publish_triggered": True,
+        "publish_result": "failed",
+        "publish_reason": "push failed",
+    }
+
+    assert lfa.format_final_operator_summary(summary) == "FINAL: validation succeeded, publish failed"
+
+
+def test_publish_validated_run_can_create_and_merge_pr_when_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(
+        lfa,
+        "build_publish_preflight",
+        lambda current_repo, branch: make_preflight(
+            origin_url="git@github.com:upstream/demo.git",
+            origin_owner="upstream",
+            current_user="contributor",
+            requires_fork=True,
+        ),
+    )
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "")
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        if command[:3] == ["gh", "pr", "create"]:
+            return 0, "https://github.com/upstream/demo/pull/9\n"
+        if command[:3] == ["gh", "pr", "merge"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, True, False, "", "", None, [], False
+    )
+
+    assert result["published"] is True
+    assert result["final"]["status"] == "success"
+    assert result["pr_created_or_reused"] is True
+    assert result["pr_merged"] is True
+    assert result["pr_status"] == "created"
+    assert result["pr_url"] == "https://github.com/upstream/demo/pull/9"
+    assert result["verification"]["synced"] is True
+    assert any(cmd[:3] == ["gh", "pr", "create"] for cmd in commands)
+    assert any(cmd[:3] == ["gh", "pr", "merge"] for cmd in commands)
+
+
+def test_publish_validated_run_marks_failed_verification_when_remote_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "def456",
+            "synced": False,
+            "reason": "publish verification failed: local HEAD abc123 does not match origin/feature def456",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["published"] is False
+    assert result["final"]["status"] == "failed_verification"
+    assert result["reason"] == "publish verification failed: local HEAD abc123 does not match origin/feature def456"
+
+
+def test_publish_current_repo_state_auto_creates_branch_from_main_in_non_interactive_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight(branch="main"))
+    monkeypatch.setattr(lfa, "make_publish_branch_name", lambda: "fix-agent/auto-branch")
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "https://github.com/octocat/demo/pull/7")
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "checkout", "-b", "fix-agent/auto-branch"]:
+            return 0, ""
+        if command == ["git", "add", "-A"]:
+            return 0, ""
+        if command == ["git", "diff", "--cached", "--quiet"]:
+            return 1, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", True, False, False, "", "", False)
+
+    assert result["published"] is True
+    assert result["branch"] == "fix-agent/auto-branch"
+    assert "auto-created publish branch from default branch" in result["actions"]
+    assert result["pr_already_exists"] is True
+    assert result["pr_url"] == "https://github.com/octocat/demo/pull/7"
+    assert commands[0] == ["git", "checkout", "-b", "fix-agent/auto-branch"]
