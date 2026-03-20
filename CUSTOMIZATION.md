@@ -264,6 +264,24 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
 
+### Repository extraction from messages
+
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+
+- `repo:owner/name` — explicit org and repo
+- `repo owner/name` — space syntax (same result)
+- `repo:name` — repo name only; the org defaults to `"langchain-ai"` (see below)
+- `https://github.com/owner/name` — GitHub URL
+
+When only a repo name is provided (no org), the `default_owner` parameter is used. This defaults to `"langchain-ai"`. To change the default org for your fork, update the `default_owner` parameter in `agent/utils/repo.py`:
+
+```python
+# agent/utils/repo.py
+def extract_repo_from_text(text: str, default_owner: str = "langchain-ai") -> dict[str, str] | None:
+```
+
+For Slack specifically, the default owner is passed from the `SLACK_REPO_OWNER` env var (see below), so changing that env var is sufficient for Slack routing.
+
 ### Customizing Linear routing
 
 The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
@@ -279,6 +297,8 @@ LINEAR_TEAM_TO_REPO = {
     },
 }
 ```
+
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment.
 
 ### Customizing Slack routing
 

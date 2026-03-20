@@ -204,6 +204,8 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping per-comment by including `repo:owner/name` (or a GitHub URL) in their `@openswe` comment. The mapping is used as a fallback when no repo is specified in the comment text.
+
 ### Slack (optional)
 
 **Create a Slack App:**
@@ -293,6 +295,8 @@ Slack messages are routed to a default repo unless the user specifies one with `
 SLACK_REPO_OWNER="my-org"      # Default GitHub org
 SLACK_REPO_NAME="my-repo"      # Default GitHub repo
 ```
+
+`SLACK_REPO_OWNER` is also used as the default org when a user specifies only a repo name (e.g. `repo:my-repo` without the org prefix). For Linear comments, the default org is `"langchain-ai"` — change it in the `default_owner` parameter of `extract_repo_from_text()` in `agent/utils/repo.py`.
 
 ## 6. Environment variables
 
