@@ -87,6 +87,13 @@ CURRENT_REMOTE_SESSION_REGISTERED = False
 REMOTE_EXECUTION_STATE: dict[str, dict | None] = {"blocked": None}
 CURRENT_VALIDATION_PLAN: dict = {}
 CURRENT_PUBLISH_IGNORE_PATHS: set[str] = set()
+BUILT_IN_PUBLISH_IGNORE_PATHS = {
+    MEMORY_FILE_NAME,
+    METRICS_FILE_NAME,
+    RECENT_STATE_FILE_NAME,
+    DOCS_STATE_FILE_NAME,
+    PUBLISH_STATE_FILE_NAME,
+}
 API_SAFETY_STATE = {
     "proxy_enabled": False,
     "http_proxy": "",
@@ -142,6 +149,10 @@ def configure_publish_ignore_paths(config: dict) -> None:
         candidate = str(item or "").strip()
         if candidate:
             CURRENT_PUBLISH_IGNORE_PATHS.add(candidate)
+
+
+def publish_ignored_change_paths() -> set[str]:
+    return BUILT_IN_PUBLISH_IGNORE_PATHS | CURRENT_PUBLISH_IGNORE_PATHS
 
 
 def configure_execution_target(target: str, repo: Path) -> None:
@@ -604,12 +615,14 @@ def extract_status_path(line: str) -> str:
     return body.strip()
 
 
-def is_ignored_change_path(path: str) -> bool:
+def is_ignored_change_path(path: str, extra_ignored_paths: set[str] | None = None) -> bool:
     if not path:
         return True
     rel = Path(path)
     path_str = str(rel)
     return (
+        (extra_ignored_paths is not None and path_str in extra_ignored_paths)
+        or
         path_str == MEMORY_FILE_NAME
         or path_str == PUBLISH_STATE_FILE_NAME
         or
@@ -623,18 +636,7 @@ def is_ignored_change_path(path: str) -> bool:
 def is_publish_ignored_change_path(path: str) -> bool:
     if not path:
         return True
-    rel = Path(path)
-    path_str = str(rel)
-    built_in = {
-        MEMORY_FILE_NAME,
-        METRICS_FILE_NAME,
-        RECENT_STATE_FILE_NAME,
-        DOCS_STATE_FILE_NAME,
-        PUBLISH_STATE_FILE_NAME,
-    }
-    if path_str in built_in or path_str in CURRENT_PUBLISH_IGNORE_PATHS:
-        return True
-    return is_ignored_change_path(path_str)
+    return is_ignored_change_path(path, extra_ignored_paths=publish_ignored_change_paths())
 
 
 def raw_git_status_output(repo: Path) -> str:
@@ -644,23 +646,34 @@ def raw_git_status_output(repo: Path) -> str:
     return output.rstrip()
 
 
-def filter_status_lines(output: str, ignore_all_ignored_dirs: bool = False) -> list[str]:
+def filter_status_lines(
+    output: str,
+    ignore_all_ignored_dirs: bool = False,
+    ignore_path_predicate=is_ignored_change_path,
+) -> list[str]:
     filtered = []
     for line in output.splitlines():
         path = extract_status_path(line)
-        if is_ignored_change_path(path):
+        if ignore_path_predicate(path):
             continue
         filtered.append(line)
     return filtered
 
 
-def filtered_git_status_output(repo: Path, ignore_all_ignored_dirs: bool = False) -> str:
+def filtered_git_status_output(
+    repo: Path,
+    ignore_all_ignored_dirs: bool = False,
+    ignore_path_predicate=is_ignored_change_path,
+) -> str:
     output = raw_git_status_output(repo)
-    return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs)).strip()
+    try:
+        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs, ignore_path_predicate)).strip()
+    except TypeError:
+        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs)).strip()
 
 
-def meaningful_changed_paths(repo: Path) -> list[str]:
-    status_output = filtered_git_status_output(repo, ignore_all_ignored_dirs=True)
+def meaningful_changed_paths(repo: Path, ignore_path_predicate=is_ignored_change_path) -> list[str]:
+    status_output = filtered_git_status_output(repo, ignore_all_ignored_dirs=True, ignore_path_predicate=ignore_path_predicate)
     paths = []
     seen = set()
     for line in status_output.splitlines():
@@ -671,8 +684,11 @@ def meaningful_changed_paths(repo: Path) -> list[str]:
     return paths
 
 
-def classify_git_working_tree(repo: Path) -> dict:
-    status_output = filtered_git_status_output(repo, ignore_all_ignored_dirs=True)
+def classify_git_working_tree(repo: Path, ignore_path_predicate=is_ignored_change_path) -> dict:
+    try:
+        status_output = filtered_git_status_output(repo, ignore_all_ignored_dirs=True, ignore_path_predicate=ignore_path_predicate)
+    except TypeError:
+        status_output = filtered_git_status_output(repo, ignore_all_ignored_dirs=True)
     has_unstaged = False
     has_staged = False
     has_untracked = False
@@ -721,30 +737,18 @@ def classify_publishable_changes(repo: Path) -> dict:
     }
 
 
-def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) -> str:
-    meaningful_paths = list(publish_changes.get("meaningful_paths") or [])
-    if not meaningful_paths:
-        return ""
-    status_lines: list[str] = []
-    for line in str(publish_changes.get("status_output") or "").splitlines():
-        if extract_status_path(line) in meaningful_paths:
-            status_lines.append(line)
-    files: list[dict[str, str]] = []
-    for path in meaningful_paths:
-        file_path = repo / Path(path)
-        if file_path.exists() and file_path.is_file():
-            try:
-                content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
-            except OSError:
-                content_hash = "unreadable"
-        else:
-            content_hash = "__missing__"
-        files.append({"path": path, "content_hash": content_hash})
-    payload = json.dumps(
-        {"paths": meaningful_paths, "status_lines": status_lines, "files": files},
-        sort_keys=True,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+def publish_meaningful_changed_paths(repo: Path) -> list[str]:
+    try:
+        return meaningful_changed_paths(repo, ignore_path_predicate=is_publish_ignored_change_path)
+    except TypeError:
+        return meaningful_changed_paths(repo)
+
+
+def classify_publish_working_tree(repo: Path) -> dict:
+    try:
+        return classify_git_working_tree(repo, ignore_path_predicate=is_publish_ignored_change_path)
+    except TypeError:
+        return classify_git_working_tree(repo)
 
 
 def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) -> str:
@@ -3332,8 +3336,8 @@ def publish_validated_run(
     result["auth_transport"] = result["target"]["transport"] or result["auth_transport"]
     set_publish_final(result, "failed", branch=branch_to_push, remote=result["remote_url"], pr_url=None)
 
-    current_paths = meaningful_changed_paths(repo)
-    working_tree = classify_git_working_tree(repo)
+    current_paths = publish_meaningful_changed_paths(repo)
+    working_tree = classify_publish_working_tree(repo)
     result["working_tree"] = working_tree
     if not publish_current_mode:
         unrelated_paths = sorted(set(current_paths) - set(changed_paths))

@@ -151,6 +151,36 @@ def test_classify_publishable_changes_treats_docs_code_and_tests_as_meaningful(m
     assert result["ignored_changes"] == [".ai_publish_state.json"]
 
 
+def test_publish_change_helpers_ignore_known_state_files_consistently(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (
+            0,
+            " M .ai_publish_state.json\n M .fix_agent_docs_state.json\n",
+        ),
+    )
+
+    assert lfa.meaningful_changed_paths(Path("/tmp/repo"), ignore_path_predicate=lfa.is_publish_ignored_change_path) == []
+    working_tree = lfa.classify_git_working_tree(Path("/tmp/repo"), ignore_path_predicate=lfa.is_publish_ignored_change_path)
+
+    assert working_tree["clean"] is True
+    assert working_tree["has_staged"] is False
+    assert working_tree["has_unstaged"] is False
+    assert working_tree["has_untracked"] is False
+
+
+def test_meaningful_content_fingerprint_excludes_ignored_state_files(tmp_path: Path) -> None:
+    (tmp_path / ".ai_publish_state.json").write_text('{"last_success": true}\n')
+    publish_changes = {
+        "status_output": " M .ai_publish_state.json",
+        "meaningful_paths": [],
+        "ignored_changes": [".ai_publish_state.json"],
+    }
+
+    assert lfa.compute_meaningful_content_fingerprint(tmp_path, publish_changes) == ""
+
+
 def test_fork_created_in_run_one_reused_in_run_two(monkeypatch: pytest.MonkeyPatch) -> None:
     target = lfa.resolve_publish_target(
         make_preflight(
@@ -1782,3 +1812,39 @@ def test_publish_current_repo_state_main_branch_with_only_ignored_changes_noops(
     assert result["ignored_changes"] == [".ai_publish_state.json", ".fix_agent_docs_state.json"]
     assert result["meaningful_paths"] == []
     assert commands == []
+
+
+def test_publish_current_repo_state_only_state_file_change_uses_real_classification_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight(branch="main"))
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "status", "--short", "--untracked-files=all"]:
+            return 0, " M .ai_publish_state.json\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", True, False, False, "", "", False)
+
+    assert result["published"] is False
+    assert result["triggered"] is False
+    assert result["final"]["status"] == "noop"
+    assert result["reason"] == "no meaningful changes to publish"
+    assert result["meaningful_changes_detected"] is False
+    assert result["meaningful_paths"] == []
+    assert result["ignored_changes"] == [".ai_publish_state.json"]
+    assert commands == [["git", "status", "--short", "--untracked-files=all"]]
