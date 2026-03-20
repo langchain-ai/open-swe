@@ -14,6 +14,21 @@
       "ts": 1774030196,
       "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
       "validation_result": "blocked"
+    },
+    {
+      "artifact_dir": "",
+      "blocked_reason": "",
+      "commit_hash": "0945926d99a0a869ca8da3124a6caff04e0cfa92",
+      "confidence": "auto-revalidate",
+      "files_changed": [],
+      "mode": "publish-auto-revalidate",
+      "repo": "/home/tom/ai/open-swe",
+      "success": true,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "ts": 1774031368,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "validation_result": "success"
     }
   ]
 }

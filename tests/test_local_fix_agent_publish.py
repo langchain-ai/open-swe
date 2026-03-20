@@ -185,6 +185,140 @@ def test_meaningful_content_fingerprint_excludes_ignored_state_files(tmp_path: P
     assert lfa.compute_meaningful_content_fingerprint(tmp_path, publish_changes) == ""
 
 
+def test_attempt_publish_auto_revalidation_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "blocked",
+        "validation_result": "blocked",
+        "validation_commit_match": False,
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "mismatch",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "load_recent_state",
+        lambda: {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "validation_command": "pytest -q",
+                    "commit_hash": "old123",
+                    "validation_result": "success",
+                    "ts": 1,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (0, "ok"))
+    captured: dict[str, object] = {}
+
+    def fake_update_recent_state(current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason=""):
+        captured["success"] = success
+        captured["test_cmd"] = test_cmd
+        return Path("/tmp/state.json")
+
+    monkeypatch.setattr(lfa, "update_recent_state", fake_update_recent_state)
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "validation_result": "success",
+            "validation_commit_match": True,
+            "last_validated_commit": "new456",
+            "current_commit": "new456",
+            "validation_age_seconds": 0,
+            "reason": "validated",
+        },
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial)
+
+    assert result["validation_state"] == "success"
+    assert result["auto_revalidated"] is True
+    assert result["validation_reused"] is False
+    assert captured["success"] == "success"
+    assert captured["test_cmd"] == "pytest -q"
+
+
+def test_attempt_publish_auto_revalidation_failure_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "blocked",
+        "validation_result": "blocked",
+        "validation_commit_match": False,
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "mismatch",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "load_recent_state",
+        lambda: {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "validation_command": "pytest -q",
+                    "commit_hash": "old123",
+                    "validation_result": "success",
+                    "ts": 1,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (1, "tests failed"))
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "failed",
+            "validation_result": "failed",
+            "validation_commit_match": True,
+            "last_validated_commit": "new456",
+            "current_commit": "new456",
+            "validation_age_seconds": 0,
+            "reason": "failed",
+        },
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial)
+
+    assert result["validation_state"] == "failed"
+    assert result["auto_revalidated"] is True
+    assert result["validation_reused"] is False
+    assert "auto-revalidation failed" in result["reason"]
+
+
+def test_attempt_publish_auto_revalidation_no_auto_revalidate_preserves_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "blocked",
+        "validation_result": "blocked",
+        "validation_commit_match": False,
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "mismatch",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("auto revalidation should not run")),
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial, no_auto_revalidate=True)
+
+    assert result["validation_state"] == "blocked"
+    assert result["auto_revalidated"] is False
+    assert result["validation_reused"] is False
+
+
 def test_fork_created_in_run_one_reused_in_run_two(monkeypatch: pytest.MonkeyPatch) -> None:
     target = lfa.resolve_publish_target(
         make_preflight(
@@ -1186,6 +1320,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
         baseline_paths: list[str],
         dry_run_mode: bool,
         publish_current_mode: bool = False,
+        validation_state: str = "success",
+        force_publish: bool = False,
     ) -> dict:
         captured.update(
             {
@@ -1205,6 +1341,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
                 "baseline_paths": baseline_paths,
                 "dry_run_mode": dry_run_mode,
                 "publish_current_mode": publish_current_mode,
+                "validation_state": validation_state,
+                "force_publish": force_publish,
             }
         )
         return {"recommended_command": "old", "final": {"status": "noop"}}
@@ -1229,6 +1367,8 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
     assert captured["baseline_paths"] == []
     assert captured["dry_run_mode"] is False
     assert captured["publish_current_mode"] is True
+    assert captured["validation_state"] == "success"
+    assert captured["force_publish"] is False
     assert result["recommended_command"] == "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr"
 
 
@@ -1253,13 +1393,19 @@ def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: py
         baseline_paths: list[str],
         dry_run_mode: bool,
         publish_current_mode: bool = False,
+        validation_state: str = "success",
+        force_publish: bool = False,
     ) -> dict:
         captured["repo"] = current_repo
         captured["test_cmd"] = test_cmd
+        captured["validation_state"] = validation_state
+        captured["force_publish"] = force_publish
         return {
             "published": True,
             "publish_scope": "validated_run",
             "triggered": True,
+            "validation_state": validation_state,
+            "publish_reason": "validated",
             "final": {"status": "success"},
             "verification": {"reason": ""},
         }
@@ -1291,8 +1437,11 @@ def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: py
     assert summary["publish_triggered"] is True
     assert summary["publish_result"] == "success"
     assert summary["publish_mode"] == "validated-run"
+    assert summary["publish_reason"] == "validated"
     assert captured["repo"] == repo
     assert captured["test_cmd"] == "pytest -q"
+    assert captured["validation_state"] == "success"
+    assert captured["force_publish"] is False
 
 
 def test_resolve_publish_requested_defaults_to_true() -> None:
@@ -1341,8 +1490,9 @@ def test_run_post_success_publish_skips_on_validation_failure(monkeypatch: pytes
     assert summary["validation_result"] == "failed"
     assert summary["publish_requested"] is True
     assert summary["publish_triggered"] is False
-    assert summary["publish_result"] == "not_requested"
-    assert summary["publish_reason"] == "publish not run because validation_result=failed"
+    assert summary["publish_result"] == "blocked"
+    assert summary["publish_reason"] == "blocked_by_validation"
+    assert "validation_result=failed" in summary["publish_detail_reason"]
     assert summary["pr_created_or_reused"] is False
 
 
@@ -1358,13 +1508,30 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         publish_message: str,
         target: str,
         dry_run_mode: bool,
+        validation_state: str = "success",
+        validation_detail: str = "",
+        force_publish: bool = False,
+        validation_commit_match: bool = False,
+        last_validated_commit: str = "",
+        current_commit: str = "",
+        validation_age_seconds: int = -1,
+        auto_revalidated: bool = False,
+        validation_reused: bool = False,
     ) -> dict:
         captured["repo"] = repo
         captured["publish_branch"] = publish_branch
+        captured["validation_state"] = validation_state
+        captured["validation_detail"] = validation_detail
+        captured["force_publish"] = force_publish
+        captured["validation_commit_match"] = validation_commit_match
+        captured["auto_revalidated"] = auto_revalidated
+        captured["validation_reused"] = validation_reused
         return {
             "published": True,
             "publish_scope": "current_repo_state",
             "triggered": True,
+            "validation_state": validation_state,
+            "publish_reason": "validated",
             "final": {"status": "success"},
             "verification": {"reason": ""},
         }
@@ -1395,7 +1562,10 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
     assert summary["publish_triggered"] is True
     assert summary["publish_result"] == "success"
     assert summary["publish_mode"] == "current-repo-state"
+    assert summary["publish_reason"] == "validated"
     assert captured["publish_branch"] == "feature/publish"
+    assert captured["validation_state"] == "success"
+    assert captured["validation_commit_match"] is True
 
 
 def test_run_post_success_publish_without_publish_flag_does_not_publish(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1467,6 +1637,7 @@ def test_run_post_success_publish_requested_but_publish_flow_returns_failed(monk
         return {
             "publish_scope": "validated_run",
             "triggered": True,
+            "publish_reason": "validated",
             "reason": "publish flow was skipped because no executor ran",
             "final": {"status": "failed"},
             "verification": {"reason": ""},
@@ -1498,7 +1669,8 @@ def test_run_post_success_publish_requested_but_publish_flow_returns_failed(monk
     assert summary["publish_requested"] is True
     assert summary["publish_triggered"] is True
     assert summary["publish_result"] == "failed"
-    assert summary["publish_reason"] == "publish flow was skipped because no executor ran"
+    assert summary["publish_reason"] == "validated"
+    assert summary["publish_detail_reason"] == "publish flow was skipped because no executor ran"
 
 
 def test_format_final_operator_summary_distinguishes_publish_failure() -> None:
@@ -1815,7 +1987,7 @@ def test_publish_current_repo_state_main_branch_with_only_ignored_changes_noops(
     assert result["reason"] == "no meaningful changes to publish"
     assert result["ignored_changes"] == [".ai_publish_state.json", ".fix_agent_docs_state.json"]
     assert result["meaningful_paths"] == []
-    assert commands == []
+    assert commands == [["git", "rev-parse", "HEAD"]]
 
 
 def test_publish_current_repo_state_only_state_file_change_uses_real_classification_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1851,7 +2023,10 @@ def test_publish_current_repo_state_only_state_file_change_uses_real_classificat
     assert result["meaningful_changes_detected"] is False
     assert result["meaningful_paths"] == []
     assert result["ignored_changes"] == [".ai_publish_state.json"]
-    assert commands == [["git", "status", "--short", "--untracked-files=all"]]
+    assert commands == [
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--short", "--untracked-files=all"],
+    ]
 
 
 def test_run_prepublish_docs_stage_no_docs_impact_returns_no_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

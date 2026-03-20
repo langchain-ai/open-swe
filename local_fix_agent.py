@@ -597,7 +597,10 @@ def repo_path_exists(repo: Path, rel_path: str) -> bool:
 
 
 def is_git_repo(repo: Path) -> bool:
-    code, _ = run_subprocess(["git", "rev-parse", "--is-inside-work-tree"], repo)
+    try:
+        code, _ = run_subprocess(["git", "rev-parse", "--is-inside-work-tree"], repo)
+    except OSError:
+        return False
     return code == 0
 
 
@@ -2001,7 +2004,19 @@ def save_recent_state(state: dict) -> None:
         return
 
 
-def update_recent_state(repo: Path, test_cmd: str, mode: str, success: bool, artifact_dir: Path | None = None, target: str = "") -> Path:
+def update_recent_state(
+    repo: Path,
+    test_cmd: str,
+    mode: str,
+    success: bool | str,
+    artifact_dir: Path | None = None,
+    target: str = "",
+    files_changed: list[str] | None = None,
+    confidence: str = "",
+    blocked_reason: str = "",
+) -> Path:
+    validation_result = str(success).strip() if isinstance(success, str) else ("success" if success else "failed")
+    commit_hash = parse_head_commit(repo) if is_git_repo(repo) else ""
     state = load_recent_state()
     runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
     runs.append(
@@ -2009,15 +2024,163 @@ def update_recent_state(repo: Path, test_cmd: str, mode: str, success: bool, art
             "repo": str(repo),
             "test_cmd": test_cmd,
             "mode": mode,
-            "success": success,
+            "success": validation_result == "success",
+            "validation_result": validation_result,
+            "validation_command": test_cmd,
+            "commit_hash": commit_hash,
             "artifact_dir": str(artifact_dir) if artifact_dir else "",
             "target": target,
+            "files_changed": list(files_changed or []),
+            "confidence": confidence,
+            "blocked_reason": blocked_reason,
             "ts": int(time.time()),
         }
     )
     state["recent_runs"] = runs[-10:]
     save_recent_state(state)
     return script_state_path(RECENT_STATE_FILE_NAME)
+
+
+def resolve_publish_validation_state(repo: Path) -> dict:
+    state = load_recent_state()
+    runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
+    repo_runs = [item for item in reversed(runs) if item.get("repo") == str(repo) and not item.get("target")]
+    current_commit = parse_head_commit(repo) if is_git_repo(repo) else ""
+    if not repo_runs:
+        return {
+            "validation_state": "blocked",
+            "validation_result": "blocked",
+            "validation_commit_match": False,
+            "last_validated_commit": "",
+            "current_commit": current_commit,
+            "validation_age_seconds": -1,
+            "reason": "publish blocked because no validation record was recorded for this repo; use --force-publish to override",
+        }
+    last = repo_runs[0]
+    last_commit = str(last.get("commit_hash") or "").strip()
+    validation_result = str(last.get("validation_result") or ("success" if last.get("success") else "failed")).strip() or "failed"
+    validation_age_seconds = -1
+    try:
+        ts = int(last.get("ts") or 0)
+    except (TypeError, ValueError):
+        ts = 0
+    if ts > 0:
+        validation_age_seconds = max(0, int(time.time()) - ts)
+    commit_match = bool(current_commit and last_commit and current_commit == last_commit)
+    blocked_reason = str(last.get("blocked_reason") or "").strip()
+    if not last_commit:
+        return {
+            "validation_state": "blocked",
+            "validation_result": "blocked",
+            "validation_commit_match": False,
+            "last_validated_commit": "",
+            "current_commit": current_commit,
+            "validation_age_seconds": validation_age_seconds,
+            "reason": "publish blocked because the last validation record did not capture a validated commit; use --force-publish to override",
+        }
+    if not commit_match:
+        return {
+            "validation_state": "blocked",
+            "validation_result": "blocked",
+            "validation_commit_match": False,
+            "last_validated_commit": last_commit,
+            "current_commit": current_commit,
+            "validation_age_seconds": validation_age_seconds,
+            "reason": (
+                f"publish blocked because current commit {current_commit or '(none)'} does not match "
+                f"last validated commit {last_commit}; use --force-publish to override"
+            ),
+        }
+    if validation_result == "success":
+        return {
+            "validation_state": "success",
+            "validation_result": "success",
+            "validation_commit_match": True,
+            "last_validated_commit": last_commit,
+            "current_commit": current_commit,
+            "validation_age_seconds": validation_age_seconds,
+            "reason": "validated",
+        }
+    if validation_result == "blocked":
+        return {
+            "validation_state": "blocked",
+            "validation_result": "blocked",
+            "validation_commit_match": True,
+            "last_validated_commit": last_commit,
+            "current_commit": current_commit,
+            "validation_age_seconds": validation_age_seconds,
+            "reason": (
+                f"publish blocked because the latest validation run was blocked: {blocked_reason or 'validation did not complete'}; "
+                "use --force-publish to override"
+            ),
+        }
+    return {
+        "validation_state": "failed",
+        "validation_result": "failed",
+        "validation_commit_match": True,
+        "last_validated_commit": last_commit,
+        "current_commit": current_commit,
+        "validation_age_seconds": validation_age_seconds,
+        "reason": "publish blocked because the latest validation run failed; use --force-publish to override",
+    }
+
+
+def attempt_publish_auto_revalidation(
+    repo: Path,
+    validation_state: dict,
+    *,
+    no_auto_revalidate: bool = False,
+) -> dict:
+    result = dict(validation_state)
+    original_commit_match = bool(result.get("validation_commit_match"))
+    result["auto_revalidated"] = False
+    result["validation_reused"] = bool(result.get("validation_state") == "success" and result.get("validation_commit_match"))
+    result["auto_revalidation_attempted"] = False
+    if result.get("validation_state") == "success" and result.get("validation_commit_match"):
+        return result
+    if no_auto_revalidate:
+        result["validation_reused"] = False
+        return result
+    state = load_recent_state()
+    runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
+    repo_runs = [item for item in reversed(runs) if item.get("repo") == str(repo) and not item.get("target")]
+    if not repo_runs:
+        result["validation_reused"] = False
+        return result
+    last = repo_runs[0]
+    validation_command = str(last.get("validation_command") or last.get("test_cmd") or "").strip()
+    if not validation_command:
+        result["validation_reused"] = False
+        result["reason"] = "publish blocked because no validation command was recorded for auto-revalidation; use --force-publish to override"
+        return result
+    result["auto_revalidation_attempted"] = True
+    code, output = run_subprocess(validation_command, repo, shell=True)
+    blocked_reason = ""
+    validation_result = "success" if code == 0 else "failed"
+    if code != 0:
+        blocked_reason = (output or "").strip()[:500]
+    update_recent_state(
+        repo,
+        validation_command,
+        "publish-auto-revalidate",
+        validation_result,
+        None,
+        "",
+        files_changed=[],
+        confidence="auto-revalidate",
+        blocked_reason=blocked_reason,
+    )
+    refreshed = resolve_publish_validation_state(repo)
+    refreshed["auto_revalidated"] = True
+    refreshed["validation_reused"] = False
+    refreshed["auto_revalidation_attempted"] = True
+    refreshed["validation_commit_match"] = original_commit_match
+    if refreshed.get("validation_state") != "success":
+        refreshed["reason"] = (
+            f"publish blocked because auto-revalidation failed for current commit {refreshed.get('current_commit') or '(none)'}; "
+            "use --force-publish to override"
+        )
+    return refreshed
 
 
 def load_publish_state(repo: Path) -> dict:
@@ -4922,6 +5085,13 @@ def recommended_publish_current_command(include_pr: bool = True) -> str:
 def make_publish_result() -> dict:
     return {
         "published": False,
+        "validation_state": "success",
+        "validation_commit_match": False,
+        "last_validated_commit": "",
+        "current_commit": "",
+        "validation_age_seconds": -1,
+        "forced_publish": False,
+        "publish_reason": "",
         "branch": "",
         "commit_sha": "",
         "pr_url": "",
@@ -5043,6 +5213,8 @@ def set_publish_final(result: dict, status: str, branch: str = "", commit: str =
 def set_publish_outcome(result: dict, status: str, reason: str, next_action: str = "") -> dict:
     result["noop"] = status == "noop"
     result["reason"] = reason
+    if status == "noop":
+        result["publish_reason"] = "noop"
     if reason:
         result["summary_status"] = reason
     result["next_action"] = next_action
@@ -5059,6 +5231,7 @@ def set_publish_outcome(result: dict, status: str, reason: str, next_action: str
 
 def mark_publish_noop(result: dict, reason: str, branch: str, remote: str, commit_sha: str = "") -> dict:
     result["noop"] = True
+    result["publish_reason"] = "noop"
     result["control_path"] = "noop"
     result["reason"] = reason
     result["summary_status"] = reason
@@ -5140,6 +5313,8 @@ def summarize_publish_result(summary: dict) -> str:
         status = str((result.get("final") or {}).get("status") or "").strip()
         if status == "noop":
             return "noop"
+        if status == "blocked":
+            return "blocked"
         return "failed"
     status = str((result.get("final") or {}).get("status") or "").strip()
     if status == "success":
@@ -5177,6 +5352,7 @@ def format_final_operator_summary(summary: dict) -> str:
     publish_result = str(summary.get("publish_result") or "not_requested").strip()
     publish_requested = bool(summary.get("publish_requested"))
     reason = str(summary.get("publish_reason") or "").strip().lower()
+    detail_reason = str(summary.get("publish_detail_reason") or "").strip().lower()
     previous_pr_url = str(summary.get("previous_pr_url") or "").strip()
     if validation_result == "success":
         if publish_result == "success":
@@ -5197,6 +5373,8 @@ def format_final_operator_summary(summary: dict) -> str:
             return f"FINAL: already published — PR: {previous_pr_url}"
         return "FINAL: already published — reusing previous result"
     if validation_result == "blocked":
+        if reason == "blocked_by_validation" or "blocked by validation" in detail_reason:
+            return "FINAL: validation blocked, publish blocked"
         if publish_result in {"success", "failed", "noop", "blocked", "failed_verification"}:
             return f"FINAL: validation blocked, publish {publish_result}"
         return "FINAL: validation blocked"
@@ -5443,7 +5621,10 @@ def prepare_publish_target(repo: Path, result: dict) -> tuple[bool, str, str]:
 
 
 def parse_head_commit(repo: Path) -> str:
-    code, output = run_subprocess(["git", "rev-parse", "HEAD"], repo)
+    try:
+        code, output = run_subprocess(["git", "rev-parse", "HEAD"], repo)
+    except Exception:
+        return ""
     return output.strip() if code == 0 else ""
 
 
@@ -5468,10 +5649,20 @@ def publish_validated_run(
     baseline_paths: list[str],
     dry_run_mode: bool,
     publish_current_mode: bool = False,
+    validation_state: str = "success",
+    force_publish: bool = False,
 ) -> dict:
     result = make_publish_result()
+    current_commit = parse_head_commit(repo) if is_git_repo(repo) else ""
     result["publish_scope"] = "current_repo_state" if publish_current_mode else "validated_run"
     result["requested"] = True
+    result["validation_state"] = validation_state
+    result["validation_commit_match"] = bool(current_commit)
+    result["last_validated_commit"] = current_commit
+    result["current_commit"] = current_commit
+    result["validation_age_seconds"] = 0 if current_commit else -1
+    result["forced_publish"] = force_publish
+    result["publish_reason"] = "forced" if force_publish and validation_state != "success" else "validated"
     publish_state = load_publish_state(repo)
     result["publish_state"] = publish_state
     result["state_loaded"] = bool(publish_state.get("timestamp"))
@@ -5517,7 +5708,7 @@ def publish_validated_run(
         return finish("blocked", "Publish requested, but this workflow only publishes local repos from the controlling machine. Remote publish is not handled.")
     if dry_run_mode:
         return finish("blocked", "Publish blocked because --dry-run skips commit creation and push.")
-    if blocked_reason:
+    if blocked_reason and not force_publish:
         result["control_path"] = "blocked_auth"
         return finish("blocked", f"Publish blocked because the run recorded a blocked state: {blocked_reason}")
     if not is_git_repo(repo):
@@ -5867,7 +6058,33 @@ def publish_current_repo_state(
     publish_message: str,
     target: str,
     dry_run_mode: bool,
+    validation_state: str = "success",
+    validation_detail: str = "",
+    force_publish: bool = False,
+    validation_commit_match: bool = False,
+    last_validated_commit: str = "",
+    current_commit: str = "",
+    validation_age_seconds: int = -1,
+    auto_revalidated: bool = False,
+    validation_reused: bool = False,
 ) -> dict:
+    if validation_state != "success" and not force_publish:
+        result = make_publish_result()
+        result["publish_scope"] = "current_repo_state"
+        result["requested"] = True
+        result["validation_state"] = validation_state
+        result["validation_commit_match"] = validation_commit_match
+        result["last_validated_commit"] = last_validated_commit
+        result["current_commit"] = current_commit
+        result["validation_age_seconds"] = validation_age_seconds
+        result["auto_revalidated"] = auto_revalidated
+        result["validation_reused"] = validation_reused
+        result["forced_publish"] = False
+        result["publish_reason"] = "blocked_by_validation"
+        result["reason"] = validation_detail or f"publish blocked because validation_result={validation_state}; use --force-publish to override"
+        result["control_path"] = "blocked_validation"
+        set_publish_final(result, "blocked")
+        return result
     result = publish_validated_run(
         repo,
         "n/a (publish current repo state)",
@@ -5885,7 +6102,15 @@ def publish_current_repo_state(
         [],
         dry_run_mode,
         True,
+        validation_state=validation_state,
+        force_publish=force_publish,
     )
+    result["validation_commit_match"] = validation_commit_match
+    result["last_validated_commit"] = last_validated_commit
+    result["current_commit"] = current_commit
+    result["validation_age_seconds"] = validation_age_seconds
+    result["auto_revalidated"] = auto_revalidated
+    result["validation_reused"] = validation_reused
     result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr or publish_merge)
     return result
 
@@ -5909,10 +6134,18 @@ def run_post_success_publish(
     publish_mode: str,
     validation_succeeded: bool,
     publish_requested: bool,
+    force_publish: bool = False,
 ) -> dict:
     validation_result = "success" if validation_succeeded else ("blocked" if blocked_reason else "failed")
     summary = {
+        "validation_state": validation_result,
         "validation_result": validation_result,
+        "validation_commit_match": validation_result == "success",
+        "last_validated_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+        "current_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+        "validation_age_seconds": 0 if is_git_repo(repo) else -1,
+        "auto_revalidated": False,
+        "validation_reused": validation_result == "success",
         "publish_requested": False,
         "publish_triggered": False,
         "publish_mode": publish_mode,
@@ -5922,6 +6155,7 @@ def run_post_success_publish(
         "publish_result": "not_requested",
         "publish_result_detail": None,
         "publish_reason": "",
+        "publish_detail_reason": "",
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
         "ignored_changes": [],
@@ -5945,10 +6179,19 @@ def run_post_success_publish(
             publish_message,
             target,
             dry_run_mode,
+            validation_state=validation_result,
+            validation_detail=(blocked_reason or ""),
+            force_publish=force_publish,
+            validation_commit_match=bool(summary.get("validation_commit_match")),
+            last_validated_commit=str(summary.get("last_validated_commit") or ""),
+            current_commit=str(summary.get("current_commit") or ""),
+            validation_age_seconds=int(summary.get("validation_age_seconds", -1)),
+            auto_revalidated=bool(summary.get("auto_revalidated")),
+            validation_reused=bool(summary.get("validation_reused")),
         )
         summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
-    elif validation_succeeded and publish_requested:
+    elif (validation_succeeded or force_publish) and publish_requested:
         summary["publish_requested"] = True
         publish_result = publish_validated_run(
             repo,
@@ -5966,22 +6209,36 @@ def run_post_success_publish(
             blocked_reason,
             baseline_paths,
             dry_run_mode,
+            validation_state=validation_result,
+            force_publish=force_publish,
         )
         summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
     elif publish_requested and not validation_succeeded:
         summary["publish_requested"] = True
-        summary["publish_result"] = "not_requested"
-        summary["publish_reason"] = f"publish not run because validation_result={validation_result}"
+        summary["publish_result"] = "blocked"
+        summary["publish_reason"] = "blocked_by_validation"
+        summary["publish_detail_reason"] = f"publish blocked because validation_result={validation_result}; use --force-publish to override"
     publish_result = summary.get("publish_result_detail") or {}
     publish_status = str((publish_result.get("final") or {}).get("status") or "").strip()
     if summary["publish_requested"] and validation_succeeded and not summary["publish_triggered"] and publish_status != "noop":
         summary["publish_result"] = "failed"
-        summary["publish_reason"] = "publish requested after validation success, but publish flow did not run"
-    elif summary.get("publish_result") != "not_requested" or publish_result:
+        summary["publish_reason"] = "validated"
+        summary["publish_detail_reason"] = "publish requested after validation success, but publish flow did not run"
+    elif publish_result:
         summary["publish_result"] = summarize_publish_result(summary)
+    if publish_result:
+        summary["validation_state"] = str(publish_result.get("validation_state") or validation_result)
+        summary["validation_commit_match"] = bool(publish_result.get("validation_commit_match"))
+        summary["last_validated_commit"] = str(publish_result.get("last_validated_commit") or summary.get("last_validated_commit") or "")
+        summary["current_commit"] = str(publish_result.get("current_commit") or summary.get("current_commit") or "")
+        summary["validation_age_seconds"] = int(publish_result.get("validation_age_seconds", summary.get("validation_age_seconds", -1)))
+        summary["auto_revalidated"] = bool(publish_result.get("auto_revalidated"))
+        summary["validation_reused"] = bool(publish_result.get("validation_reused"))
     if not summary["publish_reason"]:
-        summary["publish_reason"] = (
+        summary["publish_reason"] = str(publish_result.get("publish_reason") or "")
+    if not summary["publish_detail_reason"]:
+        summary["publish_detail_reason"] = (
             publish_result.get("reason")
             or (publish_result.get("verification") or {}).get("reason")
             or publish_result.get("pr_reason")
@@ -6007,6 +6264,13 @@ def run_post_success_publish(
 def print_post_success_publish_summary(summary: dict) -> None:
     print("\n=== VALIDATION RESULT ===")
     print(f"validation_result: {summary.get('validation_result', 'failed')}")
+    print(f"validation_state: {summary.get('validation_state', summary.get('validation_result', 'failed'))}")
+    print(f"validation_commit_match: {format_bool(summary.get('validation_commit_match'))}")
+    print(f"auto_revalidated: {format_bool(summary.get('auto_revalidated'))}")
+    print(f"validation_reused: {format_bool(summary.get('validation_reused'))}")
+    print(f"last_validated_commit: {summary.get('last_validated_commit') or '(none)'}")
+    print(f"current_commit: {summary.get('current_commit') or '(none)'}")
+    print(f"validation_age_seconds: {summary.get('validation_age_seconds', -1)}")
     print("\n=== POST-SUCCESS PUBLISH ===")
     print(f"publish_requested: {format_bool(summary.get('publish_requested'))}")
     print(f"publish_triggered: {format_bool(summary.get('publish_triggered'))}")
@@ -6021,6 +6285,8 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
     if summary.get("publish_reason"):
         print(f"publish_reason: {summary['publish_reason']}")
+    if summary.get("publish_detail_reason"):
+        print(f"publish_detail_reason: {summary['publish_detail_reason']}")
     if not summary.get("publish_result_detail"):
         print("\n=== PUBLISH RESULT ===")
         print(f"publish_result: {summary.get('publish_result', 'not_requested')}")
@@ -6075,7 +6341,15 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"meaningful_changes_detected: {format_bool(publish_result.get('meaningful_changes_detected'))}")
     print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
-    print(f"publish_reason: {publish_result.get('reason') or '(none)'}")
+    print(f"validation_state: {publish_result.get('validation_state') or 'success'}")
+    print(f"validation_commit_match: {format_bool(publish_result.get('validation_commit_match'))}")
+    print(f"auto_revalidated: {format_bool(publish_result.get('auto_revalidated'))}")
+    print(f"validation_reused: {format_bool(publish_result.get('validation_reused'))}")
+    print(f"last_validated_commit: {publish_result.get('last_validated_commit') or '(none)'}")
+    print(f"current_commit: {publish_result.get('current_commit') or '(none)'}")
+    print(f"validation_age_seconds: {publish_result.get('validation_age_seconds', -1)}")
+    print(f"publish_reason: {publish_result.get('publish_reason') or '(none)'}")
+    print(f"publish_detail_reason: {publish_result.get('reason') or '(none)'}")
     if publish_result.get("publish_scope") == "current_repo_state":
         working_tree = publish_result.get("working_tree") or {}
         print(
@@ -8461,6 +8735,8 @@ def main():
     parser.add_argument("--publish-on-success", action="store_true", help="Compatibility flag; publish-on-success is already the default for validated runs.")
     parser.add_argument("--no-publish-on-success", action="store_true", help="Disable the default publish-after-validation-success behavior for validated runs.")
     parser.add_argument("--publish-only", action="store_true", help="Publish the current repo state without running the repair loop or requiring a failing test command.")
+    parser.add_argument("--force-publish", action="store_true", help="Allow publish to proceed even when the current validation state is blocked or failed.")
+    parser.add_argument("--no-auto-revalidate", action="store_true", help="Disable automatic validation rerun when publish detects a stale validated commit.")
     parser.add_argument("--publish-branch", help="Branch name to use for publish mode.")
     parser.add_argument("--publish-pr", action="store_true", help="After publish, attempt to open a pull request with GitHub CLI.")
     parser.add_argument("--publish-merge", action="store_true", help="After publish, auto-merge only when the PR is a safe self-owned fork PR.")
@@ -8766,6 +9042,12 @@ def main():
         print(format_run_artifact_summary(repo, recent_state_path, config_path))
         return
     if args.publish_only:
+        validation_state = resolve_publish_validation_state(repo)
+        validation_state = attempt_publish_auto_revalidation(
+            repo,
+            validation_state,
+            no_auto_revalidate=bool(args.no_auto_revalidate),
+        )
         publish_result = publish_current_repo_state(
             repo,
             args.publish_branch or "",
@@ -8775,58 +9057,50 @@ def main():
             args.publish_message or "",
             target,
             args.dry_run,
+            validation_state=str(validation_state.get("validation_state") or "blocked"),
+            validation_detail=str(validation_state.get("reason") or ""),
+            force_publish=bool(args.force_publish),
+            validation_commit_match=bool(validation_state.get("validation_commit_match")),
+            last_validated_commit=str(validation_state.get("last_validated_commit") or ""),
+            current_commit=str(validation_state.get("current_commit") or ""),
+            validation_age_seconds=int(validation_state.get("validation_age_seconds", -1)),
+            auto_revalidated=bool(validation_state.get("auto_revalidated")),
+            validation_reused=bool(validation_state.get("validation_reused")),
         )
-        print_post_success_publish_summary(
-            {
-                "validation_result": "blocked",
-                "publish_requested": True,
-                "publish_triggered": bool(publish_result.get("triggered")),
-                "publish_mode": "current-repo-state",
-                "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
-                "publish_result_detail": publish_result,
-                "publish_reason": publish_result.get("reason") or (publish_result.get("verification") or {}).get("reason") or "",
-                "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
-                "pr_merged": bool(publish_result.get("pr_merged")),
-                "local_main_synced": bool(publish_result.get("local_main_synced")),
-                "docs_checked_at_publish": bool(publish_result.get("docs_checked_at_publish")),
-                "docs_required": bool(publish_result.get("docs_required")),
-                "docs_updated": bool(publish_result.get("docs_updated")),
-                "docs_refresh_mode": publish_result.get("docs_refresh_mode") or "none",
-                "docs_targets": publish_result.get("docs_targets") or [],
-                "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
-                "meaningful_paths": publish_result.get("meaningful_paths") or [],
-                "ignored_changes": publish_result.get("ignored_changes") or [],
-                "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
-                "previous_pr_url": publish_result.get("previous_pr_url") or "",
-                "previous_commit": publish_result.get("previous_commit") or "",
-            }
-        )
+        publish_summary = {
+            "validation_state": str(validation_state.get("validation_state") or "blocked"),
+            "validation_result": str(validation_state.get("validation_result") or "blocked"),
+            "validation_commit_match": bool(validation_state.get("validation_commit_match")),
+            "auto_revalidated": bool(validation_state.get("auto_revalidated")),
+            "validation_reused": bool(validation_state.get("validation_reused")),
+            "last_validated_commit": str(validation_state.get("last_validated_commit") or ""),
+            "current_commit": str(validation_state.get("current_commit") or ""),
+            "validation_age_seconds": int(validation_state.get("validation_age_seconds", -1)),
+            "publish_requested": True,
+            "publish_triggered": bool(publish_result.get("triggered")),
+            "publish_mode": "current-repo-state",
+            "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
+            "publish_result_detail": publish_result,
+            "publish_reason": publish_result.get("publish_reason") or "",
+            "publish_detail_reason": publish_result.get("reason") or (publish_result.get("verification") or {}).get("reason") or "",
+            "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
+            "pr_merged": bool(publish_result.get("pr_merged")),
+            "local_main_synced": bool(publish_result.get("local_main_synced")),
+            "docs_checked_at_publish": bool(publish_result.get("docs_checked_at_publish")),
+            "docs_required": bool(publish_result.get("docs_required")),
+            "docs_updated": bool(publish_result.get("docs_updated")),
+            "docs_refresh_mode": publish_result.get("docs_refresh_mode") or "none",
+            "docs_targets": publish_result.get("docs_targets") or [],
+            "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
+            "meaningful_paths": publish_result.get("meaningful_paths") or [],
+            "ignored_changes": publish_result.get("ignored_changes") or [],
+            "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
+            "previous_pr_url": publish_result.get("previous_pr_url") or "",
+            "previous_commit": publish_result.get("previous_commit") or "",
+        }
+        print_post_success_publish_summary(publish_summary)
         print_publish_summary(publish_result)
-        print(format_final_operator_summary(
-            {
-                "validation_result": "blocked",
-                "publish_requested": True,
-                "publish_triggered": bool(publish_result.get("triggered")),
-                "publish_mode": "current-repo-state",
-                "publish_result": (publish_result.get("final") or {}).get("status") or "failed",
-                "publish_result_detail": publish_result,
-                "publish_reason": publish_result.get("reason") or (publish_result.get("verification") or {}).get("reason") or "",
-                "pr_created_or_reused": bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists")),
-                "pr_merged": bool(publish_result.get("pr_merged")),
-                "local_main_synced": bool(publish_result.get("local_main_synced")),
-                "docs_checked_at_publish": bool(publish_result.get("docs_checked_at_publish")),
-                "docs_required": bool(publish_result.get("docs_required")),
-                "docs_updated": bool(publish_result.get("docs_updated")),
-                "docs_refresh_mode": publish_result.get("docs_refresh_mode") or "none",
-                "docs_targets": publish_result.get("docs_targets") or [],
-                "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
-                "meaningful_paths": publish_result.get("meaningful_paths") or [],
-                "ignored_changes": publish_result.get("ignored_changes") or [],
-                "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
-                "previous_pr_url": publish_result.get("previous_pr_url") or "",
-                "previous_commit": publish_result.get("previous_commit") or "",
-            }
-        ))
+        print(format_final_operator_summary(publish_summary))
         return
     if target:
         ok, error = ensure_remote_session()
@@ -9345,7 +9619,17 @@ def main():
                 outcome_label = "dry-run" if args.dry_run else "success"
                 action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, outcome_label, args.dry_run)
                 write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-                update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target)
+                update_recent_state(
+                    repo,
+                    args.test_cmd,
+                    resolved_mode,
+                    "success",
+                    artifact_dir,
+                    target,
+                    files_changed=finalization.get("changed_paths", []),
+                    confidence=str(finalization.get("confidence_level", "") or ""),
+                    blocked_reason=str(run_metrics.get("blocked_reason") or ""),
+                )
                 print(comparison_text)
                 print(action_text)
                 print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
@@ -10268,7 +10552,17 @@ def main():
                         outcome_label = "dry-run" if args.dry_run else "success"
                         action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, outcome_label, args.dry_run)
                         write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-                        update_recent_state(repo, args.test_cmd, resolved_mode, True, artifact_dir, target)
+                        update_recent_state(
+                            repo,
+                            args.test_cmd,
+                            resolved_mode,
+                            "success",
+                            artifact_dir,
+                            target,
+                            files_changed=finalization.get("changed_paths", []),
+                            confidence=str(finalization.get("confidence_level", "") or ""),
+                            blocked_reason=str(run_metrics.get("blocked_reason") or ""),
+                        )
                         print(comparison_text)
                         print(action_text)
                         print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
@@ -10339,18 +10633,32 @@ def main():
     comparison_text = analyze_run_comparison(load_recent_run_metrics(repo))
     action_text, rerun_cmd, continue_cmd, full_suite_cmd = build_action_summary(repo, args.test_cmd, resolved_mode, "failure", args.dry_run)
     write_run_artifacts(repo, artifact_dir, run_metrics, summary_text, comparison_text, rerun_cmd, continue_cmd, full_suite_cmd)
-    update_recent_state(repo, args.test_cmd, resolved_mode, False, artifact_dir, target)
+    update_recent_state(
+        repo,
+        args.test_cmd,
+        resolved_mode,
+        "blocked" if blocked else "failed",
+        artifact_dir,
+        target,
+        blocked_reason=str(run_metrics.get("blocked_reason") or ""),
+    )
     print(comparison_text)
     print(action_text)
     print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
     print_post_success_publish_summary(
         {
+            "validation_state": "failed",
             "validation_result": "failed",
+            "validation_commit_match": bool(parse_head_commit(repo) if is_git_repo(repo) else ""),
+            "last_validated_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+            "current_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+            "validation_age_seconds": 0 if is_git_repo(repo) else -1,
             "publish_requested": publish_requested,
             "publish_triggered": False,
             "publish_mode": "validated-run",
             "publish_result": "not_requested" if not publish_requested else "not_requested",
-            "publish_reason": (f"publish not run because validation_result=failed" if publish_requested else ""),
+            "publish_reason": ("blocked_by_validation" if publish_requested else ""),
+            "publish_detail_reason": (f"publish blocked because validation_result=failed; use --force-publish to override" if publish_requested else ""),
             "pr_created_or_reused": False,
             "pr_merged": False,
             "local_main_synced": False,
@@ -10359,12 +10667,18 @@ def main():
     print(
         format_final_operator_summary(
             {
+                "validation_state": "failed",
                 "validation_result": "failed",
+                "validation_commit_match": bool(parse_head_commit(repo) if is_git_repo(repo) else ""),
+                "last_validated_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+                "current_commit": parse_head_commit(repo) if is_git_repo(repo) else "",
+                "validation_age_seconds": 0 if is_git_repo(repo) else -1,
                 "publish_requested": publish_requested,
                 "publish_triggered": False,
                 "publish_mode": "validated-run",
                 "publish_result": "not_requested",
-                "publish_reason": (f"publish not run because validation_result=failed" if publish_requested else ""),
+                "publish_reason": ("blocked_by_validation" if publish_requested else ""),
+                "publish_detail_reason": (f"publish blocked because validation_result=failed; use --force-publish to override" if publish_requested else ""),
                 "pr_created_or_reused": False,
                 "pr_merged": False,
                 "local_main_synced": False,
