@@ -191,6 +191,9 @@ def test_attempt_publish_auto_revalidation_success(monkeypatch: pytest.MonkeyPat
         "validation_state": "blocked",
         "validation_result": "blocked",
         "validation_commit_match": False,
+        "meaningful_changes_detected": True,
+        "meaningful_paths": ["local_fix_agent.py"],
+        "ignored_changes": [],
         "last_validated_commit": "old123",
         "current_commit": "new456",
         "validation_age_seconds": 10,
@@ -251,6 +254,9 @@ def test_attempt_publish_auto_revalidation_failure_blocks(monkeypatch: pytest.Mo
         "validation_state": "blocked",
         "validation_result": "blocked",
         "validation_commit_match": False,
+        "meaningful_changes_detected": True,
+        "meaningful_paths": ["local_fix_agent.py"],
+        "ignored_changes": [],
         "last_validated_commit": "old123",
         "current_commit": "new456",
         "validation_age_seconds": 10,
@@ -303,6 +309,9 @@ def test_attempt_publish_auto_revalidation_no_auto_revalidate_preserves_block(mo
         "validation_state": "blocked",
         "validation_result": "blocked",
         "validation_commit_match": False,
+        "meaningful_changes_detected": True,
+        "meaningful_paths": ["local_fix_agent.py"],
+        "ignored_changes": [],
         "last_validated_commit": "old123",
         "current_commit": "new456",
         "validation_age_seconds": 10,
@@ -320,6 +329,93 @@ def test_attempt_publish_auto_revalidation_no_auto_revalidate_preserves_block(mo
     assert result["auto_revalidated"] is False
     assert result["validation_reused"] is False
     assert result["auto_revalidation_result"] == "not_needed"
+
+
+def test_attempt_publish_auto_revalidation_reuses_validation_when_only_ignored_changes_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "blocked",
+        "validation_result": "blocked",
+        "validation_commit_match": False,
+        "meaningful_changes_detected": False,
+        "meaningful_paths": [],
+        "ignored_changes": [".ai_publish_state.json"],
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "mismatch",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("revalidation should not run for ignored-only differences")),
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial)
+
+    assert result["validation_state"] == "success"
+    assert result["validation_result"] == "success"
+    assert result["validation_reused"] is True
+    assert result["auto_revalidated"] is False
+    assert result["auto_revalidation_result"] == "not_needed"
+    assert result["publish_reason"] == "validated_reused_noop"
+
+
+def test_attempt_publish_auto_revalidation_blocks_if_commit_changes_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "blocked",
+        "validation_result": "blocked",
+        "validation_commit_match": False,
+        "meaningful_changes_detected": True,
+        "meaningful_paths": ["local_fix_agent.py"],
+        "ignored_changes": [],
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "mismatch",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "load_recent_state",
+        lambda: {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "validation_command": "pytest -q",
+                    "commit_hash": "old123",
+                    "validation_result": "success",
+                    "ts": 1,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (0, "ok"))
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "validation_state": "success",
+            "validation_result": "success",
+            "validation_commit_match": False,
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_validated_commit": "new456",
+            "current_commit": "new789",
+            "validation_age_seconds": 0,
+            "reason": "validated",
+        },
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial)
+
+    assert result["validation_state"] == "blocked"
+    assert result["auto_revalidated"] is True
+    assert result["auto_revalidation_result"] == "blocked"
+    assert "changed again after the auto-revalidation attempt" in result["reason"]
 
 
 def test_fork_created_in_run_one_reused_in_run_two(monkeypatch: pytest.MonkeyPatch) -> None:

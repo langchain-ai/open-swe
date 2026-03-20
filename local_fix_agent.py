@@ -2046,11 +2046,19 @@ def resolve_publish_validation_state(repo: Path) -> dict:
     runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
     repo_runs = [item for item in reversed(runs) if item.get("repo") == str(repo) and not item.get("target")]
     current_commit = parse_head_commit(repo) if is_git_repo(repo) else ""
+    publish_changes = classify_publishable_changes(repo) if is_git_repo(repo) else {
+        "meaningful_changes_detected": False,
+        "meaningful_paths": [],
+        "ignored_changes": [],
+    }
     if not repo_runs:
         return {
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+            "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+            "ignored_changes": list(publish_changes.get("ignored_changes") or []),
             "last_validated_commit": "",
             "current_commit": current_commit,
             "validation_age_seconds": -1,
@@ -2073,6 +2081,9 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+            "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+            "ignored_changes": list(publish_changes.get("ignored_changes") or []),
             "last_validated_commit": "",
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2083,6 +2094,9 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+            "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+            "ignored_changes": list(publish_changes.get("ignored_changes") or []),
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2096,6 +2110,9 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "success",
             "validation_result": "success",
             "validation_commit_match": True,
+            "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+            "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+            "ignored_changes": list(publish_changes.get("ignored_changes") or []),
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2106,6 +2123,9 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": True,
+            "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+            "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+            "ignored_changes": list(publish_changes.get("ignored_changes") or []),
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2118,6 +2138,9 @@ def resolve_publish_validation_state(repo: Path) -> dict:
         "validation_state": "failed",
         "validation_result": "failed",
         "validation_commit_match": True,
+        "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+        "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+        "ignored_changes": list(publish_changes.get("ignored_changes") or []),
         "last_validated_commit": last_commit,
         "current_commit": current_commit,
         "validation_age_seconds": validation_age_seconds,
@@ -2138,6 +2161,13 @@ def attempt_publish_auto_revalidation(
     result["auto_revalidation_result"] = "not_needed"
     result["auto_revalidation_attempted"] = False
     if result.get("validation_state") == "success" and result.get("validation_commit_match"):
+        return result
+    if not bool(result.get("meaningful_changes_detected")) and str(result.get("validation_result") or "") == "blocked" and not original_commit_match:
+        result["validation_state"] = "success"
+        result["validation_result"] = "success"
+        result["validation_reused"] = True
+        result["publish_reason"] = "validated_reused_noop"
+        result["reason"] = "validated_reused_noop"
         return result
     if no_auto_revalidate:
         result["validation_reused"] = False
@@ -2193,6 +2223,8 @@ def attempt_publish_auto_revalidation(
             f"publish blocked because auto-revalidation failed for current commit {refreshed.get('current_commit') or '(none)'}; "
             "use --force-publish to override"
         )
+    else:
+        refreshed["publish_reason"] = "validated_after_revalidation"
     return refreshed
 
 
@@ -5104,6 +5136,9 @@ def make_publish_result() -> dict:
         "current_commit": "",
         "validation_age_seconds": -1,
         "forced_publish": False,
+        "auto_revalidated": False,
+        "validation_reused": False,
+        "auto_revalidation_result": "not_needed",
         "publish_reason": "",
         "branch": "",
         "commit_sha": "",
@@ -6129,6 +6164,8 @@ def publish_current_repo_state(
     result["auto_revalidation_result"] = auto_revalidation_result
     if auto_revalidated and validation_state == "success":
         result["publish_reason"] = "validated_after_revalidation"
+    elif validation_reused and validation_state == "success" and not validation_commit_match:
+        result["publish_reason"] = "validated_reused_noop"
     elif validation_reused and validation_state == "success":
         result["publish_reason"] = "validated"
     result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr or publish_merge)
