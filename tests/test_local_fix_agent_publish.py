@@ -240,6 +240,7 @@ def test_attempt_publish_auto_revalidation_success(monkeypatch: pytest.MonkeyPat
     assert result["validation_state"] == "success"
     assert result["auto_revalidated"] is True
     assert result["validation_reused"] is False
+    assert result["auto_revalidation_result"] == "success"
     assert captured["success"] == "success"
     assert captured["test_cmd"] == "pytest -q"
 
@@ -292,6 +293,7 @@ def test_attempt_publish_auto_revalidation_failure_blocks(monkeypatch: pytest.Mo
     assert result["validation_state"] == "failed"
     assert result["auto_revalidated"] is True
     assert result["validation_reused"] is False
+    assert result["auto_revalidation_result"] == "failed"
     assert "auto-revalidation failed" in result["reason"]
 
 
@@ -317,6 +319,7 @@ def test_attempt_publish_auto_revalidation_no_auto_revalidate_preserves_block(mo
     assert result["validation_state"] == "blocked"
     assert result["auto_revalidated"] is False
     assert result["validation_reused"] is False
+    assert result["auto_revalidation_result"] == "not_needed"
 
 
 def test_fork_created_in_run_one_reused_in_run_two(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1517,6 +1520,7 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         validation_age_seconds: int = -1,
         auto_revalidated: bool = False,
         validation_reused: bool = False,
+        auto_revalidation_result: str = "not_needed",
     ) -> dict:
         captured["repo"] = repo
         captured["publish_branch"] = publish_branch
@@ -1526,6 +1530,7 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         captured["validation_commit_match"] = validation_commit_match
         captured["auto_revalidated"] = auto_revalidated
         captured["validation_reused"] = validation_reused
+        captured["auto_revalidation_result"] = auto_revalidation_result
         return {
             "published": True,
             "publish_scope": "current_repo_state",

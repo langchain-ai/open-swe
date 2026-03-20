@@ -2135,6 +2135,7 @@ def attempt_publish_auto_revalidation(
     original_commit_match = bool(result.get("validation_commit_match"))
     result["auto_revalidated"] = False
     result["validation_reused"] = bool(result.get("validation_state") == "success" and result.get("validation_commit_match"))
+    result["auto_revalidation_result"] = "not_needed"
     result["auto_revalidation_attempted"] = False
     if result.get("validation_state") == "success" and result.get("validation_commit_match"):
         return result
@@ -2151,6 +2152,7 @@ def attempt_publish_auto_revalidation(
     validation_command = str(last.get("validation_command") or last.get("test_cmd") or "").strip()
     if not validation_command:
         result["validation_reused"] = False
+        result["auto_revalidation_result"] = "blocked"
         result["reason"] = "publish blocked because no validation command was recorded for auto-revalidation; use --force-publish to override"
         return result
     result["auto_revalidation_attempted"] = True
@@ -2174,7 +2176,18 @@ def attempt_publish_auto_revalidation(
     refreshed["auto_revalidated"] = True
     refreshed["validation_reused"] = False
     refreshed["auto_revalidation_attempted"] = True
+    post_revalidation_commit_match = bool(refreshed.get("validation_commit_match"))
     refreshed["validation_commit_match"] = original_commit_match
+    refreshed["auto_revalidation_result"] = "success" if refreshed.get("validation_state") == "success" and post_revalidation_commit_match else "failed"
+    if not post_revalidation_commit_match:
+        refreshed["validation_state"] = "blocked"
+        refreshed["validation_result"] = "blocked"
+        refreshed["auto_revalidation_result"] = "blocked"
+        refreshed["reason"] = (
+            f"publish blocked because current commit {refreshed.get('current_commit') or '(none)'} changed again after the auto-revalidation attempt; "
+            "use --force-publish or rerun publish"
+        )
+        return refreshed
     if refreshed.get("validation_state") != "success":
         refreshed["reason"] = (
             f"publish blocked because auto-revalidation failed for current commit {refreshed.get('current_commit') or '(none)'}; "
@@ -6067,6 +6080,7 @@ def publish_current_repo_state(
     validation_age_seconds: int = -1,
     auto_revalidated: bool = False,
     validation_reused: bool = False,
+    auto_revalidation_result: str = "not_needed",
 ) -> dict:
     if validation_state != "success" and not force_publish:
         result = make_publish_result()
@@ -6079,6 +6093,7 @@ def publish_current_repo_state(
         result["validation_age_seconds"] = validation_age_seconds
         result["auto_revalidated"] = auto_revalidated
         result["validation_reused"] = validation_reused
+        result["auto_revalidation_result"] = auto_revalidation_result
         result["forced_publish"] = False
         result["publish_reason"] = "blocked_by_validation"
         result["reason"] = validation_detail or f"publish blocked because validation_result={validation_state}; use --force-publish to override"
@@ -6111,6 +6126,11 @@ def publish_current_repo_state(
     result["validation_age_seconds"] = validation_age_seconds
     result["auto_revalidated"] = auto_revalidated
     result["validation_reused"] = validation_reused
+    result["auto_revalidation_result"] = auto_revalidation_result
+    if auto_revalidated and validation_state == "success":
+        result["publish_reason"] = "validated_after_revalidation"
+    elif validation_reused and validation_state == "success":
+        result["publish_reason"] = "validated"
     result["recommended_command"] = recommended_publish_current_command(include_pr=publish_pr or publish_merge)
     return result
 
@@ -6146,6 +6166,7 @@ def run_post_success_publish(
         "validation_age_seconds": 0 if is_git_repo(repo) else -1,
         "auto_revalidated": False,
         "validation_reused": validation_result == "success",
+        "auto_revalidation_result": "not_needed",
         "publish_requested": False,
         "publish_triggered": False,
         "publish_mode": publish_mode,
@@ -6188,6 +6209,7 @@ def run_post_success_publish(
             validation_age_seconds=int(summary.get("validation_age_seconds", -1)),
             auto_revalidated=bool(summary.get("auto_revalidated")),
             validation_reused=bool(summary.get("validation_reused")),
+            auto_revalidation_result=str(summary.get("auto_revalidation_result") or "not_needed"),
         )
         summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
@@ -6235,6 +6257,7 @@ def run_post_success_publish(
         summary["validation_age_seconds"] = int(publish_result.get("validation_age_seconds", summary.get("validation_age_seconds", -1)))
         summary["auto_revalidated"] = bool(publish_result.get("auto_revalidated"))
         summary["validation_reused"] = bool(publish_result.get("validation_reused"))
+        summary["auto_revalidation_result"] = str(publish_result.get("auto_revalidation_result") or summary.get("auto_revalidation_result") or "not_needed")
     if not summary["publish_reason"]:
         summary["publish_reason"] = str(publish_result.get("publish_reason") or "")
     if not summary["publish_detail_reason"]:
@@ -6268,6 +6291,7 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"validation_commit_match: {format_bool(summary.get('validation_commit_match'))}")
     print(f"auto_revalidated: {format_bool(summary.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(summary.get('validation_reused'))}")
+    print(f"auto_revalidation_result: {summary.get('auto_revalidation_result') or 'not_needed'}")
     print(f"last_validated_commit: {summary.get('last_validated_commit') or '(none)'}")
     print(f"current_commit: {summary.get('current_commit') or '(none)'}")
     print(f"validation_age_seconds: {summary.get('validation_age_seconds', -1)}")
@@ -6345,6 +6369,7 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"validation_commit_match: {format_bool(publish_result.get('validation_commit_match'))}")
     print(f"auto_revalidated: {format_bool(publish_result.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(publish_result.get('validation_reused'))}")
+    print(f"auto_revalidation_result: {publish_result.get('auto_revalidation_result') or 'not_needed'}")
     print(f"last_validated_commit: {publish_result.get('last_validated_commit') or '(none)'}")
     print(f"current_commit: {publish_result.get('current_commit') or '(none)'}")
     print(f"validation_age_seconds: {publish_result.get('validation_age_seconds', -1)}")
@@ -9066,6 +9091,7 @@ def main():
             validation_age_seconds=int(validation_state.get("validation_age_seconds", -1)),
             auto_revalidated=bool(validation_state.get("auto_revalidated")),
             validation_reused=bool(validation_state.get("validation_reused")),
+            auto_revalidation_result=str(validation_state.get("auto_revalidation_result") or "not_needed"),
         )
         publish_summary = {
             "validation_state": str(validation_state.get("validation_state") or "blocked"),
@@ -9073,6 +9099,7 @@ def main():
             "validation_commit_match": bool(validation_state.get("validation_commit_match")),
             "auto_revalidated": bool(validation_state.get("auto_revalidated")),
             "validation_reused": bool(validation_state.get("validation_reused")),
+            "auto_revalidation_result": str(validation_state.get("auto_revalidation_result") or "not_needed"),
             "last_validated_commit": str(validation_state.get("last_validated_commit") or ""),
             "current_commit": str(validation_state.get("current_commit") or ""),
             "validation_age_seconds": int(validation_state.get("validation_age_seconds", -1)),
