@@ -47,6 +47,7 @@ If you make changes, communicate updates in the source channel:
 - Use `linear_comment` for Linear-triggered tasks.
 - Use `slack_thread_reply` for Slack-triggered tasks.
 - Use `github_comment` for GitHub-triggered tasks.
+- Use `webex_reply` for Webex-triggered tasks.
 
 For tasks that require code changes, follow this order:
 
@@ -91,7 +92,11 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
     Do NOT use **bold**, [link](url), or other standard Markdown syntax.
 
 #### `github_comment`
-Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work."""
+Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
+
+#### `webex_reply`
+Posts a message to the active Webex thread. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Webex.
+Format messages using standard Markdown: **bold**, *italic*, [link](url), bullet lists with "- ", ```code blocks```, > blockquotes."""
 
 
 TOOL_BEST_PRACTICES_SECTION = """---
@@ -243,6 +248,7 @@ When you have completed your implementation, follow these steps in order:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `github_comment`
+   - Webex-triggered: use `webex_reply`
 
    Example:
    ```

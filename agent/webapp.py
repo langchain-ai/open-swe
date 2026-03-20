@@ -51,6 +51,17 @@ from .utils.slack import (
     strip_bot_mention,
     verify_slack_signature,
 )
+from .utils.webex import (
+    fetch_webex_message,
+    fetch_webex_thread_messages,
+    format_webex_messages_for_prompt,
+    get_webex_person,
+    post_webex_trace_reply,
+    verify_webex_signature,
+)
+from .utils.webex import (
+    strip_bot_mention as strip_webex_bot_mention,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +74,11 @@ SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
 SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
 SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
+
+WEBEX_WEBHOOK_SECRET = os.environ.get("WEBEX_WEBHOOK_SECRET", "")
+WEBEX_BOT_EMAIL = os.environ.get("WEBEX_BOT_EMAIL", "")
+WEBEX_REPO_OWNER = os.environ.get("WEBEX_REPO_OWNER", "langchain-ai")
+WEBEX_REPO_NAME = os.environ.get("WEBEX_REPO_NAME", "open-swe")
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -268,6 +284,15 @@ def generate_thread_id_from_slack_thread(channel_id: str, thread_id: str) -> str
     composite = f"{channel_id}:{thread_id}"
     md5_hex = hashlib.md5(composite.encode("utf-8")).hexdigest()
     return str(uuid.UUID(hex=md5_hex))
+
+
+def generate_thread_id_from_webex(room_id: str, parent_id: str) -> str:
+    """Generate a deterministic thread ID from a Webex room and parent message."""
+    hash_bytes = hashlib.sha256(f"webex:{room_id}:{parent_id}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
 
 
 def _extract_repo_config_from_thread(thread: dict[str, Any]) -> dict[str, str] | None:
@@ -1491,3 +1516,172 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+# ---------------------------------------------------------------------------
+# Webex webhooks
+# ---------------------------------------------------------------------------
+
+
+def _get_webex_repo_config(message_text: str) -> dict[str, str]:
+    """Resolve repository configuration from a Webex message.
+
+    Supports `repo:owner/name` or `github.com/owner/name` inline syntax,
+    falling back to WEBEX_REPO_OWNER / WEBEX_REPO_NAME defaults.
+    """
+    owner: str | None = None
+    name: str | None = None
+
+    if "repo:" in message_text or "repo " in message_text:
+        match = re.search(r"repo[: ]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message_text)
+        if match:
+            owner, name = match.group(1).split("/", 1)
+
+    if not owner or not name:
+        github_match = re.search(r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message_text)
+        if github_match:
+            owner, name = github_match.group(1).split("/", 1)
+
+    if not owner or not name:
+        owner = WEBEX_REPO_OWNER.strip() or "langchain-ai"
+        name = WEBEX_REPO_NAME.strip() or "open-swe"
+
+    return {"owner": owner, "name": name}
+
+
+async def process_webex_mention(  # noqa: PLR0912, PLR0915
+    data: dict[str, Any],
+    repo_config: dict[str, str],
+) -> None:
+    """Process a Webex bot mention by creating or queuing a thread run."""
+    message_id = data.get("id", "")
+    room_id = data.get("roomId", "")
+    person_id = data.get("personId", "")
+    person_email = data.get("personEmail", "")
+
+    if not message_id or not room_id:
+        logger.warning("Missing Webex message id or roomId, skipping")
+        return
+
+    full_message = await fetch_webex_message(message_id)
+    if not full_message:
+        logger.warning("Could not fetch Webex message %s, skipping", message_id)
+        return
+
+    raw_text = full_message.get("text", "")
+    clean_text = strip_webex_bot_mention(raw_text) or "(no text in mention)"
+
+    parent_id = full_message.get("parentId") or message_id
+
+    person = await get_webex_person(person_id) if person_id else None
+    display_name = (person.get("displayName", "") if person else "") or person_email
+    user_email = person_email
+
+    thread_context = ""
+    if full_message.get("parentId"):
+        thread_messages = await fetch_webex_thread_messages(room_id, parent_id)
+        if thread_messages:
+            thread_context = format_webex_messages_for_prompt(thread_messages)
+
+    context_section = f"## Conversation Context\n{thread_context}\n\n" if thread_context else ""
+
+    prompt = (
+        "You were mentioned in Webex.\n\n"
+        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
+        f"## Triggered by\n{display_name}\n\n"
+        f"## Webex Room\n- Room ID: {room_id}\n"
+        f"- Parent ID: {parent_id}\n\n"
+        f"{context_section}"
+        f"## Latest Mention Request\n{clean_text}\n\n"
+        "Use `webex_reply` to communicate in this Webex thread for clarifications, "
+        "status updates, and final summaries."
+    )
+
+    thread_id = generate_thread_id_from_webex(room_id, parent_id)
+
+    configurable: dict[str, Any] = {
+        "repo": repo_config,
+        "webex_thread": {
+            "room_id": room_id,
+            "parent_id": parent_id,
+            "triggering_person_id": person_id,
+            "triggering_person_email": person_email,
+            "triggering_display_name": display_name,
+        },
+        "user_email": user_email,
+        "source": "webex",
+    }
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info("Thread %s is active, queuing Webex message for middleware pickup", thread_id)
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content={"text": prompt, "image_urls": []},
+        )
+        if queued:
+            logger.info("Webex message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue Webex message for thread %s", thread_id)
+        return
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    run = await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+        multitask_strategy="interrupt",
+    )
+    await post_webex_trace_reply(room_id, parent_id, run["run_id"])
+
+
+@app.post("/webhooks/webex")
+async def webex_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Handle Webex webhook notifications for messages:created events."""
+    body = await request.body()
+
+    signature = request.headers.get("X-Spark-Signature", "")
+    if not verify_webex_signature(body, signature, WEBEX_WEBHOOK_SECRET):
+        logger.warning("Invalid Webex webhook signature")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse Webex webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    resource = payload.get("resource")
+    event = payload.get("event")
+    if resource != "messages" or event != "created":
+        logger.debug("Ignoring Webex webhook: resource=%s, event=%s", resource, event)
+        return {"status": "ignored", "reason": f"Not a messages:created event ({resource}:{event})"}
+
+    data = payload.get("data", {})
+    person_email = data.get("personEmail", "")
+
+    if WEBEX_BOT_EMAIL and person_email.lower() == WEBEX_BOT_EMAIL.lower():
+        logger.debug("Ignoring Webex webhook: message is from the bot itself")
+        return {"status": "ignored", "reason": "Message is from the bot"}
+
+    message_text = data.get("text", "")
+    repo_config = _get_webex_repo_config(message_text)
+
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Webex webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
+    logger.info("Accepted Webex webhook, scheduling background task")
+    background_tasks.add_task(process_webex_mention, data, repo_config)
+    return {"status": "accepted", "message": "Processing Webex mention"}
+
+
+@app.get("/webhooks/webex")
+async def webex_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for Webex webhook setup."""
+    return {"status": "ok", "message": "Webex webhook endpoint is active"}
