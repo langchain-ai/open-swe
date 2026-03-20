@@ -355,9 +355,14 @@ async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -
     name: str | None = None
 
     if "repo:" in message or "repo " in message:
-        match = re.search(r"repo[: ]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
+        match = re.search(r"repo[: ]([a-zA-Z0-9_.\-/]+)", message)
         if match:
-            owner, name = match.group(1).split("/", 1)
+            value = match.group(1).rstrip("/")
+            if "/" in value:
+                owner, name = value.split("/", 1)
+            else:
+                owner = default_owner
+                name = value
 
     if not owner or not name:
         github_match = re.search(r"github\.com/([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)", message)
