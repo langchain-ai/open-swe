@@ -203,6 +203,9 @@ def test_validated_script_is_promoted_and_relearned(tmp_path: Path) -> None:
     assert catalog["sources"][0]["origin_path"] == str(proxy_path)
     assert any(pattern["source_repo_path"] == imported_rel for pattern in memory["patterns"])
     assert any(pattern["trust_level"] == "trusted" for pattern in memory["patterns"])
+    assert result["imported_sources"][0]["source_type"] == "local"
+    assert result["imported_sources"][0]["acquisition_method"] == "direct"
+    assert result["imported_sources"][0]["proxy_used"] is False
 
 
 def test_relearn_patterns_loads_from_pattern_repo_catalog(tmp_path: Path) -> None:
@@ -315,6 +318,156 @@ COOKIE = "sessionid=abc123"
     assert "sessionid=abc123" not in content
     assert "<REDACTED_SECRET>" in content or "<REDACTED_TOKEN>" in content
     assert result["imported_sources"][0]["sanitized_changed"] is True
+
+
+def test_parse_pattern_import_source_supports_ssh_and_http() -> None:
+    ssh_legacy = lfa.parse_pattern_import_source("alice@example.com:/srv/tool.py")
+    ssh_url = lfa.parse_pattern_import_source("ssh://alice@example.com/srv/tool.py")
+    http_url = lfa.parse_pattern_import_source("https://example.com/tools/tool.py")
+
+    assert ssh_legacy["source_type"] == "ssh"
+    assert ssh_legacy["ssh_host"] == "alice@example.com"
+    assert ssh_legacy["ssh_path"] == "/srv/tool.py"
+    assert ssh_url["source_type"] == "ssh"
+    assert ssh_url["ssh_host"] == "alice@example.com"
+    assert ssh_url["ssh_path"] == "/srv/tool.py"
+    assert http_url["source_type"] == "http"
+    assert http_url["display_name"] == "tool.py"
+
+
+def test_fetch_pattern_source_http_uses_proxy_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr(lfa, "command_available", lambda name: name == "curl")
+    monkeypatch.setattr(lfa, "CURRENT_SUBPROCESS_ENV", {"HTTP_PROXY": "http://proxy:8080"})
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (0, "print('ok')\n"))
+
+    fetched = lfa.fetch_pattern_source("https://example.com/tool.py", Path("/tmp/repo"))
+
+    assert fetched["ok"] is True
+    assert fetched["source_type"] == "http"
+    assert fetched["acquisition_method"] == "curl"
+    assert fetched["proxy_used"] is True
+
+
+def test_configure_subprocess_safety_propagates_all_proxy() -> None:
+    lfa.configure_subprocess_safety(
+        {
+            "HTTP_PROXY": "http://proxy:8080",
+            "HTTPS_PROXY": "",
+            "ALL_PROXY": "socks5://proxy:1080",
+            "run_budget": 0,
+            "attempt_budget": 0,
+        }
+    )
+
+    assert lfa.CURRENT_SUBPROCESS_ENV["HTTP_PROXY"] == "http://proxy:8080"
+    assert lfa.CURRENT_SUBPROCESS_ENV["ALL_PROXY"] == "socks5://proxy:1080"
+
+
+def test_fetch_pattern_source_missing_curl_blocks_http_import(monkeypatch) -> None:
+    monkeypatch.setattr(lfa, "command_available", lambda name: False)
+
+    fetched = lfa.fetch_pattern_source("https://example.com/tool.py", Path("/tmp/repo"))
+
+    assert fetched["ok"] is False
+    assert fetched["blocked_reason"] == "missing required tool: curl"
+
+
+def test_fetch_pattern_source_missing_ssh_and_scp_blocks_ssh_import(monkeypatch) -> None:
+    monkeypatch.setattr(lfa, "command_available", lambda name: False)
+
+    fetched = lfa.fetch_pattern_source("alice@example.com:/srv/tool.py", Path("/tmp/repo"))
+
+    assert fetched["ok"] is False
+    assert fetched["blocked_reason"] == "missing required tool: ssh (and scp unavailable)"
+
+
+def test_import_pattern_files_remote_http_source_records_metadata(tmp_path: Path, monkeypatch) -> None:
+    pattern_repo = tmp_path / "pattern_repo"
+    monkeypatch.setattr(
+        lfa,
+        "fetch_pattern_source",
+        lambda source, cwd: {
+            "ok": True,
+            "source_type": "http",
+            "source_origin": source,
+            "acquisition_method": "curl",
+            "proxy_used": True,
+            "content": PROXY_SCRIPT,
+            "display_name": "proxy_client.py",
+        },
+    )
+
+    result = lfa.import_pattern_files(pattern_repo, ["https://example.com/proxy_client.py"], trust_level="trusted")
+    source = result["imported_sources"][0]
+
+    assert source["source_type"] == "http"
+    assert source["source_origin"] == "https://example.com/proxy_client.py"
+    assert source["acquisition_method"] == "curl"
+    assert source["proxy_used"] is True
+    assert source["validation_passed"] is True
+    assert source["promoted"] is True
+
+
+def test_import_pattern_files_remote_candidate_not_promoted_when_validation_blocks(tmp_path: Path, monkeypatch) -> None:
+    pattern_repo = tmp_path / "pattern_repo"
+    monkeypatch.setattr(
+        lfa,
+        "fetch_pattern_source",
+        lambda source, cwd: {
+            "ok": True,
+            "source_type": "ssh",
+            "source_origin": source,
+            "acquisition_method": "scp",
+            "proxy_used": False,
+            "content": "def broken(:\n",
+            "display_name": "broken.py",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_candidate_validation",
+        lambda current_repo, candidate_path: {
+            "plan": {"limited_validation": False, "only_syntax_import_validation": False, "primary_command": "python -m py_compile broken.py"},
+            "result": {"ok": False, "output": "syntax error"},
+            "passed": False,
+            "limited_validation": False,
+            "validation_command": "python -m py_compile broken.py",
+        },
+    )
+    monkeypatch.setattr(lfa, "repair_training_candidate", lambda current_repo, candidate_path: {"ok": False, "output": "blocked", "command": []})
+
+    result = lfa.import_pattern_files(pattern_repo, ["alice@example.com:/srv/broken.py"], trust_level="trusted")
+    source = result["imported_sources"][0]
+
+    assert source["source_type"] == "ssh"
+    assert source["acquisition_method"] == "scp"
+    assert source["validation_passed"] is False
+    assert source["promoted"] is False
+    assert source["promotion_state"] == "candidate"
+
+
+def test_import_pattern_files_acquisition_failure_records_blocked_source(tmp_path: Path, monkeypatch) -> None:
+    pattern_repo = tmp_path / "pattern_repo"
+    monkeypatch.setattr(
+        lfa,
+        "fetch_pattern_source",
+        lambda source, cwd: {
+            "ok": False,
+            "source_type": "http",
+            "source_origin": source,
+            "acquisition_method": "curl",
+            "proxy_used": True,
+            "blocked_reason": "missing required tool: curl",
+            "display_name": "tool.py",
+        },
+    )
+
+    result = lfa.import_pattern_files(pattern_repo, ["https://example.com/tool.py"], trust_level="trusted")
+    source = result["imported_sources"][0]
+
+    assert source["candidate_imported"] is False
+    assert source["validation_status"] == "blocked"
+    assert source["blocked_reason"] == "missing required tool: curl"
 
 
 def test_candidate_import_does_not_immediately_become_trusted_when_validation_is_weak(tmp_path: Path) -> None:

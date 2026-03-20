@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import urlparse
 
 MODEL = "qwen2.5-coder:14b"
 DEFAULT_MAX_STEPS = 40
@@ -138,12 +139,12 @@ def is_likely_rate_limited(output: str) -> bool:
 
 def configure_subprocess_safety(settings: dict) -> None:
     CURRENT_SUBPROCESS_ENV.clear()
-    for key in ["HTTP_PROXY", "HTTPS_PROXY"]:
+    for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
         value = settings.get(key, "")
         if value:
             CURRENT_SUBPROCESS_ENV[key] = value
             CURRENT_SUBPROCESS_ENV[key.lower()] = value
-    API_SAFETY_STATE["proxy_enabled"] = bool(settings.get("HTTP_PROXY") or settings.get("HTTPS_PROXY"))
+    API_SAFETY_STATE["proxy_enabled"] = bool(settings.get("HTTP_PROXY") or settings.get("HTTPS_PROXY") or settings.get("ALL_PROXY"))
     API_SAFETY_STATE["http_proxy"] = settings.get("HTTP_PROXY", "")
     API_SAFETY_STATE["https_proxy"] = settings.get("HTTPS_PROXY", "")
     API_SAFETY_STATE["run_budget"] = int(settings.get("run_budget", 0) or 0)
@@ -2939,27 +2940,236 @@ def import_pattern_tags(pattern_tags: str | None) -> list[str]:
     return tags
 
 
-def slugify_pattern_import_name(path: Path) -> str:
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", path.stem).strip("-").lower() or "script"
+def slugify_pattern_import_name(path: Path | str) -> str:
+    candidate_path = path if isinstance(path, Path) else Path(str(path))
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", candidate_path.stem).strip("-").lower() or "script"
     return stem[:60]
 
 
-def pattern_repo_source_id(path: Path, trust_level: str) -> str:
-    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:10]
-    return f"{trust_level}-{slugify_pattern_import_name(path)}-{digest}"
+def parse_pattern_import_source(source: str) -> dict:
+    text = str(source or "").strip()
+    parsed = urlparse(text)
+    if parsed.scheme in {"http", "https"}:
+        filename = Path(parsed.path or "script.py").name or "script.py"
+        return {
+            "source_type": "http",
+            "origin": text,
+            "display_name": filename,
+            "ssh_host": "",
+            "ssh_path": "",
+            "scheme": parsed.scheme,
+        }
+    if parsed.scheme == "ssh":
+        ssh_host = parsed.netloc
+        ssh_path = parsed.path or ""
+        filename = Path(ssh_path or "script.py").name or "script.py"
+        return {
+            "source_type": "ssh",
+            "origin": text,
+            "display_name": filename,
+            "ssh_host": ssh_host,
+            "ssh_path": ssh_path,
+            "scheme": "ssh",
+        }
+    legacy_match = re.match(r"^(?P<host>[^:@/\s]+@[^:/\s]+):(?P<path>/.*)$", text)
+    if legacy_match:
+        ssh_path = legacy_match.group("path")
+        filename = Path(ssh_path or "script.py").name or "script.py"
+        return {
+            "source_type": "ssh",
+            "origin": text,
+            "display_name": filename,
+            "ssh_host": legacy_match.group("host"),
+            "ssh_path": ssh_path,
+            "scheme": "ssh",
+        }
+    path = Path(text).expanduser()
+    return {
+        "source_type": "local",
+        "origin": str(path.resolve() if path.exists() else path),
+        "display_name": path.name or "script.py",
+        "ssh_host": "",
+        "ssh_path": "",
+        "scheme": "",
+    }
 
 
-def infer_pattern_import_destination(pattern_repo: Path, source_path: Path, trust_level: str) -> Path:
-    suffix = source_path.suffix or ".py"
-    slug = slugify_pattern_import_name(source_path)
-    digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:10]
+def pattern_source_proxy_used(source_type: str) -> bool:
+    if source_type != "http":
+        return False
+    return any(
+        bool(CURRENT_SUBPROCESS_ENV.get(key))
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]
+    )
+
+
+def command_available(name: str) -> bool:
+    return shutil.which(name) is not None
+
+
+def fetch_pattern_source(source: str, cwd: Path) -> dict:
+    parsed = parse_pattern_import_source(source)
+    source_type = parsed["source_type"]
+    origin = parsed["origin"]
+    if source_type == "local":
+        path = Path(origin)
+        if not path.exists() or not path.is_file():
+            return {
+                "ok": False,
+                "source_type": "local",
+                "source_origin": origin,
+                "acquisition_method": "direct",
+                "proxy_used": False,
+                "blocked_reason": f"local source not found: {origin}",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        try:
+            content = path.read_text()
+        except OSError as exc:
+            return {
+                "ok": False,
+                "source_type": "local",
+                "source_origin": origin,
+                "acquisition_method": "direct",
+                "proxy_used": False,
+                "blocked_reason": f"local source could not be read: {exc}",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        return {
+            "ok": True,
+            "source_type": "local",
+            "source_origin": origin,
+            "acquisition_method": "direct",
+            "proxy_used": False,
+            "content": content,
+            "display_name": parsed["display_name"],
+        }
+    if source_type == "http":
+        if not command_available("curl"):
+            return {
+                "ok": False,
+                "source_type": "http",
+                "source_origin": origin,
+                "acquisition_method": "curl",
+                "proxy_used": pattern_source_proxy_used("http"),
+                "blocked_reason": "missing required tool: curl",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        code, output = run_subprocess(["curl", "-fsSL", origin], cwd)
+        if code != 0:
+            return {
+                "ok": False,
+                "source_type": "http",
+                "source_origin": origin,
+                "acquisition_method": "curl",
+                "proxy_used": pattern_source_proxy_used("http"),
+                "blocked_reason": f"http fetch failed: {output.strip() or 'curl returned non-zero'}",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        return {
+            "ok": True,
+            "source_type": "http",
+            "source_origin": origin,
+            "acquisition_method": "curl",
+            "proxy_used": pattern_source_proxy_used("http"),
+            "content": output,
+            "display_name": parsed["display_name"],
+        }
+    if source_type == "ssh":
+        remote_spec = origin if "@" in origin and ":" in origin and not origin.startswith("ssh://") else f"{parsed['ssh_host']}:{parsed['ssh_path']}"
+        if command_available("scp"):
+            with tempfile.TemporaryDirectory(prefix="lfa-pattern-fetch-") as tmpdir:
+                destination = Path(tmpdir) / parsed["display_name"]
+                code, output = run_subprocess(["scp", "-q", remote_spec, str(destination)], cwd)
+                if code == 0 and destination.exists():
+                    try:
+                        content = destination.read_text()
+                    except OSError as exc:
+                        return {
+                            "ok": False,
+                            "source_type": "ssh",
+                            "source_origin": origin,
+                            "acquisition_method": "scp",
+                            "proxy_used": False,
+                            "blocked_reason": f"ssh fetch read failed: {exc}",
+                            "content": "",
+                            "display_name": parsed["display_name"],
+                        }
+                    return {
+                        "ok": True,
+                        "source_type": "ssh",
+                        "source_origin": origin,
+                        "acquisition_method": "scp",
+                        "proxy_used": False,
+                        "content": content,
+                        "display_name": parsed["display_name"],
+                    }
+        if not command_available("ssh"):
+            return {
+                "ok": False,
+                "source_type": "ssh",
+                "source_origin": origin,
+                "acquisition_method": "ssh",
+                "proxy_used": False,
+                "blocked_reason": "missing required tool: ssh (and scp unavailable)",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        code, output = run_subprocess(["ssh", parsed["ssh_host"], "cat", parsed["ssh_path"]], cwd)
+        if code != 0:
+            return {
+                "ok": False,
+                "source_type": "ssh",
+                "source_origin": origin,
+                "acquisition_method": "ssh",
+                "proxy_used": False,
+                "blocked_reason": f"ssh fetch failed: {output.strip() or 'ssh returned non-zero'}",
+                "content": "",
+                "display_name": parsed["display_name"],
+            }
+        return {
+            "ok": True,
+            "source_type": "ssh",
+            "source_origin": origin,
+            "acquisition_method": "ssh",
+            "proxy_used": False,
+            "content": output,
+            "display_name": parsed["display_name"],
+        }
+    return {
+        "ok": False,
+        "source_type": source_type,
+        "source_origin": origin,
+        "acquisition_method": "direct",
+        "proxy_used": False,
+        "blocked_reason": "unsupported pattern import source",
+        "content": "",
+        "display_name": parsed["display_name"],
+    }
+
+
+def pattern_repo_source_id(source: Path | str, trust_level: str) -> str:
+    digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:10]
+    return f"{trust_level}-{slugify_pattern_import_name(source)}-{digest}"
+
+
+def infer_pattern_import_destination(pattern_repo: Path, source_path: Path | str, trust_level: str) -> Path:
+    source_name = str(source_path)
+    suffix = Path(source_name).suffix or ".py"
+    slug = slugify_pattern_import_name(source_name)
+    digest = hashlib.sha256(source_name.encode("utf-8")).hexdigest()[:10]
     return ensure_pattern_repo(pattern_repo) / "candidates" / f"{slug}-{digest}{suffix}"
 
 
-def infer_curated_pattern_destination(pattern_repo: Path, source_path: Path, trust_level: str) -> Path:
-    suffix = source_path.suffix or ".py"
-    slug = slugify_pattern_import_name(source_path)
-    digest = hashlib.sha256(str(source_path.resolve()).encode("utf-8")).hexdigest()[:10]
+def infer_curated_pattern_destination(pattern_repo: Path, source_path: Path | str, trust_level: str) -> Path:
+    source_name = str(source_path)
+    suffix = Path(source_name).suffix or ".py"
+    slug = slugify_pattern_import_name(source_name)
+    digest = hashlib.sha256(source_name.encode("utf-8")).hexdigest()[:10]
     return ensure_pattern_repo(pattern_repo) / "curated" / trust_level / f"{slug}-{digest}{suffix}"
 
 
@@ -3044,15 +3254,46 @@ def import_pattern_files(
     existing_by_id = {item.get("id", ""): item for item in sources}
     pattern_count_before = len(load_script_pattern_memory(repo_root).get("patterns", []))
     for file_value in file_paths:
-        src = Path(file_value).expanduser().resolve()
-        if not src.exists() or not src.is_file():
-            continue
-        candidate_path = infer_pattern_import_destination(repo_root, src, trust)
+        fetched = fetch_pattern_source(file_value, repo_root)
+        source_origin = str(fetched.get("source_origin") or file_value)
+        candidate_path = infer_pattern_import_destination(repo_root, source_origin, trust)
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
-        raw_content = src.read_text()
+        source_id = pattern_repo_source_id(candidate_path.relative_to(repo_root), trust)
+        if not fetched.get("ok"):
+            record = {
+                "id": source_id,
+                "repo_rel_path": "",
+                "candidate_path": "",
+                "origin_path": source_origin,
+                "source_type": fetched.get("source_type", "local"),
+                "source_origin": source_origin,
+                "acquisition_method": fetched.get("acquisition_method", "direct"),
+                "proxy_used": bool(fetched.get("proxy_used")),
+                "sanitized_path": "",
+                "trust_level": trust,
+                "tags": list(tags or []),
+                "note": note,
+                "imported_at": int(time.time()),
+                "sanitized_changed": False,
+                "sanitization_applied": False,
+                "validation_status": "blocked",
+                "validation_passed": False,
+                "validation_command": "",
+                "repair_needed": False,
+                "repair_output": "",
+                "promotion_state": "candidate",
+                "promoted": False,
+                "candidate_imported": False,
+                "limited_validation": False,
+                "blocked_reason": str(fetched.get("blocked_reason") or "source acquisition failed"),
+                "final_destination": "",
+            }
+            existing_by_id[source_id] = record
+            imported.append(record)
+            continue
+        raw_content = str(fetched.get("content") or "")
         sanitized_content, changed = sanitize_pattern_script_content(raw_content)
         candidate_path.write_text(sanitized_content)
-        source_id = pattern_repo_source_id(candidate_path.relative_to(repo_root), trust)
         validation = run_candidate_validation(repo_root, candidate_path)
         repaired = False
         repair_result = {"ok": False, "output": "", "command": []}
@@ -3066,7 +3307,7 @@ def import_pattern_files(
         final_trust = trust
         curated_rel = ""
         if promote:
-            curated_path = infer_curated_pattern_destination(repo_root, src, trust)
+            curated_path = infer_curated_pattern_destination(repo_root, source_origin, trust)
             curated_path.parent.mkdir(parents=True, exist_ok=True)
             curated_path.write_text(candidate_path.read_text())
             curated_rel = str(curated_path.relative_to(repo_root))
@@ -3074,14 +3315,20 @@ def import_pattern_files(
             "id": source_id,
             "repo_rel_path": curated_rel or str(candidate_path.relative_to(repo_root)),
             "candidate_path": str(candidate_path.relative_to(repo_root)),
-            "origin_path": str(src),
+            "origin_path": source_origin,
+            "source_type": fetched.get("source_type", "local"),
+            "source_origin": source_origin,
+            "acquisition_method": fetched.get("acquisition_method", "direct"),
+            "proxy_used": bool(fetched.get("proxy_used")),
             "sanitized_path": str(candidate_path),
             "trust_level": final_trust,
             "tags": list(tags or []),
             "note": note,
             "imported_at": int(time.time()),
             "sanitized_changed": changed,
+            "sanitization_applied": changed,
             "validation_status": "passed" if validation.get("passed") else ("blocked" if blocked else "failed"),
+            "validation_passed": bool(validation.get("passed")),
             "validation_command": validation.get("validation_command", ""),
             "repair_needed": repaired,
             "repair_output": repair_result.get("output", ""),
@@ -3089,6 +3336,8 @@ def import_pattern_files(
             "promoted": promote,
             "candidate_imported": True,
             "limited_validation": bool(validation.get("limited_validation")),
+            "blocked_reason": "" if validation.get("passed") else (repair_result.get("output", "") or "validation blocked"),
+            "final_destination": curated_rel,
         }
         existing_by_id[source_id] = record
         imported.append(record)
@@ -4170,6 +4419,7 @@ def resolve_run_settings(args, require_test_cmd: bool = True) -> tuple[Path, str
         safety_settings = {
             "HTTP_PROXY": args.http_proxy or config.get("HTTP_PROXY") or os.environ.get("HTTP_PROXY", ""),
             "HTTPS_PROXY": args.https_proxy or config.get("HTTPS_PROXY") or os.environ.get("HTTPS_PROXY", ""),
+            "ALL_PROXY": config.get("ALL_PROXY") or os.environ.get("ALL_PROXY", ""),
             "run_budget": args.api_budget_run if args.api_budget_run is not None else int(config.get("api_budget_run", 0) or 0),
             "attempt_budget": (
                 args.api_budget_attempt if args.api_budget_attempt is not None else int(config.get("api_budget_attempt", 0) or 0)
@@ -4243,6 +4493,7 @@ def resolve_run_settings(args, require_test_cmd: bool = True) -> tuple[Path, str
     safety_settings = {
         "HTTP_PROXY": args.http_proxy or config.get("HTTP_PROXY") or os.environ.get("HTTP_PROXY", ""),
         "HTTPS_PROXY": args.https_proxy or config.get("HTTPS_PROXY") or os.environ.get("HTTPS_PROXY", ""),
+        "ALL_PROXY": config.get("ALL_PROXY") or os.environ.get("ALL_PROXY", ""),
         "run_budget": args.api_budget_run if args.api_budget_run is not None else int(config.get("api_budget_run", 0) or 0),
         "attempt_budget": (
             args.api_budget_attempt if args.api_budget_attempt is not None else int(config.get("api_budget_attempt", 0) or 0)
@@ -8368,10 +8619,12 @@ def main():
         for source in imported.get("imported_sources", []):
             print(
                 f"- candidate_imported={format_bool(source.get('candidate_imported'))} "
+                f"source_type={source.get('source_type', 'local')} source_origin={source.get('source_origin', source.get('origin_path', ''))} "
+                f"acquisition_method={source.get('acquisition_method', 'direct')} proxy_used={format_bool(source.get('proxy_used'))} "
                 f"source={source.get('candidate_path', '')} promoted_path={source.get('repo_rel_path', '')} "
-                f"origin={source.get('origin_path', '')} trust={source.get('trust_level', '')} "
-                f"tags={source.get('tags', [])} sanitized={format_bool(source.get('sanitized_changed'))} "
-                f"validation_passed={format_bool(source.get('validation_status') == 'passed')} "
+                f"trust={source.get('trust_level', '')} tags={source.get('tags', [])} "
+                f"sanitized={format_bool(source.get('sanitized_changed'))} "
+                f"validated={format_bool(source.get('validation_passed'))} "
                 f"repaired={format_bool(source.get('repair_needed'))} "
                 f"promoted_to_training={format_bool(source.get('promoted'))}"
             )
@@ -8394,10 +8647,11 @@ def main():
         for source in imported.get("imported_sources", []):
             print(
                 f"- candidate_imported={format_bool(source.get('candidate_imported'))} "
+                f"source_type={source.get('source_type', 'local')} source_origin={source.get('source_origin', source.get('origin_path', ''))} "
+                f"acquisition_method={source.get('acquisition_method', 'direct')} proxy_used={format_bool(source.get('proxy_used'))} "
                 f"source={source.get('candidate_path', '')} promoted_path={source.get('repo_rel_path', '')} "
-                f"origin={source.get('origin_path', '')} trust={source.get('trust_level', '')} "
-                f"sanitized={format_bool(source.get('sanitized_changed'))} "
-                f"validation_passed={format_bool(source.get('validation_status') == 'passed')} "
+                f"trust={source.get('trust_level', '')} sanitized={format_bool(source.get('sanitized_changed'))} "
+                f"validated={format_bool(source.get('validation_passed'))} "
                 f"repaired={format_bool(source.get('repair_needed'))} "
                 f"promoted_to_training={format_bool(source.get('promoted'))}"
             )
