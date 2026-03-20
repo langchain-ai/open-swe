@@ -294,6 +294,62 @@ SLACK_REPO_OWNER="my-org"      # Default GitHub org
 SLACK_REPO_NAME="my-repo"      # Default GitHub repo
 ```
 
+### Webex (optional)
+
+Open SWE can be triggered from Webex spaces when a user @mentions the bot.
+
+**Create a Webex Bot:**
+
+1. Go to [developer.webex.com/my-apps/new/bot](https://developer.webex.com/my-apps/new/bot)
+2. Fill in the bot name, username, and icon
+3. Click **Add Bot** and copy the **Bot Access Token** — save it as `WEBEX_BOT_TOKEN`
+4. Note the bot's email address (e.g. `open-swe@webex.bot`) — save it as `WEBEX_BOT_EMAIL`
+
+> **Important:** The bot access token is only shown once. If you lose it, you can regenerate it from the bot's settings page.
+
+**Create a webhook:**
+
+Use the Webex API to register a webhook. Run this `curl` command, replacing the placeholders:
+
+```bash
+curl -X POST https://webexapis.com/v1/webhooks \
+  -H "Authorization: Bearer $WEBEX_BOT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "open-swe-mentions",
+    "targetUrl": "https://<your-ngrok-url>/webhooks/webex",
+    "resource": "messages",
+    "event": "created",
+    "filter": "mentionedPeople=me",
+    "secret": "<your-webhook-secret>"
+  }'
+```
+
+Generate the webhook secret with:
+
+```bash
+openssl rand -hex 32
+```
+
+Save this secret as `WEBEX_WEBHOOK_SECRET`.
+
+The `mentionedPeople=me` filter ensures the bot only receives messages where it is @mentioned.
+
+**Credentials you'll need:**
+
+- `WEBEX_BOT_TOKEN`: the Bot Access Token from bot creation
+- `WEBEX_BOT_EMAIL`: the bot's email address (e.g. `open-swe@webex.bot`)
+- `WEBEX_WEBHOOK_SECRET`: the secret you used when creating the webhook
+
+**Configure default repo:**
+
+Webex messages are routed to a default repo unless the user specifies one with `repo:owner/name`:
+
+```bash
+WEBEX_REPO_OWNER="my-org"      # Default GitHub org
+WEBEX_REPO_NAME="my-repo"      # Default GitHub repo
+```
+
 ## 6. Environment variables
 
 Create a `.env` file in the project root. Below is the full list — only fill in the sections relevant to the triggers you configured.
@@ -343,6 +399,13 @@ SLACK_SIGNING_SECRET=""
 SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
 SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
 
+# === Webex (if using Webex trigger) ===
+WEBEX_BOT_TOKEN=""                    # From step 5
+WEBEX_BOT_EMAIL=""                    # Bot's email address
+WEBEX_WEBHOOK_SECRET=""               # From step 5
+WEBEX_REPO_OWNER=""                   # Default org for Webex-triggered tasks
+WEBEX_REPO_NAME=""                    # Default repo for Webex-triggered tasks
+
 # === Sandbox (optional) ===
 DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
 DEFAULT_SANDBOX_TEMPLATE_IMAGE=""      # Custom Docker image (default: python:3)
@@ -368,6 +431,8 @@ The server runs on `http://localhost:2024` with these endpoints:
 | `GET /webhooks/linear` | Linear webhook verification |
 | `POST /webhooks/slack` | Slack event webhooks |
 | `GET /webhooks/slack` | Slack webhook verification |
+| `POST /webhooks/webex` | Webex message webhooks |
+| `GET /webhooks/webex` | Webex webhook verification |
 | `GET /health` | Health check |
 
 ## 8. Verify it works
@@ -419,6 +484,13 @@ The `langgraph.json` at the project root already defines the graph entry point a
   }
 }
 ```
+
+### Webex
+
+1. In any Webex space where the bot has been added, send a message mentioning the bot: `@open-swe what's in the repo?`
+2. You should see:
+   - A new run in your LangSmith project
+   - The agent replies in the same Webex thread with its response
 
 ## Troubleshooting
 
