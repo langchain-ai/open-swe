@@ -287,14 +287,9 @@ Users can also override the team/project mapping per-comment by including `repo:
 - `SLACK_BOT_USER_ID`: the bot's user ID (find it in Slack by clicking the bot's profile)
 - `SLACK_BOT_USERNAME`: the bot's display name (e.g. `open-swe`)
 
-**Configure default repo:**
+**Default repo:**
 
-Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`. By default, Slack uses the global `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` env vars (see step 6). To use different defaults for Slack specifically, set:
-
-```bash
-SLACK_REPO_OWNER="my-org"      # Overrides DEFAULT_REPO_OWNER for Slack
-SLACK_REPO_NAME="my-repo"      # Overrides DEFAULT_REPO_NAME for Slack
-```
+Slack messages are routed to the default repo (`DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` — see step 6) unless the user specifies one with `repo:owner/name` in their message.
 
 ## 6. Environment variables
 
@@ -347,8 +342,6 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Override DEFAULT_REPO_OWNER for Slack (optional)
-SLACK_REPO_NAME=""                     # Override DEFAULT_REPO_NAME for Slack (optional)
 
 # === Sandbox (optional) ===
 DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)

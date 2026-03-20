@@ -307,16 +307,9 @@ Users can also override the team/project mapping on a per-comment basis by inclu
 
 ### Customizing Slack routing
 
-Slack-specific env vars can optionally override the global defaults:
+Slack uses `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` as the fallback when no repo is specified in a message.
 
-```bash
-SLACK_REPO_OWNER="my-org"      # Overrides DEFAULT_REPO_OWNER for Slack only
-SLACK_REPO_NAME="my-repo"      # Overrides DEFAULT_REPO_NAME for Slack only
-```
-
-If these are not set, Slack falls back to `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME`.
-
-Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to `SLACK_REPO_OWNER` (or `DEFAULT_REPO_OWNER` if not set).
+Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
 ### Adding a new trigger
 
