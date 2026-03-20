@@ -263,3 +263,10 @@ Remote:
 ssh edge-01
 ssh edge-01 'cd /srv/app && pytest tests/test_x.py::test_parse -q'
 ```
+
+<!-- fix-agent-prepublish-troubleshooting:start -->
+## Publish Blocked By Docs Drift
+
+If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.
+The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.
+<!-- fix-agent-prepublish-troubleshooting:end -->

@@ -283,3 +283,11 @@ Stop the run and inspect manually when you see:
 - external dependency failures not covered by tests
 
 At that point, a tighter command or an environment fix is usually more useful than another blind retry.
+
+<!-- fix-agent-prepublish-runbook:start -->
+## Pre-Publish Docs Check
+
+Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.
+The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.
+Default docs refresh mode when triggered: `rewrite`.
+<!-- fix-agent-prepublish-runbook:end -->
