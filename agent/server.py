@@ -40,6 +40,7 @@ from .tools import (
     http_request,
     linear_comment,
     slack_thread_reply,
+    webex_reply,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
@@ -383,6 +384,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_comment,
             slack_thread_reply,
             github_comment,
+            webex_reply,
         ],
         backend=sandbox_backend,
         middleware=[
