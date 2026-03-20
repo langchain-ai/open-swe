@@ -61,8 +61,10 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
-SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "langchain-ai")
-SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "open-swe")
+DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
+DEFAULT_REPO_NAME = os.environ.get("DEFAULT_REPO_NAME", "langchainplus")
+SLACK_REPO_OWNER = os.environ.get("SLACK_REPO_OWNER", "") or DEFAULT_REPO_OWNER
+SLACK_REPO_NAME = os.environ.get("SLACK_REPO_NAME", "") or DEFAULT_REPO_NAME
 
 LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
     "LANGGRAPH_URL_PROD", "http://localhost:2024"
@@ -96,20 +98,11 @@ _GITHUB_BOT_MESSAGE_PREFIXES = (
 def get_repo_config_from_team_mapping(
     team_identifier: str, project_name: str = ""
 ) -> dict[str, str]:
-    """
-    Look up repository configuration from LINEAR_TEAM_TO_REPO mapping.
+    """Look up repository configuration from LINEAR_TEAM_TO_REPO mapping."""
+    fallback = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
 
-    Supports both legacy flat mapping (team -> repo) and new nested mapping (team -> project -> repo).
-
-    Args:
-        team_identifier: Team name or ID to look up (e.g., "LangChain OSS")
-        project_name: Name of the project (e.g., "deepagents")
-
-    Returns:
-        Repository config dict with 'owner' and 'name' keys. Defaults to langchainplus if not found.
-    """
     if not team_identifier or team_identifier not in LINEAR_TEAM_TO_REPO:
-        return {"owner": "langchain-ai", "name": "langchainplus"}
+        return fallback
 
     config = LINEAR_TEAM_TO_REPO[team_identifier]
 
@@ -124,7 +117,7 @@ def get_repo_config_from_team_mapping(
     if "default" in config:
         return config["default"]
 
-    return {"owner": "langchain-ai", "name": "langchainplus"}
+    return fallback
 
 
 async def react_to_linear_comment(comment_id: str, emoji: str = "👀") -> bool:
@@ -346,8 +339,8 @@ async def check_if_using_repo_msg_sent(
 
 async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
-    default_owner = SLACK_REPO_OWNER.strip() or "langchain-ai"
-    default_name = SLACK_REPO_NAME.strip() or "langchainplus"
+    default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
+    default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
     thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
     langgraph_client = get_client(url=LANGGRAPH_URL)
 
@@ -913,7 +906,7 @@ async def linear_webhook(  # noqa: PLR0911, PLR0912, PLR0915
         logger.warning("Failed to fetch full issue details, using webhook data")
         full_issue = issue
 
-    repo_config = extract_repo_from_text(comment_body)
+    repo_config = extract_repo_from_text(comment_body, default_owner=DEFAULT_REPO_OWNER)
 
     if repo_config:
         logger.debug(

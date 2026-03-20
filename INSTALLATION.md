@@ -289,14 +289,12 @@ Users can also override the team/project mapping per-comment by including `repo:
 
 **Configure default repo:**
 
-Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`:
+Slack messages are routed to a default repo unless the user specifies one with `repo:owner/name`. By default, Slack uses the global `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` env vars (see step 6). To use different defaults for Slack specifically, set:
 
 ```bash
-SLACK_REPO_OWNER="my-org"      # Default GitHub org
-SLACK_REPO_NAME="my-repo"      # Default GitHub repo
+SLACK_REPO_OWNER="my-org"      # Overrides DEFAULT_REPO_OWNER for Slack
+SLACK_REPO_NAME="my-repo"      # Overrides DEFAULT_REPO_NAME for Slack
 ```
-
-`SLACK_REPO_OWNER` is also used as the default org when a user specifies only a repo name (e.g. `repo:my-repo` without the org prefix). For Linear comments, the default org is `"langchain-ai"` — change it in the `default_owner` parameter of `extract_repo_from_text()` in `agent/utils/repo.py`.
 
 ## 6. Environment variables
 
@@ -335,6 +333,11 @@ GITHUB_OAUTH_PROVIDER_ID=""            # The provider ID from steps 3a / 4b
 # Leave empty to allow all orgs.
 ALLOWED_GITHUB_ORGS=""                 # e.g. "my-org,my-other-org"
 
+# === Default Repository ===
+# Used across all triggers when no repo is specified.
+DEFAULT_REPO_OWNER=""                  # Default GitHub org (e.g. "my-org")
+DEFAULT_REPO_NAME=""                   # Default GitHub repo (e.g. "my-repo")
+
 # === Linear (if using Linear trigger) ===
 LINEAR_API_KEY=""                      # From step 5
 LINEAR_WEBHOOK_SECRET=""               # From step 5
@@ -344,8 +347,8 @@ SLACK_BOT_TOKEN=""                     # From step 5
 SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
-SLACK_REPO_OWNER=""                    # Default org for Slack-triggered tasks
-SLACK_REPO_NAME=""                     # Default repo for Slack-triggered tasks
+SLACK_REPO_OWNER=""                    # Override DEFAULT_REPO_OWNER for Slack (optional)
+SLACK_REPO_NAME=""                     # Override DEFAULT_REPO_NAME for Slack (optional)
 
 # === Sandbox (optional) ===
 DEFAULT_SANDBOX_TEMPLATE_NAME=""       # Custom sandbox template name (default: deepagents-cli)
