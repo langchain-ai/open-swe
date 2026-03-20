@@ -46,7 +46,7 @@ async def fetch_image_block(
         logger.debug("Fetching image from %s", image_url)
         headers = None
         host = (urlparse(image_url).hostname or "").lower()
-        if host == "uploads.linear.app" or host.endswith(".uploads.linear.app"):
+        if host.endswith("uploads.linear.app"):
             linear_api_key = os.environ.get("LINEAR_API_KEY", "")
             if linear_api_key:
                 headers = {"Authorization": linear_api_key}
