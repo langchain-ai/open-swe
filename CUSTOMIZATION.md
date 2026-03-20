@@ -264,6 +264,29 @@ To fully remove a trigger's code, delete the corresponding endpoint from `agent/
 - **Linear**: `linear_webhook()` and `process_linear_issue()`
 - **Slack**: `slack_webhook()` and `process_slack_mention()`
 
+### Default repository
+
+Set the default GitHub org and repo used across all triggers (Slack, Linear, GitHub) when no repo is specified:
+
+```bash
+DEFAULT_REPO_OWNER="my-org"      # Default GitHub org (used everywhere)
+DEFAULT_REPO_NAME="my-repo"      # Default GitHub repo (used everywhere)
+```
+
+These are used as the fallback when:
+- A Slack message doesn't specify a repo (and no thread metadata exists)
+- A Linear issue's team/project isn't in the `LINEAR_TEAM_TO_REPO` mapping
+- A user writes `repo:name` without an org prefix — the org defaults to `DEFAULT_REPO_OWNER`
+
+### Repository extraction from messages
+
+Both Slack and Linear support specifying a target repo directly in the message or comment text. The shared utility `extract_repo_from_text()` in `agent/utils/repo.py` handles parsing these formats:
+
+- `repo:owner/name` — explicit org and repo
+- `repo owner/name` — space syntax (same result)
+- `repo:name` — repo name only; the org defaults to `DEFAULT_REPO_OWNER`
+- `https://github.com/owner/name` — GitHub URL
+
 ### Customizing Linear routing
 
 The `LINEAR_TEAM_TO_REPO` dict in `agent/utils/linear_team_repo_map.py` maps Linear teams and projects to GitHub repos:
@@ -280,16 +303,13 @@ LINEAR_TEAM_TO_REPO = {
 }
 ```
 
+Users can also override the team/project mapping on a per-comment basis by including `repo:owner/name` in their `@openswe` comment. This takes priority over the mapping — the mapping is used as a fallback when no repo is specified in the comment. If the team/project isn't found in the mapping either, `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME` is used.
+
 ### Customizing Slack routing
 
-Slack uses env vars for default routing:
+Slack uses `DEFAULT_REPO_OWNER` and `DEFAULT_REPO_NAME` as the fallback when no repo is specified in a message.
 
-```bash
-SLACK_REPO_OWNER="my-org"
-SLACK_REPO_NAME="my-repo"
-```
-
-Users can override per-message with `repo:owner/name` syntax in their Slack message.
+Users can override per-message with `repo:owner/name` syntax in their Slack message. A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
 ### Adding a new trigger
 
