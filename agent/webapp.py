@@ -807,6 +807,24 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info(
+            "Thread %s is active, queuing Slack message for middleware pickup",
+            thread_id,
+        )
+        queued_payload = {"text": prompt, "image_urls": []}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
+        if queued:
+            logger.info("Slack message queued for thread %s", thread_id)
+        else:
+            logger.error("Failed to queue Slack message for thread %s", thread_id)
+        return
+
     run = await langgraph_client.runs.create(
         thread_id,
         "agent",

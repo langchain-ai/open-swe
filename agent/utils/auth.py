@@ -117,8 +117,8 @@ async def get_ls_user_id_from_email(email: str) -> dict[str, str | None]:
                     "ls_user_id": member.get("ls_user_id"),
                     "tenant_id": member.get("tenant_id"),
                 }
-        except httpx.HTTPError as e:
-            logger.error("HTTP error getting LangSmith user info for email: %s", e)
+        except Exception as e:
+            logger.exception("Error getting LangSmith user info for email: %s", e)
         return {"ls_user_id": None, "tenant_id": None}
 
 
