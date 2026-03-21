@@ -4173,3 +4173,36 @@ def test_print_post_success_publish_summary_includes_docs_fields(capsys: pytest.
     assert "docs_updated: true" in out
     assert "docs_refresh_mode: patch" in out
     assert "docs_targets: ['README.md', 'docs/RUNBOOK.md']" in out
+
+
+def test_print_post_success_publish_summary_includes_final_pr_mergeability_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = {
+        "validation_result": "success",
+        "validation_state": "success",
+        "publish_requested": True,
+        "publish_triggered": True,
+        "publish_mode": "current-repo-state",
+        "publish_result": "success",
+        "final_workflow_result": "blocked",
+        "pr_mergeable": "unknown",
+        "pr_conflicts_detected": False,
+        "pr_mergeability_source": "local_fallback",
+        "pr_mergeable_final": "false",
+        "pr_conflicts_detected_final": True,
+        "pr_mergeability_repair_attempted": True,
+        "pr_mergeability_repair_result": "blocked",
+        "pr_mergeability_reason": "local mergeability check found conflicts against origin/main",
+    }
+
+    lfa.print_post_success_publish_summary(summary)
+    out = capsys.readouterr().out
+
+    assert "pr_mergeable: unknown" in out
+    assert "pr_mergeability_source: local_fallback" in out
+    assert "pr_mergeable_final: false" in out
+    assert "pr_conflicts_detected_final: true" in out
+    assert "pr_mergeability_repair_attempted: true" in out
+    assert "pr_mergeability_repair_result: blocked" in out
+    assert "final_workflow_result: blocked" in out

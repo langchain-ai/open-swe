@@ -11660,11 +11660,23 @@ def main():
             "docs_refresh_mode": publish_result.get("docs_refresh_mode") or "none",
             "docs_targets": publish_result.get("docs_targets") or [],
             "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
+            "last_published_commit": publish_result.get("last_published_commit") or "",
+            "current_publish_candidate_commit": publish_result.get("current_publish_candidate_commit") or "",
+            "diff_files_detected": publish_result.get("diff_files_detected") or [],
             "meaningful_paths": publish_result.get("meaningful_paths") or [],
             "ignored_changes": publish_result.get("ignored_changes") or [],
             "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
             "previous_pr_url": publish_result.get("previous_pr_url") or "",
             "previous_commit": publish_result.get("previous_commit") or "",
+            "final_workflow_result": publish_result.get("final_workflow_result") or ((publish_result.get("final") or {}).get("status") or "failed"),
+            "pr_mergeable": publish_result.get("pr_mergeable") or "unknown",
+            "pr_conflicts_detected": bool(publish_result.get("pr_conflicts_detected")),
+            "pr_mergeability_reason": publish_result.get("pr_mergeability_reason") or "",
+            "pr_mergeability_source": publish_result.get("pr_mergeability_source") or "github",
+            "pr_mergeable_final": publish_result.get("pr_mergeable_final") or (publish_result.get("pr_mergeable") or "unknown"),
+            "pr_conflicts_detected_final": bool(publish_result.get("pr_conflicts_detected_final")),
+            "pr_mergeability_repair_attempted": bool(publish_result.get("pr_mergeability_repair_attempted")),
+            "pr_mergeability_repair_result": publish_result.get("pr_mergeability_repair_result") or "not_needed",
         }
         print_post_success_publish_summary(publish_summary)
         print_publish_summary(publish_result)

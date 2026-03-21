@@ -1,0 +1,12 @@
+{
+  "last_reason": "operator workflow changed in: blocked_state, cli, publish, remote, run_modes, workflow, wrappers",
+  "last_refresh_mode": "rewrite",
+  "last_targets": [
+    "README.md",
+    "docs/README.md",
+    "docs/RUNBOOK.md",
+    "docs/REMOTE_MODE.md",
+    "docs/TROUBLESHOOTING.md"
+  ],
+  "ts": 1773987873
+}

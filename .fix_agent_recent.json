@@ -1,22 +1,6 @@
 {
   "recent_runs": [
     {
-      "artifact_dir": "/tmp/lfa_upstream_analysis_high_demo/fork/.fix_agent_runs/20260321-042358",
-      "blocked_reason": "no relevant files identified with enough confidence",
-      "commit_hash": "e437be13ce9fd23a32e7cc9033f92aa3f5538dcd",
-      "confidence": "",
-      "files_changed": [],
-      "meaningful_content_fingerprint": "ba373dcf9522569b465e37aac8921fb2acb220d5f201dd61c068f9b431c5750b",
-      "mode": "safe",
-      "repo": "/tmp/lfa_upstream_analysis_high_demo/fork",
-      "success": false,
-      "target": "",
-      "test_cmd": "python -m py_compile agent/utils.py",
-      "ts": 1774081442,
-      "validation_command": "python -m py_compile agent/utils.py",
-      "validation_result": "blocked"
-    },
-    {
       "artifact_dir": "",
       "blocked_reason": "",
       "commit_hash": "fa0cc8f90589281e441a2761db69593bf91b24f0",
@@ -159,6 +143,22 @@
       "target": "",
       "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
       "ts": 1774099948,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "validation_result": "success"
+    },
+    {
+      "artifact_dir": "",
+      "blocked_reason": "",
+      "commit_hash": "fa1ed0467a37ffd97064ae7371eccd227c0ea0ad",
+      "confidence": "finalization-prepare",
+      "files_changed": [],
+      "meaningful_content_fingerprint": "baf69adac81d34efcc6db87a27cef43df349d726f5d3c4e68e578410f2bc080e",
+      "mode": "finalization-prepare",
+      "repo": "/home/tom/ai/open-swe",
+      "success": true,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "ts": 1774101734,
       "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
       "validation_result": "success"
     }
