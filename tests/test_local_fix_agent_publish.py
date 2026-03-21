@@ -185,6 +185,63 @@ def test_meaningful_content_fingerprint_excludes_ignored_state_files(tmp_path: P
     assert lfa.compute_meaningful_content_fingerprint(tmp_path, publish_changes) == ""
 
 
+def test_meaningful_content_fingerprint_stable_across_equivalent_formatting(tmp_path: Path) -> None:
+    script = tmp_path / "tool.py"
+    publish_changes = {
+        "status_output": " M tool.py",
+        "meaningful_paths": ["tool.py"],
+        "ignored_changes": [],
+    }
+    script.write_bytes(b"def run():  \r\n    return 1\r\n")
+    before = lfa.compute_meaningful_content_fingerprint(tmp_path, publish_changes)
+
+    script.write_bytes(b"def run():\n    return 1\n")
+    after = lfa.compute_meaningful_content_fingerprint(tmp_path, publish_changes)
+
+    assert before == after
+
+
+def test_resolve_publish_validation_state_reuses_success_on_fingerprint_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "load_recent_state",
+        lambda: {
+            "recent_runs": [
+                {
+                    "repo": str(repo),
+                    "target": "",
+                    "validation_command": "pytest -q",
+                    "commit_hash": "old123",
+                    "validation_result": "success",
+                    "meaningful_content_fingerprint": "fp-123",
+                    "ts": 1,
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "new456")
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo: {
+            "status_output": " M local_fix_agent.py",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "fp-123")
+
+    result = lfa.resolve_publish_validation_state(repo)
+
+    assert result["validation_state"] == "success"
+    assert result["validation_commit_match"] is False
+    assert result["fingerprint_match"] is True
+    assert result["reason"] == "validated_reused_fingerprint"
+
+
 def test_attempt_publish_auto_revalidation_success(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     initial = {
@@ -329,6 +386,36 @@ def test_attempt_publish_auto_revalidation_no_auto_revalidate_preserves_block(mo
     assert result["auto_revalidated"] is False
     assert result["validation_reused"] is False
     assert result["auto_revalidation_result"] == "not_needed"
+
+
+def test_attempt_publish_auto_revalidation_reuses_validation_on_fingerprint_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    initial = {
+        "validation_state": "success",
+        "validation_result": "success",
+        "validation_commit_match": False,
+        "fingerprint_match": True,
+        "meaningful_changes_detected": True,
+        "meaningful_paths": ["local_fix_agent.py"],
+        "ignored_changes": [],
+        "last_validated_commit": "old123",
+        "current_commit": "new456",
+        "validation_age_seconds": 10,
+        "reason": "validated_reused_fingerprint",
+    }
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("revalidation should not run for fingerprint-equivalent content")),
+    )
+
+    result = lfa.attempt_publish_auto_revalidation(repo, initial)
+
+    assert result["validation_state"] == "success"
+    assert result["validation_reused"] is True
+    assert result["auto_revalidated"] is False
+    assert result["auto_revalidation_result"] == "not_needed"
+    assert result["publish_reason"] == "validated_reused_fingerprint"
 
 
 def test_attempt_publish_auto_revalidation_reuses_validation_when_only_ignored_changes_exist(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1611,6 +1698,7 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         validation_detail: str = "",
         force_publish: bool = False,
         validation_commit_match: bool = False,
+        fingerprint_match: bool = False,
         last_validated_commit: str = "",
         current_commit: str = "",
         validation_age_seconds: int = -1,
@@ -1624,6 +1712,7 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         captured["validation_detail"] = validation_detail
         captured["force_publish"] = force_publish
         captured["validation_commit_match"] = validation_commit_match
+        captured["fingerprint_match"] = fingerprint_match
         captured["auto_revalidated"] = auto_revalidated
         captured["validation_reused"] = validation_reused
         captured["auto_revalidation_result"] = auto_revalidation_result

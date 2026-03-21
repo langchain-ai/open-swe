@@ -785,7 +785,7 @@ def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) ->
         if file_path.exists() and file_path.is_file():
             try:
                 content = file_path.read_bytes()
-                content_hash = hashlib.sha256(content).hexdigest()
+                content_hash = hashlib.sha256(normalize_meaningful_fingerprint_bytes(content)).hexdigest()
             except OSError:
                 content_hash = "unreadable"
         else:
@@ -800,6 +800,23 @@ def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) ->
         sort_keys=True,
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def normalize_meaningful_fingerprint_bytes(content: bytes) -> bytes:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content
+    normalized_lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    normalized_text = "\n".join(normalized_lines)
+    return normalized_text.encode("utf-8")
+
+
+def current_validation_fingerprint(repo: Path) -> str:
+    if not is_git_repo(repo):
+        return ""
+    publish_changes = classify_publishable_changes(repo)
+    return compute_meaningful_content_fingerprint(repo, publish_changes)
 
 
 def publish_docs_targets(repo: Path) -> list[str]:
@@ -2017,6 +2034,7 @@ def update_recent_state(
 ) -> Path:
     validation_result = str(success).strip() if isinstance(success, str) else ("success" if success else "failed")
     commit_hash = parse_head_commit(repo) if is_git_repo(repo) else ""
+    meaningful_content_fingerprint = current_validation_fingerprint(repo) if is_git_repo(repo) else ""
     state = load_recent_state()
     runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
     runs.append(
@@ -2033,6 +2051,7 @@ def update_recent_state(
             "files_changed": list(files_changed or []),
             "confidence": confidence,
             "blocked_reason": blocked_reason,
+            "meaningful_content_fingerprint": meaningful_content_fingerprint,
             "ts": int(time.time()),
         }
     )
@@ -2051,14 +2070,18 @@ def resolve_publish_validation_state(repo: Path) -> dict:
         "meaningful_paths": [],
         "ignored_changes": [],
     }
+    current_fingerprint = compute_meaningful_content_fingerprint(repo, publish_changes) if is_git_repo(repo) else ""
     if not repo_runs:
         return {
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "fingerprint_match": False,
             "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
             "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
             "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+            "last_validated_fingerprint": "",
+            "current_fingerprint": current_fingerprint,
             "last_validated_commit": "",
             "current_commit": current_commit,
             "validation_age_seconds": -1,
@@ -2066,6 +2089,7 @@ def resolve_publish_validation_state(repo: Path) -> dict:
         }
     last = repo_runs[0]
     last_commit = str(last.get("commit_hash") or "").strip()
+    last_fingerprint = str(last.get("meaningful_content_fingerprint") or "").strip()
     validation_result = str(last.get("validation_result") or ("success" if last.get("success") else "failed")).strip() or "failed"
     validation_age_seconds = -1
     try:
@@ -2075,28 +2099,51 @@ def resolve_publish_validation_state(repo: Path) -> dict:
     if ts > 0:
         validation_age_seconds = max(0, int(time.time()) - ts)
     commit_match = bool(current_commit and last_commit and current_commit == last_commit)
+    fingerprint_match = bool(last_fingerprint and current_fingerprint and last_fingerprint == current_fingerprint)
     blocked_reason = str(last.get("blocked_reason") or "").strip()
     if not last_commit:
         return {
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "fingerprint_match": False,
             "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
             "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
             "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+            "last_validated_fingerprint": last_fingerprint,
+            "current_fingerprint": current_fingerprint,
             "last_validated_commit": "",
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
             "reason": "publish blocked because the last validation record did not capture a validated commit; use --force-publish to override",
         }
     if not commit_match:
+        if validation_result == "success" and fingerprint_match:
+            return {
+                "validation_state": "success",
+                "validation_result": "success",
+                "validation_commit_match": False,
+                "fingerprint_match": True,
+                "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
+                "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
+                "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+                "last_validated_fingerprint": last_fingerprint,
+                "current_fingerprint": current_fingerprint,
+                "last_validated_commit": last_commit,
+                "current_commit": current_commit,
+                "validation_age_seconds": validation_age_seconds,
+                "reason": "validated_reused_fingerprint",
+            }
         return {
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": False,
+            "fingerprint_match": fingerprint_match,
             "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
             "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
             "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+            "last_validated_fingerprint": last_fingerprint,
+            "current_fingerprint": current_fingerprint,
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2110,9 +2157,12 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "success",
             "validation_result": "success",
             "validation_commit_match": True,
+            "fingerprint_match": fingerprint_match,
             "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
             "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
             "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+            "last_validated_fingerprint": last_fingerprint,
+            "current_fingerprint": current_fingerprint,
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2123,9 +2173,12 @@ def resolve_publish_validation_state(repo: Path) -> dict:
             "validation_state": "blocked",
             "validation_result": "blocked",
             "validation_commit_match": True,
+            "fingerprint_match": fingerprint_match,
             "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
             "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
             "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+            "last_validated_fingerprint": last_fingerprint,
+            "current_fingerprint": current_fingerprint,
             "last_validated_commit": last_commit,
             "current_commit": current_commit,
             "validation_age_seconds": validation_age_seconds,
@@ -2138,9 +2191,12 @@ def resolve_publish_validation_state(repo: Path) -> dict:
         "validation_state": "failed",
         "validation_result": "failed",
         "validation_commit_match": True,
+        "fingerprint_match": fingerprint_match,
         "meaningful_changes_detected": bool(publish_changes.get("meaningful_changes_detected")),
         "meaningful_paths": list(publish_changes.get("meaningful_paths") or []),
         "ignored_changes": list(publish_changes.get("ignored_changes") or []),
+        "last_validated_fingerprint": last_fingerprint,
+        "current_fingerprint": current_fingerprint,
         "last_validated_commit": last_commit,
         "current_commit": current_commit,
         "validation_age_seconds": validation_age_seconds,
@@ -2156,11 +2212,21 @@ def attempt_publish_auto_revalidation(
 ) -> dict:
     result = dict(validation_state)
     original_commit_match = bool(result.get("validation_commit_match"))
+    fingerprint_match = bool(result.get("fingerprint_match"))
     result["auto_revalidated"] = False
-    result["validation_reused"] = bool(result.get("validation_state") == "success" and result.get("validation_commit_match"))
+    result["validation_reused"] = bool(
+        result.get("validation_state") == "success"
+        and (result.get("validation_commit_match") or result.get("fingerprint_match"))
+    )
     result["auto_revalidation_result"] = "not_needed"
     result["auto_revalidation_attempted"] = False
-    if result.get("validation_state") == "success" and result.get("validation_commit_match"):
+    if result.get("validation_state") == "success" and original_commit_match:
+        result["publish_reason"] = "validated"
+        return result
+    if result.get("validation_state") == "success" and fingerprint_match:
+        result["validation_reused"] = True
+        result["publish_reason"] = "validated_reused_fingerprint"
+        result["reason"] = "validated_reused_fingerprint"
         return result
     if not bool(result.get("meaningful_changes_detected")) and str(result.get("validation_result") or "") == "blocked" and not original_commit_match:
         result["validation_state"] = "success"
@@ -5132,6 +5198,7 @@ def make_publish_result() -> dict:
         "published": False,
         "validation_state": "success",
         "validation_commit_match": False,
+        "fingerprint_match": False,
         "last_validated_commit": "",
         "current_commit": "",
         "validation_age_seconds": -1,
@@ -6110,6 +6177,7 @@ def publish_current_repo_state(
     validation_detail: str = "",
     force_publish: bool = False,
     validation_commit_match: bool = False,
+    fingerprint_match: bool = False,
     last_validated_commit: str = "",
     current_commit: str = "",
     validation_age_seconds: int = -1,
@@ -6123,6 +6191,7 @@ def publish_current_repo_state(
         result["requested"] = True
         result["validation_state"] = validation_state
         result["validation_commit_match"] = validation_commit_match
+        result["fingerprint_match"] = fingerprint_match
         result["last_validated_commit"] = last_validated_commit
         result["current_commit"] = current_commit
         result["validation_age_seconds"] = validation_age_seconds
@@ -6156,6 +6225,7 @@ def publish_current_repo_state(
         force_publish=force_publish,
     )
     result["validation_commit_match"] = validation_commit_match
+    result["fingerprint_match"] = fingerprint_match
     result["last_validated_commit"] = last_validated_commit
     result["current_commit"] = current_commit
     result["validation_age_seconds"] = validation_age_seconds
@@ -6164,6 +6234,8 @@ def publish_current_repo_state(
     result["auto_revalidation_result"] = auto_revalidation_result
     if auto_revalidated and validation_state == "success":
         result["publish_reason"] = "validated_after_revalidation"
+    elif validation_reused and validation_state == "success" and result.get("fingerprint_match"):
+        result["publish_reason"] = "validated_reused_fingerprint"
     elif validation_reused and validation_state == "success" and not validation_commit_match:
         result["publish_reason"] = "validated_reused_noop"
     elif validation_reused and validation_state == "success":
@@ -6241,6 +6313,7 @@ def run_post_success_publish(
             validation_detail=(blocked_reason or ""),
             force_publish=force_publish,
             validation_commit_match=bool(summary.get("validation_commit_match")),
+            fingerprint_match=bool(summary.get("fingerprint_match")),
             last_validated_commit=str(summary.get("last_validated_commit") or ""),
             current_commit=str(summary.get("current_commit") or ""),
             validation_age_seconds=int(summary.get("validation_age_seconds", -1)),
@@ -6326,6 +6399,7 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"validation_result: {summary.get('validation_result', 'failed')}")
     print(f"validation_state: {summary.get('validation_state', summary.get('validation_result', 'failed'))}")
     print(f"validation_commit_match: {format_bool(summary.get('validation_commit_match'))}")
+    print(f"fingerprint_match: {format_bool(summary.get('fingerprint_match'))}")
     print(f"auto_revalidated: {format_bool(summary.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(summary.get('validation_reused'))}")
     print(f"auto_revalidation_result: {summary.get('auto_revalidation_result') or 'not_needed'}")
@@ -6404,6 +6478,7 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
     print(f"validation_state: {publish_result.get('validation_state') or 'success'}")
     print(f"validation_commit_match: {format_bool(publish_result.get('validation_commit_match'))}")
+    print(f"fingerprint_match: {format_bool(publish_result.get('fingerprint_match'))}")
     print(f"auto_revalidated: {format_bool(publish_result.get('auto_revalidated'))}")
     print(f"validation_reused: {format_bool(publish_result.get('validation_reused'))}")
     print(f"auto_revalidation_result: {publish_result.get('auto_revalidation_result') or 'not_needed'}")
@@ -9123,6 +9198,7 @@ def main():
             validation_detail=str(validation_state.get("reason") or ""),
             force_publish=bool(args.force_publish),
             validation_commit_match=bool(validation_state.get("validation_commit_match")),
+            fingerprint_match=bool(validation_state.get("fingerprint_match")),
             last_validated_commit=str(validation_state.get("last_validated_commit") or ""),
             current_commit=str(validation_state.get("current_commit") or ""),
             validation_age_seconds=int(validation_state.get("validation_age_seconds", -1)),
@@ -9134,6 +9210,7 @@ def main():
             "validation_state": str(validation_state.get("validation_state") or "blocked"),
             "validation_result": str(validation_state.get("validation_result") or "blocked"),
             "validation_commit_match": bool(validation_state.get("validation_commit_match")),
+            "fingerprint_match": bool(validation_state.get("fingerprint_match")),
             "auto_revalidated": bool(validation_state.get("auto_revalidated")),
             "validation_reused": bool(validation_state.get("validation_reused")),
             "auto_revalidation_result": str(validation_state.get("auto_revalidation_result") or "not_needed"),
