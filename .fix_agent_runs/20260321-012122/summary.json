@@ -1,0 +1,31 @@
+{
+  "comparison": "Run comparison: performance improved. success_rate 0.00->0.00, avg_attempts 1.00->1.00, candidate_rejection_rate 1.00->0.00.",
+  "continue_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --continue",
+  "diff_path": "/home/tom/ai/open-swe/.fix_agent_runs/20260321-012122/diff.patch",
+  "full_suite_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --repo \"/home/tom/ai/open-swe\" --mode quick --test-cmd \"pytest -q\"",
+  "rerun_cmd": "python /home/tom/ai/open-swe/local_fix_agent.py --repo \"/home/tom/ai/open-swe\" --mode quick --test-cmd \"pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py\"",
+  "run_metrics": {
+    "attempts": [
+      {
+        "candidate_count": 0,
+        "candidate_rejections": 0,
+        "candidate_scores": [],
+        "hypothesis_result": "rejected",
+        "step": 1,
+        "strategy_type": "fallback/default",
+        "validation_outcomes": []
+      }
+    ],
+    "attempts_to_success": null,
+    "blocked_reason": "no relevant files identified with enough confidence",
+    "cooldowns_triggered": 0,
+    "likely_rate_limit_hits": 0,
+    "proxy_enabled": false,
+    "remote_blocked_kind": null,
+    "repo": "/home/tom/ai/open-swe",
+    "rollback_count": 0,
+    "success": false,
+    "total_attempts": 1
+  },
+  "summary": "=== RUN METRICS ===\nsuccess: False\ntotal_attempts: 1\nattempts_to_success: n/a\navg_candidates_evaluated: 0.00\ncandidate_rejection_rate: 0.00\nrollback_count: 0\nproxy_enabled: False\nlikely_rate_limit_hits: 0\ncooldowns_triggered: 0\nremote_blocked_kind: none\nblocked_reason: no relevant files identified with enough confidence\nmost_successful_strategies: none"
+}

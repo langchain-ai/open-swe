@@ -59,6 +59,38 @@
       "ts": 1774038531,
       "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
       "validation_result": "success"
+    },
+    {
+      "artifact_dir": "/home/tom/ai/open-swe/.fix_agent_runs/20260321-012122",
+      "blocked_reason": "no relevant files identified with enough confidence",
+      "commit_hash": "c2a0d63847c04e9c12ed015a17df4604a5a1992e",
+      "confidence": "",
+      "files_changed": [],
+      "meaningful_content_fingerprint": "ebaa056808b30dd4d1c38a324a38f220be9534cab8018fc776b452601a36c997",
+      "mode": "quick",
+      "repo": "/home/tom/ai/open-swe",
+      "success": false,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "ts": 1774070488,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "validation_result": "blocked"
+    },
+    {
+      "artifact_dir": "",
+      "blocked_reason": "",
+      "commit_hash": "c2a0d63847c04e9c12ed015a17df4604a5a1992e",
+      "confidence": "manual-validation",
+      "files_changed": [],
+      "meaningful_content_fingerprint": "ebaa056808b30dd4d1c38a324a38f220be9534cab8018fc776b452601a36c997",
+      "mode": "manual-validation",
+      "repo": "/home/tom/ai/open-swe",
+      "success": true,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "ts": 1774070591,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
+      "validation_result": "success"
     }
   ]
 }
