@@ -1,15 +1,25 @@
 {
   "fork_created": false,
   "fork_repo": "",
-  "last_branch": "docs/refine-operator-docs",
-  "last_commit": "",
-  "last_control_path": "noop",
+  "last_branch": "agent-run-1774070482",
+  "last_commit": "01d23f939830b77c8e91a895df439786dbf54418",
+  "last_control_path": "direct_origin_push",
+  "last_meaningful_content_fingerprint": "9ee2e1a5ba1f67f677b3c05c5305d4a3581b16173deb9b9bfb9790e4736edd0e",
+  "last_meaningful_paths": [
+    "README.md",
+    "docs/RUNBOOK.md",
+    "docs/TROUBLESHOOTING.md",
+    "local_fix_agent.py"
+  ],
+  "last_pr_url": "https://github.com/tophat1720/open-swe/pull/5",
+  "last_publish_mode": "current_repo_state",
   "last_repo": "tophat1720/open-swe",
-  "last_success": false,
+  "last_success": true,
+  "last_success_timestamp": 1774107025,
   "last_target": "origin",
   "last_target_repo": "tophat1720/open-swe",
   "last_transport": "ssh",
   "origin_url": "git@github.com:tophat1720/open-swe.git",
-  "ssh_confirmed": false,
-  "timestamp": 1773988054
+  "ssh_confirmed": true,
+  "timestamp": 1774107025
 }

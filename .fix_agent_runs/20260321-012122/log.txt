@@ -1,0 +1,18 @@
+=== RUN METRICS ===
+success: False
+total_attempts: 1
+attempts_to_success: n/a
+avg_candidates_evaluated: 0.00
+candidate_rejection_rate: 0.00
+rollback_count: 0
+proxy_enabled: False
+likely_rate_limit_hits: 0
+cooldowns_triggered: 0
+remote_blocked_kind: none
+blocked_reason: no relevant files identified with enough confidence
+most_successful_strategies: none
+Run comparison: performance improved. success_rate 0.00->0.00, avg_attempts 1.00->1.00, candidate_rejection_rate 1.00->0.00.
+rerun: python /home/tom/ai/open-swe/local_fix_agent.py --repo "/home/tom/ai/open-swe" --mode quick --test-cmd "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py"
+continue: python /home/tom/ai/open-swe/local_fix_agent.py --continue
+full_suite: python /home/tom/ai/open-swe/local_fix_agent.py --repo "/home/tom/ai/open-swe" --mode quick --test-cmd "pytest -q"
+inspect_diff: git -C /home/tom/ai/open-swe diff

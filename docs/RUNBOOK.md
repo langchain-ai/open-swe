@@ -1,88 +1,251 @@
 # Runbook
 
-This runbook is for day-to-day operation of `local_fix_agent.py`.
+This is the main operator doc for `local_fix_agent.py`.
 
-## Standard Repair Flow
+## What Do I Do?
 
-1. Choose the smallest reproducible command.
-2. Run locally first when possible.
-3. Start with `safe` unless the scope is obviously tiny.
-4. Review the summary, diff, and next actions.
-5. Run broader validation yourself after a successful narrow fix.
-
-## Common Commands
+Most runs look like this:
 
 ```bash
-fixit pytest tests/test_x.py::test_parse -q
-fixit --dry-run pytest tests/test_x.py -q
-fixit --target edge-01 --repo /srv/app "pytest tests/test_x.py -q"
-python local_fix_agent.py --continue
-python local_fix_agent.py --from-last-failure
-python local_fix_agent.py --last --explain-only
-```
-
-## Publish Commands
-
-Validated-run publish:
-
-```bash
-python local_fix_agent.py --publish
-python local_fix_agent.py --last --publish
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr --publish-merge --publish-merge-local-main
+fixit pytest tests/test_x.py -q
 ./scripts/fixpublish.sh
 ```
 
-Publish current repo state:
+Use the first command to make and validate a focused fix. Use the second command to run the required finalizer.
+
+Normal flow:
+
+```text
+fix or edit
+-> validate
+-> finalize
+-> update docs if needed
+-> publish
+-> verify PR mergeability
+```
+
+If you remember only one rule, remember this:
+
+- validation success is not completion
+- the run is complete only after `./scripts/fixpublish.sh`
+
+## What Is Happening?
+
+The tool is built for a simple operating model:
+
+```text
+pick a narrow target
+-> let the agent fix or edit
+-> validate
+-> finalize
+-> update docs if needed
+-> publish
+-> verify PR mergeability
+```
+
+The important mental shift is that validation is not the last step.
+
+Completion requires the canonical finalizer:
 
 ```bash
-python local_fix_agent.py --publish-only
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
+./scripts/fixpublish.sh
+```
+
+## Mental Model
+
+Use this split when reasoning about the system:
+
+- Codex:
+  edits files, runs the requested validation, and should always run the finalizer after successful changes
+- The agent:
+  stores validation records, decides whether docs need updates, aligns the branch with its base branch when safe, publishes, and checks PR mergeability
+- The operator:
+  chooses the target command, reviews the result, and resolves only truly ambiguous blocked states
+
+## Common Tasks
+
+### 1. Fix a failing script or test
+
+```bash
+fixit pytest tests/test_x.py::test_parse -q
+```
+
+Use the smallest command that reproduces the problem. A narrow target gives the agent the best chance of making a safe, local fix.
+
+### 2. Dry-run before changing anything
+
+```bash
+fixit --dry-run pytest tests/test_x.py -q
+```
+
+Use this when you want the agent to inspect and plan without committing a publishable result yet.
+
+### 3. Finalize and publish
+
+```bash
+./scripts/fixpublish.sh
+```
+
+This is the normal final step after successful changes.
+
+### 4. Publish the current repo state directly
+
+```bash
 ./scripts/publishcurrent.sh
 ```
 
-## Choosing Between Publish Modes
+Use this when you already know the current repo state is what you want to publish and you are intentionally skipping the repair loop.
 
-- Use validated-run publish when the agent just completed a successful repair and you want only that validated change set.
-- Use publish-current when you want to stage and publish the repo state that already exists in the working tree.
+### 5. Reuse recent context
 
-## Safe Auto-Merge Rules
+```bash
+python local_fix_agent.py --continue
+python local_fix_agent.py --last
+python local_fix_agent.py --from-last-failure
+```
 
-Auto-merge only proceeds when all of the following are true:
+Use these when you want to pick up a recent validation target or recent run context instead of restating everything.
 
-- authenticated GitHub user is known
-- PR base repo owner matches the authenticated user
-- PR head repo owner matches the authenticated user
-- PR base branch is `main`
-- PR state is `OPEN`
-- PR is not draft and not conflicted
-- required review is not blocking
-- required checks are passing, or there are no required checks
+### 6. Import a script into training
 
-If any condition fails, merge is skipped and the exact block reason is printed.
+```bash
+python local_fix_agent.py --script /path/to/example.py --add-to-training
+```
 
-## When Docs Need Refresh
+The script goes through candidate import, sanitization, validation, optional repair, and promotion into the private pattern repo only if it becomes a safe curated example.
 
-Operator docs are considered impacted when changes affect:
+### 7. Inspect learned patterns
 
-- CLI flags or help text
-- run modes
-- wrapper scripts in `scripts/`
-- publish behavior or publish summaries
-- blocked-state behavior or user-facing messages
-- remote execution behavior
-- operator workflow semantics reflected in the docs set
+```bash
+python local_fix_agent.py --list-patterns
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-pattern-sources
+```
 
-If `--update-docs` is set:
+## Why Did It Do That?
 
-- `patch` updates only the relevant operator docs
-- `rewrite` replaces the full operator docs set from a clean baseline
+The workflow is split on purpose:
 
-## Review Checklist
+- validation proves a specific repo state
+- finalization decides whether that validated state should publish, noop, or block
+- docs updates happen inside finalization so published code and docs stay together
+- branch alignment happens before publish so the PR is more likely to be mergeable immediately
+- PR mergeability is checked again after publish as a final safety net
 
-- inspect the diff
-- confirm the target command still passes
-- run a broader suite if the repo warrants it
-- read blocked evidence carefully before retrying
-- check docs summary fields when operator-visible behavior changed
+## Key Concepts
+
+### Validation record
+
+A validation record says that a specific commit was validated successfully. Publish is tied to that recorded state.
+
+### Finalizer
+
+The finalizer is [`./scripts/fixpublish.sh`](../scripts/fixpublish.sh). It is the required last step after successful edits.
+
+### Meaningful changes
+
+Meaningful changes are the files that matter for publish decisions:
+
+- code
+- tests
+- docs
+- scripts
+- behavior-relevant config
+
+Known machine-local state files are ignored.
+
+### Pattern repo
+
+The pattern repo is the local private training repo for learned script patterns. It stores sanitized, curated examples.
+
+### Promotion states
+
+- `candidate`
+- `curated_experimental`
+- `curated_trusted`
+
+These are different from trust level. Promotion state describes where a source is in the curation process. Trust level describes how strongly it should influence normal runs.
+
+## Safety Rules
+
+- Do not treat a passing validation command as completion.
+- Always run the finalizer after successful changes.
+- The finalizer is the only canonical publish path.
+- Docs updates happen inside finalization, not as a separate ad hoc step.
+- Publish/noop decisions are based on meaningful changes, not only on working-tree noise.
+- The branch is aligned with its base branch before publish when that can be done safely.
+- PR mergeability is checked after publish as a final safety net.
+- Ambiguous merge conflicts block instead of being guessed through.
+
+## Blocked States
+
+Blocked means the tool found a point where automatic continuation would be unsafe, misleading, or too ambiguous.
+
+Examples:
+
+- no reproducible validation command
+- merge conflict that cannot be safely auto-resolved
+- publish blocked by validation
+- docs refresh changed the repo state and revalidation failed
+- branch alignment introduced conflicts that could not be resolved safely
+
+Blocked is not a crash. It is an intentional stop with evidence and next steps.
+
+## Common Commands
+
+Local repair:
+
+```bash
+fixit pytest tests/test_x.py -q
+```
+
+Remote repair:
+
+```bash
+fixit --target edge-01 --repo /srv/app "pytest tests/test_x.py -q"
+```
+
+Explain current context:
+
+```bash
+python local_fix_agent.py --last --explain-only
+```
+
+Canonical finalizer:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+Direct publish-current path:
+
+```bash
+./scripts/publishcurrent.sh
+```
+
+List trusted patterns:
+
+```bash
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+```
+
+## Operator Checklist
+
+After a successful run:
+
+- review the diff
+- confirm the validation target still passes
+- run a broader suite if the change deserves it
+- run the finalizer if it has not already run
+- read the publish result and PR mergeability result separately
+
+## How Is It Implemented?
+
+The operator mental model above is the part you should carry around day to day. The details below matter when you need to explain a surprising result or debug the workflow.
+
+## Advanced Notes
+
+- `--no-finalize` intentionally stops before the required finalizer and is reported as incomplete
+- `--publish-only` uses the current repo state but still respects validation gating
+- the finalizer can create a validation record itself when one is missing
+- post-publish PR mergeability verification remains active even when pre-publish base alignment succeeds

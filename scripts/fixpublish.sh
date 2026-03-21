@@ -5,4 +5,5 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 export AI_PUBLISH_ALLOW_FORK=1
-python local_fix_agent.py --last --publish --publish-pr "$@"
+python local_fix_agent.py --repo "$ROOT_DIR" --ensure-validation-record "$@"
+python local_fix_agent.py --repo "$ROOT_DIR" --publish-only --publish-pr "$@"

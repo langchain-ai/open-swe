@@ -1,0 +1,97 @@
+{
+  "tasks": [
+    {
+      "id": "proxy-debug",
+      "task_type": "debug",
+      "script": "examples/proxy_client.py",
+      "prompt": "Debug a proxy-aware command line utility that talks through enterprise proxies.",
+      "expected_pattern_types": ["cli_style", "entrypoint", "proxy_handling", "timeout", "validation_strategy"],
+      "forbidden_pattern_types": ["retry_backoff", "rate_limit_handling"],
+      "required_applied_patterns": ["proxy_handling"],
+      "forbidden_applied_patterns": ["retry_backoff", "rate_limit_handling"],
+      "expected_conventions": ["argparse", "main_guard", "logging", "proxy"],
+      "correctness_command": "python -c \"import os, pathlib, sys; sys.path.insert(0, str(pathlib.Path('.').resolve())); os.environ['HTTP_PROXY']='http://proxy.internal:8080'; import examples.proxy_client as mod; assert mod.build_proxy_map()['http']=='http://proxy.internal:8080'; print('proxy-map-ok')\"",
+      "correctness_expected_contains": ["proxy-map-ok"]
+    },
+    {
+      "id": "cli-refactor",
+      "task_type": "refactor",
+      "script": "examples/cli_formatter.py",
+      "prompt": "Refactor a small CLI utility while preserving config loading and operator-facing logging.",
+      "expected_pattern_types": ["cli_style", "entrypoint", "logging_style", "config_loading", "validation_strategy"],
+      "forbidden_pattern_types": ["proxy_handling", "request_session", "rate_limit_handling"],
+      "required_applied_patterns": ["cli_style", "config_loading"],
+      "forbidden_applied_patterns": ["proxy_handling", "request_session", "retry_backoff", "rate_limit_handling"],
+      "expected_conventions": ["argparse", "main_guard", "logging"],
+      "correctness_setup_files": {
+        "aliases.json": "{\"Team Name\": \"prod-team\"}\n"
+      },
+      "correctness_command": "python -c \"import pathlib, sys; sys.path.insert(0, str(pathlib.Path('.').resolve())); import examples.cli_formatter as mod; aliases = mod.load_aliases('aliases.json'); assert aliases['Team Name']=='prod-team'; print('config-load-ok')\"",
+      "correctness_expected_contains": ["config-load-ok"]
+    },
+    {
+      "id": "retry-debug",
+      "task_type": "debug",
+      "script": "examples/retry_worker.py",
+      "prompt": "Debug a rate-limited worker with retries and backoff.",
+      "expected_pattern_types": ["retry_backoff", "rate_limit_handling", "logging_style", "validation_strategy"],
+      "forbidden_pattern_types": ["proxy_handling"],
+      "required_applied_patterns": ["retry_backoff", "rate_limit_handling"],
+      "forbidden_applied_patterns": ["proxy_handling"],
+      "expected_conventions": ["argparse", "main_guard", "logging", "retry"],
+      "correctness_command": "python -c \"import pathlib, sys; sys.path.insert(0, str(pathlib.Path('.').resolve())); import examples.retry_worker as mod; assert mod.fetch_with_retry(2, 0.0)=='ok'; print('retry-ok')\"",
+      "correctness_expected_contains": ["retry-ok"]
+    },
+    {
+      "id": "ambiguous-proxy-debug",
+      "task_type": "debug",
+      "script": "examples/ambiguous_network_cli.py",
+      "prompt": "Debug an enterprise proxy failure in a network CLI. Do not add retry loops when the issue is proxy configuration.",
+      "expected_pattern_types": ["proxy_handling", "timeout", "validation_strategy"],
+      "forbidden_pattern_types": ["retry_backoff", "rate_limit_handling"],
+      "required_applied_patterns": ["proxy_handling"],
+      "forbidden_applied_patterns": ["retry_backoff", "rate_limit_handling"],
+      "expected_conventions": ["argparse", "main_guard", "logging", "proxy"],
+      "correctness_command": "python -c \"import os, pathlib, sys; sys.path.insert(0, str(pathlib.Path('.').resolve())); os.environ['HTTP_PROXY']='http://proxy.internal:8080'; import examples.ambiguous_network_cli as mod; assert mod.run_once()=='proxy-ok'; print('ambiguous-proxy-ok')\"",
+      "correctness_expected_contains": ["ambiguous-proxy-ok"]
+    },
+    {
+      "id": "local-validation",
+      "task_type": "validation_discovery",
+      "script": "examples/local_slugify.py",
+      "prompt": "Find a safe validation command for a simple local helper utility with no network behavior.",
+      "expected_pattern_types": ["function_organization", "validation_strategy"],
+      "forbidden_pattern_types": ["proxy_handling", "request_session", "retry_backoff", "rate_limit_handling"],
+      "required_validation_kind": "function",
+      "expected_conventions": [],
+      "correctness_command": "python -c \"import pathlib, sys; sys.path.insert(0, str(pathlib.Path('.').resolve())); import examples.local_slugify as mod; assert mod.slugify(' A_B ')=='a-b'; print('slugify-ok')\"",
+      "correctness_expected_contains": ["slugify-ok"]
+    },
+    {
+      "id": "new-config-script",
+      "task_type": "new-script",
+      "prompt": "Create a small local CLI utility that normalizes names and supports alias lookup from a JSON config file.",
+      "output_name": "generated_config_tool.py",
+      "expected_pattern_types": ["cli_style", "entrypoint", "logging_style", "config_loading"],
+      "forbidden_pattern_types": ["proxy_handling", "request_session", "retry_backoff", "rate_limit_handling"],
+      "required_applied_patterns": ["config_loading"],
+      "expected_conventions": ["argparse", "main_guard", "logging"],
+      "correctness_setup_files": {
+        "aliases.json": "{\"Team Name\": \"prod-team\"}\n"
+      },
+      "correctness_command": "python {script} --config aliases.json \"Team Name\"",
+      "correctness_expected_contains": ["prod-team"]
+    },
+    {
+      "id": "new-local-script",
+      "task_type": "new-script",
+      "prompt": "Create a small local CLI utility that normalizes names without importing network-specific patterns.",
+      "output_name": "generated_local_tool.py",
+      "expected_pattern_types": ["cli_style", "entrypoint", "logging_style"],
+      "forbidden_pattern_types": ["proxy_handling", "request_session", "retry_backoff", "rate_limit_handling"],
+      "expected_conventions": ["argparse", "main_guard", "logging"],
+      "correctness_command": "python {script} \"Team Name\"",
+      "correctness_expected_contains": ["team-name"]
+    }
+  ]
+}

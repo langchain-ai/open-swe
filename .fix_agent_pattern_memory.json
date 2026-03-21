@@ -1,0 +1,1419 @@
+{
+  "patterns": [
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.95,
+      "family": "cli_style",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-cli_style-argparse",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "cli",
+        "configured_proxy",
+        "def",
+        "default",
+        "else"
+      ],
+      "name": "cli style",
+      "normalized_examples": {
+        "style": "argparse",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "cli_style",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 14,
+      "summary": "Uses argparse for command-line parsing and operator-facing help output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.75,
+      "family": "config_loading",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-config_loading-env_or_file",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "config",
+        "configured_proxy",
+        "def",
+        "default",
+        "else"
+      ],
+      "name": "config loading",
+      "normalized_examples": {
+        "style": "env_or_file"
+      },
+      "pattern_type": "config_loading",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 4,
+      "summary": "Loads configuration from environment variables or config files."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "entrypoint",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-entrypoint-main",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default",
+        "else",
+        "entrypoint"
+      ],
+      "name": "entrypoint",
+      "normalized_examples": {
+        "style": "main"
+      },
+      "pattern_type": "entrypoint",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 6,
+      "summary": "Uses a main() entrypoint behind a __main__ guard."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.68,
+      "family": "function_organization",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-function_organization-helper_functions",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default",
+        "else",
+        "evals"
+      ],
+      "name": "function organization",
+      "normalized_examples": {
+        "style": "helper_functions"
+      },
+      "pattern_type": "function_organization",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 0,
+      "summary": "Breaks implementation into named helper functions instead of a single monolith."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.8,
+      "family": "logging_style",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-logging_style-logging",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default",
+        "else",
+        "evals"
+      ],
+      "name": "logging style",
+      "normalized_examples": {
+        "style": "logging"
+      },
+      "pattern_type": "logging_style",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 2,
+      "summary": "Uses structured logging calls instead of print-only status output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "proxy_handling",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-proxy_handling-proxy_aware",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default",
+        "else",
+        "evals"
+      ],
+      "name": "proxy handling",
+      "normalized_examples": {
+        "style": "proxy_aware"
+      },
+      "pattern_type": "proxy_handling",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 6,
+      "summary": "Handles outbound proxy configuration explicitly."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.72,
+      "family": "request_session",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-request_session-request_helper",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default",
+        "else",
+        "evals"
+      ],
+      "name": "request session",
+      "normalized_examples": {
+        "style": "request_helper"
+      },
+      "pattern_type": "request_session",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 2,
+      "summary": "Wraps outbound requests in a dedicated request/opening helper."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.88,
+      "family": "retry_backoff",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-retry_backoff-loop_retry",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "auto",
+        "backoff",
+        "basicconfig",
+        "build_opener",
+        "configured_proxy",
+        "def",
+        "default"
+      ],
+      "name": "retry backoff",
+      "normalized_examples": {
+        "style": "loop_retry"
+      },
+      "pattern_type": "retry_backoff",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 3,
+      "summary": "Uses retry/backoff loops around flaky external operations."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "family": "validation_strategy",
+      "id": "evals-pattern_learning-examples-ambiguous_network_cli.py-validation_strategy-cli_help",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "ambiguous_network_cli",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "auto",
+        "basicconfig",
+        "build_opener",
+        "cli_help",
+        "configured_proxy",
+        "def",
+        "default",
+        "else"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "cli_help",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/ambiguous_network_cli.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers cli_help validation for this script shape."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.95,
+      "family": "cli_style",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-cli_style-argparse",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli",
+        "cli_formatter",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else"
+      ],
+      "name": "cli style",
+      "normalized_examples": {
+        "style": "argparse",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "cli_style",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 14,
+      "summary": "Uses argparse for command-line parsing and operator-facing help output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.75,
+      "family": "config_loading",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-config_loading-env_or_file",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli_formatter",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else",
+        "env"
+      ],
+      "name": "config loading",
+      "normalized_examples": {
+        "style": "env_or_file"
+      },
+      "pattern_type": "config_loading",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 4,
+      "summary": "Loads configuration from environment variables or config files."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "entrypoint",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-entrypoint-main",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli_formatter",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else",
+        "entrypoint"
+      ],
+      "name": "entrypoint",
+      "normalized_examples": {
+        "style": "main"
+      },
+      "pattern_type": "entrypoint",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 6,
+      "summary": "Uses a main() entrypoint behind a __main__ guard."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.68,
+      "family": "function_organization",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-function_organization-helper_functions",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli_formatter",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else",
+        "evals"
+      ],
+      "name": "function organization",
+      "normalized_examples": {
+        "style": "helper_functions"
+      },
+      "pattern_type": "function_organization",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 0,
+      "summary": "Breaks implementation into named helper functions instead of a single monolith."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.8,
+      "family": "logging_style",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-logging_style-logging",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli_formatter",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else",
+        "evals"
+      ],
+      "name": "logging style",
+      "normalized_examples": {
+        "style": "logging"
+      },
+      "pattern_type": "logging_style",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 2,
+      "summary": "Uses structured logging calls instead of print-only status output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "family": "validation_strategy",
+      "id": "evals-pattern_learning-examples-cli_formatter.py-validation_strategy-cli_help",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "aliases",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "cli_formatter",
+        "cli_help",
+        "config",
+        "config_path",
+        "def",
+        "default",
+        "dict",
+        "else"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "cli_help",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/cli_formatter.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers cli_help validation for this script shape."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.68,
+      "family": "function_organization",
+      "id": "evals-pattern_learning-examples-local_slugify.py-function_organization-helper_functions",
+      "keywords": [
+        "def",
+        "evals",
+        "examples",
+        "for",
+        "functions",
+        "helpers",
+        "join",
+        "local_slugify",
+        "lower",
+        "lowered",
+        "part",
+        "pattern_learning",
+        "replace",
+        "return",
+        "slugify",
+        "split"
+      ],
+      "name": "function organization",
+      "normalized_examples": {
+        "style": "helper_functions"
+      },
+      "pattern_type": "function_organization",
+      "source_files": [
+        "evals/pattern_learning/examples/local_slugify.py"
+      ],
+      "success_count": 0,
+      "summary": "Breaks implementation into named helper functions instead of a single monolith."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "family": "validation_strategy",
+      "id": "evals-pattern_learning-examples-local_slugify.py-validation_strategy-function",
+      "keywords": [
+        "def",
+        "evals",
+        "evals/pattern_learning/examples/local_slugify.py",
+        "examples",
+        "for",
+        "function",
+        "join",
+        "local_slugify",
+        "lower",
+        "lowered",
+        "part",
+        "pattern_learning",
+        "replace",
+        "return",
+        "slugify",
+        "split"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "function",
+        "validation_kind": "function"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/local_slugify.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers function validation for this script shape."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "id": "evals-pattern_learning-examples-local_slugify.py-validation_strategy-import",
+      "keywords": [
+        "def",
+        "evals",
+        "evals/pattern_learning/examples/local_slugify.py",
+        "examples",
+        "for",
+        "import",
+        "join",
+        "local_slugify",
+        "lower",
+        "lowered",
+        "part",
+        "pattern_learning",
+        "replace",
+        "return",
+        "slugify",
+        "split"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "import",
+        "validation_kind": "import"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/local_slugify.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers import validation for this script shape."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.95,
+      "family": "cli_style",
+      "id": "evals-pattern_learning-examples-proxy_client.py-cli_style-argparse",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "cli",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict"
+      ],
+      "name": "cli style",
+      "normalized_examples": {
+        "style": "argparse",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "cli_style",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 14,
+      "summary": "Uses argparse for command-line parsing and operator-facing help output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.75,
+      "family": "config_loading",
+      "id": "evals-pattern_learning-examples-proxy_client.py-config_loading-env_or_file",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "config",
+        "configured",
+        "def",
+        "default",
+        "dict"
+      ],
+      "name": "config loading",
+      "normalized_examples": {
+        "style": "env_or_file"
+      },
+      "pattern_type": "config_loading",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 4,
+      "summary": "Loads configuration from environment variables or config files."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "entrypoint",
+      "id": "evals-pattern_learning-examples-proxy_client.py-entrypoint-main",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "entrypoint"
+      ],
+      "name": "entrypoint",
+      "normalized_examples": {
+        "style": "main"
+      },
+      "pattern_type": "entrypoint",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 6,
+      "summary": "Uses a main() entrypoint behind a __main__ guard."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.68,
+      "family": "function_organization",
+      "id": "evals-pattern_learning-examples-proxy_client.py-function_organization-helper_functions",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "evals"
+      ],
+      "name": "function organization",
+      "normalized_examples": {
+        "style": "helper_functions"
+      },
+      "pattern_type": "function_organization",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 0,
+      "summary": "Breaks implementation into named helper functions instead of a single monolith."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.8,
+      "family": "logging_style",
+      "id": "evals-pattern_learning-examples-proxy_client.py-logging_style-logging",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "evals"
+      ],
+      "name": "logging style",
+      "normalized_examples": {
+        "style": "logging"
+      },
+      "pattern_type": "logging_style",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 2,
+      "summary": "Uses structured logging calls instead of print-only status output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "proxy_handling",
+      "id": "evals-pattern_learning-examples-proxy_client.py-proxy_handling-proxy_aware",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "evals"
+      ],
+      "name": "proxy handling",
+      "normalized_examples": {
+        "style": "proxy_aware"
+      },
+      "pattern_type": "proxy_handling",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 6,
+      "summary": "Handles outbound proxy configuration explicitly."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.72,
+      "family": "request_session",
+      "id": "evals-pattern_learning-examples-proxy_client.py-request_session-request_helper",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "evals"
+      ],
+      "name": "request session",
+      "normalized_examples": {
+        "style": "request_helper"
+      },
+      "pattern_type": "request_session",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 2,
+      "summary": "Wraps outbound requests in a dedicated request/opening helper."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.82,
+      "family": "timeout",
+      "id": "evals-pattern_learning-examples-proxy_client.py-timeout-explicit_timeout",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict",
+        "evals"
+      ],
+      "name": "timeout",
+      "normalized_examples": {
+        "style": "explicit_timeout"
+      },
+      "pattern_type": "timeout",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 2,
+      "summary": "Sets explicit timeout values for external work."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "family": "validation_strategy",
+      "id": "evals-pattern_learning-examples-proxy_client.py-validation_strategy-cli_help",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "argparse",
+        "args",
+        "argumentparser",
+        "basicconfig",
+        "build_opener",
+        "build_proxy_map",
+        "build_proxy_opener",
+        "cli_help",
+        "com",
+        "configured",
+        "def",
+        "default",
+        "dict"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "cli_help",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/proxy_client.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers cli_help validation for this script shape."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.95,
+      "family": "cli_style",
+      "id": "evals-pattern_learning-examples-retry_worker.py-cli_style-argparse",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "cli",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals"
+      ],
+      "name": "cli style",
+      "normalized_examples": {
+        "style": "argparse",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "cli_style",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 14,
+      "summary": "Uses argparse for command-line parsing and operator-facing help output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.9,
+      "family": "entrypoint",
+      "id": "evals-pattern_learning-examples-retry_worker.py-entrypoint-main",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "entrypoint",
+        "evals"
+      ],
+      "name": "entrypoint",
+      "normalized_examples": {
+        "style": "main"
+      },
+      "pattern_type": "entrypoint",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 6,
+      "summary": "Uses a main() entrypoint behind a __main__ guard."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "refactor"
+      ],
+      "confidence": 0.7,
+      "family": "error_handling",
+      "id": "evals-pattern_learning-examples-retry_worker.py-error_handling-try_except",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "error",
+        "evals"
+      ],
+      "name": "error handling",
+      "normalized_examples": {
+        "style": "try_except"
+      },
+      "pattern_type": "error_handling",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 0,
+      "summary": "Uses explicit exception handling around risky operations."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.68,
+      "family": "function_organization",
+      "id": "evals-pattern_learning-examples-retry_worker.py-function_organization-helper_functions",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals",
+        "examples"
+      ],
+      "name": "function organization",
+      "normalized_examples": {
+        "style": "helper_functions"
+      },
+      "pattern_type": "function_organization",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 0,
+      "summary": "Breaks implementation into named helper functions instead of a single monolith."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.8,
+      "family": "logging_style",
+      "id": "evals-pattern_learning-examples-retry_worker.py-logging_style-logging",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals",
+        "examples"
+      ],
+      "name": "logging style",
+      "normalized_examples": {
+        "style": "logging"
+      },
+      "pattern_type": "logging_style",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 2,
+      "summary": "Uses structured logging calls instead of print-only status output."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.86,
+      "family": "rate_limit_handling",
+      "id": "evals-pattern_learning-examples-retry_worker.py-rate_limit_handling-rate_limit",
+      "keywords": [
+        "429",
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals"
+      ],
+      "name": "rate limit handling",
+      "normalized_examples": {
+        "style": "rate_limit"
+      },
+      "pattern_type": "rate_limit_handling",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 3,
+      "summary": "Recognizes rate-limit responses and handles them explicitly."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.88,
+      "family": "retry_backoff",
+      "id": "evals-pattern_learning-examples-retry_worker.py-retry_backoff-loop_retry",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "backoff",
+        "basicconfig",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals"
+      ],
+      "name": "retry backoff",
+      "normalized_examples": {
+        "style": "loop_retry"
+      },
+      "pattern_type": "retry_backoff",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 3,
+      "summary": "Uses retry/backoff loops around flaky external operations."
+    },
+    {
+      "anti_pattern_note": "",
+      "applicability_context": [
+        "debug",
+        "new-script",
+        "refactor",
+        "validation_discovery"
+      ],
+      "confidence": 0.83,
+      "family": "validation_strategy",
+      "id": "evals-pattern_learning-examples-retry_worker.py-validation_strategy-cli_help",
+      "keywords": [
+        "__main__",
+        "__name__",
+        "add_argument",
+        "and",
+        "argparse",
+        "args",
+        "argumentparser",
+        "attempt",
+        "attempts",
+        "basicconfig",
+        "cli_help",
+        "def",
+        "default",
+        "delay",
+        "delay_seconds",
+        "evals"
+      ],
+      "name": "validation strategy",
+      "normalized_examples": {
+        "style": "cli_help",
+        "validation_kind": "cli_help"
+      },
+      "pattern_type": "validation_strategy",
+      "source_files": [
+        "evals/pattern_learning/examples/retry_worker.py"
+      ],
+      "success_count": 9,
+      "summary": "Prefers cli_help validation for this script shape."
+    }
+  ],
+  "sources": [
+    "evals/pattern_learning/examples/ambiguous_network_cli.py",
+    "evals/pattern_learning/examples/cli_formatter.py",
+    "evals/pattern_learning/examples/local_slugify.py",
+    "evals/pattern_learning/examples/proxy_client.py",
+    "evals/pattern_learning/examples/retry_worker.py"
+  ],
+  "updated_at": 1774023591
+}
