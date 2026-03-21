@@ -7152,6 +7152,14 @@ def make_publish_result() -> dict:
         "pr_conflicts_detected_final": False,
         "pr_mergeability_repair_attempted": False,
         "pr_mergeability_repair_result": "not_needed",
+        "prepublish_base_alignment_attempted": False,
+        "base_branch": "",
+        "branch_diverged": False,
+        "alignment_needed": False,
+        "alignment_result": "not_needed",
+        "alignment_changed_commit": False,
+        "validation_rerun_after_alignment": False,
+        "alignment_block_reason": "",
         "final_workflow_result": "",
         "merge_conflict_result": None,
         "triggered": False,
@@ -7699,6 +7707,121 @@ def repair_pr_mergeability(repo: Path, pr_url: str, validation_command: str = ""
     return result
 
 
+def resolve_prepublish_base_branch(repo: Path, branch: str, default_branch: str) -> tuple[str, str]:
+    try:
+        existing_pr = detect_existing_pr(repo, branch)
+    except Exception:
+        existing_pr = ""
+    if existing_pr:
+        try:
+            mergeability = verify_pr_mergeability(repo, existing_pr)
+        except Exception:
+            mergeability = {}
+        pr_base_branch = str(mergeability.get("pr_base_branch") or "").strip()
+        if pr_base_branch:
+            return pr_base_branch, existing_pr
+    return default_branch or "main", existing_pr
+
+
+def align_branch_with_base_before_publish(
+    repo: Path,
+    *,
+    branch: str,
+    base_branch: str,
+    validation_command: str = "",
+    no_auto_conflict_resolution_after_sync: bool = False,
+) -> dict:
+    result = {
+        "prepublish_base_alignment_attempted": False,
+        "base_branch": base_branch or "",
+        "branch_diverged": False,
+        "alignment_needed": False,
+        "alignment_result": "not_needed",
+        "alignment_changed_commit": False,
+        "validation_rerun_after_alignment": False,
+        "alignment_block_reason": "",
+        "merge_conflict_result": None,
+        "validation_result_after_alignment": "not_run",
+        "validation_record_result": None,
+        "existing_pr_url": "",
+    }
+    if not branch or not base_branch:
+        result["alignment_result"] = "blocked"
+        result["alignment_block_reason"] = "pre-publish base alignment requires both a publish branch and a base branch"
+        return result
+    current_branch = current_git_branch(repo)
+    if current_branch != branch:
+        result["alignment_result"] = "blocked"
+        result["alignment_block_reason"] = (
+            f"pre-publish base alignment expected branch '{branch}', but current branch is '{current_branch or '(none)'}'"
+        )
+        return result
+    fetch_code, fetch_output = run_subprocess(["git", "fetch", "origin", base_branch], repo)
+    if fetch_code != 0:
+        result["alignment_result"] = "blocked"
+        result["alignment_block_reason"] = (
+            f"pre-publish base alignment blocked because fetching origin/{base_branch} failed: {fetch_output}"
+        )
+        return result
+    count_code, count_output = run_subprocess(
+        ["git", "rev-list", "--left-right", "--count", f"HEAD...origin/{base_branch}"],
+        repo,
+    )
+    if count_code != 0:
+        result["alignment_result"] = "blocked"
+        result["alignment_block_reason"] = (
+            count_output.strip() or f"failed to compare HEAD against origin/{base_branch}"
+        )
+        return result
+    ahead_count, behind_count = parse_ahead_behind_counts(count_output)
+    result["branch_diverged"] = ahead_count > 0 and behind_count > 0
+    result["alignment_needed"] = behind_count > 0
+    if not result["alignment_needed"]:
+        return result
+    result["prepublish_base_alignment_attempted"] = True
+    before_commit = parse_head_commit(repo)
+    ok, sync_reason, conflict_result = run_sync_operation_with_conflict_hook(
+        repo,
+        sync_operation="prepublish_base_alignment",
+        command=["git", "merge", "--no-edit", f"origin/{base_branch}"],
+        validation_command=validation_command or latest_repo_validation_command(repo),
+        no_auto_conflict_resolution_after_sync=no_auto_conflict_resolution_after_sync,
+    )
+    result["merge_conflict_result"] = conflict_result
+    after_commit = parse_head_commit(repo)
+    result["alignment_changed_commit"] = bool(before_commit and after_commit and before_commit != after_commit)
+    if conflict_result.get("merge_conflicts_detected"):
+        conflicted_files = conflict_result.get("conflicted_files") or []
+        if conflicted_files and not ok and not sync_reason:
+            sync_reason = "pre-publish base alignment blocked due to conflicted files: " + ", ".join(conflicted_files[:10])
+    if not ok:
+        result["alignment_result"] = "blocked"
+        result["alignment_block_reason"] = sync_reason or str(conflict_result.get("blocked_reason") or "pre-publish base alignment failed")
+        validation_after_merge = str(conflict_result.get("validation_result_after_merge") or "not_run")
+        result["validation_result_after_alignment"] = validation_after_merge
+        return result
+    if result["alignment_changed_commit"]:
+        validation_record = ensure_validation_record_for_current_commit(
+            repo,
+            validation_command=validation_command or latest_repo_validation_command(repo),
+        )
+        result["validation_rerun_after_alignment"] = True
+        result["validation_record_result"] = validation_record
+        result["validation_result_after_alignment"] = str(validation_record.get("validation_result") or "blocked")
+        if not validation_record.get("ok"):
+            result["alignment_result"] = "blocked"
+            result["alignment_block_reason"] = (
+                validation_record.get("reason")
+                or "pre-publish base alignment changed the branch, but validation did not succeed"
+            )
+            return result
+    else:
+        validation_after_merge = str(conflict_result.get("validation_result_after_merge") or "not_run")
+        result["validation_result_after_alignment"] = validation_after_merge
+    result["alignment_result"] = "success"
+    return result
+
+
 def sync_local_main_after_merge(repo: Path) -> tuple[bool, str]:
     current_branch = current_git_branch(repo)
     code, output = run_subprocess(["git", "rev-parse", "--verify", "main"], repo)
@@ -8216,6 +8339,44 @@ def publish_validated_run(
         result["current_publish_candidate_commit"] = commit_sha
         set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
 
+    base_branch, existing_pr_url = resolve_prepublish_base_branch(repo, branch_to_push, default_branch)
+    result["base_branch"] = base_branch
+    alignment = align_branch_with_base_before_publish(
+        repo,
+        branch=branch_to_push,
+        base_branch=base_branch,
+        validation_command=test_cmd,
+        no_auto_conflict_resolution_after_sync=CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC,
+    )
+    result["prepublish_base_alignment_attempted"] = bool(alignment.get("prepublish_base_alignment_attempted"))
+    result["branch_diverged"] = bool(alignment.get("branch_diverged"))
+    result["alignment_needed"] = bool(alignment.get("alignment_needed"))
+    result["alignment_result"] = str(alignment.get("alignment_result") or "not_needed")
+    result["alignment_changed_commit"] = bool(alignment.get("alignment_changed_commit"))
+    result["validation_rerun_after_alignment"] = bool(alignment.get("validation_rerun_after_alignment"))
+    result["alignment_block_reason"] = str(alignment.get("alignment_block_reason") or "")
+    if alignment.get("merge_conflict_result"):
+        result["merge_conflict_result"] = alignment.get("merge_conflict_result")
+    if existing_pr_url:
+        result["pr_url"] = existing_pr_url
+    if result["alignment_result"] == "blocked":
+        result["control_path"] = "blocked_alignment"
+        return finish("blocked", result["alignment_block_reason"] or "pre-publish base alignment blocked publish")
+    if result["alignment_changed_commit"]:
+        commit_sha = parse_head_commit(repo)
+        result["commit_sha"] = commit_sha
+        result["current_publish_candidate_commit"] = commit_sha
+        result["validation_state"] = "success"
+        result["validation_commit_match"] = True
+        result["last_validated_commit"] = commit_sha
+        result["current_commit"] = commit_sha
+        result["validation_age_seconds"] = 0
+        result["validation_reused"] = False
+        result["auto_revalidated"] = False
+        result["auto_revalidation_result"] = "not_needed"
+        set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=result.get("pr_url") or None)
+        result["actions"].append("aligned publish branch with base")
+
     if result["environment"].get("interactive"):
         if not prompt_yes_no(
             f"Push branch '{branch_to_push}' to origin?",
@@ -8581,6 +8742,14 @@ def run_post_success_publish(
     summary["previous_publish_branch"] = publish_result.get("previous_publish_branch") or ""
     summary["previous_pr_url"] = publish_result.get("previous_pr_url") or ""
     summary["previous_commit"] = publish_result.get("previous_commit") or ""
+    summary["base_branch"] = publish_result.get("base_branch") or ""
+    summary["prepublish_base_alignment_attempted"] = bool(publish_result.get("prepublish_base_alignment_attempted"))
+    summary["branch_diverged"] = bool(publish_result.get("branch_diverged"))
+    summary["alignment_needed"] = bool(publish_result.get("alignment_needed"))
+    summary["alignment_result"] = publish_result.get("alignment_result") or "not_needed"
+    summary["alignment_changed_commit"] = bool(publish_result.get("alignment_changed_commit"))
+    summary["validation_rerun_after_alignment"] = bool(publish_result.get("validation_rerun_after_alignment"))
+    summary["alignment_block_reason"] = publish_result.get("alignment_block_reason") or ""
     summary["final_workflow_result"] = publish_result.get("final_workflow_result") or summary.get("publish_result") or ""
     summary["pr_mergeable"] = publish_result.get("pr_mergeable") or "unknown"
     summary["pr_conflicts_detected"] = bool(publish_result.get("pr_conflicts_detected"))
@@ -8620,6 +8789,15 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"diff_files_detected: {summary.get('diff_files_detected') or []}")
     print(f"ignored_changes: {summary.get('ignored_changes') or []}")
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
+    print(f"base_branch: {summary.get('base_branch') or '(none)'}")
+    print(f"prepublish_base_alignment_attempted: {format_bool(summary.get('prepublish_base_alignment_attempted'))}")
+    print(f"branch_diverged: {format_bool(summary.get('branch_diverged'))}")
+    print(f"alignment_needed: {format_bool(summary.get('alignment_needed'))}")
+    print(f"alignment_result: {summary.get('alignment_result') or 'not_needed'}")
+    print(f"alignment_changed_commit: {format_bool(summary.get('alignment_changed_commit'))}")
+    print(f"validation_rerun_after_alignment: {format_bool(summary.get('validation_rerun_after_alignment'))}")
+    if summary.get("alignment_block_reason"):
+        print(f"alignment_block_reason: {summary.get('alignment_block_reason')}")
     if summary.get("publish_reason"):
         print(f"publish_reason: {summary['publish_reason']}")
     if summary.get("publish_detail_reason"):
@@ -8691,6 +8869,15 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"diff_files_detected: {publish_result.get('diff_files_detected') or []}")
     print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
+    print(f"base_branch: {publish_result.get('base_branch') or '(none)'}")
+    print(f"prepublish_base_alignment_attempted: {format_bool(publish_result.get('prepublish_base_alignment_attempted'))}")
+    print(f"branch_diverged: {format_bool(publish_result.get('branch_diverged'))}")
+    print(f"alignment_needed: {format_bool(publish_result.get('alignment_needed'))}")
+    print(f"alignment_result: {publish_result.get('alignment_result') or 'not_needed'}")
+    print(f"alignment_changed_commit: {format_bool(publish_result.get('alignment_changed_commit'))}")
+    print(f"validation_rerun_after_alignment: {format_bool(publish_result.get('validation_rerun_after_alignment'))}")
+    if publish_result.get("alignment_block_reason"):
+        print(f"alignment_block_reason: {publish_result.get('alignment_block_reason')}")
     print(f"validation_state: {publish_result.get('validation_state') or 'success'}")
     print(f"validation_commit_match: {format_bool(publish_result.get('validation_commit_match'))}")
     print(f"fingerprint_match: {format_bool(publish_result.get('fingerprint_match'))}")
@@ -11668,6 +11855,14 @@ def main():
             "previous_publish_branch": publish_result.get("previous_publish_branch") or "",
             "previous_pr_url": publish_result.get("previous_pr_url") or "",
             "previous_commit": publish_result.get("previous_commit") or "",
+            "base_branch": publish_result.get("base_branch") or "",
+            "prepublish_base_alignment_attempted": bool(publish_result.get("prepublish_base_alignment_attempted")),
+            "branch_diverged": bool(publish_result.get("branch_diverged")),
+            "alignment_needed": bool(publish_result.get("alignment_needed")),
+            "alignment_result": publish_result.get("alignment_result") or "not_needed",
+            "alignment_changed_commit": bool(publish_result.get("alignment_changed_commit")),
+            "validation_rerun_after_alignment": bool(publish_result.get("validation_rerun_after_alignment")),
+            "alignment_block_reason": publish_result.get("alignment_block_reason") or "",
             "final_workflow_result": publish_result.get("final_workflow_result") or ((publish_result.get("final") or {}).get("status") or "failed"),
             "pr_mergeable": publish_result.get("pr_mergeable") or "unknown",
             "pr_conflicts_detected": bool(publish_result.get("pr_conflicts_detected")),

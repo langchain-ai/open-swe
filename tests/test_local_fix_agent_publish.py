@@ -2162,6 +2162,10 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
         if command == ["git", "add", "-A"]:
             return 0, ""
         if command == ["git", "diff", "--cached", "--quiet"]:
@@ -2178,12 +2182,14 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
 
     assert result["published"] is True
     assert result["summary_status"] == "staged current repo state"
-    assert commands[:4] == [
+    assert commands[:3] == [
         ["git", "add", "-A"],
         ["git", "diff", "--cached", "--quiet"],
         ["git", "commit", "-m", "chore: publish current repo state"],
-        ["git", "push", "-u", "origin", "feature"],
     ]
+    assert ["git", "fetch", "origin", "main"] in commands
+    assert ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"] in commands
+    assert ["git", "push", "-u", "origin", "feature"] in commands
 
 
 def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2239,6 +2245,10 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
         if command == ["git", "add", "-A"]:
             return 0, ""
         if command == ["git", "diff", "--cached", "--quiet"]:
@@ -2255,12 +2265,14 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
 
     assert result["published"] is True
     assert result["working_tree"]["has_untracked"] is True
-    assert commands[:4] == [
+    assert commands[:3] == [
         ["git", "add", "-A"],
         ["git", "diff", "--cached", "--quiet"],
         ["git", "commit", "-m", "chore: publish current repo state"],
-        ["git", "push", "-u", "origin", "feature"],
     ]
+    assert ["git", "fetch", "origin", "main"] in commands
+    assert ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"] in commands
+    assert ["git", "push", "-u", "origin", "feature"] in commands
 
 
 def test_publish_current_does_not_reference_specific_files(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2360,6 +2372,10 @@ def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pyte
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
         if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
             return 0, ""
         if command[:2] == ["git", "commit"]:
@@ -3361,6 +3377,140 @@ def test_locally_verify_pr_mergeability_executes_merge_probe(monkeypatch: pytest
     assert ["git", "merge", "--abort"] in commands
 
 
+def test_align_branch_with_base_before_publish_already_aligned(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "3 0\n"
+        raise AssertionError(command)
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.align_branch_with_base_before_publish(
+        repo,
+        branch="feature",
+        base_branch="main",
+        validation_command="pytest -q",
+    )
+
+    assert result["prepublish_base_alignment_attempted"] is False
+    assert result["alignment_needed"] is False
+    assert result["alignment_result"] == "not_needed"
+    assert result["validation_rerun_after_alignment"] is False
+
+
+def test_align_branch_with_base_before_publish_merges_and_reruns_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    commits = iter(["abc123", "def456"])
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: next(commits))
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            True,
+            "",
+            {"merge_conflicts_detected": False, "merge_result": "not_needed", "validation_result_after_merge": "not_run"},
+        ),
+    )
+    monkeypatch.setattr(
+        lfa,
+        "ensure_validation_record_for_current_commit",
+        lambda current_repo, validation_command="", target="": {
+            "ok": True,
+            "validation_record_created": True,
+            "validation_record_reused": False,
+            "validation_commit": "def456",
+            "validation_result": "success",
+            "validation_command": validation_command,
+            "reason": "validated",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "2 1\n"
+        raise AssertionError(command)
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.align_branch_with_base_before_publish(
+        repo,
+        branch="feature",
+        base_branch="main",
+        validation_command="pytest -q",
+    )
+
+    assert result["prepublish_base_alignment_attempted"] is True
+    assert result["branch_diverged"] is True
+    assert result["alignment_needed"] is True
+    assert result["alignment_result"] == "success"
+    assert result["alignment_changed_commit"] is True
+    assert result["validation_rerun_after_alignment"] is True
+    assert result["validation_result_after_alignment"] == "success"
+
+
+def test_align_branch_with_base_before_publish_blocks_on_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            False,
+            "overlapping code conflict with low merge confidence",
+            {
+                "merge_conflicts_detected": True,
+                "conflicted_files": ["local_fix_agent.py"],
+                "resolution_strategy_per_file": {"local_fix_agent.py": "blocked_ambiguous_code_conflict"},
+                "validation_result_after_merge": "not_run",
+                "merge_result": "blocked",
+                "blocked_reason": "overlapping code conflict with low merge confidence",
+            },
+        ),
+    )
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 2\n"
+        raise AssertionError(command)
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.align_branch_with_base_before_publish(
+        repo,
+        branch="feature",
+        base_branch="main",
+        validation_command="pytest -q",
+    )
+
+    assert result["prepublish_base_alignment_attempted"] is True
+    assert result["alignment_result"] == "blocked"
+    assert result["alignment_block_reason"] == "overlapping code conflict with low merge confidence"
+    assert result["merge_conflict_result"]["conflicted_files"] == ["local_fix_agent.py"]
+
+
 def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
@@ -3775,9 +3925,115 @@ def test_publish_success_reports_unknown_pr_mergeability(monkeypatch: pytest.Mon
     assert result["pr_mergeability_repair_attempted"] is False
 
 
+def test_publish_success_with_prepublish_alignment_avoids_postpublish_repair(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": "M  local_fix_agent.py",
+            "diff_output": "",
+            "diff_files_detected": ["local_fix_agent.py"],
+            "last_published_commit": baseline_commit,
+            "current_commit": current_commit,
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    commits = iter(["abc123", "abc123", "def456", "def456", "def456"])
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: next(commits))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "resolve_prepublish_base_branch", lambda current_repo, branch, default_branch: ("main", "https://github.com/octocat/demo/pull/9"))
+    monkeypatch.setattr(
+        lfa,
+        "align_branch_with_base_before_publish",
+        lambda current_repo, branch, base_branch, validation_command="", no_auto_conflict_resolution_after_sync=False: {
+            "prepublish_base_alignment_attempted": True,
+            "base_branch": base_branch,
+            "branch_diverged": True,
+            "alignment_needed": True,
+            "alignment_result": "success",
+            "alignment_changed_commit": True,
+            "validation_rerun_after_alignment": True,
+            "alignment_block_reason": "",
+            "merge_conflict_result": None,
+            "validation_result_after_alignment": "success",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "def456",
+            "remote_head": "def456",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "repair_pr_mergeability",
+        lambda current_repo, pr_url, validation_command="": (_ for _ in ()).throw(AssertionError("repair should not run")),
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] or command[:2] == ["git", "commit"] or command[:3] == ["git", "push", "-u"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, False, False, "", "", None, [], False
+    )
+
+    assert result["alignment_result"] == "success"
+    assert result["alignment_changed_commit"] is True
+    assert result["validation_rerun_after_alignment"] is True
+    assert result["pr_mergeability_repair_attempted"] is False
+    assert result["pr_mergeability_repair_result"] == "not_needed"
+
+
 def test_publish_current_repo_state_auto_creates_branch_from_main_in_non_interactive_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
+    branch_state = {"current": "main"}
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
     monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
     monkeypatch.setattr(
@@ -3787,7 +4043,7 @@ def test_publish_current_repo_state_auto_creates_branch_from_main_in_non_interac
     )
     monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
     monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
-    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: branch_state["current"])
     monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
     monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight(branch="main"))
     monkeypatch.setattr(lfa, "make_publish_branch_name", lambda: "fix-agent/auto-branch")
@@ -3835,6 +4091,7 @@ def test_publish_current_repo_state_auto_creates_branch_from_main_in_non_interac
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
         if command == ["git", "checkout", "-b", "fix-agent/auto-branch"]:
+            branch_state["current"] = "fix-agent/auto-branch"
             return 0, ""
         if command == ["git", "add", "-A"]:
             return 0, ""
