@@ -7144,6 +7144,9 @@ def make_publish_result() -> dict:
         "pr_requested": False,
         "pr_status": "not_requested",
         "pr_reason": "",
+        "pr_mergeable": "unknown",
+        "pr_conflicts_detected": False,
+        "pr_mergeability_reason": "",
         "triggered": False,
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
@@ -7449,6 +7452,52 @@ def detect_existing_pr(repo: Path, branch: str) -> str:
         if isinstance(first, dict):
             return str(first.get("url") or "").strip()
     return ""
+
+
+def verify_pr_mergeability(repo: Path, pr_url: str) -> dict:
+    if not pr_url.strip():
+        return {
+            "pr_mergeable": "unknown",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "no PR URL is available",
+        }
+    code, output = run_subprocess(
+        ["gh", "pr", "view", pr_url, "--json", "mergeable,mergeStateStatus"],
+        repo,
+    )
+    if code != 0:
+        return {
+            "pr_mergeable": "unknown",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": f"PR mergeability could not be verified: {output.strip()}",
+        }
+    try:
+        data = json.loads(output or "{}")
+    except json.JSONDecodeError:
+        return {
+            "pr_mergeable": "unknown",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "PR mergeability could not be parsed from gh output",
+        }
+    mergeable_raw = str(data.get("mergeable") or "").strip().upper()
+    merge_state = str(data.get("mergeStateStatus") or "").strip().upper()
+    conflicts = mergeable_raw == "CONFLICTING" or merge_state in {"DIRTY", "CONFLICTING"}
+    if mergeable_raw in {"MERGEABLE", "CONFLICTING", "UNKNOWN"}:
+        mergeable = "true" if mergeable_raw == "MERGEABLE" else "false" if mergeable_raw == "CONFLICTING" else "unknown"
+    elif isinstance(data.get("mergeable"), bool):
+        mergeable = "true" if bool(data.get("mergeable")) else "false"
+    else:
+        mergeable = "unknown"
+    reason = ""
+    if conflicts:
+        reason = f"PR has merge conflicts against its base branch ({merge_state or mergeable_raw or 'unknown'})"
+    elif mergeable == "unknown":
+        reason = f"PR mergeability is not yet known ({merge_state or mergeable_raw or 'unknown'})"
+    return {
+        "pr_mergeable": mergeable,
+        "pr_conflicts_detected": conflicts,
+        "pr_mergeability_reason": reason,
+    }
 
 
 def can_auto_merge_publish_result(result: dict) -> tuple[bool, str]:
@@ -8090,6 +8139,12 @@ def publish_validated_run(
         if result["pr_status"] == "not_requested":
             result["pr_status"] = "failed"
 
+    if pr_url:
+        mergeability = verify_pr_mergeability(repo, pr_url)
+        result["pr_mergeable"] = mergeability.get("pr_mergeable") or "unknown"
+        result["pr_conflicts_detected"] = bool(mergeability.get("pr_conflicts_detected"))
+        result["pr_mergeability_reason"] = str(mergeability.get("pr_mergeability_reason") or "")
+
     set_publish_final(result, "success", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=pr_url or None)
     return finish("success")
 
@@ -8324,6 +8379,9 @@ def run_post_success_publish(
     summary["previous_publish_branch"] = publish_result.get("previous_publish_branch") or ""
     summary["previous_pr_url"] = publish_result.get("previous_pr_url") or ""
     summary["previous_commit"] = publish_result.get("previous_commit") or ""
+    summary["pr_mergeable"] = publish_result.get("pr_mergeable") or "unknown"
+    summary["pr_conflicts_detected"] = bool(publish_result.get("pr_conflicts_detected"))
+    summary["pr_mergeability_reason"] = publish_result.get("pr_mergeability_reason") or ""
     return summary
 
 
@@ -8364,6 +8422,10 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"pr_created_or_reused: {format_bool(summary.get('pr_created_or_reused'))}")
     print(f"pr_merged: {format_bool(summary.get('pr_merged'))}")
     print(f"local_main_synced: {format_bool(summary.get('local_main_synced'))}")
+    print(f"pr_mergeable: {summary.get('pr_mergeable') or 'unknown'}")
+    print(f"pr_conflicts_detected: {format_bool(summary.get('pr_conflicts_detected'))}")
+    if summary.get("pr_mergeability_reason"):
+        print(f"pr_mergeability_reason: {summary.get('pr_mergeability_reason')}")
 
 
 def print_publish_summary(publish_result: dict) -> None:
@@ -8460,6 +8522,10 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"sync_verified: {bool(verification.get('synced'))}")
     print(f"pr_requested: {bool(publish_result.get('pr_requested'))}")
     print(f"pr_status: {publish_result.get('pr_status') or 'not_requested'}")
+    print(f"pr_mergeable: {publish_result.get('pr_mergeable') or 'unknown'}")
+    print(f"pr_conflicts_detected: {format_bool(publish_result.get('pr_conflicts_detected'))}")
+    if publish_result.get("pr_mergeability_reason"):
+        print(f"pr_mergeability_reason: {publish_result['pr_mergeability_reason']}")
     if publish_result.get("pr_reason"):
         print(f"pr_reason: {publish_result['pr_reason']}")
     if publish_result.get("publish_scope") == "current_repo_state":
