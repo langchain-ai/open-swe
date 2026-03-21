@@ -3235,7 +3235,7 @@ def test_publish_success_reports_mergeable_pr(monkeypatch: pytest.MonkeyPatch) -
     assert result["pr_conflicts_detected"] is False
 
 
-def test_publish_success_reports_conflicting_pr(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
     monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
@@ -3300,6 +3300,21 @@ def test_publish_success_reports_conflicting_pr(monkeypatch: pytest.MonkeyPatch)
     )
     monkeypatch.setattr(
         lfa,
+        "repair_pr_mergeability",
+        lambda current_repo, pr_url, validation_command="": {
+            "attempted": True,
+            "result": "success",
+            "reason": "",
+            "mergeability": {
+                "pr_mergeable": "true",
+                "pr_conflicts_detected": False,
+                "pr_mergeability_reason": "",
+            },
+            "merge_conflict_result": None,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
         "run_subprocess",
         lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] or command[:2] == ["git", "commit"] or command[:3] == ["git", "push", "-u"] else (0, ""),
     )
@@ -3309,10 +3324,223 @@ def test_publish_success_reports_conflicting_pr(monkeypatch: pytest.MonkeyPatch)
     )
 
     assert result["final"]["status"] == "success"
+    assert result["final_workflow_result"] == "success"
     assert result["pr_url"] == "https://github.com/octocat/demo/pull/8"
-    assert result["pr_mergeable"] == "false"
-    assert result["pr_conflicts_detected"] is True
-    assert "merge conflicts" in result["pr_mergeability_reason"]
+    assert result["pr_mergeable"] == "true"
+    assert result["pr_conflicts_detected"] is False
+    assert result["pr_mergeability_repair_attempted"] is True
+    assert result["pr_mergeability_repair_result"] == "success"
+
+
+def test_publish_success_conflicting_pr_auto_repair_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": "M  local_fix_agent.py",
+            "diff_output": "",
+            "diff_files_detected": ["local_fix_agent.py"],
+            "last_published_commit": baseline_commit,
+            "current_commit": current_commit,
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "https://github.com/octocat/demo/pull/8")
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "false",
+            "pr_conflicts_detected": True,
+            "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "repair_pr_mergeability",
+        lambda current_repo, pr_url, validation_command="": {
+            "attempted": True,
+            "result": "blocked",
+            "reason": "config conflict is not clearly compatible",
+            "mergeability": {
+                "pr_mergeable": "false",
+                "pr_conflicts_detected": True,
+                "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+            },
+            "merge_conflict_result": {
+                "merge_conflicts_detected": True,
+                "conflicted_files": ["settings.json"],
+                "resolution_strategy_per_file": {"settings.json": "blocked_ambiguous_config_conflict"},
+                "validation_result_after_merge": "not_run",
+                "merge_result": "blocked",
+                "blocked_reason": "config conflict is not clearly compatible",
+                "sync_operation_attempted": True,
+                "sync_operation": "pr_mergeability_repair",
+                "conflict_source": "pr_mergeability_repair",
+                "auto_conflict_resolution_attempted": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] or command[:2] == ["git", "commit"] or command[:3] == ["git", "push", "-u"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, False, False, "", "", None, [], False
+    )
+
+    assert result["final"]["status"] == "success"
+    assert result["final_workflow_result"] == "blocked"
+    assert result["pr_mergeability_repair_attempted"] is True
+    assert result["pr_mergeability_repair_result"] == "blocked"
+    assert result["reason"] == "config conflict is not clearly compatible"
+    assert result["merge_conflict_result"]["conflicted_files"] == ["settings.json"]
+
+
+def test_publish_success_conflicting_pr_validation_failure_after_repair_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": "M  local_fix_agent.py",
+            "diff_output": "",
+            "diff_files_detected": ["local_fix_agent.py"],
+            "last_published_commit": baseline_commit,
+            "current_commit": current_commit,
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_git_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": True,
+            "has_untracked": False,
+        },
+    )
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "https://github.com/octocat/demo/pull/10")
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "false",
+            "pr_conflicts_detected": True,
+            "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "repair_pr_mergeability",
+        lambda current_repo, pr_url, validation_command="": {
+            "attempted": True,
+            "result": "blocked",
+            "reason": "validation failed after merge resolution",
+            "mergeability": {
+                "pr_mergeable": "false",
+                "pr_conflicts_detected": True,
+                "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+            },
+            "merge_conflict_result": {
+                "merge_conflicts_detected": True,
+                "conflicted_files": ["app.py"],
+                "resolution_strategy_per_file": {"app.py": "structured_merge_combined_logic"},
+                "validation_result_after_merge": "failed",
+                "merge_result": "blocked",
+                "blocked_reason": "validation failed after merge resolution",
+                "sync_operation_attempted": True,
+                "sync_operation": "pr_mergeability_repair",
+                "conflict_source": "pr_mergeability_repair",
+                "auto_conflict_resolution_attempted": True,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command == ["git", "add", "-A", "--", "local_fix_agent.py"] or command[:2] == ["git", "commit"] or command[:3] == ["git", "push", "-u"] else (0, ""),
+    )
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, False, False, "", "", None, [], False
+    )
+
+    assert result["final_workflow_result"] == "blocked"
+    assert result["pr_mergeability_repair_result"] == "blocked"
+    assert result["reason"] == "validation failed after merge resolution"
 
 
 def test_publish_success_reports_unknown_pr_mergeability(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3393,6 +3621,7 @@ def test_publish_success_reports_unknown_pr_mergeability(monkeypatch: pytest.Mon
     assert result["pr_mergeable"] == "unknown"
     assert result["pr_conflicts_detected"] is False
     assert "not yet known" in result["pr_mergeability_reason"]
+    assert result["pr_mergeability_repair_attempted"] is False
 
 
 def test_publish_current_repo_state_auto_creates_branch_from_main_in_non_interactive_mode(monkeypatch: pytest.MonkeyPatch) -> None:
