@@ -4,6 +4,7 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.git_provider import GITLAB, get_git_provider, get_noreply_email
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
@@ -18,6 +19,7 @@ from ..utils.github import (
     git_push,
 )
 from ..utils.github_token import get_github_token
+from ..utils.gitlab import create_gitlab_mr, get_gitlab_default_branch
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
 
@@ -164,7 +166,7 @@ def commit_and_open_pr(
             sandbox_backend,
             repo_dir,
             "open-swe[bot]",
-            "open-swe@users.noreply.github.com",
+            get_noreply_email(),
         )
         git_add_all(sandbox_backend, repo_dir)
 
@@ -195,23 +197,44 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(get_github_default_branch(repo_owner, repo_name, github_token))
-        pr_url, _pr_number, pr_existing = asyncio.run(
-            create_github_pr(
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                github_token=github_token,
-                title=title,
-                head_branch=target_branch,
-                base_branch=base_branch,
-                body=body,
+        provider = get_git_provider()
+        base_branch_override = configurable.get("base_branch")
+        if provider == GITLAB:
+            base_branch = base_branch_override or asyncio.run(
+                get_gitlab_default_branch(repo_owner, repo_name, github_token)
             )
-        )
+            pr_url, _pr_number, pr_existing = asyncio.run(
+                create_gitlab_mr(
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    gitlab_token=github_token,
+                    title=title,
+                    head_branch=target_branch,
+                    base_branch=base_branch,
+                    body=body,
+                )
+            )
+        else:
+            base_branch = base_branch_override or asyncio.run(
+                get_github_default_branch(repo_owner, repo_name, github_token)
+            )
+            pr_url, _pr_number, pr_existing = asyncio.run(
+                create_github_pr(
+                    repo_owner=repo_owner,
+                    repo_name=repo_name,
+                    github_token=github_token,
+                    title=title,
+                    head_branch=target_branch,
+                    base_branch=base_branch,
+                    body=body,
+                )
+            )
 
         if not pr_url:
+            mr_label = "GitLab MR" if provider == GITLAB else "GitHub PR"
             return {
                 "success": False,
-                "error": "Failed to create GitHub PR",
+                "error": f"Failed to create {mr_label}",
                 "pr_url": None,
                 "pr_existing": False,
             }

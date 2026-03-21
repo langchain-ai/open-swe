@@ -35,6 +35,7 @@ from .utils.github_comments import (
 )
 from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.gitlab import fetch_gitlab_issue_notes, post_gitlab_note
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -59,6 +60,8 @@ app = FastAPI()
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
+GITLAB_WEBHOOK_SECRET = os.environ.get("GITLAB_WEBHOOK_SECRET", "")
+GITLAB_DEFAULT_BASE_BRANCH = os.environ.get("GITLAB_DEFAULT_BASE_BRANCH", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
 DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
@@ -1520,3 +1523,229 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
     return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+
+
+# ── GitLab webhook ────────────────────────────────────────────────────────────
+
+_GITLAB_BOT_NOTE_PREFIXES = (
+    "🔐 **GitHub Authentication Required**",
+    "✅ **Pull Request Created**",
+    "✅ **Merge Request Created**",
+    "✅ **Pull Request Updated**",
+    "✅ **Merge Request Updated**",
+    "**Pull Request Created**",
+    "**Merge Request Created**",
+    "**Pull Request Updated**",
+    "**Merge Request Updated**",
+    "🤖 **Agent Response**",
+    "❌ **Agent Error**",
+)
+
+
+def _verify_gitlab_webhook_token(request_token: str) -> bool:
+    """Verify the X-Gitlab-Token header against GITLAB_WEBHOOK_SECRET.
+
+    If GITLAB_WEBHOOK_SECRET is not configured, all requests are allowed
+    (useful for local development).
+    """
+    secret = os.environ.get("GITLAB_WEBHOOK_SECRET", "")
+    if not secret:
+        return True
+    return hmac.compare_digest(request_token, secret)
+
+
+def generate_thread_id_from_gitlab_issue(issue_id: str) -> str:
+    """Generate a deterministic thread ID from a GitLab issue ID."""
+    hash_bytes = hashlib.sha256(f"gitlab-issue:{issue_id}".encode()).hexdigest()
+    return (
+        f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-"
+        f"{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+    )
+
+
+async def process_gitlab_issue(
+    issue_id: str,
+    issue_iid: int,
+    title: str,
+    description: str,
+    issue_url: str,
+    repo_owner: str,
+    repo_name: str,
+    triggering_note: str,
+    triggering_username: str,
+) -> None:
+    """Process a GitLab issue note mentioning @openswe.
+
+    Creates (or resumes) a LangGraph thread and run for the issue.
+    """
+    gitlab_token = os.environ.get("GITLAB_TOKEN", "")
+    repo_config = {"owner": repo_owner, "name": repo_name}
+
+    logger.info(
+        "Processing GitLab issue iid=%s (%s) for repo %s/%s",
+        issue_iid,
+        issue_id,
+        repo_owner,
+        repo_name,
+    )
+
+    thread_id = generate_thread_id_from_gitlab_issue(issue_id)
+
+    # Post an eyes emoji reaction by adding a quick note, then delete it — not possible
+    # via GitLab REST API in a lightweight way, so we skip reaction and just log.
+    # (GitLab award emoji API exists but adds unnecessary complexity here.)
+
+    # Fetch all notes for context
+    notes: list[dict] = []
+    if gitlab_token:
+        notes = await fetch_gitlab_issue_notes(repo_owner, repo_name, gitlab_token, issue_iid)
+
+    comments_text = ""
+    if notes:
+        relevant_notes = [
+            n for n in notes
+            if not n.get("system", False)
+            and not any(
+                (n.get("body") or "").startswith(prefix)
+                for prefix in _GITLAB_BOT_NOTE_PREFIXES
+            )
+        ]
+        if relevant_notes:
+            comments_text = "\n\n## Comments:\n"
+            for note in relevant_notes:
+                author = note.get("author", {}).get("username", "user")
+                body = note.get("body", "")
+                comments_text += f"\n**{author}:** {body}\n"
+
+    prompt = (
+        f"Please work on the following GitLab issue:\n\n"
+        f"## Title: {title}\n\n"
+        f"## Triggered by: {triggering_username}\n\n"
+        f"## Issue URL: {issue_url}\n\n"
+        f"## Description:\n{description or 'No description'}\n"
+        f"{comments_text}\n\n"
+        f"## Latest comment from {triggering_username}:\n{triggering_note}\n\n"
+        f"Please analyze this issue and implement the necessary changes. "
+        f"When you're done, use commit_and_open_pr to commit and open a Merge Request."
+    )
+
+    configurable: dict[str, Any] = {
+        "repo": repo_config,
+        "source": "gitlab",
+        "gitlab_issue": {
+            "id": issue_id,
+            "iid": issue_iid,
+            "title": title,
+            "url": issue_url,
+        },
+    }
+    gitlab_default_base_branch = os.environ.get("GITLAB_DEFAULT_BASE_BRANCH", "")
+    if gitlab_default_base_branch:
+        configurable["base_branch"] = gitlab_default_base_branch
+
+    thread_active = await is_thread_active(thread_id)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+
+    if thread_active:
+        logger.info("Thread %s is busy, queuing GitLab issue message", thread_id)
+        await queue_message_for_thread(thread_id, prompt)
+        return
+
+    logger.info("Creating LangGraph run for thread %s from GitLab issue", thread_id)
+    await langgraph_client.runs.create(
+        thread_id,
+        "agent",
+        input={"messages": [{"role": "user", "content": prompt}]},
+        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        if_not_exists="create",
+    )
+    logger.info("LangGraph run created for thread %s from GitLab issue", thread_id)
+
+    # Post acknowledgement note on the issue
+    if gitlab_token:
+        ack = f"👀 Open SWE agent is working on this issue. Thread: `{thread_id}`\n\n[LangGraph]({LANGGRAPH_URL})"
+        await post_gitlab_note(
+            repo_owner, repo_name, gitlab_token, issue_iid, ack
+        )
+
+
+@app.post("/webhooks/gitlab")
+async def gitlab_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
+    """Handle GitLab webhooks for issue note (comment) events that mention @openswe."""
+    body = await request.body()
+
+    token = request.headers.get("X-Gitlab-Token", "")
+    if not _verify_gitlab_webhook_token(token):
+        logger.warning("Invalid GitLab webhook token")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse GitLab webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    object_kind = payload.get("object_kind", "")
+
+    # We only handle note events on issues
+    if object_kind != "note":
+        logger.debug("Ignoring GitLab webhook: object_kind=%s", object_kind)
+        return {"status": "ignored", "reason": f"object_kind '{object_kind}' is not 'note'"}
+
+    obj = payload.get("object_attributes", {})
+    noteable_type = obj.get("noteable_type", "")
+    if noteable_type != "Issue":
+        logger.debug("Ignoring GitLab note on %s (not an issue)", noteable_type)
+        return {"status": "ignored", "reason": f"Note is on {noteable_type}, not Issue"}
+
+    note_body = obj.get("note", "")
+    if "@openswe" not in note_body.lower():
+        logger.debug("Ignoring GitLab note: no @openswe mention")
+        return {"status": "ignored", "reason": "Note does not mention @openswe"}
+
+    # Skip our own bot notes
+    if any(note_body.startswith(prefix) for prefix in _GITLAB_BOT_NOTE_PREFIXES):
+        logger.debug("Ignoring GitLab note: it's our own bot message")
+        return {"status": "ignored", "reason": "Note is our own bot message"}
+
+    project = payload.get("project", {})
+    path_with_namespace = project.get("path_with_namespace", "")
+    if "/" not in path_with_namespace:
+        logger.warning("Cannot parse repo owner/name from path_with_namespace: %s", path_with_namespace)
+        return {"status": "error", "message": "Cannot parse project path"}
+
+    repo_owner, repo_name = path_with_namespace.split("/", 1)
+
+    issue = payload.get("issue", {})
+    issue_id = str(issue.get("id", ""))
+    issue_iid = issue.get("iid")
+    if not issue_id or not issue_iid:
+        logger.warning("Missing GitLab issue id/iid in webhook payload")
+        return {"status": "error", "message": "Missing issue id/iid"}
+
+    title = issue.get("title", "No title")
+    description = issue.get("description") or "No description"
+    issue_url = issue.get("url", "") or obj.get("url", "")
+
+    user = payload.get("user", {})
+    triggering_username = user.get("username", "unknown")
+
+    logger.info(
+        "Accepted GitLab webhook: issue iid=%s, repo=%s/%s, user=%s",
+        issue_iid, repo_owner, repo_name, triggering_username,
+    )
+    background_tasks.add_task(
+        process_gitlab_issue,
+        issue_id=issue_id,
+        issue_iid=issue_iid,
+        title=title,
+        description=description,
+        issue_url=issue_url,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        triggering_note=note_body,
+        triggering_username=triggering_username,
+    )
+    return {"status": "accepted", "message": "Processing GitLab issue note"}
