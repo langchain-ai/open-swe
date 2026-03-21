@@ -7147,6 +7147,9 @@ def make_publish_result() -> dict:
         "pr_mergeable": "unknown",
         "pr_conflicts_detected": False,
         "pr_mergeability_reason": "",
+        "pr_mergeability_source": "github",
+        "pr_mergeable_final": "unknown",
+        "pr_conflicts_detected_final": False,
         "pr_mergeability_repair_attempted": False,
         "pr_mergeability_repair_result": "not_needed",
         "final_workflow_result": "",
@@ -7518,6 +7521,81 @@ def verify_pr_mergeability(repo: Path, pr_url: str) -> dict:
     }
 
 
+def locally_verify_pr_mergeability(repo: Path, base_branch: str, head_branch: str) -> dict:
+    result = {
+        "pr_mergeability_source": "local_fallback",
+        "pr_mergeable_final": "unknown",
+        "pr_conflicts_detected_final": False,
+        "pr_mergeability_reason": "",
+    }
+    if not base_branch or not head_branch:
+        result["pr_mergeability_reason"] = "local PR mergeability verification requires both base and head branches"
+        return result
+    original_branch = current_git_branch(repo)
+    switched = False
+    if original_branch != head_branch:
+        code, output = run_subprocess(["git", "checkout", head_branch], repo)
+        if code != 0:
+            result["pr_mergeability_reason"] = f"local PR mergeability verification failed during checkout: {output}"
+            return result
+        switched = True
+    try:
+        fetch_code, fetch_output = run_subprocess(["git", "fetch", "origin"], repo)
+        if fetch_code != 0:
+            result["pr_mergeability_reason"] = f"local PR mergeability verification failed during fetch: {fetch_output}"
+            return result
+        merge_code, merge_output = run_subprocess(["git", "merge", f"origin/{base_branch}", "--no-commit", "--no-ff"], repo)
+        conflicted = conflicted_git_paths(repo)
+        if merge_code == 0 and not conflicted:
+            result["pr_mergeable_final"] = "true"
+            result["pr_conflicts_detected_final"] = False
+            return result
+        if conflicted:
+            result["pr_mergeable_final"] = "false"
+            result["pr_conflicts_detected_final"] = True
+            result["pr_mergeability_reason"] = (
+                f"local mergeability check found conflicts against origin/{base_branch}: "
+                + ", ".join(conflicted[:10])
+            )
+            return result
+        result["pr_mergeability_reason"] = (
+            merge_output.strip()
+            or f"local PR mergeability verification failed while merging origin/{base_branch}"
+        )
+        return result
+    finally:
+        sequence_state = detect_git_sequence_state(repo)
+        if sequence_state == "merge":
+            run_subprocess(["git", "merge", "--abort"], repo)
+        if switched:
+            run_subprocess(["git", "checkout", original_branch], repo)
+
+
+def resolve_pr_mergeability(repo: Path, pr_url: str) -> dict:
+    github = verify_pr_mergeability(repo, pr_url)
+    result = {
+        "pr_mergeable": github.get("pr_mergeable") or "unknown",
+        "pr_conflicts_detected": bool(github.get("pr_conflicts_detected")),
+        "pr_mergeability_reason": str(github.get("pr_mergeability_reason") or ""),
+        "pr_base_branch": str(github.get("pr_base_branch") or ""),
+        "pr_head_branch": str(github.get("pr_head_branch") or ""),
+        "pr_mergeability_source": "github",
+        "pr_mergeable_final": github.get("pr_mergeable") or "unknown",
+        "pr_conflicts_detected_final": bool(github.get("pr_conflicts_detected")),
+    }
+    base_branch = result["pr_base_branch"]
+    head_branch = result["pr_head_branch"]
+    if base_branch and head_branch and result["pr_mergeable"] in {"unknown", "true"}:
+        local = locally_verify_pr_mergeability(repo, base_branch, head_branch)
+        if local.get("pr_mergeable_final") in {"true", "false"}:
+            result["pr_mergeability_source"] = "local_fallback"
+            result["pr_mergeable_final"] = local.get("pr_mergeable_final") or result["pr_mergeable_final"]
+            result["pr_conflicts_detected_final"] = bool(local.get("pr_conflicts_detected_final"))
+            if local.get("pr_mergeability_reason"):
+                result["pr_mergeability_reason"] = str(local.get("pr_mergeability_reason"))
+    return result
+
+
 def can_auto_merge_publish_result(result: dict) -> tuple[bool, str]:
     target = result.get("target") or {}
     preflight = result.get("preflight") or {}
@@ -7553,14 +7631,14 @@ def repair_pr_mergeability(repo: Path, pr_url: str, validation_command: str = ""
         "attempted": False,
         "result": "not_needed",
         "reason": "",
-        "mergeability": verify_pr_mergeability(repo, pr_url),
+        "mergeability": resolve_pr_mergeability(repo, pr_url),
         "merge_conflict_result": None,
     }
     initial = result["mergeability"]
     if not pr_url.strip():
         result["reason"] = "no PR URL is available"
         return result
-    if not initial.get("pr_conflicts_detected"):
+    if not initial.get("pr_conflicts_detected_final"):
         return result
     base_branch = str(initial.get("pr_base_branch") or "").strip()
     head_branch = str(initial.get("pr_head_branch") or "").strip()
@@ -7611,9 +7689,9 @@ def repair_pr_mergeability(repo: Path, pr_url: str, validation_command: str = ""
         result["result"] = "blocked"
         result["reason"] = f"PR mergeability repair blocked because pushing the repaired PR branch failed: {push_output}"
         return result
-    refreshed = verify_pr_mergeability(repo, pr_url)
+    refreshed = resolve_pr_mergeability(repo, pr_url)
     result["mergeability"] = refreshed
-    if refreshed.get("pr_conflicts_detected"):
+    if refreshed.get("pr_conflicts_detected_final"):
         result["result"] = "blocked"
         result["reason"] = str(refreshed.get("pr_mergeability_reason") or "PR still has merge conflicts after repair attempt")
         return result
@@ -8233,11 +8311,14 @@ def publish_validated_run(
             result["pr_status"] = "failed"
 
     if pr_url:
-        mergeability = verify_pr_mergeability(repo, pr_url)
+        mergeability = resolve_pr_mergeability(repo, pr_url)
         result["pr_mergeable"] = mergeability.get("pr_mergeable") or "unknown"
         result["pr_conflicts_detected"] = bool(mergeability.get("pr_conflicts_detected"))
         result["pr_mergeability_reason"] = str(mergeability.get("pr_mergeability_reason") or "")
-        if result["pr_conflicts_detected"]:
+        result["pr_mergeability_source"] = str(mergeability.get("pr_mergeability_source") or "github")
+        result["pr_mergeable_final"] = mergeability.get("pr_mergeable_final") or result["pr_mergeable"]
+        result["pr_conflicts_detected_final"] = bool(mergeability.get("pr_conflicts_detected_final"))
+        if result["pr_conflicts_detected_final"]:
             repair = repair_pr_mergeability(repo, pr_url, validation_command=test_cmd)
             result["pr_mergeability_repair_attempted"] = bool(repair.get("attempted"))
             result["pr_mergeability_repair_result"] = str(repair.get("result") or "blocked")
@@ -8246,6 +8327,9 @@ def publish_validated_run(
                 result["pr_mergeable"] = refreshed.get("pr_mergeable") or result["pr_mergeable"]
                 result["pr_conflicts_detected"] = bool(refreshed.get("pr_conflicts_detected"))
                 result["pr_mergeability_reason"] = str(refreshed.get("pr_mergeability_reason") or result["pr_mergeability_reason"] or "")
+                result["pr_mergeability_source"] = str(refreshed.get("pr_mergeability_source") or result["pr_mergeability_source"] or "github")
+                result["pr_mergeable_final"] = refreshed.get("pr_mergeable_final") or result["pr_mergeable_final"] or result["pr_mergeable"]
+                result["pr_conflicts_detected_final"] = bool(refreshed.get("pr_conflicts_detected_final"))
             if repair.get("merge_conflict_result"):
                 result["merge_conflict_result"] = repair.get("merge_conflict_result")
             if repair.get("result") != "success":
@@ -8501,6 +8585,9 @@ def run_post_success_publish(
     summary["pr_mergeable"] = publish_result.get("pr_mergeable") or "unknown"
     summary["pr_conflicts_detected"] = bool(publish_result.get("pr_conflicts_detected"))
     summary["pr_mergeability_reason"] = publish_result.get("pr_mergeability_reason") or ""
+    summary["pr_mergeability_source"] = publish_result.get("pr_mergeability_source") or "github"
+    summary["pr_mergeable_final"] = publish_result.get("pr_mergeable_final") or summary["pr_mergeable"]
+    summary["pr_conflicts_detected_final"] = bool(publish_result.get("pr_conflicts_detected_final"))
     summary["pr_mergeability_repair_attempted"] = bool(publish_result.get("pr_mergeability_repair_attempted"))
     summary["pr_mergeability_repair_result"] = publish_result.get("pr_mergeability_repair_result") or "not_needed"
     return summary
@@ -8545,6 +8632,9 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"local_main_synced: {format_bool(summary.get('local_main_synced'))}")
     print(f"pr_mergeable: {summary.get('pr_mergeable') or 'unknown'}")
     print(f"pr_conflicts_detected: {format_bool(summary.get('pr_conflicts_detected'))}")
+    print(f"pr_mergeability_source: {summary.get('pr_mergeability_source') or 'github'}")
+    print(f"pr_mergeable_final: {summary.get('pr_mergeable_final') or summary.get('pr_mergeable') or 'unknown'}")
+    print(f"pr_conflicts_detected_final: {format_bool(summary.get('pr_conflicts_detected_final'))}")
     print(f"pr_mergeability_repair_attempted: {format_bool(summary.get('pr_mergeability_repair_attempted'))}")
     print(f"pr_mergeability_repair_result: {summary.get('pr_mergeability_repair_result') or 'not_needed'}")
     print(f"final_workflow_result: {summary.get('final_workflow_result') or summary.get('publish_result') or 'failed'}")
@@ -8648,6 +8738,9 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"pr_status: {publish_result.get('pr_status') or 'not_requested'}")
     print(f"pr_mergeable: {publish_result.get('pr_mergeable') or 'unknown'}")
     print(f"pr_conflicts_detected: {format_bool(publish_result.get('pr_conflicts_detected'))}")
+    print(f"pr_mergeability_source: {publish_result.get('pr_mergeability_source') or 'github'}")
+    print(f"pr_mergeable_final: {publish_result.get('pr_mergeable_final') or publish_result.get('pr_mergeable') or 'unknown'}")
+    print(f"pr_conflicts_detected_final: {format_bool(publish_result.get('pr_conflicts_detected_final'))}")
     print(f"pr_mergeability_repair_attempted: {format_bool(publish_result.get('pr_mergeability_repair_attempted'))}")
     print(f"pr_mergeability_repair_result: {publish_result.get('pr_mergeability_repair_result') or 'not_needed'}")
     print(f"final_workflow_result: {publish_result.get('final_workflow_result') or final.get('status') or 'failed'}")

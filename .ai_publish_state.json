@@ -2,9 +2,9 @@
   "fork_created": false,
   "fork_repo": "",
   "last_branch": "agent-run-1774070482",
-  "last_commit": "62259bb35a438c311588d94e39dc1e6231749bb6",
+  "last_commit": "4c74e19f4559b066eac79c8c603077ddbc5542d4",
   "last_control_path": "direct_origin_push",
-  "last_meaningful_content_fingerprint": "8af8952609d32c5c7a19defc9a21dbf9f5bd60cf55ce5c26183fa16bed60d76d",
+  "last_meaningful_content_fingerprint": "5064f6dc503774c145231f5962b43060329612a9dc5c5bd19db2d42b9deeaf15",
   "last_meaningful_paths": [
     "local_fix_agent.py",
     "tests/test_local_fix_agent_publish.py"
@@ -13,11 +13,11 @@
   "last_publish_mode": "current_repo_state",
   "last_repo": "tophat1720/open-swe",
   "last_success": true,
-  "last_success_timestamp": 1774084904,
+  "last_success_timestamp": 1774085318,
   "last_target": "origin",
   "last_target_repo": "tophat1720/open-swe",
   "last_transport": "ssh",
   "origin_url": "git@github.com:tophat1720/open-swe.git",
   "ssh_confirmed": true,
-  "timestamp": 1774084904
+  "timestamp": 1774085318
 }

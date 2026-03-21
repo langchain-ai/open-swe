@@ -3212,11 +3212,14 @@ def test_publish_success_reports_mergeable_pr(monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(
         lfa,
-        "verify_pr_mergeability",
+        "resolve_pr_mergeability",
         lambda current_repo, pr_url: {
             "pr_mergeable": "true",
             "pr_conflicts_detected": False,
             "pr_mergeability_reason": "",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
         },
     )
     monkeypatch.setattr(
@@ -3233,6 +3236,129 @@ def test_publish_success_reports_mergeable_pr(monkeypatch: pytest.MonkeyPatch) -
     assert result["pr_url"] == "https://github.com/octocat/demo/pull/7"
     assert result["pr_mergeable"] == "true"
     assert result["pr_conflicts_detected"] is False
+    assert result["pr_mergeable_final"] == "true"
+    assert result["pr_conflicts_detected_final"] is False
+
+
+def test_resolve_pr_mergeability_unknown_uses_local_fallback_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "unknown",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "PR mergeability is not yet known (UNKNOWN)",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "locally_verify_pr_mergeability",
+        lambda current_repo, base_branch, head_branch: {
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+            "pr_mergeability_reason": "",
+        },
+    )
+
+    result = lfa.resolve_pr_mergeability(Path("/tmp/repo"), "https://github.com/octocat/demo/pull/11")
+
+    assert result["pr_mergeable"] == "unknown"
+    assert result["pr_mergeability_source"] == "local_fallback"
+    assert result["pr_mergeable_final"] == "true"
+    assert result["pr_conflicts_detected_final"] is False
+
+
+def test_resolve_pr_mergeability_unknown_uses_local_fallback_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "unknown",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "PR mergeability is not yet known (UNKNOWN)",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "locally_verify_pr_mergeability",
+        lambda current_repo, base_branch, head_branch: {
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "false",
+            "pr_conflicts_detected_final": True,
+            "pr_mergeability_reason": "local mergeability check found conflicts against origin/main: app.py",
+        },
+    )
+
+    result = lfa.resolve_pr_mergeability(Path("/tmp/repo"), "https://github.com/octocat/demo/pull/12")
+
+    assert result["pr_mergeability_source"] == "local_fallback"
+    assert result["pr_mergeable_final"] == "false"
+    assert result["pr_conflicts_detected_final"] is True
+
+
+def test_resolve_pr_mergeability_local_conflict_overrides_github_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "locally_verify_pr_mergeability",
+        lambda current_repo, base_branch, head_branch: {
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "false",
+            "pr_conflicts_detected_final": True,
+            "pr_mergeability_reason": "local mergeability check found conflicts against origin/main: app.py",
+        },
+    )
+
+    result = lfa.resolve_pr_mergeability(Path("/tmp/repo"), "https://github.com/octocat/demo/pull/13")
+
+    assert result["pr_mergeable"] == "true"
+    assert result["pr_mergeability_source"] == "local_fallback"
+    assert result["pr_mergeable_final"] == "false"
+    assert result["pr_conflicts_detected_final"] is True
+
+
+def test_locally_verify_pr_mergeability_executes_merge_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_git_sequence_state", lambda current_repo: "merge")
+    monkeypatch.setattr(lfa, "conflicted_git_paths", lambda current_repo: [])
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        commands.append(command)
+        if command == ["git", "fetch", "origin"]:
+            return 0, ""
+        if command == ["git", "merge", "origin/main", "--no-commit", "--no-ff"]:
+            return 0, ""
+        if command == ["git", "merge", "--abort"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.locally_verify_pr_mergeability(Path("/tmp/repo"), "main", "feature")
+
+    assert result["pr_mergeability_source"] == "local_fallback"
+    assert result["pr_mergeable_final"] == "true"
+    assert result["pr_conflicts_detected_final"] is False
+    assert ["git", "fetch", "origin"] in commands
+    assert ["git", "merge", "origin/main", "--no-commit", "--no-ff"] in commands
+    assert ["git", "merge", "--abort"] in commands
 
 
 def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3291,11 +3417,14 @@ def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest
     )
     monkeypatch.setattr(
         lfa,
-        "verify_pr_mergeability",
+        "resolve_pr_mergeability",
         lambda current_repo, pr_url: {
             "pr_mergeable": "false",
             "pr_conflicts_detected": True,
             "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "false",
+            "pr_conflicts_detected_final": True,
         },
     )
     monkeypatch.setattr(
@@ -3309,6 +3438,9 @@ def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest
                 "pr_mergeable": "true",
                 "pr_conflicts_detected": False,
                 "pr_mergeability_reason": "",
+                "pr_mergeability_source": "github",
+                "pr_mergeable_final": "true",
+                "pr_conflicts_detected_final": False,
             },
             "merge_conflict_result": None,
         },
@@ -3328,6 +3460,8 @@ def test_publish_success_conflicting_pr_auto_repair_succeeds(monkeypatch: pytest
     assert result["pr_url"] == "https://github.com/octocat/demo/pull/8"
     assert result["pr_mergeable"] == "true"
     assert result["pr_conflicts_detected"] is False
+    assert result["pr_mergeable_final"] == "true"
+    assert result["pr_conflicts_detected_final"] is False
     assert result["pr_mergeability_repair_attempted"] is True
     assert result["pr_mergeability_repair_result"] == "success"
 
@@ -3388,11 +3522,14 @@ def test_publish_success_conflicting_pr_auto_repair_blocks(monkeypatch: pytest.M
     )
     monkeypatch.setattr(
         lfa,
-        "verify_pr_mergeability",
+        "resolve_pr_mergeability",
         lambda current_repo, pr_url: {
             "pr_mergeable": "false",
             "pr_conflicts_detected": True,
             "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "false",
+            "pr_conflicts_detected_final": True,
         },
     )
     monkeypatch.setattr(
@@ -3406,6 +3543,9 @@ def test_publish_success_conflicting_pr_auto_repair_blocks(monkeypatch: pytest.M
                 "pr_mergeable": "false",
                 "pr_conflicts_detected": True,
                 "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+                "pr_mergeability_source": "github",
+                "pr_mergeable_final": "false",
+                "pr_conflicts_detected_final": True,
             },
             "merge_conflict_result": {
                 "merge_conflicts_detected": True,
@@ -3495,11 +3635,14 @@ def test_publish_success_conflicting_pr_validation_failure_after_repair_blocks(m
     )
     monkeypatch.setattr(
         lfa,
-        "verify_pr_mergeability",
+        "resolve_pr_mergeability",
         lambda current_repo, pr_url: {
             "pr_mergeable": "false",
             "pr_conflicts_detected": True,
             "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "false",
+            "pr_conflicts_detected_final": True,
         },
     )
     monkeypatch.setattr(
@@ -3513,6 +3656,9 @@ def test_publish_success_conflicting_pr_validation_failure_after_repair_blocks(m
                 "pr_mergeable": "false",
                 "pr_conflicts_detected": True,
                 "pr_mergeability_reason": "PR has merge conflicts against its base branch (DIRTY)",
+                "pr_mergeability_source": "github",
+                "pr_mergeable_final": "false",
+                "pr_conflicts_detected_final": True,
             },
             "merge_conflict_result": {
                 "merge_conflicts_detected": True,
@@ -3599,11 +3745,14 @@ def test_publish_success_reports_unknown_pr_mergeability(monkeypatch: pytest.Mon
     )
     monkeypatch.setattr(
         lfa,
-        "verify_pr_mergeability",
+        "resolve_pr_mergeability",
         lambda current_repo, pr_url: {
             "pr_mergeable": "unknown",
             "pr_conflicts_detected": False,
             "pr_mergeability_reason": "PR mergeability is not yet known (UNKNOWN)",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "unknown",
+            "pr_conflicts_detected_final": False,
         },
     )
     monkeypatch.setattr(
@@ -3620,6 +3769,8 @@ def test_publish_success_reports_unknown_pr_mergeability(monkeypatch: pytest.Mon
     assert result["pr_url"] == "https://github.com/octocat/demo/pull/9"
     assert result["pr_mergeable"] == "unknown"
     assert result["pr_conflicts_detected"] is False
+    assert result["pr_mergeable_final"] == "unknown"
+    assert result["pr_conflicts_detected_final"] is False
     assert "not yet known" in result["pr_mergeability_reason"]
     assert result["pr_mergeability_repair_attempted"] is False
 
