@@ -18,7 +18,7 @@ jobs:
     name: Agent lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
         run: uv sync --locked --extra dev
@@ -29,7 +29,7 @@ jobs:
     name: Agent format check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
         run: uv sync --locked --extra dev
@@ -40,7 +40,7 @@ jobs:
     name: Agent unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v4
       - name: Install dependencies
         run: uv sync --locked --extra dev
