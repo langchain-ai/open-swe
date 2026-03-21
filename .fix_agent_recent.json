@@ -3,22 +3,6 @@
     {
       "artifact_dir": "",
       "blocked_reason": "",
-      "commit_hash": "3ca606ff23e7461512768b73712644eadd33a302",
-      "confidence": "finalization-prepare",
-      "files_changed": [],
-      "meaningful_content_fingerprint": "",
-      "mode": "finalization-prepare",
-      "repo": "/home/tom/ai/open-swe",
-      "success": true,
-      "target": "",
-      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
-      "ts": 1774083233,
-      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py",
-      "validation_result": "success"
-    },
-    {
-      "artifact_dir": "",
-      "blocked_reason": "",
       "commit_hash": "e790cce58cf6ca94dd65023a132ffc1225adbffe",
       "confidence": "finalization-prepare",
       "files_changed": [],
@@ -157,6 +141,22 @@
       "target": "",
       "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py /home/tom/ai/open-swe/tests/test_local_fix_agent_docs.py -q",
       "ts": 1774107019,
+      "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py /home/tom/ai/open-swe/tests/test_local_fix_agent_docs.py -q",
+      "validation_result": "success"
+    },
+    {
+      "artifact_dir": "",
+      "blocked_reason": "",
+      "commit_hash": "01d23f939830b77c8e91a895df439786dbf54418",
+      "confidence": "finalization-prepare",
+      "files_changed": [],
+      "meaningful_content_fingerprint": "adb96b1f5d7482763e4840db1f9faed5b730cc25fb3ca917cba637c27f4c22a1",
+      "mode": "finalization-prepare",
+      "repo": "/home/tom/ai/open-swe",
+      "success": true,
+      "target": "",
+      "test_cmd": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py /home/tom/ai/open-swe/tests/test_local_fix_agent_docs.py -q",
+      "ts": 1774110449,
       "validation_command": "pytest /home/tom/ai/open-swe/tests/test_local_fix_agent_publish.py /home/tom/ai/open-swe/tests/test_local_fix_agent_pattern_eval.py /home/tom/ai/open-swe/tests/test_local_fix_agent_script_validation.py /home/tom/ai/open-swe/tests/test_local_fix_agent_docs.py -q",
       "validation_result": "success"
     }

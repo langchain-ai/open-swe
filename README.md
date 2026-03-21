@@ -35,14 +35,16 @@ Open SWE is the open-source version of this pattern. Built on [LangGraph](https:
 
 This repo includes a standalone operator workflow built around [`local_fix_agent.py`](./local_fix_agent.py).
 
-Use it when you want the agent to:
+### What Do I Do?
 
-- make a focused fix
-- validate the current repo state
-- run the canonical finalizer
-- update docs if needed
-- publish the result
-- verify that the PR is mergeable
+Most operators only need two commands:
+
+```bash
+fixit pytest tests/test_x.py -q
+./scripts/fixpublish.sh
+```
+
+Use the first command to make and validate a focused fix. Use the second command to run the required finalizer.
 
 The normal flow is:
 
@@ -55,17 +57,29 @@ fix or edit
 -> verify PR mergeability
 ```
 
-The most common commands are:
-
-```bash
-fixit pytest tests/test_x.py -q
-./scripts/fixpublish.sh
-```
-
 Important rule:
 
 - a passing validation command is not completion
 - the run is only complete after the finalizer runs
+
+### What Is Happening?
+
+The system is doing one thing at a time:
+
+- `fixit ...`
+  reproduces the problem, edits the repo, and validates the current state
+- `./scripts/fixpublish.sh`
+  confirms validation state, updates docs if needed, aligns the branch with its base branch when safe, publishes, and verifies PR mergeability
+
+### Why Did It Do That?
+
+The tool separates validation from finalization on purpose:
+
+- validation proves a repo state
+- finalization decides whether that validated state is publishable
+- docs updates, branch alignment, and PR mergeability checks happen in finalization so they stay in one safety-gated path
+
+### How Is It Implemented?
 
 The canonical finalizer is:
 
@@ -85,12 +99,14 @@ That command is responsible for:
 
 If you intentionally want to stop after validation and skip finalization, use `--no-finalize`. That is treated as incomplete, not successful.
 
-If you are new to the operator workflow, read these next:
+If you want the operator workflow first, read these next:
 
 - [Runbook](./docs/RUNBOOK.md)
 - [Troubleshooting](./docs/TROUBLESHOOTING.md)
 
-## Architecture
+If you want architecture and implementation details, continue below.
+
+## Architecture And Deep Internals
 
 Open SWE makes the same core architectural decisions as the best internal coding agents. Here's how it maps to the patterns described in [this overview](https://x.com/kishan_dahya/status/2028971339974099317) of Stripe's Minions, Ramp's Inspect, and Coinbase's Cloudbot:
 
@@ -207,17 +223,22 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 `local_fix_agent.py` is the operator-facing repair and publish tool in this repo.
 
-### What it does
+### What Do I Do?
 
-It helps an operator move from a failing command to a reviewed publish result with explicit safety gates:
+Use this tool when you want a narrow repair loop and a single required finalizer:
 
-- fix code or docs
-- validate the current repo state
-- finalize through the canonical finalizer
-- publish or noop
-- verify PR mergeability
+- run a focused validation command
+- let the agent edit the repo
+- finalize through [`./scripts/fixpublish.sh`](./scripts/fixpublish.sh)
 
-### Mental model
+Most common commands:
+
+```bash
+fixit pytest tests/test_x.py -q
+./scripts/fixpublish.sh
+```
+
+### What Is Happening?
 
 Think about the system in three parts:
 
@@ -228,7 +249,7 @@ Think about the system in three parts:
 - the operator:
   chooses the validation target, reviews the output, and handles truly ambiguous blocked states
 
-### Common tasks
+### Common Tasks
 
 Fix and validate locally:
 
@@ -273,7 +294,15 @@ python local_fix_agent.py --list-patterns
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
 ```
 
-### Key concepts
+### Why Did It Do That?
+
+The workflow is intentionally split:
+
+- validation proves a specific commit or repo state
+- finalization decides whether that state should publish, noop, or block
+- docs handling, base-branch alignment, and PR mergeability checks happen in the finalizer so they stay in the same safety path
+
+### Key Concepts
 
 - Validation record:
   a persisted record that a specific commit was validated successfully
@@ -290,7 +319,7 @@ python local_fix_agent.py --list-patterns --filter-state curated_trusted
 - Blocked:
   the tool stopped because continuing automatically would be unsafe or too ambiguous
 
-### Safety rules
+### Safety Rules
 
 - validation success is not completion
 - finalization is required
@@ -302,7 +331,18 @@ python local_fix_agent.py --list-patterns --filter-state curated_trusted
 - PR mergeability is checked again after publish as a safety net
 - learning uses trust-gated pattern sources; raw candidates do not become trusted automatically
 
-### Where to go next
+### How Is It Implemented?
+
+The implementation details live lower in this file and in the dedicated docs:
+
+- [Runbook](./docs/RUNBOOK.md) for the normal workflow
+- [Troubleshooting](./docs/TROUBLESHOOTING.md) for blocked states and recovery
+- [Operator Guide](./docs/README.md) for broader CLI and workflow detail
+- [Remote Mode](./docs/REMOTE_MODE.md) for SSH-backed execution
+- [`scripts/fixpublish.sh`](./scripts/fixpublish.sh) for the canonical finalizer
+- [`scripts/publishcurrent.sh`](./scripts/publishcurrent.sh) for direct publish-current mode
+
+### Where To Go Next
 
 - [Runbook](./docs/RUNBOOK.md) for the normal workflow
 - [Troubleshooting](./docs/TROUBLESHOOTING.md) for blocked states and recovery

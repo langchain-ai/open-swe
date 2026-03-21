@@ -2,16 +2,31 @@
 
 This page is for operator-visible failures, blocked states, and recovery steps.
 
-## Start With The Outcome
+## What Do I Do?
 
-When a run ends, ask these questions in order:
+When a run ends in a way you do not expect, check these in order:
 
 1. Did validation succeed?
 2. Did the finalizer run?
 3. Did publish succeed, noop, or block?
 4. Is the PR mergeable?
 
-That order matters because the system separates these stages on purpose.
+The canonical finalizer is:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+If a run ends after validation but before finalization, that is incomplete, not successful. The explicit incomplete outcome is reported as `finalization skipped (incomplete)`.
+
+## What Is Happening?
+
+The system separates outcomes on purpose:
+
+- validation proves a repo state
+- finalization decides whether that state should publish
+- publish says whether the branch was pushed or reused successfully
+- PR mergeability says whether that published branch is actually ready to merge
 
 ## High-Level Meanings
 
@@ -37,16 +52,15 @@ The finalizer decided there was nothing meaningful to publish. This usually mean
 
 Blocked means the tool stopped intentionally because continuing would be unsafe or too ambiguous.
 
-## Canonical Finalizer
+## Why Did It Do That?
 
-The required finalization command is:
+Common reasons the workflow stops or surprises you:
 
-```bash
-./scripts/fixpublish.sh
-```
-
-If a run ends after validation but before finalization, that is incomplete, not successful.
-The explicit incomplete outcome is reported as `finalization skipped (incomplete)`.
+- there is no successful validation record for the current commit
+- docs refresh changed the repo and revalidation failed
+- pre-publish base alignment hit a conflict or validation failure
+- publish succeeded but PR mergeability still needed to be verified
+- merge conflict resolution was too ambiguous to automate safely
 
 ## Common Publish Questions
 
@@ -67,7 +81,7 @@ Most common explanations:
 - there were no meaningful changes since the last successful published state
 - the current publishable state already matches a previous successful publish state
 
-### Why did publish succeed but the workflow still not feel “done”?
+### Why did publish succeed but the workflow still not feel done?
 
 Because publish success and PR mergeability are different checks. A branch can be pushed successfully while the PR still needs mergeability verification or repair.
 
@@ -234,6 +248,15 @@ Canonical finalizer:
 ```bash
 ./scripts/fixpublish.sh
 ```
+
+## How Is It Implemented?
+
+If you need the deeper model:
+
+- validation records are commit-linked
+- docs updates happen inside the finalizer
+- pre-publish base alignment tries to make the branch mergeable before publish
+- post-publish PR mergeability verification is the final safety net
 
 ## How To Think About This System When It Fails
 

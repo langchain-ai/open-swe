@@ -2,7 +2,34 @@
 
 This is the main operator doc for `local_fix_agent.py`.
 
-## Overview
+## What Do I Do?
+
+Most runs look like this:
+
+```bash
+fixit pytest tests/test_x.py -q
+./scripts/fixpublish.sh
+```
+
+Use the first command to make and validate a focused fix. Use the second command to run the required finalizer.
+
+Normal flow:
+
+```text
+fix or edit
+-> validate
+-> finalize
+-> update docs if needed
+-> publish
+-> verify PR mergeability
+```
+
+If you remember only one rule, remember this:
+
+- validation success is not completion
+- the run is complete only after `./scripts/fixpublish.sh`
+
+## What Is Happening?
 
 The tool is built for a simple operating model:
 
@@ -35,7 +62,7 @@ Use this split when reasoning about the system:
 - The operator:
   chooses the target command, reviews the result, and resolves only truly ambiguous blocked states
 
-## Common Workflows
+## Common Tasks
 
 ### 1. Fix a failing script or test
 
@@ -59,16 +86,7 @@ Use this when you want the agent to inspect and plan without committing a publis
 ./scripts/fixpublish.sh
 ```
 
-This is the normal final step after successful changes. The finalizer:
-
-- ensures a commit-linked validation record exists
-- checks meaningful changes
-- detects docs drift
-- updates docs if needed
-- reruns validation if docs or code changed
-- aligns the branch with its base branch when safe
-- publishes
-- verifies PR mergeability
+This is the normal final step after successful changes.
 
 ### 4. Publish the current repo state directly
 
@@ -103,6 +121,16 @@ python local_fix_agent.py --list-patterns
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
 python local_fix_agent.py --list-pattern-sources
 ```
+
+## Why Did It Do That?
+
+The workflow is split on purpose:
+
+- validation proves a specific repo state
+- finalization decides whether that validated state should publish, noop, or block
+- docs updates happen inside finalization so published code and docs stay together
+- branch alignment happens before publish so the PR is more likely to be mergeable immediately
+- PR mergeability is checked again after publish as a final safety net
 
 ## Key Concepts
 
@@ -149,6 +177,20 @@ These are different from trust level. Promotion state describes where a source i
 - PR mergeability is checked after publish as a final safety net.
 - Ambiguous merge conflicts block instead of being guessed through.
 
+## Blocked States
+
+Blocked means the tool found a point where automatic continuation would be unsafe, misleading, or too ambiguous.
+
+Examples:
+
+- no reproducible validation command
+- merge conflict that cannot be safely auto-resolved
+- publish blocked by validation
+- docs refresh changed the repo state and revalidation failed
+- branch alignment introduced conflicts that could not be resolved safely
+
+Blocked is not a crash. It is an intentional stop with evidence and next steps.
+
 ## Common Commands
 
 Local repair:
@@ -187,20 +229,6 @@ List trusted patterns:
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
 ```
 
-## How To Think About Blocked States
-
-Blocked means the tool found a point where automatic continuation would be unsafe, misleading, or too ambiguous.
-
-Examples:
-
-- no reproducible validation command
-- merge conflict that cannot be safely auto-resolved
-- publish blocked by validation
-- docs refresh changed the repo state and revalidation failed
-- branch alignment introduced conflicts that could not be resolved safely
-
-Blocked is not a crash. It is an intentional stop with evidence and next steps.
-
 ## Operator Checklist
 
 After a successful run:
@@ -210,6 +238,10 @@ After a successful run:
 - run a broader suite if the change deserves it
 - run the finalizer if it has not already run
 - read the publish result and PR mergeability result separately
+
+## How Is It Implemented?
+
+The operator mental model above is the part you should carry around day to day. The details below matter when you need to explain a surprising result or debug the workflow.
 
 ## Advanced Notes
 
