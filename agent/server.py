@@ -362,6 +362,24 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         msg = "Cannot proceed: no repo was cloned. Set 'repo.owner' and 'repo.name' in the configurable config"
         raise RuntimeError(msg)
 
+    branch_name = get_config().get("metadata", {}).get("branch_name")
+    if branch_name:
+        logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)
+        loop = asyncio.get_event_loop()
+        safe_repo_dir = shlex.quote(repo_dir)
+        safe_branch = shlex.quote(branch_name)
+        checkout_result = await loop.run_in_executor(
+            None,
+            sandbox_backend.execute,
+            f"cd {safe_repo_dir} && git fetch origin && git checkout {safe_branch}",
+        )
+        if checkout_result.exit_code != 0:
+            logger.warning(
+                "Failed to checkout branch '%s': %s",
+                branch_name,
+                checkout_result.output[:200] if checkout_result.output else "",
+            )
+
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
