@@ -165,7 +165,18 @@ python local_fix_agent.py --continue
 
 ### Headless daily publish
 
-Validated runs publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
+Successful code changes are not complete until the canonical finalizer runs:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+That finalizer is the only required post-success path. It handles meaningful-change detection, docs drift detection and docs updates, revalidation, validation gating, and the real publish/noop/blocked result.
+It also creates or reuses a commit-linked validation record through the agent before publish, so finalization does not stop on a missing validation record for the current commit.
+
+Validated runs now finalize automatically after successful validation unless you explicitly opt out with `--no-finalize`. `--no-publish-on-success` remains as a compatibility alias for stopping before the publish/finalization step.
+
+If you skip finalization, the run is incomplete rather than successful because the canonical finalizer did not run.
 
 Publish now includes a pre-publish docs gate after validation succeeds and before commit/push/PR work starts. The tool detects whether operator docs need to change, updates the affected docs in the same change set when possible, reruns validation, and blocks publish if docs refresh or revalidation fails.
 
@@ -178,14 +189,13 @@ Run the agent and publish the validated result:
 ```bash
 python local_fix_agent.py
 python local_fix_agent.py --last
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish-pr
 ./scripts/fixpublish.sh
 ```
 
-Disable automatic publish for a validated run:
+Intentionally stop before finalization:
 
 ```bash
-python local_fix_agent.py --no-publish-on-success
+python local_fix_agent.py --no-finalize
 ```
 
 Publish the current repo or branch state directly:
@@ -200,7 +210,7 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
 
 - changes into the repo root
 - sets `AI_PUBLISH_ALLOW_FORK=1`
-- runs a validated publish flow with PR creation enabled
+- runs the canonical guarded finalization flow by publishing the current validated repo state with PR creation enabled
 
 `publishcurrent.sh`:
 
@@ -227,6 +237,13 @@ Typical commands:
 python local_fix_agent.py --import-pattern-files /path/to/example.py
 python local_fix_agent.py --list-pattern-sources
 python local_fix_agent.py --list-patterns
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-patterns --filter-tag proxy --search retry --output json
+python local_fix_agent.py --promote-pattern <pattern-id>
+python local_fix_agent.py --demote-pattern <pattern-id>
+python local_fix_agent.py --promote-source <source-id-or-path>
+python local_fix_agent.py --demote-source <source-id-or-path>
+python local_fix_agent.py --forget-source <source-id-or-path>
 python local_fix_agent.py --relearn-patterns
 python local_fix_agent.py --reset-pattern-repo
 ```
@@ -238,6 +255,35 @@ python local_fix_agent.py --script /path/to/foo.py --add-to-training
 ```
 
 Imported scripts are sanitized before storage so obvious secrets and credential-bearing literals are replaced with placeholders while preserving the surrounding code structure and engineering patterns.
+
+Pattern inspection is read-only. `--list-patterns` reports each pattern id, source file, source origin, trust level, promotion state, validation result, and promotion reason. Promotion states:
+
+- `candidate`: sanitized candidate retained outside curated learning
+- `curated_experimental`: curated but weakly trusted
+- `curated_trusted`: curated and strongly trusted
+
+Useful filters:
+
+```bash
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-patterns --filter-tag cli
+python local_fix_agent.py --list-patterns --search retry --limit 5
+python local_fix_agent.py --list-pattern-sources --output json
+```
+
+Manual control commands:
+
+```bash
+python local_fix_agent.py --promote-pattern <pattern-id>
+python local_fix_agent.py --demote-pattern <pattern-id>
+python local_fix_agent.py --promote-source <source-id-or-path>
+python local_fix_agent.py --demote-source <source-id-or-path>
+python local_fix_agent.py --forget-source <source-id-or-path>
+python local_fix_agent.py --promote-pattern <pattern-id> --set-promotion-state curated_trusted
+python local_fix_agent.py --demote-source <source-id-or-path> --dry-run
+```
+
+Manual promotion/demotion is an override, not a replacement for the automatic trust gates. The agent records `promotion_method: manual` and keeps the reason visible in `--list-patterns`. Forgetting a source removes it from the active memory and source registry view; the sanitized file is left on disk unless you remove it separately.
 
 ### Resolve settings only
 

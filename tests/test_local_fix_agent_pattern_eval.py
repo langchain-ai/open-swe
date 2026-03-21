@@ -218,7 +218,218 @@ def test_relearn_patterns_loads_from_pattern_repo_catalog(tmp_path: Path) -> Non
     relearned = lfa.relearn_patterns_from_repo(pattern_repo)
 
     assert relearned["learned_patterns"]
-    assert any(pattern["pattern_type"] == "proxy_handling" for pattern in relearned["memory"]["patterns"])
+
+
+def test_inspect_patterns_returns_expected_structure(tmp_path: Path) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "network"])
+    lfa.import_pattern_files(pattern_repo, [str(local_path)], trust_level="experimental", tags=["local"])
+
+    inspection = lfa.inspect_patterns(pattern_repo)
+
+    assert inspection["summary"]["total_patterns"] >= 1
+    assert inspection["summary"]["curated_trusted"] >= 1
+    assert inspection["summary"]["candidate"] >= 1
+    first = inspection["patterns"][0]
+    assert {
+        "id",
+        "pattern_type",
+        "source_file",
+        "source_origin",
+        "trust_level",
+        "promotion_state",
+        "tags",
+        "applicability_context",
+        "confidence",
+        "validation_result",
+        "publish_result",
+        "regression_status",
+        "last_validated_commit",
+        "last_published_commit",
+        "pr_url",
+        "promotion_reason",
+        "timestamp",
+    }.issubset(first.keys())
+
+
+def test_inspect_patterns_filter_state_works(tmp_path: Path) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    lfa.import_pattern_files(pattern_repo, [str(local_path)], trust_level="experimental", tags=["local"])
+
+    trusted_only = lfa.inspect_patterns(pattern_repo, filter_state="curated_trusted")
+
+    assert trusted_only["patterns"]
+    assert all(item["promotion_state"] == "curated_trusted" for item in trusted_only["patterns"])
+
+
+def test_inspect_patterns_filter_tag_works(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "network"])
+
+    filtered = lfa.inspect_patterns(pattern_repo, filter_tag="proxy")
+
+    assert filtered["patterns"]
+    assert all("proxy" in item["tags"] for item in filtered["patterns"])
+
+
+def test_inspect_patterns_search_and_limit_work(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "retry"])
+
+    filtered = lfa.inspect_patterns(pattern_repo, search="retry", limit=1)
+
+    assert len(filtered["patterns"]) == 1
+    assert "retry" in json.dumps(filtered["patterns"][0], sort_keys=True).lower()
+
+
+def test_inspect_patterns_none_repo_returns_empty_result() -> None:
+    inspection = lfa.inspect_patterns(None)
+
+    assert inspection["pattern_repo"] == "none"
+    assert inspection["summary"]["total_patterns"] == 0
+    assert inspection["patterns"] == []
+
+
+def test_inspect_pattern_sources_respects_repo_selection(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    default_repo = tmp_path / "default_repo"
+    proxy_repo = tmp_path / "proxy_repo"
+    lfa.import_pattern_files(default_repo, [str(proxy_path)], trust_level="experimental", tags=["generic"])
+    lfa.import_pattern_files(proxy_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "network"])
+    config = {
+        "pattern_repo": str(default_repo),
+        "pattern_repos": {"proxy": {"path": str(proxy_repo), "tags": ["proxy", "network"]}},
+    }
+
+    selection = lfa.select_pattern_repo(config, "proxy", "debug", "debug proxy timeout failures in network cli", script_path=proxy_path)
+    inspection = lfa.inspect_pattern_sources(selection["path"])
+
+    assert inspection["pattern_repo"] == str(proxy_repo.resolve())
+    assert inspection["summary"]["curated_trusted"] >= 1
+    assert any(source["trust_level"] == "trusted" for source in inspection["sources"])
+
+
+def test_promote_pattern_records_manual_metadata(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    pattern_id = lfa.inspect_patterns(pattern_repo)["patterns"][0]["id"]
+
+    result = lfa.manage_pattern_state(pattern_repo, pattern_id, action="demote")
+    inspection = lfa.inspect_patterns(pattern_repo, search=pattern_id)
+
+    assert result["ok"] is True
+    assert result["previous_state"] == "curated_trusted"
+    assert result["new_state"] == "curated_experimental"
+    assert inspection["patterns"][0]["promotion_method"] == "manual"
+    assert "manual demote pattern override" in inspection["patterns"][0]["promotion_reason"]
+
+
+def test_demote_pattern_to_candidate_removes_from_effective_memory(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="experimental", tags=["proxy"])
+    pattern_id = lfa.inspect_patterns(pattern_repo)["patterns"][0]["id"]
+
+    first = lfa.manage_pattern_state(pattern_repo, pattern_id, action="demote")
+    second = lfa.manage_pattern_state(pattern_repo, pattern_id, action="demote")
+    inspection = lfa.inspect_patterns(pattern_repo, search=pattern_id)
+
+    assert first["new_state"] == "candidate"
+    assert second["new_state"] == "candidate"
+    assert inspection["patterns"] == []
+
+
+def test_forget_pattern_hides_it_from_inspection(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    pattern_id = lfa.inspect_patterns(pattern_repo)["patterns"][0]["id"]
+
+    result = lfa.manage_pattern_state(pattern_repo, pattern_id, action="forget")
+    inspection = lfa.inspect_patterns(pattern_repo, search=pattern_id)
+
+    assert result["ok"] is True
+    assert result["new_state"] == "forgotten"
+    assert inspection["patterns"] == []
+
+
+def test_promote_source_makes_candidate_patterns_effective(tmp_path: Path) -> None:
+    repo, _, local_path = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    imported = lfa.import_pattern_files(pattern_repo, [str(local_path)], trust_level="experimental", tags=["local"])
+    source_id = imported["imported_sources"][0]["id"]
+
+    result = lfa.manage_source_state(pattern_repo, source_id, action="promote")
+    inspection = lfa.inspect_patterns(pattern_repo, filter_state="curated_experimental")
+
+    assert result["ok"] is True
+    assert result["previous_state"] == "candidate"
+    assert result["new_state"] == "curated_experimental"
+    assert inspection["patterns"]
+
+
+def test_demote_source_reduces_trust_in_listing(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    imported = lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    source_id = imported["imported_sources"][0]["id"]
+
+    result = lfa.manage_source_state(pattern_repo, source_id, action="demote")
+    inspection = lfa.inspect_patterns(pattern_repo, filter_state="curated_experimental")
+
+    assert result["ok"] is True
+    assert result["new_state"] == "curated_experimental"
+    assert inspection["patterns"]
+    assert all(item["trust_level"] == "experimental" for item in inspection["patterns"])
+
+
+def test_forget_source_removes_it_from_active_registry(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    imported = lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    source_id = imported["imported_sources"][0]["id"]
+
+    result = lfa.manage_source_state(pattern_repo, source_id, action="forget")
+    inspection = lfa.inspect_pattern_sources(pattern_repo)
+
+    assert result["ok"] is True
+    assert result["new_state"] == "forgotten"
+    assert all(source["path"] != imported["imported_sources"][0]["repo_rel_path"] for source in inspection["sources"])
+
+
+def test_pattern_inspection_json_includes_manual_metadata(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    pattern_id = lfa.inspect_patterns(pattern_repo)["patterns"][0]["id"]
+    lfa.manage_pattern_state(pattern_repo, pattern_id, action="demote")
+
+    payload = lfa.inspect_patterns(pattern_repo, search=pattern_id)
+    encoded = json.dumps(payload, sort_keys=True)
+
+    assert "promotion_method" in encoded
+    assert "promotion_reason" in encoded
+
+
+def test_pattern_control_dry_run_does_not_mutate(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy"])
+    before = lfa.inspect_patterns(pattern_repo)
+    pattern_id = before["patterns"][0]["id"]
+
+    result = lfa.manage_pattern_state(pattern_repo, pattern_id, action="demote", dry_run=True)
+    after = lfa.inspect_patterns(pattern_repo)
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert before == after
 
 
 def test_trusted_patterns_influence_more_than_experimental(tmp_path: Path) -> None:

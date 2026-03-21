@@ -182,11 +182,31 @@ python local_fix_agent.py --last
 python local_fix_agent.py --from-last-failure
 python local_fix_agent.py
 python local_fix_agent.py --last
-python local_fix_agent.py --no-publish-on-success
+python local_fix_agent.py --no-finalize
 python local_fix_agent.py --publish-only
 ```
 
-Validated runs now publish automatically after successful validation unless you opt out with `--no-publish-on-success`.
+Successful code changes are not considered complete until the canonical finalizer runs. The required finalization command is:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+That finalizer is the single guarded path for:
+
+- creating or reusing a commit-linked validation record through the agent
+- meaningful change detection
+- docs drift detection and docs updates
+- revalidation after docs/code changes
+- validation-to-publish gating
+- stale-validation auto-revalidation
+- real publish/noop/blocked reporting
+
+Validated runs now finalize automatically after successful validation unless you explicitly opt out with `--no-finalize`. `--no-publish-on-success` remains as a compatibility alias for stopping before publish/finalization.
+
+If you use `--no-finalize`, the run is treated as incomplete rather than successful because the canonical finalizer did not run.
+
+If the current commit does not already have a validation record, `./scripts/fixpublish.sh` first runs the agent in validation-record mode before the real publish/finalization step.
 
 Before a real publish attempt, the agent now runs a pre-publish docs check. It decides whether docs are required, which docs targets are affected, and whether the refresh mode is `patch`, `rewrite`, or `none`. If docs drift is detected, the tool updates docs before publish, reruns validation when it has a validation command or discovered validation plan, and blocks publish if the docs refresh or revalidation fails.
 
@@ -199,7 +219,6 @@ If publish noops because the current fingerprint matches a previous successful p
 Headless validated run with PR creation:
 
 ```bash
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish-pr
 ./scripts/fixpublish.sh
 ```
 
@@ -216,12 +235,34 @@ Private training repo for pattern learning:
 python local_fix_agent.py --import-pattern-files /path/to/example.py
 python local_fix_agent.py --list-pattern-sources
 python local_fix_agent.py --list-patterns
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-patterns --filter-tag proxy --search retry --output json
+python local_fix_agent.py --promote-pattern <pattern-id>
+python local_fix_agent.py --demote-source <source-id-or-path>
+python local_fix_agent.py --forget-source <source-id-or-path>
 python local_fix_agent.py --reset-pattern-repo
 ```
 
 The default private training repo lives at `~/.codex/memories/local_fix_agent_private_patterns`. The tool creates it automatically on first use and reuses it on later runs unless you explicitly reset it with `--reset-pattern-repo`.
 
 `--script /path/to/foo.py` uses script mode normally and does not add the script to training. To add a script to training, opt in explicitly with `--add-to-training`; the imported copy is sanitized before it is stored in the private training repo.
+
+Pattern inspection is read-only. `--list-patterns` shows what the agent currently trusts, the promotion state for each pattern source, validation status, tags, confidence, and the promotion reason. Promotion states mean:
+
+- `candidate`: sanitized candidate source exists but it has not been promoted into curated learning
+- `curated_experimental`: curated source is available, but it should influence normal runs weakly
+- `curated_trusted`: curated source is trusted and can strongly influence normal runs
+
+Use `--filter-state`, `--filter-tag`, and `--search` to narrow the list. Use `--output json` for automation.
+
+Manual controls are local overrides layered on top of the automatic curation flow:
+
+- `--promote-pattern` and `--demote-pattern` change one pattern at a time
+- `--promote-source`, `--demote-source`, and `--forget-source` apply to an entire source
+- `--set-trust` and `--set-promotion-state` let you override the automatic next step directly
+- `--dry-run` previews the change without mutating the repo
+
+Manual overrides are recorded as `promotion_method: manual`; they do not silently become automatic trust.
 
 ### Mental Model
 

@@ -4,9 +4,17 @@ This page is for operator-visible failures and blocked states.
 
 ## Publish-on-success default
 
-Validated runs now attempt the guarded validated-run publish flow automatically after `validation_result: success`.
+Validated runs are not complete until the canonical finalizer runs after `validation_result: success`.
 
-Use `--no-publish-on-success` when you want to stop after validation and skip publish.
+The canonical finalization command is:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+Use `--no-finalize` only when you intentionally want to stop after validation and skip the required finalization step. `--no-publish-on-success` remains as a compatibility alias.
+
+If you do that, the run reports `FINAL: validation succeeded, finalization skipped (incomplete)` instead of a successful completion.
 
 Known local state files such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and similar machine-local cache/state files are ignored when publish decides whether there is anything meaningful to publish.
 
@@ -175,6 +183,26 @@ What to do:
 - rerun with `--dry-run` if you are not already using it
 - narrow the test target
 - consider `--mode deep` only after narrowing the validation command
+
+## Inspect pattern training state
+
+Use the pattern inspection commands when you need to see what the agent currently trusts:
+
+```bash
+python local_fix_agent.py --list-patterns
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-patterns --output json
+python local_fix_agent.py --list-pattern-sources
+python local_fix_agent.py --demote-pattern <pattern-id> --dry-run
+```
+
+Meaning:
+
+- `candidate` entries are sanitized sources that have not been promoted into curated learning
+- `curated_experimental` entries are curated but weakly trusted
+- `curated_trusted` entries are curated and strongly trusted
+
+If a pattern or source is over-applied, use the manual control commands to demote or forget it, then rerun `--list-patterns` to verify the new effective state.
 
 ## Repeated stagnation
 

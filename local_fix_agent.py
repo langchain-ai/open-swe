@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Sequence
 from urllib.parse import urlparse
 
 MODEL = "qwen2.5-coder:14b"
@@ -29,6 +30,7 @@ MAX_SEARCH_OUTPUT_CHARS = 4000
 MEMORY_FILE_NAME = ".fix_agent_memory.json"
 SCRIPT_PATTERN_MEMORY_FILE_NAME = ".fix_agent_pattern_memory.json"
 SCRIPT_PATTERN_EFFECTIVENESS_FILE_NAME = ".fix_agent_pattern_effectiveness.json"
+SCRIPT_PATTERN_CONTROL_FILE_NAME = ".fix_agent_pattern_controls.json"
 PATTERN_EVAL_FILE_NAME = ".fix_agent_pattern_eval.json"
 PATTERN_REPO_SOURCE_CATALOG_FILE_NAME = "pattern_sources.json"
 DEFAULT_PATTERN_REPO_DIR_NAME = "local_fix_agent_pattern_repo"
@@ -102,6 +104,7 @@ CURRENT_REMOTE_SESSION_REGISTERED = False
 REMOTE_EXECUTION_STATE: dict[str, dict | None] = {"blocked": None}
 CURRENT_VALIDATION_PLAN: dict = {}
 CURRENT_PUBLISH_IGNORE_PATHS: set[str] = set()
+CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC = False
 BUILT_IN_PUBLISH_IGNORE_PATHS = {
     MEMORY_FILE_NAME,
     METRICS_FILE_NAME,
@@ -810,6 +813,1049 @@ def normalize_meaningful_fingerprint_bytes(content: bytes) -> bytes:
     normalized_lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     normalized_text = "\n".join(normalized_lines)
     return normalized_text.encode("utf-8")
+
+
+def conflicted_git_paths(repo: Path) -> list[str]:
+    if not is_git_repo(repo):
+        return []
+    code, output = run_subprocess(["git", "diff", "--name-only", "--diff-filter=U"], repo)
+    if code != 0:
+        return []
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
+def classify_conflict_file(path: str) -> str:
+    normalized = str(path or "").strip()
+    if not normalized:
+        return "unknown"
+    rel = Path(normalized)
+    suffix = rel.suffix.lower()
+    if normalized in publish_ignored_change_paths():
+        return "state"
+    if normalized == DOCS_STATE_FILE_NAME:
+        return "state"
+    if normalized == "README.md" or normalized.startswith("docs/") or suffix == ".md":
+        return "docs"
+    if normalized.startswith("tests/") or rel.name.startswith("test_") or rel.name.endswith("_test.py"):
+        return "tests"
+    if suffix in {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}:
+        return "config"
+    if suffix in {".py", ".sh", ".js", ".ts", ".tsx", ".jsx"}:
+        return "code"
+    return "unknown"
+
+
+def parse_conflict_blocks(text: str) -> tuple[bool, list[dict]]:
+    lines = text.splitlines(keepends=True)
+    blocks: list[dict] = []
+    current_normal: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("<<<<<<< "):
+            if current_normal:
+                blocks.append({"type": "normal", "text": "".join(current_normal)})
+                current_normal = []
+            i += 1
+            ours: list[str] = []
+            while i < len(lines) and not lines[i].startswith("======="):
+                ours.append(lines[i])
+                i += 1
+            if i >= len(lines):
+                return False, []
+            i += 1
+            theirs: list[str] = []
+            while i < len(lines) and not lines[i].startswith(">>>>>>> "):
+                theirs.append(lines[i])
+                i += 1
+            if i >= len(lines):
+                return False, []
+            i += 1
+            blocks.append({"type": "conflict", "ours": "".join(ours), "theirs": "".join(theirs)})
+            continue
+        current_normal.append(line)
+        i += 1
+    if current_normal:
+        blocks.append({"type": "normal", "text": "".join(current_normal)})
+    return True, blocks
+
+
+def summarize_code_or_text_change(text: str, category: str, path: str = "") -> str:
+    stripped = str(text or "").strip()
+    lowered = stripped.lower()
+    if not stripped:
+        return "keeps no content in the conflicted block"
+    if category == "config":
+        keys = re.findall(r'"([^"]+)"\s*:', stripped)
+        unique_keys = []
+        for key in keys:
+            if key not in unique_keys:
+                unique_keys.append(key)
+        if unique_keys:
+            preview = ", ".join(unique_keys[:3])
+            return f"changes config keys: {preview}"
+        return "changes configuration values"
+    if category == "docs":
+        added_lines = [line.strip("-* ").strip() for line in stripped.splitlines() if line.strip()]
+        if added_lines:
+            preview = added_lines[0][:80]
+            return f"adds documentation content about {preview}"
+        return "changes documentation wording"
+    if category == "tests":
+        if "assert" in lowered:
+            return "adds or changes test assertions"
+        if "raises" in lowered:
+            return "adds exception validation"
+        return "changes test coverage"
+    signals = [
+        ("retry", "adds retry logic"),
+        ("proxy", "adds proxy support"),
+        ("timeout", "changes timeout handling"),
+        ("logging", "adds logging"),
+        ("logger", "adds logging"),
+        ("json", "changes response parsing"),
+        ("response", "changes response parsing"),
+        ("parse", "changes parsing logic"),
+        ("session", "changes session handling"),
+        ("argparse", "changes CLI argument handling"),
+        ("click", "changes CLI command handling"),
+        ("typer", "changes CLI command handling"),
+    ]
+    for token, message in signals:
+        if token in lowered:
+            return message
+    if category == "code":
+        if "def " in lowered and "return" in lowered:
+            return "refactors function logic"
+        return "changes code logic in the conflicted block"
+    return f"changes {Path(path).name or 'the conflicted file'}"
+
+
+def explain_conflict_hunks(path: str, category: str, blocks: list[dict]) -> dict:
+    conflict_blocks = [block for block in blocks if block.get("type") == "conflict"]
+    explanations: list[dict] = []
+    ours_items: list[str] = []
+    theirs_items: list[str] = []
+    reasons: list[str] = []
+    suggestions: list[str] = []
+    for index, block in enumerate(blocks):
+        if block.get("type") != "conflict":
+            continue
+        ours = str(block.get("ours") or "")
+        theirs = str(block.get("theirs") or "")
+        ours_summary = summarize_code_or_text_change(ours, category, path)
+        theirs_summary = summarize_code_or_text_change(theirs, category, path)
+        if category == "config":
+            conflict_reason = "both sides modify the same config block differently"
+            suggested_resolution = "merge both only if the resulting config keeps the intended keys and values compatible"
+        elif category == "docs":
+            conflict_reason = "both sides edit the same documentation section"
+            suggested_resolution = "merge both if the guidance is complementary; otherwise prefer the version with the intended wording"
+        elif category == "tests":
+            conflict_reason = "both sides edit the same test block"
+            suggested_resolution = "merge both if the assertions are compatible; otherwise keep the stricter version that still matches the intended behavior"
+        elif category == "code":
+            conflict_reason = "both sides edit the same code block"
+            suggested_resolution = "merge both if the logic changes are compatible; otherwise keep the side that preserves the intended behavior"
+        else:
+            conflict_reason = "both sides edit the same block and the intent is unclear"
+            suggested_resolution = "review both sides manually before marking the file resolved"
+        explanations.append(
+            {
+                "file": path,
+                "file_type": category,
+                "hunk_index": len(explanations) + 1,
+                "ours_summary": ours_summary,
+                "theirs_summary": theirs_summary,
+                "conflict_reason": conflict_reason,
+                "suggested_resolution": suggested_resolution,
+            }
+        )
+        if ours_summary not in ours_items:
+            ours_items.append(ours_summary)
+        if theirs_summary not in theirs_items:
+            theirs_items.append(theirs_summary)
+        if conflict_reason not in reasons:
+            reasons.append(conflict_reason)
+        if suggested_resolution not in suggestions:
+            suggestions.append(suggested_resolution)
+    return {
+        "file": path,
+        "file_type": category,
+        "hunk_count": len(conflict_blocks),
+        "ours_summary": "; ".join(ours_items) if ours_items else "",
+        "theirs_summary": "; ".join(theirs_items) if theirs_items else "",
+        "conflict_reason": "; ".join(reasons) if reasons else "",
+        "suggested_resolution": "; ".join(suggestions) if suggestions else "",
+        "hunks": explanations,
+    }
+
+
+def merge_unique_lines(first: str, second: str) -> str:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for raw in (first.splitlines(), second.splitlines()):
+        for line in raw:
+            key = line.rstrip()
+            if key in seen and key:
+                continue
+            if key:
+                seen.add(key)
+            merged.append(line)
+    suffix = "\n" if first.endswith("\n") or second.endswith("\n") else ""
+    return "\n".join(merged) + suffix
+
+
+def score_test_conflict_side(text: str) -> tuple[int, int]:
+    lowered = text.lower()
+    strictness = lowered.count("assert") + lowered.count("raises") + lowered.count("parametrize")
+    return strictness, len([line for line in text.splitlines() if line.strip()])
+
+
+def text_is_syntax_valid(path: str, content: str) -> bool:
+    if Path(path).suffix.lower() != ".py":
+        return True
+    try:
+        ast.parse(content)
+    except SyntaxError:
+        return False
+    return True
+
+
+def render_conflict_resolution(blocks: list[dict], chooser) -> str:
+    rendered: list[str] = []
+    for block in blocks:
+        if block.get("type") == "normal":
+            rendered.append(str(block.get("text") or ""))
+            continue
+        rendered.append(str(chooser(str(block.get("ours") or ""), str(block.get("theirs") or ""))))
+    return "".join(rendered)
+
+
+def resolve_conflicted_text(path: str, content: str, category: str) -> dict:
+    parsed, blocks = parse_conflict_blocks(content)
+    if not parsed:
+        return {"ok": False, "strategy": "blocked_invalid_markers", "reason": "invalid conflict markers"}
+    explanation = explain_conflict_hunks(path, category, blocks)
+    if category == "docs":
+        resolved = render_conflict_resolution(
+            blocks,
+            lambda ours, theirs: theirs if len(theirs.strip().splitlines()) >= len(ours.strip().splitlines()) else ours,
+        )
+        return {"ok": True, "strategy": "prefer_newer_docs_content", "content": resolved, "explanation": explanation}
+    if category == "tests":
+        resolved = render_conflict_resolution(
+            blocks,
+            lambda ours, theirs: theirs if score_test_conflict_side(theirs) >= score_test_conflict_side(ours) else ours,
+        )
+        if not text_is_syntax_valid(path, resolved):
+            return {"ok": False, "strategy": "blocked_ambiguous_test_conflict", "reason": "resolved test conflict is not syntactically valid", "explanation": explanation}
+        return {"ok": True, "strategy": "prefer_stricter_test_content", "content": resolved, "explanation": explanation}
+    if category == "config":
+        if len(blocks) == 1 and blocks[0].get("type") == "conflict":
+            ours = str(blocks[0].get("ours") or "")
+            theirs = str(blocks[0].get("theirs") or "")
+            if ours.strip() == theirs.strip():
+                return {"ok": True, "strategy": "trivial_config_merge", "content": theirs, "explanation": explanation}
+            if not ours.strip():
+                return {"ok": True, "strategy": "prefer_nonempty_config", "content": theirs, "explanation": explanation}
+            if not theirs.strip():
+                return {"ok": True, "strategy": "prefer_nonempty_config", "content": ours, "explanation": explanation}
+        return {"ok": False, "strategy": "blocked_ambiguous_config_conflict", "reason": "config conflict is not clearly compatible", "explanation": explanation}
+    if category == "unknown":
+        return {"ok": False, "strategy": "blocked_unknown_conflict", "reason": "unknown conflicted file type requires manual resolution", "explanation": explanation}
+    merged = render_conflict_resolution(blocks, merge_unique_lines)
+    if text_is_syntax_valid(path, merged):
+        return {"ok": True, "strategy": "structured_merge_combined_logic", "content": merged, "explanation": explanation}
+    return {"ok": False, "strategy": "blocked_ambiguous_code_conflict", "reason": "structured code merge remained syntactically invalid", "explanation": explanation}
+
+
+def latest_repo_validation_command(repo: Path) -> str:
+    state = load_recent_state()
+    runs = [item for item in state.get("recent_runs", []) if isinstance(item, dict)]
+    for item in reversed(runs):
+        if item.get("repo") != str(repo) or item.get("target"):
+            continue
+        command = str(item.get("validation_command") or item.get("test_cmd") or "").strip()
+        if command:
+            return command
+    return ""
+
+
+def detect_merge_conflicts(repo: Path) -> dict:
+    conflicted = conflicted_git_paths(repo)
+    return {
+        "merge_conflicts_detected": bool(conflicted),
+        "conflicted_files": conflicted,
+        "conflict_types": {path: classify_conflict_file(path) for path in conflicted},
+    }
+
+
+def resolve_merge_conflicts(repo: Path, validation_command: str = "", no_auto_merge_conflicts: bool = False) -> dict:
+    detected = detect_merge_conflicts(repo)
+    git_sequence_state = detect_git_sequence_state(repo)
+    result = {
+        "merge_conflicts_detected": bool(detected.get("merge_conflicts_detected")),
+        "conflicted_files": list(detected.get("conflicted_files") or []),
+        "resolution_strategy_per_file": {},
+        "validation_result_after_merge": "not_run",
+        "validation_command": validation_command or "",
+        "merge_result": "not_needed" if not detected.get("merge_conflicts_detected") else "blocked",
+        "blocked_reason": "",
+        "commit_sha": "",
+        "sync_operation_attempted": False,
+        "sync_operation": "none",
+        "conflict_source": git_sequence_state if git_sequence_state != "none" else "none",
+        "auto_conflict_resolution_attempted": False,
+        "git_sequence_state": git_sequence_state,
+        "conflict_explanations": {},
+    }
+    if not detected.get("merge_conflicts_detected"):
+        return result
+    if no_auto_merge_conflicts:
+        result["validation_result_after_merge"] = "not_run"
+        result["blocked_reason"] = "merge conflicts detected and auto-resolution is disabled by --no-auto-merge-conflicts"
+        for rel_path in result["conflicted_files"]:
+            result["resolution_strategy_per_file"][rel_path] = "strict_mode_blocked"
+            result["conflict_explanations"][rel_path] = {
+                "file": rel_path,
+                "file_type": classify_conflict_file(rel_path),
+                "hunk_count": 0,
+                "ours_summary": "",
+                "theirs_summary": "",
+                "conflict_reason": "auto-resolution is disabled for this run",
+                "suggested_resolution": manual_merge_hint_for_file(rel_path),
+                "hunks": [],
+            }
+        return result
+    result["auto_conflict_resolution_attempted"] = True
+    resolved_files: list[str] = []
+    for rel_path in result["conflicted_files"]:
+        category = classify_conflict_file(rel_path)
+        abs_path = safe_repo_path(repo, rel_path)
+        if category == "state":
+            code, output = run_subprocess(["git", "checkout", "--theirs", "--", rel_path], repo)
+            if code != 0:
+                result["resolution_strategy_per_file"][rel_path] = "blocked_state_theirs_checkout_failed"
+                result["blocked_reason"] = output.strip() or f"failed to resolve state conflict for {rel_path}"
+                result["merge_result"] = "blocked"
+                return result
+            result["resolution_strategy_per_file"][rel_path] = "take_theirs_state_file"
+            resolved_files.append(rel_path)
+            continue
+        try:
+            content = abs_path.read_text()
+        except OSError as exc:
+            result["resolution_strategy_per_file"][rel_path] = "blocked_unreadable"
+            result["blocked_reason"] = f"failed to read conflicted file {rel_path}: {exc}"
+            result["merge_result"] = "blocked"
+            return result
+        resolved = resolve_conflicted_text(rel_path, content, category)
+        if resolved.get("explanation"):
+            result["conflict_explanations"][rel_path] = resolved["explanation"]
+        result["resolution_strategy_per_file"][rel_path] = resolved.get("strategy", "blocked")
+        if not resolved.get("ok"):
+            result["blocked_reason"] = str(resolved.get("reason") or f"ambiguous conflict in {rel_path}")
+            result["merge_result"] = "blocked"
+            return result
+        abs_path.write_text(str(resolved.get("content") or ""))
+        resolved_files.append(rel_path)
+    if not resolved_files:
+        result["blocked_reason"] = "no conflicted files were resolved"
+        result["merge_result"] = "blocked"
+        return result
+    command = validation_command.strip() or latest_repo_validation_command(repo)
+    result["validation_command"] = command
+    if command:
+        code, output = run_subprocess(command, repo, shell=True)
+        result["validation_result_after_merge"] = "success" if code == 0 else "failed"
+        if code != 0:
+            result["blocked_reason"] = (output or "").strip()[:500] or "validation failed after merge resolution"
+            result["merge_result"] = "blocked"
+            return result
+    else:
+        result["validation_result_after_merge"] = "blocked"
+        result["blocked_reason"] = "no validation command available after merge resolution"
+        result["merge_result"] = "blocked"
+        return result
+    add_code, add_output = run_subprocess(["git", "add", "--"] + resolved_files, repo)
+    if add_code != 0:
+        result["validation_result_after_merge"] = "blocked"
+        result["blocked_reason"] = add_output.strip() or "failed to stage resolved files"
+        result["merge_result"] = "blocked"
+        return result
+    sequence_state = detect_git_sequence_state(repo)
+    if sequence_state == "merge":
+        commit_code, commit_output = run_subprocess(["git", "commit", "-m", "auto-resolved merge conflicts with validation"], repo)
+    elif sequence_state == "rebase":
+        commit_code, commit_output = run_subprocess(["git", "rebase", "--continue"], repo)
+    elif sequence_state == "cherry_pick":
+        commit_code, commit_output = run_subprocess(["git", "cherry-pick", "--continue"], repo)
+    else:
+        commit_code, commit_output = run_subprocess(["git", "commit", "-m", "auto-resolved merge conflicts with validation"], repo)
+    if commit_code != 0:
+        result["validation_result_after_merge"] = "blocked"
+        result["blocked_reason"] = commit_output.strip() or f"failed to continue {sequence_state or 'merge'} after conflict resolution"
+        result["merge_result"] = "blocked"
+        return result
+    result["merge_result"] = "success"
+    result["commit_sha"] = parse_head_commit(repo)
+    return result
+
+
+def print_conflict_explanations(result: dict) -> None:
+    explanations = dict(result.get("conflict_explanations") or {})
+    if not explanations:
+        return
+    print("\n=== CONFLICT EXPLANATION ===")
+    for rel_path in result.get("conflicted_files") or []:
+        item = explanations.get(rel_path) or {}
+        print(f"file: {rel_path}")
+        print(f"file_type: {item.get('file_type') or classify_conflict_file(rel_path)}")
+        print(f"hunk_count: {int(item.get('hunk_count', 0) or 0)}")
+        print(f"ours_summary: {item.get('ours_summary') or '(none)'}")
+        print(f"theirs_summary: {item.get('theirs_summary') or '(none)'}")
+        print(f"conflict_reason: {item.get('conflict_reason') or '(none)'}")
+        print(f"suggested_resolution: {item.get('suggested_resolution') or manual_merge_hint_for_file(rel_path)}")
+
+
+def print_merge_conflict_summary(result: dict) -> None:
+    print("\n=== MERGE CONFLICTS ===")
+    print(f"sync_operation_attempted: {format_bool(result.get('sync_operation_attempted'))}")
+    print(f"sync_operation: {result.get('sync_operation') or 'none'}")
+    print(f"merge_conflicts_detected: {format_bool(result.get('merge_conflicts_detected'))}")
+    print(f"conflict_source: {result.get('conflict_source') or 'none'}")
+    print(f"auto_conflict_resolution_attempted: {format_bool(result.get('auto_conflict_resolution_attempted'))}")
+    print(f"conflicted_files: {result.get('conflicted_files') or []}")
+    print(f"resolution_strategy_per_file: {result.get('resolution_strategy_per_file') or {}}")
+    print(f"validation_result_after_merge: {result.get('validation_result_after_merge') or 'not_needed'}")
+    print(f"merge_result: {result.get('merge_result') or 'blocked'}")
+    if result.get("blocked_reason"):
+        print(f"merge_blocked_reason: {result['blocked_reason']}")
+    if result.get("commit_sha"):
+        print(f"merge_commit: {result.get('commit_sha')}")
+    print_conflict_explanations(result)
+    if result.get("merge_conflicts_detected") and result.get("merge_result") == "blocked":
+        print_manual_merge_required(result)
+
+
+def manual_merge_reason_for_file(path: str, strategy: str, blocked_reason: str) -> str:
+    category = classify_conflict_file(path)
+    if strategy == "blocked_ambiguous_config_conflict":
+        return "ambiguous config conflict; both sides modify the same settings differently"
+    if strategy == "blocked_ambiguous_code_conflict":
+        return "ambiguous code conflict; structured merge could not preserve both logic paths safely"
+    if strategy == "blocked_ambiguous_test_conflict":
+        return "ambiguous test conflict; auto-merged test content did not stay syntactically valid"
+    if strategy == "blocked_unknown_conflict":
+        return "unknown conflict type; the file needs manual review before continuing"
+    if strategy == "blocked_invalid_markers":
+        return "invalid conflict markers; Git conflict blocks could not be parsed safely"
+    if strategy == "blocked_unreadable":
+        return blocked_reason or "the conflicted file could not be read safely"
+    if strategy == "strict_mode_blocked":
+        if category == "config":
+            return "ambiguous config conflict; auto-resolution is disabled and both sides need manual review"
+        if category == "docs":
+            return "docs conflict requires manual review because auto-resolution is disabled"
+        if category == "tests":
+            return "test conflict requires manual review because auto-resolution is disabled"
+        if category == "code":
+            return "code conflict requires manual review because auto-resolution is disabled"
+        return "conflict requires manual review because auto-resolution is disabled"
+    if blocked_reason:
+        return blocked_reason
+    if category == "docs":
+        return "docs conflict was not safe to resolve automatically"
+    if category == "tests":
+        return "test conflict was not safe to resolve automatically"
+    if category == "code":
+        return "code conflict was not safe to resolve automatically"
+    if category == "config":
+        return "config conflict was not safe to resolve automatically"
+    return "conflict was not safe to resolve automatically"
+
+
+def manual_merge_hint_for_file(path: str) -> str:
+    category = classify_conflict_file(path)
+    if category == "config":
+        return "use ours if local settings are known-good; use theirs if upstream defaults must win; merge both only if the combined config remains compatible"
+    if category == "docs":
+        return "use ours if local docs describe the intended behavior; use theirs if upstream wording is authoritative; merge both if each side adds complementary guidance"
+    if category == "tests":
+        return "use ours if local tests cover the correct behavior; use theirs if upstream adds required assertions; merge both if each side adds valid coverage"
+    if category == "code":
+        return "use ours if local logic is known-good; use theirs if the upstream fix should win; merge both if each side adds valid complementary logic"
+    if category == "state":
+        return "prefer the side that matches the current repo state, or regenerate the state file if it is machine-local"
+    return "use ours if local changes should win; use theirs if upstream is authoritative; merge both only when the changes are clearly complementary"
+
+
+def resume_agent_command(argv: Sequence[str] | None = None) -> str:
+    args = list(argv if argv is not None else sys.argv[1:])
+    return f"python local_fix_agent.py {shlex.join(args)}".strip()
+
+
+def print_manual_merge_required(result: dict, argv: Sequence[str] | None = None) -> None:
+    conflicted_files = list(result.get("conflicted_files") or [])
+    blocked_reason = str(result.get("blocked_reason") or "manual merge resolution is required")
+    sequence_state = str(result.get("git_sequence_state") or "none")
+    strategy_per_file = dict(result.get("resolution_strategy_per_file") or {})
+    explanations = dict(result.get("conflict_explanations") or {})
+    print("\n=== MANUAL MERGE REQUIRED ===")
+    print(f"conflicted_files: {conflicted_files}")
+    print(f"reason_for_block: {blocked_reason}")
+    for rel_path in conflicted_files:
+        conflict_type = classify_conflict_file(rel_path)
+        strategy = str(strategy_per_file.get(rel_path) or "blocked")
+        file_reason = manual_merge_reason_for_file(rel_path, strategy, blocked_reason)
+        file_hint = manual_merge_hint_for_file(rel_path)
+        explanation = explanations.get(rel_path) or {}
+        print(f"file: {rel_path}")
+        print(f"file_type: {conflict_type}")
+        if explanation.get("hunk_count") is not None:
+            print(f"hunk_count: {int(explanation.get('hunk_count', 0) or 0)}")
+        if explanation.get("ours_summary"):
+            print(f"ours_summary: {explanation.get('ours_summary')}")
+        if explanation.get("theirs_summary"):
+            print(f"theirs_summary: {explanation.get('theirs_summary')}")
+        if explanation.get("conflict_reason"):
+            print(f"conflict_reason: {explanation.get('conflict_reason')}")
+        if explanation.get("suggested_resolution"):
+            print(f"suggested_resolution: {explanation.get('suggested_resolution')}")
+        print(f"reason: {file_reason}")
+        print(f"hint: {file_hint}")
+    print("list_conflicted_files: git diff --name-only --diff-filter=U")
+    for rel_path in conflicted_files:
+        quoted_path = shlex.quote(rel_path)
+        print(f"open_file: <editor> {quoted_path}")
+        print(f"accept_ours: git checkout --ours -- {quoted_path}")
+        print(f"accept_theirs: git checkout --theirs -- {quoted_path}")
+        print(f"mark_resolved: git add {quoted_path}")
+    if sequence_state == "rebase":
+        print("complete_merge: git rebase --continue")
+    elif sequence_state == "cherry_pick":
+        print("complete_merge: git cherry-pick --continue")
+    else:
+        print("complete_merge: git commit")
+    print("Resume:")
+    print(resume_agent_command(argv))
+
+
+def maybe_handle_merge_conflicts(
+    repo: Path,
+    *,
+    validation_command: str,
+    sync_operation: str = "none",
+    publish_requested: bool,
+    publish_mode: str,
+    publish_branch: str,
+    publish_pr: bool,
+    publish_merge: bool,
+    publish_merge_local_main: bool,
+    publish_message: str,
+    target: str,
+    dry_run_mode: bool,
+    force_publish: bool,
+    no_auto_merge_conflicts: bool = False,
+) -> dict | None:
+    merge_result = resolve_merge_conflicts(repo, validation_command=validation_command, no_auto_merge_conflicts=no_auto_merge_conflicts)
+    merge_result["sync_operation_attempted"] = sync_operation != "none"
+    merge_result["sync_operation"] = sync_operation
+    if sync_operation != "none":
+        merge_result["conflict_source"] = sync_operation
+    print_merge_conflict_summary(merge_result)
+    if not merge_result.get("merge_conflicts_detected"):
+        return None
+    if merge_result.get("merge_result") != "success":
+        return {
+            "handled": True,
+            "success": False,
+            "merge_result": merge_result,
+            "continue_with_repair": False,
+        }
+    update_recent_state(
+        repo,
+        validation_command,
+        "merge-conflict-resolve",
+        "success",
+        None,
+        target,
+        files_changed=list(merge_result.get("conflicted_files") or []),
+        confidence="merge-conflict-resolve",
+        blocked_reason="",
+    )
+    if publish_requested:
+        publish_summary = run_post_success_publish(
+            repo,
+            validation_command,
+            0,
+            "merge-conflict-resolve",
+            None,
+            list(merge_result.get("conflicted_files") or []),
+            publish_branch,
+            publish_pr,
+            publish_merge,
+            publish_merge_local_main,
+            publish_message,
+            target,
+            None,
+            [],
+            dry_run_mode,
+            publish_mode,
+            True,
+            True,
+            force_publish,
+        )
+        print(format_final_operator_summary(publish_summary))
+    else:
+        print("FINAL: merge conflicts resolved, validated, and committed")
+    return {
+        "handled": True,
+        "success": True,
+        "merge_result": merge_result,
+        "continue_with_repair": False,
+    }
+
+
+def run_sync_operation_with_conflict_hook(
+    repo: Path,
+    *,
+    sync_operation: str,
+    command: list[str],
+    validation_command: str = "",
+    no_auto_conflict_resolution_after_sync: bool = False,
+) -> tuple[bool, str, dict]:
+    code, output = run_subprocess(command, repo)
+    if code != 0 and not conflicted_git_paths(repo):
+        return False, output.strip() or f"{sync_operation} failed", {
+            "sync_operation_attempted": True,
+            "sync_operation": sync_operation,
+            "merge_conflicts_detected": False,
+            "conflict_source": sync_operation,
+            "auto_conflict_resolution_attempted": False,
+            "merge_result": "not_needed",
+        }
+    conflict_result = resolve_merge_conflicts(
+        repo,
+        validation_command=validation_command,
+        no_auto_merge_conflicts=no_auto_conflict_resolution_after_sync,
+    )
+    conflict_result["sync_operation_attempted"] = True
+    conflict_result["sync_operation"] = sync_operation
+    conflict_result["conflict_source"] = sync_operation if conflict_result.get("merge_conflicts_detected") else "none"
+    if conflict_result.get("merge_conflicts_detected"):
+        return conflict_result.get("merge_result") == "success", conflict_result.get("blocked_reason", ""), conflict_result
+    return True, output.strip(), conflict_result
+
+
+def detect_remote_default_branch(repo: Path, remote_name: str, fallback_branch: str = "main") -> str:
+    code, output = run_subprocess(["git", "symbolic-ref", f"refs/remotes/{remote_name}/HEAD"], repo)
+    if code == 0 and output.strip():
+        remote_ref = output.strip()
+        if remote_ref.startswith("refs/remotes/"):
+            return remote_ref[len("refs/remotes/") :]
+        return remote_ref
+    for candidate in [fallback_branch, "master"]:
+        remote_ref = f"{remote_name}/{candidate}"
+        code, _ = run_subprocess(["git", "rev-parse", "--verify", remote_ref], repo)
+        if code == 0:
+            return remote_ref
+    return f"{remote_name}/{fallback_branch}"
+
+
+def parse_ahead_behind_counts(output: str) -> tuple[int, int]:
+    parts = (output or "").strip().split()
+    if len(parts) < 2:
+        return 0, 0
+    try:
+        ahead = int(parts[0])
+        behind = int(parts[1])
+    except (TypeError, ValueError):
+        return 0, 0
+    return ahead, behind
+
+
+def classify_upstream_change_path(path: str) -> str:
+    normalized = (path or "").strip().lower()
+    if not normalized:
+        return "unknown"
+    name = Path(normalized).name
+    if normalized == "readme.md" or normalized.startswith("docs/") or name.endswith(".md"):
+        return "docs"
+    if normalized.startswith("tests/") or name.startswith("test_") or name.endswith("_test.py"):
+        return "tests"
+    if name in {"pyproject.toml", "requirements.txt", "requirements-dev.txt", "poetry.lock", "uv.lock", "pdm.lock"}:
+        return "dependencies"
+    if name.endswith((".ini", ".yaml", ".yml", ".json", ".toml", ".cfg")):
+        return "config"
+    if normalized.startswith("agent/") or normalized.startswith("src/") or name.endswith(".py"):
+        return "core_code"
+    return "unknown"
+
+
+def parse_name_status_output(output: str) -> list[dict]:
+    changes: list[dict] = []
+    for line in (output or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        parts = text.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0].strip().upper()
+        change_code = status[:1]
+        path = parts[-1].strip()
+        if not path:
+            continue
+        change_type = {
+            "A": "added",
+            "M": "modified",
+            "D": "deleted",
+            "R": "modified",
+            "C": "modified",
+        }.get(change_code, "modified")
+        changes.append(
+            {
+                "path": path,
+                "change_type": change_type,
+                "category": classify_upstream_change_path(path),
+            }
+        )
+    return changes
+
+
+def semantic_hint_for_upstream_path(path: str, category: str) -> str:
+    normalized = (path or "").strip().lower()
+    if "langsmith" in normalized:
+        return "LangSmith logging or tracing integration changed"
+    if "cli" in normalized:
+        return "CLI utilities changed"
+    if "proxy" in normalized or "network" in normalized:
+        return "proxy or network behavior changed"
+    if category == "dependencies":
+        return "dependency versions or lockfiles changed"
+    if category == "docs":
+        return "documentation changed"
+    if category == "tests":
+        return "test coverage changed"
+    if category == "config":
+        return "configuration defaults changed"
+    if category == "core_code":
+        return "core agent logic changed"
+    return "project files changed"
+
+
+def summarize_upstream_semantics(changes: list[dict]) -> list[str]:
+    categories = {str(item.get("category") or "") for item in changes}
+    change_types = {str(item.get("change_type") or "") for item in changes}
+    summaries: list[str] = []
+    seen = set()
+    if categories == {"docs"}:
+        return ["docs-only changes"]
+    if categories == {"tests"}:
+        return ["tests-only changes"]
+    for item in changes:
+        hint = semantic_hint_for_upstream_path(str(item.get("path") or ""), str(item.get("category") or ""))
+        if hint not in seen:
+            summaries.append(hint)
+            seen.add(hint)
+        if len(summaries) >= 3:
+            break
+    if "added" in change_types and "new files were added" not in seen:
+        summaries.append("new files were added")
+    if "deleted" in change_types and "files were removed" not in seen:
+        summaries.append("files were removed")
+    return summaries[:4]
+
+
+def assess_upstream_change_risk(changes: list[dict], commit_count: int, diff_text: str) -> tuple[str, str]:
+    if not changes:
+        return "low", "no incoming upstream file changes were detected"
+    categories = {str(item.get("category") or "") for item in changes}
+    change_types = {str(item.get("change_type") or "") for item in changes}
+    diff_lines = len([line for line in (diff_text or "").splitlines() if line.strip()])
+    if categories == {"docs"}:
+        return "low", "incoming changes are limited to documentation"
+    if categories == {"tests"}:
+        return "low", "incoming changes are limited to tests"
+    if "dependencies" in categories:
+        return "high", "dependency or lockfile changes can alter runtime behavior"
+    if change_types == {"added"} and "config" not in categories and "dependencies" not in categories:
+        return "medium", "incoming upstream changes add new project files"
+    if "core_code" in categories:
+        return "high", "core code changes can alter agent behavior directly"
+    if diff_lines > 400 or len(changes) > 15 or commit_count > 8:
+        return "high", "incoming upstream diff is large enough to require explicit review"
+    if "added" in change_types or "deleted" in change_types:
+        return "medium", "incoming upstream changes add or remove project files"
+    return "medium", "incoming upstream changes are broader than docs/tests but do not touch the highest-risk paths"
+
+
+def analyze_upstream_changes(repo: Path, upstream_branch: str) -> dict:
+    log_code, log_output = run_subprocess(["git", "log", f"HEAD..{upstream_branch}", "--oneline"], repo)
+    if log_code != 0:
+        return {
+            "ok": False,
+            "reason": log_output.strip() or f"failed to inspect commits for {upstream_branch}",
+            "commit_count": 0,
+            "changed_files": [],
+            "change_types": {},
+            "categories": {},
+            "summary": "",
+            "semantic_summary": "",
+            "risk_level": "high",
+            "risk_reason": "could not inspect upstream commits safely",
+        }
+    name_status_code, name_status_output = run_subprocess(["git", "diff", "--name-status", f"HEAD..{upstream_branch}"], repo)
+    if name_status_code != 0:
+        return {
+            "ok": False,
+            "reason": name_status_output.strip() or f"failed to inspect changed files for {upstream_branch}",
+            "commit_count": 0,
+            "changed_files": [],
+            "change_types": {},
+            "categories": {},
+            "summary": "",
+            "semantic_summary": "",
+            "risk_level": "high",
+            "risk_reason": "could not inspect upstream changed files safely",
+        }
+    diff_code, diff_output = run_subprocess(["git", "diff", f"HEAD..{upstream_branch}"], repo)
+    if diff_code != 0:
+        return {
+            "ok": False,
+            "reason": diff_output.strip() or f"failed to inspect upstream diff for {upstream_branch}",
+            "commit_count": 0,
+            "changed_files": [],
+            "change_types": {},
+            "categories": {},
+            "summary": "",
+            "semantic_summary": "",
+            "risk_level": "high",
+            "risk_reason": "could not inspect the upstream diff safely",
+        }
+    commits = [line.strip() for line in log_output.splitlines() if line.strip()]
+    changes = parse_name_status_output(name_status_output)
+    summary_parts = [f"{len(changes)} files changed"]
+    core = [item["path"] for item in changes if item.get("category") == "core_code"]
+    added = [item["path"] for item in changes if item.get("change_type") == "added"]
+    deps = [item["path"] for item in changes if item.get("category") == "dependencies"]
+    docs = [item["path"] for item in changes if item.get("category") == "docs"]
+    if core:
+        summary_parts.append(f"core logic updated in {', '.join(core[:2])}")
+    if added:
+        summary_parts.append(f"new file added: {', '.join(added[:2])}")
+    if deps:
+        summary_parts.append(f"dependencies updated: {', '.join(deps[:2])}")
+    if docs:
+        summary_parts.append(f"docs updated: {', '.join(docs[:2])}")
+    semantic_items = summarize_upstream_semantics(changes)
+    risk_level, risk_reason = assess_upstream_change_risk(changes, len(commits), diff_output)
+    return {
+        "ok": True,
+        "reason": "",
+        "commit_count": len(commits),
+        "commits": commits,
+        "changed_files": [item["path"] for item in changes],
+        "change_types": {item["path"]: item["change_type"] for item in changes},
+        "categories": {item["path"]: item["category"] for item in changes},
+        "summary": "; ".join(summary_parts[:4]),
+        "semantic_summary": "; ".join(semantic_items) if semantic_items else "upstream changes affect tracked project files",
+        "risk_level": risk_level,
+        "risk_reason": risk_reason,
+    }
+
+
+def run_repo_validation_command(
+    repo: Path,
+    validation_command: str,
+    *,
+    mode: str,
+    confidence: str,
+    target: str = "",
+    files_changed: list[str] | None = None,
+) -> dict:
+    command = validation_command.strip()
+    if not command:
+        return {
+            "ok": False,
+            "validation_result": "blocked",
+            "reason": f"no validation command available after {mode}",
+            "output": "",
+        }
+    code, output = run_subprocess(command, repo, shell=True)
+    validation_result = "success" if code == 0 else "failed"
+    blocked_reason = ""
+    if code != 0:
+        blocked_reason = (output or "").strip()[:500]
+    update_recent_state(
+        repo,
+        command,
+        mode,
+        validation_result,
+        None,
+        target,
+        files_changed=list(files_changed or []),
+        confidence=confidence,
+        blocked_reason=blocked_reason,
+    )
+    return {
+        "ok": code == 0,
+        "validation_result": validation_result,
+        "reason": blocked_reason or "",
+        "output": output,
+    }
+
+
+def make_upstream_sync_result() -> dict:
+    return {
+        "upstream_detected": False,
+        "upstream_branch": "upstream/main",
+        "behind_count": 0,
+        "ahead_count": 0,
+        "sync_attempted": False,
+        "sync_result": "not_needed",
+        "reason": "",
+        "merge_conflict_result": None,
+        "validation_result_after_sync": "not_run",
+        "analysis": {
+            "commit_count": 0,
+            "changed_files": [],
+            "change_types": {},
+            "categories": {},
+            "summary": "",
+            "semantic_summary": "",
+            "risk_level": "low",
+            "risk_reason": "",
+        },
+    }
+
+
+def print_upstream_change_analysis(analysis: dict) -> None:
+    print("\n=== UPSTREAM CHANGE ANALYSIS ===")
+    print(f"commits: {int(analysis.get('commit_count', 0) or 0)}")
+    print(f"files_changed: {len(analysis.get('changed_files') or [])}")
+    print(f"summary: {analysis.get('summary') or '(none)'}")
+    print(f"semantic_summary: {analysis.get('semantic_summary') or '(none)'}")
+    print(f"risk_level: {analysis.get('risk_level') or 'low'}")
+    print(f"risk_reason: {analysis.get('risk_reason') or '(none)'}")
+
+
+def print_upstream_sync_summary(result: dict) -> None:
+    print("\n=== UPSTREAM SYNC ===")
+    print(f"upstream_detected: {format_bool(result.get('upstream_detected'))}")
+    print(f"upstream_branch: {result.get('upstream_branch') or 'upstream/main'}")
+    print(f"behind_count: {int(result.get('behind_count', 0) or 0)}")
+    print(f"ahead_count: {int(result.get('ahead_count', 0) or 0)}")
+    print(f"sync_attempted: {format_bool(result.get('sync_attempted'))}")
+    print(f"sync_result: {result.get('sync_result') or 'not_needed'}")
+    if result.get("reason"):
+        print(f"sync_reason: {result.get('reason')}")
+
+
+def sync_with_upstream_before_workflow(
+    repo: Path,
+    *,
+    validation_command: str = "",
+    target: str = "",
+    no_auto_conflict_resolution_after_sync: bool = False,
+    no_upstream_sync: bool = False,
+    force_upstream_merge: bool = False,
+) -> dict:
+    result = make_upstream_sync_result()
+    if no_upstream_sync or not is_git_repo(repo):
+        return result
+    remotes = parse_remote_names(repo)
+    if "upstream" not in remotes:
+        return result
+    result["upstream_detected"] = True
+    fetch_code, fetch_output = run_subprocess(["git", "fetch", "upstream"], repo)
+    if fetch_code != 0:
+        result["sync_result"] = "blocked"
+        result["reason"] = fetch_output.strip() or "git fetch upstream failed"
+        return result
+    upstream_branch = detect_remote_default_branch(repo, "upstream", fallback_branch="main")
+    result["upstream_branch"] = upstream_branch
+    count_code, count_output = run_subprocess(["git", "rev-list", "--left-right", "--count", f"HEAD...{upstream_branch}"], repo)
+    if count_code != 0:
+        result["sync_result"] = "blocked"
+        result["reason"] = count_output.strip() or f"failed to compare HEAD with {upstream_branch}"
+        return result
+    ahead_count, behind_count = parse_ahead_behind_counts(count_output)
+    result["ahead_count"] = ahead_count
+    result["behind_count"] = behind_count
+    if behind_count <= 0:
+        result["sync_result"] = "not_needed"
+        return result
+    analysis = analyze_upstream_changes(repo, upstream_branch)
+    result["analysis"] = analysis
+    if not analysis.get("ok"):
+        result["sync_result"] = "blocked"
+        result["reason"] = str(analysis.get("reason") or "failed to analyze upstream changes")
+        return result
+    if str(analysis.get("risk_level") or "low") == "high" and not force_upstream_merge:
+        result["sync_result"] = "blocked"
+        result["reason"] = (
+            f"upstream merge blocked because risk_level=high: {analysis.get('risk_reason') or 'explicit review required'}; "
+            "use --force-upstream-merge to override"
+        )
+        return result
+    result["sync_attempted"] = True
+    effective_validation_command = validation_command.strip() or latest_repo_validation_command(repo)
+    ok, sync_reason, conflict_result = run_sync_operation_with_conflict_hook(
+        repo,
+        sync_operation="branch_sync",
+        command=["git", "merge", "--no-edit", upstream_branch],
+        validation_command=effective_validation_command,
+        no_auto_conflict_resolution_after_sync=no_auto_conflict_resolution_after_sync,
+    )
+    if conflict_result.get("merge_conflicts_detected"):
+        conflict_result["sync_operation_attempted"] = True
+        conflict_result["sync_operation"] = "branch_sync"
+        conflict_result["conflict_source"] = "branch_sync"
+        result["merge_conflict_result"] = conflict_result
+        if not ok:
+            result["sync_result"] = "blocked"
+            result["reason"] = sync_reason or str(conflict_result.get("blocked_reason") or "merge conflict resolution blocked")
+            return result
+        validation_result = str(conflict_result.get("validation_result_after_merge") or "success")
+        result["validation_result_after_sync"] = validation_result
+        if validation_result == "success":
+            update_recent_state(
+                repo,
+                effective_validation_command,
+                "upstream-sync",
+                "success",
+                None,
+                target,
+                files_changed=list(conflict_result.get("conflicted_files") or []),
+                confidence="upstream-sync",
+                blocked_reason="",
+            )
+            result["sync_result"] = "success"
+            return result
+        result["sync_result"] = "blocked"
+        result["reason"] = str(conflict_result.get("blocked_reason") or "validation failed after merge conflict resolution")
+        return result
+    if not ok:
+        result["sync_result"] = "blocked"
+        result["reason"] = sync_reason or "upstream sync failed"
+        return result
+    validation_run = run_repo_validation_command(
+        repo,
+        effective_validation_command,
+        mode="upstream-sync",
+        confidence="upstream-sync",
+        target=target,
+    )
+    result["validation_result_after_sync"] = str(validation_run.get("validation_result") or "blocked")
+    if not validation_run.get("ok"):
+        result["sync_result"] = "blocked"
+        result["reason"] = str(validation_run.get("reason") or "validation failed after upstream sync")
+        return result
+    result["sync_result"] = "success"
+    return result
 
 
 def current_validation_fingerprint(repo: Path) -> str:
@@ -1641,7 +2687,7 @@ def save_pattern_source_catalog(pattern_repo: Path, catalog: dict) -> None:
         return
 
 
-def load_script_pattern_memory(pattern_repo: Path) -> dict:
+def load_raw_script_pattern_memory(pattern_repo: Path) -> dict:
     path = pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_MEMORY_FILE_NAME)
     if not path.exists():
         return {"patterns": [], "sources": [], "updated_at": 0}
@@ -1671,6 +2717,202 @@ def save_script_pattern_memory(pattern_repo: Path, memory: dict) -> None:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     except OSError:
         return
+
+
+def pattern_control_path(pattern_repo: Path) -> Path:
+    return pattern_repo_storage_path(pattern_repo, SCRIPT_PATTERN_CONTROL_FILE_NAME)
+
+
+def load_pattern_controls(pattern_repo: Path) -> dict:
+    path = pattern_control_path(pattern_repo)
+    if not path.exists():
+        return {"patterns": {}, "sources": {}}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"patterns": {}, "sources": {}}
+    patterns = data.get("patterns", {}) if isinstance(data, dict) else {}
+    sources = data.get("sources", {}) if isinstance(data, dict) else {}
+    return {
+        "patterns": patterns if isinstance(patterns, dict) else {},
+        "sources": sources if isinstance(sources, dict) else {},
+    }
+
+
+def save_pattern_controls(pattern_repo: Path, controls: dict) -> None:
+    path = pattern_control_path(pattern_repo)
+    payload = {
+        "patterns": controls.get("patterns", {}) if isinstance(controls.get("patterns"), dict) else {},
+        "sources": controls.get("sources", {}) if isinstance(controls.get("sources"), dict) else {},
+    }
+    try:
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    except OSError:
+        return
+
+
+def effective_source_state(source_record: dict, override: dict | None = None) -> tuple[str, str]:
+    base_state = normalize_pattern_promotion_state(source_record)
+    base_trust = str(source_record.get("trust_level") or "trusted").strip().lower() or "trusted"
+    if not isinstance(override, dict):
+        return base_state, base_trust
+    state = str(override.get("promotion_state") or base_state).strip().lower() or base_state
+    trust = str(override.get("trust_level") or base_trust).strip().lower() or base_trust
+    if state not in {"candidate", "curated_experimental", "curated_trusted"}:
+        state = base_state
+    if trust not in PATTERN_TRUST_LEVELS:
+        trust = base_trust
+    if state == "curated_trusted":
+        trust = "trusted"
+    elif state == "curated_experimental":
+        trust = "experimental"
+    return state, trust
+
+
+def source_control_keys(source_record: dict) -> set[str]:
+    keys = set()
+    for field in ("id", "repo_rel_path", "candidate_path"):
+        candidate = str(source_record.get(field) or "").strip()
+        if candidate:
+            keys.add(candidate)
+    return keys
+
+
+def pattern_control_keys(pattern: dict) -> set[str]:
+    keys = set()
+    for field in ("id", "source_repo_path", "source_file"):
+        candidate = str(pattern.get(field) or "").strip()
+        if candidate:
+            keys.add(candidate)
+    return keys
+
+
+def resolve_source_override(controls: dict, source_record: dict) -> dict | None:
+    source_controls = controls.get("sources", {}) if isinstance(controls, dict) else {}
+    for key in source_control_keys(source_record):
+        override = source_controls.get(key)
+        if isinstance(override, dict):
+            return override
+    return None
+
+
+def resolve_pattern_override(controls: dict, pattern: dict) -> dict | None:
+    pattern_controls = controls.get("patterns", {}) if isinstance(controls, dict) else {}
+    for key in pattern_control_keys(pattern):
+        override = pattern_controls.get(key)
+        if isinstance(override, dict):
+            return override
+    return None
+
+
+def apply_manual_metadata(pattern: dict, override: dict | None = None) -> dict:
+    updated = dict(pattern)
+    if not isinstance(override, dict):
+        return updated
+    if override.get("trust_level"):
+        updated["trust_level"] = str(override.get("trust_level"))
+    if override.get("promotion_state"):
+        updated["promotion_state"] = str(override.get("promotion_state"))
+    if override.get("promotion_method"):
+        updated["promotion_method"] = str(override.get("promotion_method"))
+    if override.get("promotion_reason"):
+        updated["promotion_reason"] = str(override.get("promotion_reason"))
+    if override.get("timestamp") is not None:
+        updated["timestamp"] = int(override.get("timestamp") or 0)
+    return updated
+
+
+def load_effective_pattern_sources(pattern_repo: Path) -> list[dict]:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    catalog = load_pattern_source_catalog(repo_root)
+    controls = load_pattern_controls(repo_root)
+    effective: list[dict] = []
+    for source in [item for item in catalog.get("sources", []) if isinstance(item, dict)]:
+        override = resolve_source_override(controls, source)
+        if isinstance(override, dict) and override.get("action") == "forget":
+            continue
+        state, trust = effective_source_state(source, override)
+        updated = dict(source)
+        updated["effective_promotion_state"] = state
+        updated["effective_trust_level"] = trust
+        updated["promotion_method"] = str((override or {}).get("promotion_method") or source.get("promotion_method") or ("manual" if override else "automatic"))
+        updated["promotion_reason"] = str((override or {}).get("promotion_reason") or source.get("promotion_reason") or "")
+        updated["promotion_timestamp"] = int((override or {}).get("timestamp") or source.get("imported_at") or 0)
+        effective.append(updated)
+    return effective
+
+
+def build_effective_pattern_memory(pattern_repo: Path) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    raw_memory = load_raw_script_pattern_memory(repo_root)
+    controls = load_pattern_controls(repo_root)
+    effective_sources = load_effective_pattern_sources(repo_root)
+    source_by_path = {
+        str(source.get("repo_rel_path") or source.get("candidate_path") or ""): source
+        for source in effective_sources
+        if str(source.get("repo_rel_path") or source.get("candidate_path") or "")
+    }
+    retained: list[dict] = []
+    seen_ids: set[str] = set()
+    for pattern in [item for item in raw_memory.get("patterns", []) if isinstance(item, dict)]:
+        source = source_by_path.get(str(pattern.get("source_repo_path") or ""))
+        source_state = str((source or {}).get("effective_promotion_state") or "")
+        source_trust = str((source or {}).get("effective_trust_level") or pattern.get("trust_level") or "trusted")
+        override = resolve_pattern_override(controls, pattern)
+        if isinstance(override, dict) and override.get("action") == "forget":
+            continue
+        updated = dict(pattern)
+        updated["trust_level"] = source_trust
+        updated["promotion_state"] = source_state or ("curated_trusted" if source_trust == "trusted" else "curated_experimental")
+        updated["promotion_method"] = str((source or {}).get("promotion_method") or updated.get("promotion_method") or "automatic")
+        updated["promotion_reason"] = str((source or {}).get("promotion_reason") or updated.get("promotion_reason") or "")
+        updated["timestamp"] = int((source or {}).get("promotion_timestamp") or updated.get("timestamp") or 0)
+        updated = apply_manual_metadata(updated, override)
+        effective_state = str(updated.get("promotion_state") or "")
+        if effective_state == "candidate":
+            continue
+        seen_ids.add(str(updated.get("id") or ""))
+        retained.append(updated)
+    for source in effective_sources:
+        source_state = str(source.get("effective_promotion_state") or "")
+        if source_state == "candidate":
+            candidate_rel = str(source.get("candidate_path") or source.get("repo_rel_path") or "").strip()
+        else:
+            candidate_rel = str(source.get("repo_rel_path") or "").strip()
+        if not candidate_rel:
+            continue
+        candidate_path = repo_root / candidate_rel
+        if not candidate_path.exists() or not candidate_path.is_file():
+            continue
+        extracted = extract_script_patterns_with_metadata(repo_root, candidate_path, source)
+        for pattern in extracted:
+            override = resolve_pattern_override(controls, pattern)
+            if isinstance(override, dict) and override.get("action") == "forget":
+                continue
+            effective_pattern = dict(pattern)
+            effective_pattern["trust_level"] = str(source.get("effective_trust_level") or effective_pattern.get("trust_level") or "trusted")
+            effective_pattern["promotion_state"] = source_state
+            effective_pattern["promotion_method"] = str(source.get("promotion_method") or "automatic")
+            effective_pattern["promotion_reason"] = str(source.get("promotion_reason") or "")
+            effective_pattern["timestamp"] = int(source.get("promotion_timestamp") or 0)
+            effective_pattern = apply_manual_metadata(effective_pattern, override)
+            effective_state = str(effective_pattern.get("promotion_state") or "")
+            if effective_state == "candidate":
+                continue
+            pattern_id = str(effective_pattern.get("id") or "")
+            if not pattern_id or pattern_id in seen_ids:
+                continue
+            seen_ids.add(pattern_id)
+            retained.append(effective_pattern)
+    return {
+        "patterns": sorted(retained, key=lambda item: item.get("id", "")),
+        "sources": sorted({str(item.get("source_repo_path") or "") for item in retained if str(item.get("source_repo_path") or "")}),
+        "updated_at": int(raw_memory.get("updated_at", 0) or 0),
+    }
+
+
+def load_script_pattern_memory(pattern_repo: Path) -> dict:
+    return build_effective_pattern_memory(pattern_repo)
 
 
 def append_pattern_eval_history(repo: Path, run_result: dict) -> None:
@@ -2202,6 +3444,69 @@ def resolve_publish_validation_state(repo: Path) -> dict:
         "validation_age_seconds": validation_age_seconds,
         "reason": "publish blocked because the latest validation run failed; use --force-publish to override",
     }
+
+
+def ensure_validation_record_for_current_commit(
+    repo: Path,
+    *,
+    validation_command: str = "",
+    target: str = "",
+) -> dict:
+    state = resolve_publish_validation_state(repo)
+    current_commit = str(state.get("current_commit") or parse_head_commit(repo) or "").strip()
+    last_commit = str(state.get("last_validated_commit") or "").strip()
+    if current_commit and last_commit == current_commit:
+        validation_result = str(state.get("validation_result") or state.get("validation_state") or "blocked").strip() or "blocked"
+        return {
+            "ok": validation_result == "success",
+            "validation_record_created": False,
+            "validation_record_reused": True,
+            "validation_commit": current_commit,
+            "validation_result": validation_result,
+            "validation_command": str(validation_command or latest_repo_validation_command(repo) or ""),
+            "reason": str(state.get("reason") or ""),
+        }
+    command = str(validation_command or latest_repo_validation_command(repo) or "").strip()
+    if not command:
+        return {
+            "ok": False,
+            "validation_record_created": False,
+            "validation_record_reused": False,
+            "validation_commit": current_commit,
+            "validation_result": "blocked",
+            "validation_command": "",
+            "reason": "no validation command is available to create a validation record for the current commit",
+        }
+    validation_run = run_repo_validation_command(
+        repo,
+        command,
+        mode="finalization-prepare",
+        confidence="finalization-prepare",
+        target=target,
+    )
+    refreshed = resolve_publish_validation_state(repo)
+    refreshed_result = str(refreshed.get("validation_result") or refreshed.get("validation_state") or "blocked").strip() or "blocked"
+    return {
+        "ok": validation_run.get("ok") and refreshed_result == "success",
+        "validation_record_created": True,
+        "validation_record_reused": False,
+        "validation_commit": str(refreshed.get("current_commit") or current_commit or ""),
+        "validation_result": refreshed_result,
+        "validation_command": command,
+        "reason": str(refreshed.get("reason") or validation_run.get("reason") or ""),
+    }
+
+
+def print_validation_record_result(result: dict) -> None:
+    print("\n=== VALIDATION RECORD ===")
+    print(f"validation_record_created: {format_bool(result.get('validation_record_created'))}")
+    print(f"validation_record_reused: {format_bool(result.get('validation_record_reused'))}")
+    print(f"validation_commit: {result.get('validation_commit') or '(none)'}")
+    print(f"validation_result: {result.get('validation_result') or 'blocked'}")
+    if result.get("validation_command"):
+        print(f"validation_command: {result.get('validation_command')}")
+    if result.get("reason"):
+        print(f"validation_record_reason: {result.get('reason')}")
 
 
 def attempt_publish_auto_revalidation(
@@ -3695,6 +5000,517 @@ def list_patterns(pattern_repo: Path) -> list[dict]:
     return [item for item in memory.get("patterns", []) if isinstance(item, dict)]
 
 
+def normalize_pattern_promotion_state(source_record: dict) -> str:
+    state = str(source_record.get("promotion_state") or "").strip().lower()
+    trust_level = str(source_record.get("trust_level") or "trusted").strip().lower()
+    if state == "candidate":
+        return "candidate"
+    if state == "curated":
+        return "curated_trusted" if trust_level == "trusted" else "curated_experimental"
+    if state in {"curated_trusted", "curated_experimental"}:
+        return state
+    return "candidate"
+
+
+def normalize_pattern_validation_result(source_record: dict) -> str:
+    raw = str(source_record.get("validation_result") or source_record.get("validation_status") or "").strip().lower()
+    if raw in {"passed", "success"}:
+        return "success"
+    if raw in {"blocked", "failed"}:
+        return raw
+    return "not_recorded"
+
+
+def derive_pattern_promotion_reason(source_record: dict) -> str:
+    if source_record.get("promotion_reason"):
+        return str(source_record.get("promotion_reason"))
+    promotion_state = str(source_record.get("effective_promotion_state") or normalize_pattern_promotion_state(source_record))
+    validation_result = normalize_pattern_validation_result(source_record)
+    if promotion_state == "candidate":
+        if source_record.get("limited_validation"):
+            return "validation limited; retained as candidate"
+        blocked_reason = str(source_record.get("blocked_reason") or "").strip()
+        if blocked_reason:
+            return blocked_reason
+        if validation_result == "failed":
+            return "validation failed; not promoted"
+        if validation_result == "blocked":
+            return "validation blocked; not promoted"
+        return "candidate import awaiting curation"
+    if promotion_state == "curated_experimental":
+        return "validated and curated as experimental"
+    return "validated and curated as trusted"
+
+
+def enrich_pattern_entry(pattern: dict, source_record: dict | None = None) -> dict:
+    source_record = source_record or {}
+    source_file = str(
+        source_record.get("repo_rel_path")
+        or source_record.get("candidate_path")
+        or pattern.get("source_repo_path")
+        or (pattern.get("source_files") or [""])[0]
+        or ""
+    )
+    return {
+        "id": str(pattern.get("id") or ""),
+        "pattern_type": str(pattern.get("pattern_type") or ""),
+        "source_file": source_file,
+        "source_origin": str(source_record.get("source_origin") or source_record.get("origin_path") or pattern.get("source_origin") or ""),
+        "source_type": str(source_record.get("source_type") or ""),
+        "trust_level": str(pattern.get("trust_level") or source_record.get("effective_trust_level") or source_record.get("trust_level") or "trusted"),
+        "promotion_state": str(
+            pattern.get("promotion_state")
+            or source_record.get("effective_promotion_state")
+            or source_record.get("promotion_state")
+            or ("curated_trusted" if str(pattern.get("trust_level") or "trusted") == "trusted" else "curated_experimental")
+        ),
+        "tags": sorted(set(list(source_record.get("tags") or []) + list(pattern.get("tags") or []))),
+        "applicability_context": list(pattern.get("applicability_context") or []),
+        "confidence": float(pattern.get("confidence", 0) or 0),
+        "validation_result": normalize_pattern_validation_result(source_record) if source_record else "success",
+        "publish_result": str(source_record.get("publish_result") or "not_recorded"),
+        "regression_status": str(source_record.get("regression_status") or "none"),
+        "last_validated_commit": str(source_record.get("last_validated_commit") or source_record.get("last_validated_fingerprint") or ""),
+        "last_published_commit": str(source_record.get("last_published_commit") or ""),
+        "pr_url": str(source_record.get("pr_url") or ""),
+        "promotion_reason": str(pattern.get("promotion_reason") or (derive_pattern_promotion_reason(source_record) if source_record else "learned from curated source")),
+        "timestamp": int(pattern.get("timestamp") or source_record.get("imported_at") or 0),
+        "promotion_method": str(pattern.get("promotion_method") or source_record.get("promotion_method") or "automatic"),
+        "summary": str(pattern.get("summary") or ""),
+        "anti_pattern_note": str(pattern.get("anti_pattern_note") or ""),
+        "source_repo_path": str(pattern.get("source_repo_path") or source_file),
+        "source_files": list(pattern.get("source_files") or []),
+        "keywords": list(pattern.get("keywords") or []),
+        "family": str(pattern.get("family") or pattern.get("pattern_type") or ""),
+    }
+
+
+def build_pattern_inspection_records(pattern_repo: Path) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    catalog = {"sources": load_effective_pattern_sources(repo_root)}
+    memory = load_script_pattern_memory(repo_root)
+    patterns = [item for item in memory.get("patterns", []) if isinstance(item, dict)]
+    source_records = [item for item in catalog.get("sources", []) if isinstance(item, dict)]
+    source_by_repo_rel = {
+        str(item.get("repo_rel_path") or item.get("candidate_path") or ""): item
+        for item in source_records
+        if str(item.get("repo_rel_path") or item.get("candidate_path") or "")
+    }
+    records: list[dict] = []
+    seen_ids: set[str] = set()
+    for pattern in patterns:
+        key = str(pattern.get("source_repo_path") or "")
+        source_record = source_by_repo_rel.get(key)
+        enriched = enrich_pattern_entry(pattern, source_record)
+        seen_ids.add(enriched["id"])
+        records.append(enriched)
+    for source_record in source_records:
+        if normalize_pattern_promotion_state(source_record) != "candidate":
+            continue
+        candidate_rel = str(source_record.get("candidate_path") or source_record.get("repo_rel_path") or "").strip()
+        if not candidate_rel:
+            continue
+        candidate_path = repo_root / candidate_rel
+        if not candidate_path.exists() or not candidate_path.is_file():
+            continue
+        for pattern in extract_script_patterns_with_metadata(repo_root, candidate_path, source_record):
+            enriched = enrich_pattern_entry(pattern, source_record)
+            if enriched["id"] in seen_ids:
+                continue
+            seen_ids.add(enriched["id"])
+            records.append(enriched)
+    return {
+        "pattern_repo": str(repo_root),
+        "memory_updated_at": int(memory.get("updated_at", 0) or 0),
+        "patterns": sorted(records, key=lambda item: (item.get("promotion_state", ""), item.get("id", ""))),
+        "sources": source_records,
+    }
+
+
+def filter_pattern_inspection_records(
+    records: list[dict],
+    *,
+    filter_state: str = "",
+    filter_tag: str = "",
+    search: str = "",
+    limit: int = 0,
+) -> list[dict]:
+    selected = list(records)
+    if filter_state:
+        selected = [item for item in selected if str(item.get("promotion_state") or "") == filter_state]
+    if filter_tag:
+        tag = filter_tag.strip().lower()
+        selected = [item for item in selected if tag in {str(entry).strip().lower() for entry in item.get("tags", [])}]
+    if search:
+        needle = search.strip().lower()
+        selected = [
+            item
+            for item in selected
+            if needle in " ".join(
+                [
+                    str(item.get("id") or ""),
+                    str(item.get("pattern_type") or ""),
+                    str(item.get("source_file") or ""),
+                    str(item.get("source_origin") or ""),
+                    " ".join(str(tag) for tag in item.get("tags", [])),
+                    " ".join(str(ctx) for ctx in item.get("applicability_context", [])),
+                    str(item.get("promotion_reason") or ""),
+                    str(item.get("summary") or ""),
+                ]
+            ).lower()
+        ]
+    if limit > 0:
+        selected = selected[:limit]
+    return selected
+
+
+def summarize_pattern_records(records: list[dict]) -> dict:
+    summary = {
+        "total_patterns": len(records),
+        "curated_trusted": 0,
+        "curated_experimental": 0,
+        "candidate": 0,
+        "trusted_count": 0,
+        "experimental_count": 0,
+        "candidate_count": 0,
+    }
+    for item in records:
+        state = str(item.get("promotion_state") or "")
+        trust = str(item.get("trust_level") or "")
+        if state in {"curated_trusted", "curated_experimental", "candidate"}:
+            summary[state] += 1
+        if state == "candidate":
+            summary["candidate_count"] += 1
+        elif trust == "trusted":
+            summary["trusted_count"] += 1
+        else:
+            summary["experimental_count"] += 1
+    return summary
+
+
+def inspect_patterns(
+    pattern_repo: Path | None,
+    *,
+    filter_state: str = "",
+    filter_tag: str = "",
+    search: str = "",
+    limit: int = 0,
+) -> dict:
+    if pattern_repo is None:
+        return {
+            "pattern_repo": "none",
+            "summary": summarize_pattern_records([]),
+            "patterns": [],
+            "memory_updated_at": 0,
+        }
+    inspection = build_pattern_inspection_records(pattern_repo)
+    filtered = filter_pattern_inspection_records(
+        inspection.get("patterns", []),
+        filter_state=filter_state,
+        filter_tag=filter_tag,
+        search=search,
+        limit=limit,
+    )
+    return {
+        "pattern_repo": inspection.get("pattern_repo", "none"),
+        "summary": summarize_pattern_records(filtered),
+        "patterns": filtered,
+        "memory_updated_at": inspection.get("memory_updated_at", 0),
+    }
+
+
+def inspect_pattern_sources(pattern_repo: Path | None, *, limit: int = 0, filter_state: str = "", filter_tag: str = "", search: str = "") -> dict:
+    if pattern_repo is None:
+        return {
+            "pattern_repo": "none",
+            "summary": {"total_sources": 0, "curated_trusted": 0, "curated_experimental": 0, "candidate": 0},
+            "sources": [],
+        }
+    repo_root = ensure_pattern_repo(pattern_repo)
+    catalog = {"sources": load_effective_pattern_sources(repo_root)}
+    memory = load_script_pattern_memory(repo_root)
+    counts_by_source: dict[str, int] = {}
+    for pattern in memory.get("patterns", []):
+        if not isinstance(pattern, dict):
+            continue
+        source_key = str(pattern.get("source_repo_path") or "")
+        if source_key:
+            counts_by_source[source_key] = counts_by_source.get(source_key, 0) + 1
+    sources: list[dict] = []
+    for source in [item for item in catalog.get("sources", []) if isinstance(item, dict)]:
+        promotion_state = normalize_pattern_promotion_state(source)
+        entry = {
+            "path": str(source.get("repo_rel_path") or source.get("candidate_path") or ""),
+            "source_origin": str(source.get("source_origin") or source.get("origin_path") or ""),
+            "trust_level": str(source.get("effective_trust_level") or source.get("trust_level") or "trusted"),
+            "promotion_state": str(source.get("effective_promotion_state") or promotion_state),
+            "tags": list(source.get("tags") or []),
+            "validation_result": normalize_pattern_validation_result(source),
+            "pattern_count": counts_by_source.get(str(source.get("repo_rel_path") or ""), 0),
+            "timestamp": int(source.get("imported_at") or 0),
+            "promotion_method": str(source.get("promotion_method") or "automatic"),
+            "promotion_reason": str(source.get("promotion_reason") or derive_pattern_promotion_reason(source)),
+        }
+        sources.append(entry)
+    if filter_state:
+        sources = [item for item in sources if item["promotion_state"] == filter_state]
+    if filter_tag:
+        tag = filter_tag.strip().lower()
+        sources = [item for item in sources if tag in {str(entry).strip().lower() for entry in item.get("tags", [])}]
+    if search:
+        needle = search.strip().lower()
+        sources = [item for item in sources if needle in f"{item['path']} {item['source_origin']}".lower()]
+    if limit > 0:
+        sources = sources[:limit]
+    summary = {
+        "total_sources": len(sources),
+        "curated_trusted": sum(1 for item in sources if item["promotion_state"] == "curated_trusted"),
+        "curated_experimental": sum(1 for item in sources if item["promotion_state"] == "curated_experimental"),
+        "candidate": sum(1 for item in sources if item["promotion_state"] == "candidate"),
+    }
+    return {
+        "pattern_repo": str(repo_root),
+        "summary": summary,
+        "sources": sources,
+    }
+
+
+def print_pattern_inspection(summary: dict, records: list[dict], *, show_promotion_state: bool = True) -> None:
+    print("Summary:")
+    print(f"- total_patterns: {summary.get('total_patterns', 0)}")
+    print(f"- curated_trusted: {summary.get('curated_trusted', 0)}")
+    print(f"- curated_experimental: {summary.get('curated_experimental', 0)}")
+    print(f"- candidate: {summary.get('candidate', 0)}")
+    for record in records:
+        print(f"\nPattern ID: {record.get('id', '')}")
+        if show_promotion_state:
+            print(f"- promotion_state: {record.get('promotion_state', '')}")
+        print(f"- trust_level: {record.get('trust_level', '')}")
+        print(f"- pattern_type: {record.get('pattern_type', '')}")
+        print(f"- tags: {record.get('tags', [])}")
+        print(f"- applicability_context: {record.get('applicability_context', [])}")
+        print(f"- confidence: {record.get('confidence', 0)}")
+        print(f"- validation_result: {record.get('validation_result', 'not_recorded')}")
+        print(f"- publish_result: {record.get('publish_result', 'not_recorded')}")
+        print(f"- regression_status: {record.get('regression_status', 'none')}")
+        print(f"- source_file: {record.get('source_file', '')}")
+        print(f"- source_origin: {record.get('source_origin', '') or '(none)'}")
+        print(f"- last_validated_commit: {record.get('last_validated_commit', '') or '(none)'}")
+        print(f"- last_published_commit: {record.get('last_published_commit', '') or '(none)'}")
+        print(f"- pr_url: {record.get('pr_url', '') or '(none)'}")
+        print(f"- promotion_method: {record.get('promotion_method', 'automatic')}")
+        print(f"- promotion_reason: {record.get('promotion_reason', '')}")
+        print(f"- timestamp: {record.get('timestamp', 0)}")
+
+
+def print_pattern_source_inspection(summary: dict, sources: list[dict]) -> None:
+    print("Summary:")
+    print(f"- total_sources: {summary.get('total_sources', 0)}")
+    print(f"- curated_trusted: {summary.get('curated_trusted', 0)}")
+    print(f"- curated_experimental: {summary.get('curated_experimental', 0)}")
+    print(f"- candidate: {summary.get('candidate', 0)}")
+    for source in sources:
+        print(
+            f"- path={source.get('path', '')} trust={source.get('trust_level', '')} "
+            f"promotion_state={source.get('promotion_state', '')} tags={source.get('tags', [])} "
+            f"validation_result={source.get('validation_result', 'not_recorded')} "
+            f"pattern_count={source.get('pattern_count', 0)} origin={source.get('source_origin', '') or '(none)'}"
+        )
+
+
+def apply_pattern_control_action(current_state: str, action: str) -> str:
+    if action == "promote":
+        if current_state == "candidate":
+            return "curated_experimental"
+        if current_state == "curated_experimental":
+            return "curated_trusted"
+        return current_state
+    if action == "demote":
+        if current_state == "curated_trusted":
+            return "curated_experimental"
+        if current_state == "curated_experimental":
+            return "candidate"
+        return current_state
+    return current_state
+
+
+def trust_for_promotion_state(state: str, current_trust: str = "trusted") -> str:
+    if state == "curated_trusted":
+        return "trusted"
+    if state in {"candidate", "curated_experimental"}:
+        return "experimental"
+    return current_trust if current_trust in PATTERN_TRUST_LEVELS else "trusted"
+
+
+def refresh_pattern_memory_from_controls(pattern_repo: Path) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    effective = build_effective_pattern_memory(repo_root)
+    save_script_pattern_memory(repo_root, effective)
+    return effective
+
+
+def find_pattern_record(pattern_repo: Path, pattern_id: str) -> dict | None:
+    inspection = build_pattern_inspection_records(pattern_repo)
+    for pattern in inspection.get("patterns", []):
+        if str(pattern.get("id") or "") == pattern_id:
+            return pattern
+    return None
+
+
+def find_source_record(pattern_repo: Path, source_ref: str) -> dict | None:
+    source_ref = str(source_ref or "").strip()
+    if not source_ref:
+        return None
+    for source in load_effective_pattern_sources(pattern_repo):
+        if source_ref in source_control_keys(source):
+            return source
+    return None
+
+
+def manage_pattern_state(
+    pattern_repo: Path,
+    pattern_id: str,
+    *,
+    action: str,
+    set_trust: str = "",
+    set_promotion_state: str = "",
+    dry_run: bool = False,
+) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    pattern = find_pattern_record(repo_root, pattern_id)
+    controls = load_pattern_controls(repo_root)
+    existing_override = resolve_pattern_override(controls, {"id": pattern_id})
+    if not pattern:
+        if isinstance(existing_override, dict):
+            pattern = {
+                "id": pattern_id,
+                "promotion_state": str(existing_override.get("promotion_state") or "candidate"),
+                "trust_level": str(existing_override.get("trust_level") or "experimental"),
+            }
+        else:
+            return {"ok": False, "reason": "pattern not found", "target_type": "pattern", "target": pattern_id}
+    pattern_controls = controls.setdefault("patterns", {})
+    previous_state = str(pattern.get("promotion_state") or "")
+    previous_trust = str(pattern.get("trust_level") or "")
+    new_state = set_promotion_state or apply_pattern_control_action(previous_state, action)
+    new_trust = set_trust or trust_for_promotion_state(new_state, previous_trust)
+    if action == "forget":
+        next_control = {
+            "action": "forget",
+            "promotion_method": "manual",
+            "promotion_reason": "manual forget pattern override",
+            "timestamp": int(time.time()),
+        }
+        affected_pattern_count = 1
+    else:
+        next_control = {
+            "action": action or "set",
+            "promotion_state": new_state,
+            "trust_level": new_trust,
+            "promotion_method": "manual",
+            "promotion_reason": f"manual {action or 'set'} pattern override",
+            "timestamp": int(time.time()),
+        }
+        affected_pattern_count = 1
+    if not dry_run:
+        pattern_controls[pattern_id] = next_control
+        save_pattern_controls(repo_root, controls)
+        refresh_pattern_memory_from_controls(repo_root)
+    return {
+        "ok": True,
+        "target_type": "pattern",
+        "target": pattern_id,
+        "previous_state": previous_state,
+        "new_state": "forgotten" if action == "forget" else new_state,
+        "previous_trust": previous_trust,
+        "new_trust": "" if action == "forget" else new_trust,
+        "affected_pattern_count": affected_pattern_count,
+        "reindexed": not dry_run,
+        "dry_run": dry_run,
+    }
+
+
+def manage_source_state(
+    pattern_repo: Path,
+    source_ref: str,
+    *,
+    action: str,
+    set_trust: str = "",
+    set_promotion_state: str = "",
+    dry_run: bool = False,
+) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    source = find_source_record(repo_root, source_ref)
+    if not source:
+        return {"ok": False, "reason": "source not found", "target_type": "source", "target": source_ref}
+    controls = load_pattern_controls(repo_root)
+    source_controls = controls.setdefault("sources", {})
+    source_key = str(source.get("id") or source.get("repo_rel_path") or source.get("candidate_path") or source_ref)
+    previous_state = str(source.get("effective_promotion_state") or normalize_pattern_promotion_state(source))
+    previous_trust = str(source.get("effective_trust_level") or source.get("trust_level") or "trusted")
+    new_state = set_promotion_state or apply_pattern_control_action(previous_state, action)
+    new_trust = set_trust or trust_for_promotion_state(new_state, previous_trust)
+    if action == "forget":
+        next_control = {
+            "action": "forget",
+            "promotion_method": "manual",
+            "promotion_reason": "manual forget source override; source file remains on disk",
+            "timestamp": int(time.time()),
+        }
+        new_state_label = "forgotten"
+    else:
+        next_control = {
+            "action": action or "set",
+            "promotion_state": new_state,
+            "trust_level": new_trust,
+            "promotion_method": "manual",
+            "promotion_reason": f"manual {action or 'set'} source override",
+            "timestamp": int(time.time()),
+        }
+        new_state_label = new_state
+    related_patterns = [
+        item
+        for item in build_pattern_inspection_records(repo_root).get("patterns", [])
+        if str(item.get("source_file") or "") in source_control_keys(source)
+        or str(item.get("source_repo_path") or "") in source_control_keys(source)
+    ]
+    if not dry_run:
+        source_controls[source_key] = next_control
+        save_pattern_controls(repo_root, controls)
+        refresh_pattern_memory_from_controls(repo_root)
+    return {
+        "ok": True,
+        "target_type": "source",
+        "target": source_key,
+        "previous_state": previous_state,
+        "new_state": new_state_label,
+        "previous_trust": previous_trust,
+        "new_trust": "" if action == "forget" else new_trust,
+        "affected_pattern_count": len(related_patterns),
+        "reindexed": not dry_run,
+        "dry_run": dry_run,
+    }
+
+
+def print_pattern_control_result(result: dict) -> None:
+    if not result.get("ok"):
+        print("=== PATTERN CONTROL ===")
+        print(f"target_type: {result.get('target_type', '(unknown)')}")
+        print(f"target: {result.get('target', '(none)')}")
+        print(f"error: {result.get('reason', 'unknown error')}")
+        return
+    print("=== PATTERN CONTROL ===")
+    print(f"target_type: {result.get('target_type', '(unknown)')}")
+    print(f"target: {result.get('target', '(none)')}")
+    print(f"previous_state: {result.get('previous_state', '(none)')}")
+    print(f"new_state: {result.get('new_state', '(none)')}")
+    print(f"previous_trust: {result.get('previous_trust', '(none)')}")
+    print(f"new_trust: {result.get('new_trust', '(none)')}")
+    print(f"affected_pattern_count: {result.get('affected_pattern_count', 0)}")
+    print(f"reindex_ran: {format_bool(result.get('reindexed'))}")
+    print(f"dry_run: {format_bool(result.get('dry_run'))}")
+
+
 def forget_pattern(pattern_repo: Path, pattern_id: str) -> dict:
     memory = load_script_pattern_memory(pattern_repo)
     retained = [item for item in memory.get("patterns", []) if isinstance(item, dict) and item.get("id") != pattern_id]
@@ -5180,17 +6996,15 @@ def detect_publish_environment() -> dict:
 
 
 def recommended_publish_command(include_pr: bool = True) -> str:
-    cmd = "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish"
     if include_pr:
-        cmd += " --publish-pr"
-    return cmd
+        return "./scripts/fixpublish.sh"
+    return "./scripts/publishcurrent.sh"
 
 
 def recommended_publish_current_command(include_pr: bool = True) -> str:
-    cmd = "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only"
     if include_pr:
-        cmd += " --publish-pr"
-    return cmd
+        return "./scripts/fixpublish.sh"
+    return "./scripts/publishcurrent.sh"
 
 
 def make_publish_result() -> dict:
@@ -5453,6 +7267,8 @@ def publish_summary_requires_failure(summary: dict) -> bool:
 def resolve_publish_requested(args: argparse.Namespace) -> bool:
     if getattr(args, "publish_only", False):
         return True
+    if getattr(args, "no_finalize", False):
+        return False
     if getattr(args, "no_publish_on_success", False):
         return False
     return True
@@ -5494,6 +7310,12 @@ def format_final_operator_summary(summary: dict) -> str:
             return f"FINAL: validation blocked, publish {publish_result}"
         return "FINAL: validation blocked"
     return "FINAL: validation failed"
+
+
+def fail_incomplete_without_finalization() -> None:
+    print("FINALIZATION SKIPPED: --no-finalize")
+    print("FINAL: validation succeeded, finalization skipped (incomplete)")
+    raise SystemExit(2)
 
 
 def resolve_publish_target(preflight: dict, publish_state: dict) -> dict:
@@ -5626,13 +7448,23 @@ def sync_local_main_after_merge(repo: Path) -> tuple[bool, str]:
         if code != 0:
             return False, f"Local main sync failed during checkout: {output}"
         switched = True
-    code, output = run_subprocess(["git", "pull", "--ff-only", "origin", "main"], repo)
+    ok, sync_reason, conflict_result = run_sync_operation_with_conflict_hook(
+        repo,
+        sync_operation="branch_sync",
+        command=["git", "pull", "--ff-only", "origin", "main"],
+        validation_command=latest_repo_validation_command(repo),
+        no_auto_conflict_resolution_after_sync=CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC,
+    )
     if switched:
         restore_code, restore_output = run_subprocess(["git", "checkout", current_branch], repo)
         if restore_code != 0:
             return False, f"Local main sync restored main, but could not switch back to {current_branch}: {restore_output}"
-    if code != 0:
-        return False, f"Local main sync failed: {output}"
+    if conflict_result.get("merge_conflicts_detected"):
+        if ok:
+            return True, ""
+        return False, f"Local main sync conflict handling blocked: {sync_reason or conflict_result.get('blocked_reason')}"
+    if not ok:
+        return False, f"Local main sync failed: {sync_reason}"
     return True, ""
 
 
@@ -5741,6 +7573,25 @@ def parse_head_commit(repo: Path) -> str:
     except Exception:
         return ""
     return output.strip() if code == 0 else ""
+
+
+def git_dir_path(repo: Path) -> Path:
+    code, output = run_subprocess(["git", "rev-parse", "--git-dir"], repo)
+    if code != 0 or not output.strip():
+        return repo / ".git"
+    git_dir = Path(output.strip())
+    return git_dir if git_dir.is_absolute() else (repo / git_dir).resolve()
+
+
+def detect_git_sequence_state(repo: Path) -> str:
+    git_dir = git_dir_path(repo)
+    if (git_dir / "MERGE_HEAD").exists():
+        return "merge"
+    if (git_dir / "CHERRY_PICK_HEAD").exists():
+        return "cherry_pick"
+    if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+        return "rebase"
+    return "none"
 
 
 def make_publish_branch_name() -> str:
@@ -8854,6 +10705,7 @@ def finalize_success(
 
 
 def main():
+    global CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", help="Path to repo")
     parser.add_argument("--script", help="Path to a Python script; validation commands are discovered automatically.")
@@ -8871,9 +10723,14 @@ def main():
     parser.add_argument("--publish", action="store_true", help="Compatibility flag for the default validated-run publish behavior.")
     parser.add_argument("--publish-on-success", action="store_true", help="Compatibility flag; publish-on-success is already the default for validated runs.")
     parser.add_argument("--no-publish-on-success", action="store_true", help="Disable the default publish-after-validation-success behavior for validated runs.")
+    parser.add_argument("--no-finalize", action="store_true", help="Stop after successful validation and skip the canonical finalization publish path.")
+    parser.add_argument("--ensure-validation-record", action="store_true", help="Create or reuse a commit-linked validation record for the current repo state before finalization.")
     parser.add_argument("--publish-only", action="store_true", help="Publish the current repo state without running the repair loop or requiring a failing test command.")
     parser.add_argument("--force-publish", action="store_true", help="Allow publish to proceed even when the current validation state is blocked or failed.")
+    parser.add_argument("--no-auto-merge-conflicts", action="store_true", help="Detect merge conflicts and block immediately instead of attempting auto-resolution.")
+    parser.add_argument("--no-auto-conflict-resolution-after-sync", action="store_true", help="After pull/merge/rebase/branch-sync conflicts, block immediately instead of attempting auto-resolution.")
     parser.add_argument("--no-auto-revalidate", action="store_true", help="Disable automatic validation rerun when publish detects a stale validated commit.")
+    parser.add_argument("--force-upstream-merge", action="store_true", help="Allow upstream sync to proceed even when the incoming upstream change analysis is high risk.")
     parser.add_argument("--publish-branch", help="Branch name to use for publish mode.")
     parser.add_argument("--publish-pr", action="store_true", help="After publish, attempt to open a pull request with GitHub CLI.")
     parser.add_argument("--publish-merge", action="store_true", help="After publish, auto-merge only when the PR is a safe self-owned fork PR.")
@@ -8889,6 +10746,19 @@ def main():
     parser.add_argument("--pattern-note", help="Optional note recorded with imported pattern sources.")
     parser.add_argument("--list-patterns", action="store_true", help="List learned patterns from the private pattern repository.")
     parser.add_argument("--list-pattern-sources", action="store_true", help="List source files tracked in the private pattern repository.")
+    parser.add_argument("--promote-pattern", help="Promote one pattern by id.")
+    parser.add_argument("--demote-pattern", help="Demote one pattern by id.")
+    parser.add_argument("--show-promotion-state", action=argparse.BooleanOptionalAction, default=True, help="Show promotion state in human-readable pattern listings.")
+    parser.add_argument("--filter-state", choices=["candidate", "curated_experimental", "curated_trusted"], help="Filter listed patterns or sources by promotion state.")
+    parser.add_argument("--filter-tag", help="Filter listed patterns or sources by tag.")
+    parser.add_argument("--search", help="Filter listed patterns or sources by substring match.")
+    parser.add_argument("--limit", type=int, default=0, help="Maximum number of patterns or sources to list. 0 means no limit.")
+    parser.add_argument("--output", choices=["human", "json"], default="human", help="Output format for list-style pattern commands.")
+    parser.add_argument("--promote-source", help="Promote one pattern source by id or path.")
+    parser.add_argument("--demote-source", help="Demote one pattern source by id or path.")
+    parser.add_argument("--forget-source", help="Forget one pattern source by id or path.")
+    parser.add_argument("--set-trust", choices=sorted(PATTERN_TRUST_LEVELS), help="Manual trust override for pattern/source management.")
+    parser.add_argument("--set-promotion-state", choices=["candidate", "curated_experimental", "curated_trusted"], help="Manual promotion-state override for pattern/source management.")
     parser.add_argument("--relearn-patterns", action="store_true", help="Rebuild pattern memory by scanning the private pattern repository.")
     parser.add_argument("--forget-pattern", help="Remove a learned pattern by id from the private pattern memory.")
     parser.add_argument("--new-script", help="Generate a new script using learned conventions when relevant patterns exist.")
@@ -8898,6 +10768,7 @@ def main():
     parser.add_argument("--pattern-eval-tasks", help="Optional path to a pattern-learning eval task JSON file.")
     parser.add_argument("--http-proxy", help="HTTP proxy for subprocess-driven tasks.")
     parser.add_argument("--https-proxy", help="HTTPS proxy for subprocess-driven tasks.")
+    parser.add_argument("--no-upstream-sync", action="store_true", help="Skip the automatic upstream fetch/merge check before learning, validation, repair, or publish.")
     parser.add_argument("--api-budget-run", type=int, help="Optional likely API-failure budget for the full run.")
     parser.add_argument("--api-budget-attempt", type=int, help="Optional likely API-failure budget per attempt.")
     parser.add_argument("--config", help="Path to config JSON file.")
@@ -8918,14 +10789,19 @@ def main():
         or args.reset_pattern_repo
         or args.list_patterns
         or args.list_pattern_sources
+        or args.promote_pattern
+        or args.demote_pattern
         or args.relearn_patterns
         or args.forget_pattern
+        or args.promote_source
+        or args.demote_source
+        or args.forget_source
         or (args.script and args.add_to_training)
     )
 
     repo, args.test_cmd, args.max_steps, args.max_file_chars, resolved_mode, mode_source, config_path, recent_state_path, safety_settings, target = resolve_run_settings(
         args,
-        require_test_cmd=not args.publish_only and not pattern_special_mode,
+        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record,
     )
     if not target and not repo.exists():
         print(f"Missing repo path: {repo}", file=sys.stderr)
@@ -8933,16 +10809,20 @@ def main():
 
     configure_execution_target(target, repo)
     configure_subprocess_safety(safety_settings)
+    CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC = bool(getattr(args, "no_auto_conflict_resolution_after_sync", False))
     config_values, _ = load_agent_config(args.config, Path.cwd())
     configure_publish_ignore_paths(config_values)
-    pattern_repo_management_mode = bool(
+    pattern_repo_mutation_mode = bool(
         args.learn_from
         or args.import_pattern_files
         or args.reset_pattern_repo
-        or args.list_patterns
-        or args.list_pattern_sources
         or args.relearn_patterns
         or args.forget_pattern
+        or args.promote_pattern
+        or args.demote_pattern
+        or args.promote_source
+        or args.demote_source
+        or args.forget_source
         or (args.script and args.add_to_training)
     )
     selection_task_type, selection_task_text, selection_script_path = infer_pattern_repo_selection_context(args, resolved_mode)
@@ -8952,12 +10832,13 @@ def main():
         selection_task_type,
         selection_task_text,
         script_path=selection_script_path,
-        require_repo=pattern_repo_management_mode,
+        require_repo=pattern_repo_mutation_mode,
     )
     pattern_repo = pattern_repo_selection.get("path")
     created_pattern_repo = False
     reset_existing = False
-    if pattern_repo_management_mode:
+    json_list_mode = bool((args.list_patterns or args.list_pattern_sources) and args.output == "json")
+    if pattern_repo_mutation_mode:
         if pattern_repo is None:
             print("Pattern repo management requires a concrete pattern repo.", file=sys.stderr)
             raise SystemExit(2)
@@ -8966,40 +10847,56 @@ def main():
         else:
             pattern_repo, created_pattern_repo = ensure_pattern_repo_status(pattern_repo)
     publish_requested = resolve_publish_requested(args)
-    if args.learn_from:
-        startup_signal("Mode: learn trusted script patterns")
-    elif args.import_pattern_files or args.list_patterns or args.list_pattern_sources or args.relearn_patterns or args.forget_pattern:
-        startup_signal("Mode: manage private pattern repository")
-    elif args.new_script:
-        startup_signal("Mode: generate new script from learned patterns")
-    elif args.eval_pattern_learning:
-        startup_signal("Mode: evaluate learned script patterns")
-    elif args.publish_only:
-        startup_signal("Mode: publish current repo state")
-    else:
-        startup_signal("Mode: publish validated run" if publish_requested else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
-        startup_signal(f"Using test: {args.test_cmd}")
-    startup_signal(
-        "Proxy support: enabled"
-        if API_SAFETY_STATE["proxy_enabled"]
-        else "Proxy support: disabled"
-    )
-    if args.publish_only:
-        startup_signal("Skipping repair loop; publish-only mode active.")
-    elif pattern_special_mode:
-        startup_signal("Skipping repair loop; pattern-learning workflow active.")
-    else:
-        startup_signal("Starting repair loop...")
-    print(f"Execution: {'remote' if target else 'local'}")
-    if target:
-        print(f"🌐 Target: {target}")
-    print(f"Repository: {repo}")
-    if CURRENT_VALIDATION_PLAN.get("active"):
-        print(format_validation_plan_summary(CURRENT_VALIDATION_PLAN))
-    print(f"selected pattern repo: {pattern_repo_selection.get('selected', 'none')}")
-    print(f"pattern repo reason: {pattern_repo_selection.get('reason', '')}")
-    print(f"pattern repo confidence: {pattern_repo_selection.get('confidence', 'low')}")
-    if pattern_special_mode:
+    if not json_list_mode:
+        if args.learn_from:
+            startup_signal("Mode: learn trusted script patterns")
+        elif (
+            args.import_pattern_files
+            or args.list_patterns
+            or args.list_pattern_sources
+            or args.relearn_patterns
+            or args.forget_pattern
+            or args.promote_pattern
+            or args.demote_pattern
+            or args.promote_source
+            or args.demote_source
+            or args.forget_source
+        ):
+            startup_signal("Mode: manage private pattern repository")
+        elif args.new_script:
+            startup_signal("Mode: generate new script from learned patterns")
+        elif args.eval_pattern_learning:
+            startup_signal("Mode: evaluate learned script patterns")
+        elif args.publish_only:
+            startup_signal("Mode: publish current repo state")
+        elif args.ensure_validation_record:
+            startup_signal("Mode: ensure validation record")
+        else:
+            startup_signal("Mode: publish validated run" if publish_requested else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
+            startup_signal(f"Using test: {args.test_cmd}")
+        startup_signal(
+            "Proxy support: enabled"
+            if API_SAFETY_STATE["proxy_enabled"]
+            else "Proxy support: disabled"
+        )
+        if args.publish_only:
+            startup_signal("Skipping repair loop; publish-only mode active.")
+        elif args.ensure_validation_record:
+            startup_signal("Skipping repair loop; validation-record mode active.")
+        elif pattern_special_mode:
+            startup_signal("Skipping repair loop; pattern-learning workflow active.")
+        else:
+            startup_signal("Starting repair loop...")
+        print(f"Execution: {'remote' if target else 'local'}")
+        if target:
+            print(f"🌐 Target: {target}")
+        print(f"Repository: {repo}")
+        if CURRENT_VALIDATION_PLAN.get("active"):
+            print(format_validation_plan_summary(CURRENT_VALIDATION_PLAN))
+        print(f"selected pattern repo: {pattern_repo_selection.get('selected', 'none')}")
+        print(f"pattern repo reason: {pattern_repo_selection.get('reason', '')}")
+        print(f"pattern repo confidence: {pattern_repo_selection.get('confidence', 'low')}")
+    if pattern_special_mode and not json_list_mode:
         print(f"Pattern repo: {pattern_repo if pattern_repo else 'none'}")
         if args.reset_pattern_repo:
             print("=== PATTERN REPO RESET ===")
@@ -9014,9 +10911,45 @@ def main():
                 or args.list_pattern_sources
                 or args.relearn_patterns
                 or args.forget_pattern
+                or args.promote_pattern
+                or args.demote_pattern
+                or args.promote_source
+                or args.demote_source
+                or args.forget_source
                 or args.add_to_training
             ):
                 return
+    should_sync_upstream = bool(
+        not args.no_upstream_sync
+        and not args.explain_only
+        and (
+            args.publish_only
+            or publish_requested
+            or not pattern_special_mode
+            or args.learn_from
+            or args.import_pattern_files
+            or args.new_script
+            or args.eval_pattern_learning
+            or (args.script and args.add_to_training)
+        )
+    )
+    upstream_sync_result = make_upstream_sync_result()
+    if should_sync_upstream:
+        upstream_sync_result = sync_with_upstream_before_workflow(
+            repo,
+            validation_command=args.test_cmd or latest_repo_validation_command(repo),
+            target=target,
+            no_auto_conflict_resolution_after_sync=bool(args.no_auto_conflict_resolution_after_sync),
+            no_upstream_sync=bool(args.no_upstream_sync),
+            force_upstream_merge=bool(args.force_upstream_merge),
+        )
+        if int((upstream_sync_result.get("behind_count") or 0)) > 0:
+            print_upstream_change_analysis(upstream_sync_result.get("analysis") or {})
+        print_upstream_sync_summary(upstream_sync_result)
+        if upstream_sync_result.get("merge_conflict_result"):
+            print_merge_conflict_summary(upstream_sync_result["merge_conflict_result"])
+        if upstream_sync_result.get("sync_result") == "blocked":
+            raise SystemExit(1)
     if args.import_pattern_files:
         imported = import_pattern_files(
             pattern_repo,
@@ -9078,28 +11011,118 @@ def main():
         print(f"learned_pattern_count: {len(relearned.get('learned_patterns', []))}")
         return
     if args.list_pattern_sources:
-        print("=== PATTERN SOURCES ===")
-        for source in list_pattern_sources(pattern_repo):
-            print(
-                f"- path={source.get('repo_rel_path', '')} trust={source.get('trust_level', '')} "
-                f"tags={source.get('tags', [])} origin={source.get('origin_path', '')}"
-            )
+        inspection = inspect_pattern_sources(
+            pattern_repo,
+            limit=max(0, int(args.limit or 0)),
+            filter_state=str(args.filter_state or ""),
+            filter_tag=str(args.filter_tag or ""),
+            search=str(args.search or ""),
+        )
+        if args.output == "json":
+            print(json.dumps(inspection, indent=2, sort_keys=True))
+        else:
+            print("=== PATTERN SOURCES ===")
+            print(f"pattern_repo: {inspection.get('pattern_repo', 'none')}")
+            print_pattern_source_inspection(inspection.get("summary", {}), inspection.get("sources", []))
         return
     if args.list_patterns:
-        print("=== PATTERNS ===")
-        for pattern in list_patterns(pattern_repo):
-            print(
-                f"- id={pattern.get('id', '')} type={pattern.get('pattern_type', '')} "
-                f"trust={pattern.get('trust_level', '')} source={pattern.get('source_repo_path', '')} "
-                f"tags={pattern.get('tags', [])} confidence={pattern.get('confidence', 0)}"
+        inspection = inspect_patterns(
+            pattern_repo,
+            filter_state=str(args.filter_state or ""),
+            filter_tag=str(args.filter_tag or ""),
+            search=str(args.search or ""),
+            limit=max(0, int(args.limit or 0)),
+        )
+        if args.output == "json":
+            print(json.dumps(inspection, indent=2, sort_keys=True))
+        else:
+            print("=== PATTERNS ===")
+            print(f"pattern_repo: {inspection.get('pattern_repo', 'none')}")
+            print_pattern_inspection(
+                inspection.get("summary", {}),
+                inspection.get("patterns", []),
+                show_promotion_state=bool(args.show_promotion_state),
             )
         return
+    if args.promote_pattern:
+        result = manage_pattern_state(
+            pattern_repo,
+            args.promote_pattern,
+            action="promote",
+            set_trust=str(args.set_trust or ""),
+            set_promotion_state=str(args.set_promotion_state or ""),
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
+        return
+    if args.demote_pattern:
+        result = manage_pattern_state(
+            pattern_repo,
+            args.demote_pattern,
+            action="demote",
+            set_trust=str(args.set_trust or ""),
+            set_promotion_state=str(args.set_promotion_state or ""),
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
+        return
+    if args.promote_source:
+        result = manage_source_state(
+            pattern_repo,
+            args.promote_source,
+            action="promote",
+            set_trust=str(args.set_trust or ""),
+            set_promotion_state=str(args.set_promotion_state or ""),
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
+        return
+    if args.demote_source:
+        result = manage_source_state(
+            pattern_repo,
+            args.demote_source,
+            action="demote",
+            set_trust=str(args.set_trust or ""),
+            set_promotion_state=str(args.set_promotion_state or ""),
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
+        return
+    if args.forget_source:
+        result = manage_source_state(
+            pattern_repo,
+            args.forget_source,
+            action="forget",
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
+        return
     if args.forget_pattern:
-        forgotten = forget_pattern(pattern_repo, args.forget_pattern)
-        print("=== FORGET PATTERN ===")
-        print(f"pattern_id: {forgotten.get('pattern_id', '')}")
-        print(f"removed: {forgotten.get('removed')}")
-        print(f"remaining_patterns: {forgotten.get('remaining_patterns', 0)}")
+        result = manage_pattern_state(
+            pattern_repo,
+            args.forget_pattern,
+            action="forget",
+            dry_run=bool(args.dry_run),
+        )
+        if args.output == "json":
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print_pattern_control_result(result)
         return
     if args.learn_from:
         learned = learn_from_scripts(
@@ -9170,6 +11193,16 @@ def main():
         eval_result = run_pattern_learning_eval(repo, args.pattern_eval_tasks, pattern_repo=pattern_repo)
         print_pattern_eval_report(eval_result)
         return
+    if args.ensure_validation_record:
+        validation_record_result = ensure_validation_record_for_current_commit(
+            repo,
+            validation_command=args.test_cmd or "",
+            target=target,
+        )
+        print_validation_record_result(validation_record_result)
+        if not validation_record_result.get("ok"):
+            raise SystemExit(1)
+        return
     if args.publish_only:
         print("Active mode: publish current repo state")
     elif publish_requested:
@@ -9178,6 +11211,26 @@ def main():
         print("Explain-only mode: resolved settings only, no repair attempt will run.")
         print(format_run_artifact_summary(repo, recent_state_path, config_path))
         return
+    merge_conflict_outcome = maybe_handle_merge_conflicts(
+        repo,
+        validation_command=args.test_cmd or latest_repo_validation_command(repo),
+        publish_requested=bool(args.publish_only or publish_requested),
+        publish_mode="current-repo-state" if args.publish_only else "validated-run",
+        publish_branch=args.publish_branch or "",
+        publish_pr=args.publish_pr,
+        publish_merge=args.publish_merge,
+        publish_merge_local_main=args.publish_merge_local_main,
+        publish_message=args.publish_message or "",
+        target=target,
+        dry_run_mode=args.dry_run,
+        force_publish=bool(args.force_publish),
+        no_auto_merge_conflicts=bool(args.no_auto_merge_conflicts),
+    )
+    if merge_conflict_outcome:
+        if merge_conflict_outcome.get("success"):
+            return
+        if not merge_conflict_outcome.get("continue_with_repair"):
+            raise SystemExit(1)
     if args.publish_only:
         validation_state = resolve_publish_validation_state(repo)
         validation_state = attempt_publish_auto_revalidation(
@@ -9774,6 +11827,8 @@ def main():
                 print(comparison_text)
                 print(action_text)
                 print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
+                if args.no_finalize:
+                    fail_incomplete_without_finalization()
                 publish_summary = run_post_success_publish(
                     repo,
                     args.test_cmd,
@@ -10707,6 +12762,8 @@ def main():
                         print(comparison_text)
                         print(action_text)
                         print(format_run_artifact_summary(repo, recent_state_path, config_path, artifact_dir, target))
+                        if args.no_finalize:
+                            fail_incomplete_without_finalization()
                         publish_summary = run_post_success_publish(
                             repo,
                             args.test_cmd,

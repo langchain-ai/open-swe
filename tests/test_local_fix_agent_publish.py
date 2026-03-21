@@ -1,11 +1,69 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pytest
 
 import local_fix_agent as lfa
+
+
+def git_ok(repo: Path, *args: str) -> str:
+    code, output = lfa.run_subprocess(["git", *args], repo)
+    assert code == 0, output
+    return output
+
+
+def build_merge_conflict_repo(tmp_path: Path, rel_path: str, main_text: str, feature_text: str, base_text: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_ok(repo, "init")
+    git_ok(repo, "config", "user.email", "tests@example.com")
+    git_ok(repo, "config", "user.name", "Test User")
+    git_ok(repo, "checkout", "-b", "main")
+    target = repo / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(base_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "base")
+    git_ok(repo, "checkout", "-b", "feature")
+    target.write_text(feature_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "feature")
+    git_ok(repo, "checkout", "main")
+    target.write_text(main_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "main")
+    code, _ = lfa.run_subprocess(["git", "merge", "feature"], repo)
+    assert code != 0
+    return repo
+
+
+def build_rebase_conflict_repo(tmp_path: Path, rel_path: str, main_text: str, feature_text: str, base_text: str) -> Path:
+    repo = tmp_path / "repo_rebase"
+    repo.mkdir()
+    git_ok(repo, "init")
+    git_ok(repo, "config", "user.email", "tests@example.com")
+    git_ok(repo, "config", "user.name", "Test User")
+    git_ok(repo, "checkout", "-b", "main")
+    target = repo / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(base_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "base")
+    git_ok(repo, "checkout", "-b", "feature")
+    target.write_text(feature_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "feature")
+    git_ok(repo, "checkout", "main")
+    target.write_text(main_text)
+    git_ok(repo, "add", "--", rel_path)
+    git_ok(repo, "commit", "-m", "main")
+    git_ok(repo, "checkout", "feature")
+    code, _ = lfa.run_subprocess(["git", "rebase", "main"], repo)
+    assert code != 0
+    return repo
 
 
 def make_preflight(**overrides: object) -> dict:
@@ -503,6 +561,795 @@ def test_attempt_publish_auto_revalidation_blocks_if_commit_changes_again(monkey
     assert result["auto_revalidated"] is True
     assert result["auto_revalidation_result"] == "blocked"
     assert "changed again after the auto-revalidation attempt" in result["reason"]
+
+
+def test_resolve_merge_conflicts_state_file_takes_theirs(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        ".ai_publish_state.json",
+        json.dumps({"side": "main"}) + "\n",
+        json.dumps({"side": "feature"}) + "\n",
+        json.dumps({"side": "base"}) + "\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -c \"print('ok')\"")
+
+    assert result["merge_conflicts_detected"] is True
+    assert result["merge_result"] == "success"
+    assert result["resolution_strategy_per_file"][".ai_publish_state.json"] == "take_theirs_state_file"
+    assert (repo / ".ai_publish_state.json").read_text() == json.dumps({"side": "feature"}) + "\n"
+
+
+def test_resolve_merge_conflicts_docs_trivial_merge(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        "README.md",
+        "# Demo\n\nline one\nline two\nproxy support\n",
+        "# Demo\n\nline one\nlogging notes\n",
+        "# Demo\n\nbase line\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -c \"print('ok')\"")
+
+    assert result["merge_result"] == "success"
+    assert result["resolution_strategy_per_file"]["README.md"] == "prefer_newer_docs_content"
+    assert result["conflict_explanations"]["README.md"]["file_type"] == "docs"
+    assert "adds documentation content" in result["conflict_explanations"]["README.md"]["ours_summary"]
+    assert "both sides edit the same documentation section" == result["conflict_explanations"]["README.md"]["conflict_reason"]
+    assert "line two" in (repo / "README.md").read_text()
+
+
+def test_resolve_merge_conflicts_code_conflict_resolved_and_validated(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        "app.py",
+        "def run():\n    for attempt in range(3):\n        retry = True\n    return 1\n",
+        "def run():\n    timeout = 5\n    return timeout\n",
+        "def run():\n    return 0\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -m py_compile app.py")
+
+    assert result["merge_conflicts_detected"] is True
+    assert result["merge_result"] == "success"
+    assert result["validation_result_after_merge"] == "success"
+    assert result["resolution_strategy_per_file"]["app.py"] == "structured_merge_combined_logic"
+    assert result["conflict_explanations"]["app.py"]["ours_summary"] == "adds retry logic"
+    assert result["conflict_explanations"]["app.py"]["theirs_summary"] == "changes timeout handling"
+    assert result["conflict_explanations"]["app.py"]["conflict_reason"] == "both sides edit the same code block"
+    assert "auto-resolved merge conflicts with validation" in git_ok(repo, "log", "-1", "--pretty=%s")
+
+
+def test_resolve_merge_conflicts_config_ambiguous_blocks(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        "settings.json",
+        json.dumps({"timeout": 10, "mode": "fast"}, indent=2) + "\n",
+        json.dumps({"timeout": 5, "mode": "safe"}, indent=2) + "\n",
+        json.dumps({"timeout": 1}, indent=2) + "\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -c \"print('ok')\"")
+
+    assert result["merge_conflicts_detected"] is True
+    assert result["merge_result"] == "blocked"
+    assert result["resolution_strategy_per_file"]["settings.json"] == "blocked_ambiguous_config_conflict"
+    assert result["conflict_explanations"]["settings.json"]["ours_summary"] == "changes config keys: timeout, mode"
+    assert result["conflict_explanations"]["settings.json"]["theirs_summary"] == "changes config keys: timeout, mode"
+    assert result["conflict_explanations"]["settings.json"]["conflict_reason"] == "both sides modify the same config block differently"
+
+
+def test_resolve_merge_conflicts_code_conflict_ambiguous_blocks(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        "broken.py",
+        "def run():\n    if True:\n",
+        "def run():\n    return 1\n",
+        "def run():\n    return 0\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -m py_compile broken.py")
+
+    assert result["merge_conflicts_detected"] is True
+    assert result["merge_result"] == "blocked"
+    assert result["resolution_strategy_per_file"]["broken.py"] == "blocked_ambiguous_code_conflict"
+
+
+def test_resolve_merge_conflicts_strict_mode_blocks_without_attempting_resolution(tmp_path: Path) -> None:
+    repo = build_merge_conflict_repo(
+        tmp_path,
+        "app.py",
+        "def run():\n    value = 2\n    return value\n",
+        "def run():\n    note = 'ok'\n    return 1\n",
+        "def run():\n    return 0\n",
+    )
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -m py_compile app.py", no_auto_merge_conflicts=True)
+
+    assert result["merge_conflicts_detected"] is True
+    assert result["merge_result"] == "blocked"
+    assert result["validation_result_after_merge"] == "not_run"
+    assert result["resolution_strategy_per_file"]["app.py"] == "strict_mode_blocked"
+
+
+def test_print_merge_conflict_summary_blocked_includes_manual_section(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(lfa.sys, "argv", ["local_fix_agent.py", "--repo", "/tmp/demo", "--publish-only"])
+
+    lfa.print_merge_conflict_summary(
+        {
+            "sync_operation_attempted": True,
+            "sync_operation": "merge",
+            "merge_conflicts_detected": True,
+            "conflict_source": "git_merge",
+            "auto_conflict_resolution_attempted": True,
+            "conflicted_files": ["settings.json"],
+            "resolution_strategy_per_file": {"settings.json": "blocked_ambiguous_config_conflict"},
+            "validation_result_after_merge": "not_run",
+            "merge_result": "blocked",
+            "blocked_reason": "config conflict is not clearly compatible",
+            "git_sequence_state": "merge",
+            "conflict_explanations": {
+                "settings.json": {
+                    "file": "settings.json",
+                    "file_type": "config",
+                    "hunk_count": 1,
+                    "ours_summary": "changes config keys: timeout, mode",
+                    "theirs_summary": "changes config keys: timeout, mode",
+                    "conflict_reason": "both sides modify the same config block differently",
+                    "suggested_resolution": "merge both only if the resulting config keeps the intended keys and values compatible",
+                    "hunks": [],
+                }
+            },
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "=== MANUAL MERGE REQUIRED ===" in output
+    assert "=== CONFLICT EXPLANATION ===" in output
+    assert "conflicted_files: ['settings.json']" in output
+    assert "file: settings.json" in output
+    assert "file_type: config" in output
+    assert "ambiguous config conflict; both sides modify the same settings differently" in output
+    assert "ours_summary: changes config keys: timeout, mode" in output
+    assert "theirs_summary: changes config keys: timeout, mode" in output
+    assert "conflict_reason: both sides modify the same config block differently" in output
+    assert "hint: use ours if local settings are known-good; use theirs if upstream defaults must win; merge both only if the combined config remains compatible" in output
+    assert "git diff --name-only --diff-filter=U" in output
+    assert "<editor> settings.json" in output
+    assert "git checkout --ours -- settings.json" in output
+    assert "git checkout --theirs -- settings.json" in output
+    assert "git add settings.json" in output
+    assert "complete_merge: git commit" in output
+    assert "Resume:" in output
+    assert "python local_fix_agent.py --repo /tmp/demo --publish-only" in output
+
+
+def test_maybe_handle_merge_conflicts_blocked_disables_further_automation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(lfa.sys, "argv", ["local_fix_agent.py", "--repo", str(repo), "--test-cmd", "pytest -q"])
+    monkeypatch.setattr(
+        lfa,
+        "resolve_merge_conflicts",
+        lambda current_repo, validation_command="", no_auto_merge_conflicts=False: {
+            "merge_conflicts_detected": True,
+            "conflicted_files": ["broken.py"],
+            "resolution_strategy_per_file": {"broken.py": "blocked_ambiguous_code_conflict"},
+            "validation_result_after_merge": "failed",
+            "merge_result": "blocked",
+            "blocked_reason": "structured code merge remained syntactically invalid",
+            "commit_sha": "",
+            "sync_operation_attempted": False,
+            "sync_operation": "none",
+            "conflict_source": "merge",
+            "auto_conflict_resolution_attempted": True,
+            "git_sequence_state": "merge",
+        },
+    )
+
+    outcome = lfa.maybe_handle_merge_conflicts(
+        repo,
+        validation_command="pytest -q",
+        publish_requested=False,
+        publish_mode="validated-run",
+        publish_branch="",
+        publish_pr=False,
+        publish_merge=False,
+        publish_merge_local_main=False,
+        publish_message="",
+        target="",
+        dry_run_mode=False,
+        force_publish=False,
+    )
+
+    output = capsys.readouterr().out
+    assert outcome["handled"] is True
+    assert outcome["success"] is False
+    assert outcome["continue_with_repair"] is False
+    assert "=== MANUAL MERGE REQUIRED ===" in output
+    assert "file: broken.py" in output
+    assert "file_type: code" in output
+    assert "ours_summary: adds retry logic" not in output
+    assert "hint: use ours if local logic is known-good; use theirs if the upstream fix should win; merge both if each side adds valid complementary logic" in output
+    assert "Resume:" in output
+    assert "python local_fix_agent.py" in output
+
+
+def test_print_manual_merge_required_uses_rebase_continue(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(lfa.sys, "argv", ["local_fix_agent.py", "--repo", "/tmp/rebase-demo"])
+
+    lfa.print_manual_merge_required(
+        {
+            "conflicted_files": ["app.py"],
+            "resolution_strategy_per_file": {"app.py": "blocked_ambiguous_code_conflict"},
+            "blocked_reason": "structured code merge remained syntactically invalid",
+            "git_sequence_state": "rebase",
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "complete_merge: git rebase --continue" in output
+
+
+def test_print_manual_merge_required_uses_cherry_pick_continue(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(lfa.sys, "argv", ["local_fix_agent.py", "--repo", "/tmp/cherry-demo"])
+
+    lfa.print_manual_merge_required(
+        {
+            "conflicted_files": ["README.md"],
+            "resolution_strategy_per_file": {"README.md": "blocked_unknown_conflict"},
+            "blocked_reason": "unknown conflicted file type requires manual resolution",
+            "git_sequence_state": "cherry_pick",
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "complete_merge: git cherry-pick --continue" in output
+
+
+def test_resolve_merge_conflicts_rebase_continue_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = build_rebase_conflict_repo(
+        tmp_path,
+        "app.py",
+        "def run():\n    value = 2\n    return value\n",
+        "def run():\n    note = 'ok'\n    return 1\n",
+        "def run():\n    return 0\n",
+    )
+    original = lfa.run_subprocess
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "rebase", "--continue"]:
+            return 0, "continued"
+        return original(command, cwd, shell=shell)
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.resolve_merge_conflicts(repo, validation_command="python -m py_compile app.py")
+
+    assert result["merge_result"] == "success"
+    assert result["git_sequence_state"] == "rebase"
+
+
+def test_maybe_handle_merge_conflicts_publish_flow(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        lfa,
+        "resolve_merge_conflicts",
+        lambda current_repo, validation_command="", no_auto_merge_conflicts=False: {
+            "merge_conflicts_detected": True,
+            "conflicted_files": ["app.py"],
+            "resolution_strategy_per_file": {"app.py": "structured_merge_combined_logic"},
+            "validation_result_after_merge": "success",
+            "merge_result": "success",
+            "blocked_reason": "",
+            "commit_sha": "abc123",
+        },
+    )
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
+
+    def fake_run_post_success_publish(*args, **kwargs):
+        captured["called"] = True
+        return {
+            "validation_result": "success",
+            "validation_state": "success",
+            "publish_requested": True,
+            "publish_triggered": False,
+            "publish_result": "noop",
+        }
+
+    monkeypatch.setattr(lfa, "run_post_success_publish", fake_run_post_success_publish)
+    monkeypatch.setattr(lfa, "format_final_operator_summary", lambda summary: "FINAL: ok")
+
+    outcome = lfa.maybe_handle_merge_conflicts(
+        repo,
+        validation_command="pytest -q",
+        publish_requested=True,
+        publish_mode="validated-run",
+        publish_branch="",
+        publish_pr=False,
+        publish_merge=False,
+        publish_merge_local_main=False,
+        publish_message="",
+        target="",
+        dry_run_mode=False,
+        force_publish=False,
+    )
+
+    assert outcome["handled"] is True
+    assert outcome["success"] is True
+    assert captured["called"] is True
+
+
+def test_run_sync_operation_with_conflict_hook_auto_resolves(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (1, "conflict") if command == ["git", "pull", "--ff-only", "origin", "main"] else (0, ""))
+    monkeypatch.setattr(lfa, "conflicted_git_paths", lambda current_repo: ["app.py"])
+    monkeypatch.setattr(
+        lfa,
+        "resolve_merge_conflicts",
+        lambda current_repo, validation_command="", no_auto_merge_conflicts=False: {
+            "merge_conflicts_detected": True,
+            "conflicted_files": ["app.py"],
+            "resolution_strategy_per_file": {"app.py": "structured_merge_combined_logic"},
+            "validation_result_after_merge": "success",
+            "merge_result": "success",
+            "blocked_reason": "",
+            "commit_sha": "abc123",
+            "auto_conflict_resolution_attempted": True,
+        },
+    )
+
+    ok, _, result = lfa.run_sync_operation_with_conflict_hook(
+        repo,
+        sync_operation="pull",
+        command=["git", "pull", "--ff-only", "origin", "main"],
+        validation_command="pytest -q",
+    )
+
+    assert ok is True
+    assert result["sync_operation_attempted"] is True
+    assert result["sync_operation"] == "pull"
+    assert result["conflict_source"] == "pull"
+    assert result["merge_result"] == "success"
+
+
+def test_run_sync_operation_with_conflict_hook_strict_mode_blocks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(lfa, "run_subprocess", lambda command, cwd, shell=False: (1, "conflict"))
+    monkeypatch.setattr(lfa, "conflicted_git_paths", lambda current_repo: ["app.py"])
+    monkeypatch.setattr(
+        lfa,
+        "resolve_merge_conflicts",
+        lambda current_repo, validation_command="", no_auto_merge_conflicts=False: {
+            "merge_conflicts_detected": True,
+            "conflicted_files": ["app.py"],
+            "resolution_strategy_per_file": {"app.py": "strict_mode_blocked"},
+            "validation_result_after_merge": "not_run",
+            "merge_result": "blocked",
+            "blocked_reason": "strict",
+            "commit_sha": "",
+            "auto_conflict_resolution_attempted": False,
+        },
+    )
+
+    ok, reason, result = lfa.run_sync_operation_with_conflict_hook(
+        repo,
+        sync_operation="branch_sync",
+        command=["git", "pull", "--ff-only", "origin", "main"],
+        validation_command="pytest -q",
+        no_auto_conflict_resolution_after_sync=True,
+    )
+
+    assert ok is False
+    assert reason == "strict"
+    assert result["sync_operation"] == "branch_sync"
+    assert result["merge_result"] == "blocked"
+
+
+def test_sync_with_upstream_before_workflow_no_upstream(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_ok(repo, "init")
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["upstream_detected"] is False
+    assert result["sync_attempted"] is False
+    assert result["sync_result"] == "not_needed"
+
+
+def test_sync_with_upstream_before_workflow_behind_runs_sync_and_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    saved: list[tuple[str, str]] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "1 2\n"
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 docs refresh\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tREADME.md\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/README.md b/README.md\n+updated docs\n"
+        if shell and command == "pytest -q":
+            return 0, "ok"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            True,
+            "",
+            {"merge_conflicts_detected": False, "merge_result": "not_needed"},
+        ),
+    )
+    monkeypatch.setattr(
+        lfa,
+        "update_recent_state",
+        lambda current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason="": saved.append((mode, str(success))) or Path("/tmp/state.json"),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["upstream_detected"] is True
+    assert result["upstream_branch"] == "upstream/main"
+    assert result["ahead_count"] == 1
+    assert result["behind_count"] == 2
+    assert result["sync_attempted"] is True
+    assert result["sync_result"] == "success"
+    assert result["validation_result_after_sync"] == "success"
+    assert result["analysis"]["risk_level"] == "low"
+    assert saved[-1] == ("upstream-sync", "success")
+
+
+def test_sync_with_upstream_before_workflow_conflict_resolution_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    saved: list[tuple[str, str, list[str]]] = []
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "0 3\n"
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 docs refresh\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tREADME.md\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/README.md b/README.md\n+updated docs\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            True,
+            "",
+            {
+                "merge_conflicts_detected": True,
+                "conflicted_files": ["app.py"],
+                "resolution_strategy_per_file": {"app.py": "structured_merge_combined_logic"},
+                "validation_result_after_merge": "success",
+                "merge_result": "success",
+                "blocked_reason": "",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        lfa,
+        "update_recent_state",
+        lambda current_repo, test_cmd, mode, success, artifact_dir=None, target="", files_changed=None, confidence="", blocked_reason="": saved.append((mode, str(success), list(files_changed or []))) or Path("/tmp/state.json"),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "success"
+    assert result["merge_conflict_result"]["conflicted_files"] == ["app.py"]
+    assert saved[-1] == ("upstream-sync", "success", ["app.py"])
+
+
+def test_sync_with_upstream_before_workflow_conflict_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "0 1\n"
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 docs refresh\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tREADME.md\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/README.md b/README.md\n+updated docs\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            False,
+            "config conflict is not clearly compatible",
+            {
+                "merge_conflicts_detected": True,
+                "conflicted_files": ["settings.json"],
+                "resolution_strategy_per_file": {"settings.json": "blocked_ambiguous_config_conflict"},
+                "validation_result_after_merge": "not_run",
+                "merge_result": "blocked",
+                "blocked_reason": "config conflict is not clearly compatible",
+            },
+        ),
+    )
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "blocked"
+    assert result["reason"] == "config conflict is not clearly compatible"
+    assert result["merge_conflict_result"]["merge_result"] == "blocked"
+
+
+def test_analyze_upstream_changes_docs_only_low_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 docs refresh\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tREADME.md\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/README.md b/README.md\n+docs\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.analyze_upstream_changes(repo, "upstream/main")
+
+    assert result["changed_files"] == ["README.md"]
+    assert result["change_types"]["README.md"] == "modified"
+    assert result["categories"]["README.md"] == "docs"
+    assert result["risk_level"] == "low"
+    assert result["semantic_summary"] == "docs-only changes"
+
+
+def test_analyze_upstream_changes_new_file_medium_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 add helper\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "A\tagent/utils/linear.py\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/agent/utils/linear.py b/agent/utils/linear.py\n+def helper():\n+    return 1\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.analyze_upstream_changes(repo, "upstream/main")
+
+    assert result["change_types"]["agent/utils/linear.py"] == "added"
+    assert "new file added: agent/utils/linear.py" in result["summary"]
+    assert result["risk_level"] == "medium"
+
+
+def test_analyze_upstream_changes_core_logic_high_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 cli refactor\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tagent/utils/langsmith.py\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/agent/utils/langsmith.py b/agent/utils/langsmith.py\n+trace()\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.analyze_upstream_changes(repo, "upstream/main")
+
+    assert result["risk_level"] == "high"
+    assert result["risk_reason"] == "core code changes can alter agent behavior directly"
+    assert "LangSmith logging or tracing integration changed" in result["semantic_summary"]
+
+
+def test_analyze_upstream_changes_dependencies_high_risk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 deps update\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tuv.lock\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/uv.lock b/uv.lock\n+version = \"1.2.3\"\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.analyze_upstream_changes(repo, "upstream/main")
+
+    assert result["risk_level"] == "high"
+    assert result["risk_reason"] == "dependency or lockfile changes can alter runtime behavior"
+    assert "dependencies updated: uv.lock" in result["summary"]
+
+
+def test_print_upstream_change_analysis_outputs_summary(capsys: pytest.CaptureFixture[str]) -> None:
+    lfa.print_upstream_change_analysis(
+        {
+            "commit_count": 2,
+            "changed_files": ["agent/utils/langsmith.py", "README.md"],
+            "summary": "2 files changed; core logic updated in agent/utils/langsmith.py; docs updated: README.md",
+            "semantic_summary": "LangSmith logging or tracing integration changed; documentation changed",
+            "risk_level": "high",
+            "risk_reason": "core code changes can alter agent behavior directly",
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "=== UPSTREAM CHANGE ANALYSIS ===" in output
+    assert "commits: 2" in output
+    assert "files_changed: 2" in output
+    assert "risk_level: high" in output
+
+
+def test_sync_with_upstream_before_workflow_high_risk_blocks_without_force(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "0 1\n"
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 core change\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tagent/core.py\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/agent/core.py b/agent/core.py\n+return 1\n"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.sync_with_upstream_before_workflow(repo, validation_command="pytest -q")
+
+    assert result["sync_result"] == "blocked"
+    assert "use --force-upstream-merge to override" in result["reason"]
+    assert result["sync_attempted"] is False
+
+
+def test_sync_with_upstream_before_workflow_high_risk_force_allows_merge(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command == ["git", "fetch", "upstream"]:
+            return 0, ""
+        if command == ["git", "symbolic-ref", "refs/remotes/upstream/HEAD"]:
+            return 0, "refs/remotes/upstream/main\n"
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...upstream/main"]:
+            return 0, "0 1\n"
+        if command == ["git", "log", "HEAD..upstream/main", "--oneline"]:
+            return 0, "abc123 core change\n"
+        if command == ["git", "diff", "--name-status", "HEAD..upstream/main"]:
+            return 0, "M\tagent/core.py\n"
+        if command == ["git", "diff", "HEAD..upstream/main"]:
+            return 0, "diff --git a/agent/core.py b/agent/core.py\n+return 1\n"
+        if shell and command == "pytest -q":
+            return 0, "ok"
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin", "upstream"])
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "run_sync_operation_with_conflict_hook",
+        lambda current_repo, sync_operation, command, validation_command="", no_auto_conflict_resolution_after_sync=False: (
+            True,
+            "",
+            {"merge_conflicts_detected": False, "merge_result": "not_needed"},
+        ),
+    )
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: Path("/tmp/state.json"))
+
+    result = lfa.sync_with_upstream_before_workflow(
+        repo,
+        validation_command="pytest -q",
+        force_upstream_merge=True,
+    )
+
+    assert result["sync_result"] == "success"
+    assert result["sync_attempted"] is True
+    assert result["analysis"]["risk_level"] == "high"
+
+
+def test_maybe_handle_merge_conflicts_no_conflicts_returns_none(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_ok(repo, "init")
+    git_ok(repo, "config", "user.email", "tests@example.com")
+    git_ok(repo, "config", "user.name", "Test User")
+
+    outcome = lfa.maybe_handle_merge_conflicts(
+        repo,
+        validation_command="python -c \"print('ok')\"",
+        publish_requested=False,
+        publish_mode="validated-run",
+        publish_branch="",
+        publish_pr=False,
+        publish_merge=False,
+        publish_merge_local_main=False,
+        publish_message="",
+        target="",
+        dry_run_mode=False,
+        force_publish=False,
+        no_auto_merge_conflicts=False,
+    )
+
+    assert outcome is None
 
 
 def test_fork_created_in_run_one_reused_in_run_two(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1555,7 +2402,7 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
     assert captured["publish_current_mode"] is True
     assert captured["validation_state"] == "success"
     assert captured["force_publish"] is False
-    assert result["recommended_command"] == "AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr"
+    assert result["recommended_command"] == "./scripts/fixpublish.sh"
 
 
 def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1631,18 +2478,147 @@ def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: py
 
 
 def test_resolve_publish_requested_defaults_to_true() -> None:
-    args = argparse.Namespace(publish_only=False, no_publish_on_success=False, publish=False, publish_on_success=False)
+    args = argparse.Namespace(publish_only=False, no_publish_on_success=False, no_finalize=False, publish=False, publish_on_success=False)
     assert lfa.resolve_publish_requested(args) is True
 
 
 def test_resolve_publish_requested_honors_no_publish_on_success() -> None:
-    args = argparse.Namespace(publish_only=False, no_publish_on_success=True, publish=False, publish_on_success=False)
+    args = argparse.Namespace(publish_only=False, no_publish_on_success=True, no_finalize=False, publish=False, publish_on_success=False)
+    assert lfa.resolve_publish_requested(args) is False
+
+
+def test_resolve_publish_requested_honors_no_finalize() -> None:
+    args = argparse.Namespace(publish_only=False, no_publish_on_success=False, no_finalize=True, publish=False, publish_on_success=False)
     assert lfa.resolve_publish_requested(args) is False
 
 
 def test_resolve_publish_requested_preserves_publish_only_mode() -> None:
-    args = argparse.Namespace(publish_only=True, no_publish_on_success=True, publish=False, publish_on_success=False)
+    args = argparse.Namespace(publish_only=True, no_publish_on_success=True, no_finalize=True, publish=False, publish_on_success=False)
     assert lfa.resolve_publish_requested(args) is True
+
+
+def test_recommended_publish_current_command_uses_finalizer_script() -> None:
+    assert lfa.recommended_publish_current_command(include_pr=True) == "./scripts/fixpublish.sh"
+
+
+def test_ensure_validation_record_creates_missing_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    calls: list[tuple[str, str]] = []
+    states = [
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "",
+            "validation_result": "blocked",
+            "validation_state": "blocked",
+            "reason": "publish blocked because no validation record was recorded for this repo; use --force-publish to override",
+        },
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "abc123",
+            "validation_result": "success",
+            "validation_state": "success",
+            "reason": "validated",
+        },
+    ]
+
+    monkeypatch.setattr(lfa, "resolve_publish_validation_state", lambda current_repo: states.pop(0))
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda current_repo, validation_command, mode, confidence, target="", files_changed=None: calls.append((validation_command, mode)) or {"ok": True, "validation_result": "success", "reason": "", "output": ""},
+    )
+
+    result = lfa.ensure_validation_record_for_current_commit(repo, validation_command="pytest -q")
+
+    assert result["ok"] is True
+    assert result["validation_record_created"] is True
+    assert result["validation_commit"] == "abc123"
+    assert calls == [("pytest -q", "finalization-prepare")]
+
+
+def test_ensure_validation_record_reuses_existing_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(
+        lfa,
+        "resolve_publish_validation_state",
+        lambda current_repo: {
+            "current_commit": "abc123",
+            "last_validated_commit": "abc123",
+            "validation_result": "success",
+            "validation_state": "success",
+            "reason": "validated",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("validation should be reused")),
+    )
+
+    result = lfa.ensure_validation_record_for_current_commit(repo, validation_command="pytest -q")
+
+    assert result["ok"] is True
+    assert result["validation_record_created"] is False
+    assert result["validation_record_reused"] is True
+    assert result["validation_commit"] == "abc123"
+
+
+def test_ensure_validation_record_failed_validation_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    states = [
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "",
+            "validation_result": "blocked",
+            "validation_state": "blocked",
+            "reason": "publish blocked because no validation record was recorded for this repo; use --force-publish to override",
+        },
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "abc123",
+            "validation_result": "failed",
+            "validation_state": "failed",
+            "reason": "publish blocked because the latest validation run failed; use --force-publish to override",
+        },
+    ]
+
+    monkeypatch.setattr(lfa, "resolve_publish_validation_state", lambda current_repo: states.pop(0))
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda current_repo, validation_command, mode, confidence, target="", files_changed=None: {"ok": False, "validation_result": "failed", "reason": "pytest failed", "output": "pytest failed"},
+    )
+
+    result = lfa.ensure_validation_record_for_current_commit(repo, validation_command="pytest -q")
+
+    assert result["ok"] is False
+    assert result["validation_record_created"] is True
+    assert result["validation_result"] == "failed"
+
+
+def test_no_finalize_is_reported_as_incomplete(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        lfa.fail_incomplete_without_finalization()
+
+    output = capsys.readouterr().out
+    assert excinfo.value.code == 2
+    assert "FINALIZATION SKIPPED: --no-finalize" in output
+    assert "FINAL: validation succeeded, finalization skipped (incomplete)" in output
+
+
+def test_docs_describe_required_finalizer() -> None:
+    readme = Path("/home/tom/ai/open-swe/README.md").read_text()
+    runbook = Path("/home/tom/ai/open-swe/docs/RUNBOOK.md").read_text()
+    troubleshooting = Path("/home/tom/ai/open-swe/docs/TROUBLESHOOTING.md").read_text()
+    fixpublish = Path("/home/tom/ai/open-swe/scripts/fixpublish.sh").read_text()
+
+    assert "./scripts/fixpublish.sh" in readme
+    assert "--no-finalize" in readme
+    assert "./scripts/fixpublish.sh" in runbook
+    assert "--no-finalize" in runbook
+    assert "finalization skipped (incomplete)" in troubleshooting
+    assert "--ensure-validation-record" in fixpublish
+    assert '--repo "$ROOT_DIR" --publish-only --publish-pr' in fixpublish
 
 
 def test_run_post_success_publish_skips_on_validation_failure(monkeypatch: pytest.MonkeyPatch) -> None:

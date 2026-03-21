@@ -1,23 +1,20 @@
 {
   "fork_created": false,
   "fork_repo": "",
-  "last_branch": "agent-run-1774030190",
-  "last_commit": "acbb6477d887a06f00f58a7a25bc66e780927525",
-  "last_control_path": "direct_origin_push",
-  "last_meaningful_content_fingerprint": "3725aff50e0881167a7cd3d49e1042b598392b54365352fb3b621d585e80887d",
-  "last_meaningful_paths": [
-    "local_fix_agent.py",
-    "tests/test_local_fix_agent_publish.py"
-  ],
-  "last_pr_url": "https://github.com/tophat1720/open-swe/pull/4",
+  "last_branch": "",
+  "last_commit": "",
+  "last_control_path": "",
+  "last_meaningful_content_fingerprint": "",
+  "last_meaningful_paths": [],
+  "last_pr_url": "",
   "last_publish_mode": "current_repo_state",
-  "last_repo": "tophat1720/open-swe",
-  "last_success": true,
-  "last_success_timestamp": 1774038534,
-  "last_target": "origin",
-  "last_target_repo": "tophat1720/open-swe",
-  "last_transport": "ssh",
-  "origin_url": "git@github.com:tophat1720/open-swe.git",
-  "ssh_confirmed": true,
-  "timestamp": 1774038534
+  "last_repo": "",
+  "last_success": false,
+  "last_success_timestamp": 0,
+  "last_target": "blocked",
+  "last_target_repo": "",
+  "last_transport": "unknown",
+  "origin_url": "",
+  "ssh_confirmed": false,
+  "timestamp": 1774080612
 }
