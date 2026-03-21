@@ -732,14 +732,47 @@ def classify_git_working_tree(repo: Path, ignore_path_predicate=is_ignored_chang
     }
 
 
-def classify_publishable_changes(repo: Path) -> dict:
+def classify_publishable_changes(
+    repo: Path,
+    baseline_commit: str = "",
+    current_commit: str = "HEAD",
+) -> dict:
     status_output = raw_git_status_output(repo)
+    diff_output = ""
+    diff_files_detected: list[str] = []
+    last_published_commit = str(baseline_commit or "").strip()
+    current_commit_ref = str(current_commit or "HEAD").strip() or "HEAD"
+    if last_published_commit:
+        code, output = run_subprocess(
+            ["git", "diff", "--name-status", last_published_commit, current_commit_ref],
+            repo,
+        )
+        if code == 0:
+            diff_output = output.rstrip()
+            seen_diff: set[str] = set()
+            for line in diff_output.splitlines():
+                parts = line.split("\t", 1)
+                if len(parts) != 2:
+                    continue
+                path = parts[1].strip()
+                if path and path not in seen_diff:
+                    seen_diff.add(path)
+                    diff_files_detected.append(path)
     meaningful_paths: list[str] = []
     ignored_changes: list[str] = []
     seen_meaningful: set[str] = set()
     seen_ignored: set[str] = set()
-    for line in status_output.splitlines():
+    combined_lines = []
+    if diff_output:
+        combined_lines.extend(diff_output.splitlines())
+    if status_output:
+        combined_lines.extend(status_output.splitlines())
+    for line in combined_lines:
         path = extract_status_path(line)
+        if not path and "\t" in line:
+            parts = line.split("\t", 1)
+            if len(parts) == 2:
+                path = parts[1].strip()
         if not path:
             continue
         if is_publish_ignored_change_path(path):
@@ -752,6 +785,10 @@ def classify_publishable_changes(repo: Path) -> dict:
             meaningful_paths.append(path)
     return {
         "status_output": status_output,
+        "diff_output": diff_output,
+        "diff_files_detected": diff_files_detected,
+        "last_published_commit": last_published_commit,
+        "current_commit": current_commit_ref,
         "meaningful_changes_detected": bool(meaningful_paths),
         "meaningful_paths": meaningful_paths,
         "ignored_changes": ignored_changes,
@@ -7111,6 +7148,8 @@ def make_publish_result() -> dict:
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
         "ignored_changes": [],
+        "last_published_commit": "",
+        "diff_files_detected": [],
         "docs_checked_at_publish": False,
         "docs_required": False,
         "docs_updated": False,
@@ -7735,10 +7774,19 @@ def publish_validated_run(
         return finish("blocked", "Publish blocked because GitHub authentication could not be verified during preflight.", "Run `gh auth status` and `gh auth login`, then rerun `--publish`.")
     result["control_path"] = "fork_push" if result["target"]["type"] == "fork" else "direct_origin_push"
 
-    publish_changes = classify_publishable_changes(repo)
+    current_head_for_diff = parse_head_commit(repo)
+    baseline_commit = ""
+    if str(publish_state.get("last_branch") or "").strip() == current_branch:
+        baseline_commit = str(publish_state.get("last_commit") or "").strip()
+    try:
+        publish_changes = classify_publishable_changes(repo, baseline_commit=baseline_commit, current_commit=current_head_for_diff or "HEAD")
+    except TypeError:
+        publish_changes = classify_publishable_changes(repo)
     result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
     result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
     result["ignored_changes"] = publish_changes.get("ignored_changes") or []
+    result["last_published_commit"] = publish_changes.get("last_published_commit") or ""
+    result["diff_files_detected"] = publish_changes.get("diff_files_detected") or []
     if not result["meaningful_changes_detected"]:
         result["control_path"] = "noop"
         result["summary_status"] = "no meaningful changes to publish"
@@ -7753,10 +7801,15 @@ def publish_validated_run(
         result["control_path"] = "blocked_docs"
         return finish("blocked", str(docs_stage.get("reason") or "docs update blocked publish"))
     if docs_stage.get("docs_updated"):
-        publish_changes = classify_publishable_changes(repo)
+        try:
+            publish_changes = classify_publishable_changes(repo, baseline_commit=baseline_commit, current_commit=current_head_for_diff or "HEAD")
+        except TypeError:
+            publish_changes = classify_publishable_changes(repo)
         result["meaningful_changes_detected"] = bool(publish_changes.get("meaningful_changes_detected"))
         result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
         result["ignored_changes"] = publish_changes.get("ignored_changes") or []
+        result["last_published_commit"] = publish_changes.get("last_published_commit") or ""
+        result["diff_files_detected"] = publish_changes.get("diff_files_detected") or []
         if not publish_current_mode:
             changed_paths = sorted(set(changed_paths) | set(docs_stage.get("updated_targets") or []))
     result["meaningful_content_fingerprint"] = compute_meaningful_content_fingerprint(repo, publish_changes)
@@ -7815,7 +7868,7 @@ def publish_validated_run(
         unrelated_paths = sorted(set(current_paths) - set(changed_paths))
         if unrelated_paths:
             return finish("blocked", "Publish blocked because the working tree contains unrelated changes: " + ", ".join(unrelated_paths[:10]))
-    head_sha = parse_head_commit(repo)
+    head_sha = current_head_for_diff or parse_head_commit(repo)
     result["fingerprint"] = {
         "matched_previous_success": False,
         "reason": "",
@@ -7858,7 +7911,12 @@ def publish_validated_run(
     if publish_state.get("last_success") and same_target and same_publish_mode:
         result["fingerprint"]["reason"] = "fingerprint mismatch due to new meaningful changes"
     already_pushed, local_head = branch_already_up_to_date(repo, branch_to_push, result["target"]["url"] or "origin")
-    if publish_current_mode and working_tree["clean"]:
+    publish_existing_commit = (
+        publish_current_mode
+        and bool(working_tree.get("clean"))
+        and bool(result.get("diff_files_detected"))
+    )
+    if publish_current_mode and working_tree["clean"] and not publish_existing_commit:
         commit_ref = local_head or head_sha
         mark_publish_noop(result, "no changes to publish", branch_to_push, result["remote_url"], commit_ref)
         return finish("noop")
@@ -7870,19 +7928,26 @@ def publish_validated_run(
         mark_publish_noop(result, "Publish noop: nothing to commit.", branch_to_push, result["remote_url"], commit_ref)
         return finish("noop")
 
+    commit_sha = ""
     if publish_current_mode:
-        code, output = run_subprocess(["git", "add", "-A"], repo)
-        if code != 0:
-            return finish("blocked", f"Publish blocked because staging failed: {output}")
-        result["summary_status"] = "staged current repo state"
+        if publish_existing_commit:
+            commit_sha = head_sha or parse_head_commit(repo)
+            result["commit_sha"] = commit_sha
+            result["summary_status"] = "publishing existing committed repo state"
+            set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
+        else:
+            code, output = run_subprocess(["git", "add", "-A"], repo)
+            if code != 0:
+                return finish("blocked", f"Publish blocked because staging failed: {output}")
+            result["summary_status"] = "staged current repo state"
 
-        code, _ = run_subprocess(["git", "diff", "--cached", "--quiet"], repo)
-        if code == 0:
-            commit_ref = local_head or parse_head_commit(repo)
-            mark_publish_noop(result, "no changes to publish", branch_to_push, result["remote_url"], commit_ref)
-            return finish("noop")
-        if code not in {0, 1}:
-            return finish("blocked", "Publish blocked because staged-change detection failed.")
+            code, _ = run_subprocess(["git", "diff", "--cached", "--quiet"], repo)
+            if code == 0:
+                commit_ref = local_head or parse_head_commit(repo)
+                mark_publish_noop(result, "no changes to publish", branch_to_push, result["remote_url"], commit_ref)
+                return finish("noop")
+            if code not in {0, 1}:
+                return finish("blocked", "Publish blocked because staged-change detection failed.")
     else:
         code, output = run_subprocess(["git", "add", "-A", "--", *changed_paths], repo)
         if code != 0:
@@ -7901,29 +7966,30 @@ def publish_validated_run(
             mark_publish_noop(result, "Publish noop: nothing to commit.", branch_to_push, result["remote_url"], commit_ref)
             return finish("noop")
 
-    commit_message = publish_message.strip() or "fix(agent): apply validated repair"
-    if result["environment"].get("interactive"):
-        if not prompt_yes_no(
-            f"Publish commit to branch '{branch_to_push}' with message '{commit_message}'?",
-            default=True,
-        ):
-            return finish("blocked", "Publish cancelled before commit.")
+    if not publish_existing_commit:
+        commit_message = publish_message.strip() or "fix(agent): apply validated repair"
+        if result["environment"].get("interactive"):
+            if not prompt_yes_no(
+                f"Publish commit to branch '{branch_to_push}' with message '{commit_message}'?",
+                default=True,
+            ):
+                return finish("blocked", "Publish cancelled before commit.")
 
-    code, output = run_subprocess(["git", "commit", "-m", commit_message], repo)
-    if code != 0:
-        if "nothing to commit" in output.lower():
-            already_pushed, local_head = branch_already_up_to_date(repo, branch_to_push, result["target"]["url"] or "origin")
-            commit_ref = local_head or parse_head_commit(repo)
-            if already_pushed:
-                mark_publish_noop(result, "Publish noop: branch already up to date on origin.", branch_to_push, result["remote_url"], commit_ref)
+        code, output = run_subprocess(["git", "commit", "-m", commit_message], repo)
+        if code != 0:
+            if "nothing to commit" in output.lower():
+                already_pushed, local_head = branch_already_up_to_date(repo, branch_to_push, result["target"]["url"] or "origin")
+                commit_ref = local_head or parse_head_commit(repo)
+                if already_pushed:
+                    mark_publish_noop(result, "Publish noop: branch already up to date on origin.", branch_to_push, result["remote_url"], commit_ref)
+                    return finish("noop")
+                mark_publish_noop(result, "Publish noop: nothing to commit.", branch_to_push, result["remote_url"], commit_ref)
                 return finish("noop")
-            mark_publish_noop(result, "Publish noop: nothing to commit.", branch_to_push, result["remote_url"], commit_ref)
-            return finish("noop")
-        return finish("blocked", f"Publish blocked because commit failed: {output}")
+            return finish("blocked", f"Publish blocked because commit failed: {output}")
 
-    commit_sha = parse_head_commit(repo)
-    result["commit_sha"] = commit_sha
-    set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
+        commit_sha = parse_head_commit(repo)
+        result["commit_sha"] = commit_sha
+        set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
 
     if result["environment"].get("interactive"):
         if not prompt_yes_no(
@@ -7932,15 +7998,19 @@ def publish_validated_run(
         ):
             return finish("blocked", "Publish stopped after commit because push was not confirmed.")
 
-    code, output = run_subprocess(["git", "push", "-u", "origin", branch_to_push], repo)
-    if code != 0:
-        lowered = (output or "").lower()
-        if any(token in lowered for token in ["authentication failed", "permission denied", "403", "could not read username"]):
-            return finish("failed_auth", f"Publish blocked because push failed with an authentication error: {output}", "Verify GitHub auth for the resolved target and retry.")
-        if "repository not found" in lowered and result["target"]["type"] == "fork":
-            return finish("missing_fork", f"Publish blocked because the resolved fork target was not found: {output}", f"Create or verify fork `{result['target']['repo']}`, then set origin with `git remote set-url origin {result['target']['url']}` and retry.")
-        return finish("failed", f"Publish blocked because push failed: {output}", "Inspect the resolved target URL, auth, and branch permissions before retrying.")
-    result["attempted"] = True
+    if already_pushed and publish_existing_commit:
+        result["actions"].append("reused existing pushed branch")
+        result["attempted"] = True
+    else:
+        code, output = run_subprocess(["git", "push", "-u", "origin", branch_to_push], repo)
+        if code != 0:
+            lowered = (output or "").lower()
+            if any(token in lowered for token in ["authentication failed", "permission denied", "403", "could not read username"]):
+                return finish("failed_auth", f"Publish blocked because push failed with an authentication error: {output}", "Verify GitHub auth for the resolved target and retry.")
+            if "repository not found" in lowered and result["target"]["type"] == "fork":
+                return finish("missing_fork", f"Publish blocked because the resolved fork target was not found: {output}", f"Create or verify fork `{result['target']['repo']}`, then set origin with `git remote set-url origin {result['target']['url']}` and retry.")
+            return finish("failed", f"Publish blocked because push failed: {output}", "Inspect the resolved target URL, auth, and branch permissions before retrying.")
+        result["attempted"] = True
     result["verification"] = verify_publish_sync(repo, branch_to_push, "origin")
 
     pr_url = ""
@@ -8238,6 +8308,8 @@ def run_post_success_publish(
     summary["meaningful_changes_detected"] = bool(publish_result.get("meaningful_changes_detected"))
     summary["meaningful_paths"] = publish_result.get("meaningful_paths") or []
     summary["ignored_changes"] = publish_result.get("ignored_changes") or []
+    summary["last_published_commit"] = publish_result.get("last_published_commit") or ""
+    summary["diff_files_detected"] = publish_result.get("diff_files_detected") or []
     summary["docs_checked_at_publish"] = bool(publish_result.get("docs_checked_at_publish"))
     summary["docs_required"] = bool(publish_result.get("docs_required"))
     summary["docs_updated"] = bool(publish_result.get("docs_updated"))
@@ -8271,6 +8343,8 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"docs_refresh_mode: {summary.get('docs_refresh_mode') or 'none'}")
     print(f"docs_targets: {summary.get('docs_targets') or []}")
     print(f"meaningful_changes_detected: {format_bool(summary.get('meaningful_changes_detected'))}")
+    print(f"last_published_commit: {summary.get('last_published_commit') or '(none)'}")
+    print(f"diff_files_detected: {summary.get('diff_files_detected') or []}")
     print(f"ignored_changes: {summary.get('ignored_changes') or []}")
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
     if summary.get("publish_reason"):
@@ -8329,6 +8403,8 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"retry_success: {bool(publish_result.get('retry_success'))}")
     print(f"retry_reason: {publish_result.get('retry_reason') or '(none)'}")
     print(f"meaningful_changes_detected: {format_bool(publish_result.get('meaningful_changes_detected'))}")
+    print(f"last_published_commit: {publish_result.get('last_published_commit') or '(none)'}")
+    print(f"diff_files_detected: {publish_result.get('diff_files_detected') or []}")
     print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
     print(f"validation_state: {publish_result.get('validation_state') or 'success'}")

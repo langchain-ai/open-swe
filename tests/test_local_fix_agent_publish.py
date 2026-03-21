@@ -213,6 +213,26 @@ def test_classify_publishable_changes_treats_docs_code_and_tests_as_meaningful(m
     assert result["ignored_changes"] == [".ai_publish_state.json"]
 
 
+def test_classify_publishable_changes_uses_last_published_commit_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command[:3] == ["git", "status", "--short"]:
+            return 0, ""
+        if command[:3] == ["git", "diff", "--name-status"]:
+            return 0, "M\tREADME.md\nM\tlocal_fix_agent.py\nM\t.ai_publish_state.json\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.classify_publishable_changes(Path("/tmp/repo"), baseline_commit="abc123", current_commit="def456")
+
+    assert result["last_published_commit"] == "abc123"
+    assert result["current_commit"] == "def456"
+    assert result["diff_files_detected"] == ["README.md", "local_fix_agent.py", ".ai_publish_state.json"]
+    assert result["meaningful_changes_detected"] is True
+    assert result["meaningful_paths"] == ["README.md", "local_fix_agent.py"]
+    assert result["ignored_changes"] == [".ai_publish_state.json"]
+
+
 def test_publish_change_helpers_ignore_known_state_files_consistently(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         lfa,
@@ -1727,6 +1747,76 @@ def test_same_target_but_different_commit_does_not_reuse_previous_publish(monkey
     assert result["fingerprint"]["matched_previous_success"] is False
 
 
+def test_publish_uses_last_published_commit_diff_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        lfa,
+        "load_publish_state",
+        lambda current_repo: {
+            "last_success": True,
+            "last_branch": "feature",
+            "last_commit": "abc123",
+            "last_publish_mode": "validated_run",
+            "origin_url": "git@github.com:octocat/demo.git",
+            "timestamp": 1,
+            "ssh_confirmed": True,
+            "last_target_repo": "octocat/demo",
+        },
+    )
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "def456")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "run_prepublish_docs_stage", lambda *args, **kwargs: {"docs_checked_at_publish": False, "docs_required": False, "docs_updated": False, "docs_refresh_mode": "none", "docs_targets": []})
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "M  local_fix_agent.py")
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {"status_output": "M  local_fix_agent.py", "clean": False, "has_unstaged": False, "has_staged": True, "has_untracked": False},
+    )
+    monkeypatch.setattr(lfa, "compute_meaningful_content_fingerprint", lambda current_repo, publish_changes: "new-fp")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "def456"))
+
+    def fake_classify(current_repo, baseline_commit="", current_commit="HEAD"):
+        captured["baseline_commit"] = baseline_commit
+        captured["current_commit"] = current_commit
+        return {
+            "status_output": "",
+            "diff_output": "M\tlocal_fix_agent.py",
+            "diff_files_detected": ["local_fix_agent.py"],
+            "last_published_commit": baseline_commit,
+            "current_commit": current_commit,
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+        }
+
+    monkeypatch.setattr(lfa, "classify_publishable_changes", fake_classify)
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (0, "") if command[:3] == ["git", "add", "-A"] else (0, ""),
+    )
+    monkeypatch.setattr(lfa, "verify_publish_sync", lambda *args, **kwargs: {"current_branch": "feature", "upstream_branch": "origin/feature", "upstream_exists": True, "local_head": "def456", "remote_head": "def456", "synced": True, "reason": ""})
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert captured == {"baseline_commit": "abc123", "current_commit": "def456"}
+    assert result["final"]["status"] != "noop"
+    assert result["last_published_commit"] == "abc123"
+    assert result["diff_files_detected"] == ["local_fix_agent.py"]
+
+
 def test_same_commit_but_different_meaningful_content_fingerprint_does_not_reuse(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     monkeypatch.setattr(
@@ -3189,7 +3279,7 @@ def test_publish_current_repo_state_main_branch_with_only_ignored_changes_noops(
     assert result["reason"] == "no meaningful changes to publish"
     assert result["ignored_changes"] == [".ai_publish_state.json", ".fix_agent_docs_state.json"]
     assert result["meaningful_paths"] == []
-    assert commands == [["git", "rev-parse", "HEAD"]]
+    assert commands == [["git", "rev-parse", "HEAD"], ["git", "rev-parse", "HEAD"]]
 
 
 def test_publish_current_repo_state_only_state_file_change_uses_real_classification_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3226,6 +3316,7 @@ def test_publish_current_repo_state_only_state_file_change_uses_real_classificat
     assert result["meaningful_paths"] == []
     assert result["ignored_changes"] == [".ai_publish_state.json"]
     assert commands == [
+        ["git", "rev-parse", "HEAD"],
         ["git", "rev-parse", "HEAD"],
         ["git", "status", "--short", "--untracked-files=all"],
     ]
