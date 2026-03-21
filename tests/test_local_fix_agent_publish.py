@@ -1812,7 +1812,7 @@ def test_publish_uses_last_published_commit_diff_baseline(monkeypatch: pytest.Mo
     )
 
     assert captured == {"baseline_commit": "abc123", "current_commit": "def456"}
-    assert result["final"]["status"] != "noop"
+    assert result["meaningful_changes_detected"] is True
     assert result["last_published_commit"] == "abc123"
     assert result["diff_files_detected"] == ["local_fix_agent.py"]
 

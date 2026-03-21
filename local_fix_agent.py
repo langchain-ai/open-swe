@@ -7149,6 +7149,7 @@ def make_publish_result() -> dict:
         "meaningful_paths": [],
         "ignored_changes": [],
         "last_published_commit": "",
+        "current_publish_candidate_commit": "",
         "diff_files_detected": [],
         "docs_checked_at_publish": False,
         "docs_required": False,
@@ -7786,6 +7787,7 @@ def publish_validated_run(
     result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
     result["ignored_changes"] = publish_changes.get("ignored_changes") or []
     result["last_published_commit"] = publish_changes.get("last_published_commit") or ""
+    result["current_publish_candidate_commit"] = publish_changes.get("current_commit") or current_head_for_diff or ""
     result["diff_files_detected"] = publish_changes.get("diff_files_detected") or []
     if not result["meaningful_changes_detected"]:
         result["control_path"] = "noop"
@@ -7809,6 +7811,7 @@ def publish_validated_run(
         result["meaningful_paths"] = publish_changes.get("meaningful_paths") or []
         result["ignored_changes"] = publish_changes.get("ignored_changes") or []
         result["last_published_commit"] = publish_changes.get("last_published_commit") or ""
+        result["current_publish_candidate_commit"] = publish_changes.get("current_commit") or current_head_for_diff or ""
         result["diff_files_detected"] = publish_changes.get("diff_files_detected") or []
         if not publish_current_mode:
             changed_paths = sorted(set(changed_paths) | set(docs_stage.get("updated_targets") or []))
@@ -7933,6 +7936,7 @@ def publish_validated_run(
         if publish_existing_commit:
             commit_sha = head_sha or parse_head_commit(repo)
             result["commit_sha"] = commit_sha
+            result["current_publish_candidate_commit"] = commit_sha
             result["summary_status"] = "publishing existing committed repo state"
             set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
         else:
@@ -7989,6 +7993,7 @@ def publish_validated_run(
 
         commit_sha = parse_head_commit(repo)
         result["commit_sha"] = commit_sha
+        result["current_publish_candidate_commit"] = commit_sha
         set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
 
     if result["environment"].get("interactive"):
@@ -8309,6 +8314,7 @@ def run_post_success_publish(
     summary["meaningful_paths"] = publish_result.get("meaningful_paths") or []
     summary["ignored_changes"] = publish_result.get("ignored_changes") or []
     summary["last_published_commit"] = publish_result.get("last_published_commit") or ""
+    summary["current_publish_candidate_commit"] = publish_result.get("current_publish_candidate_commit") or ""
     summary["diff_files_detected"] = publish_result.get("diff_files_detected") or []
     summary["docs_checked_at_publish"] = bool(publish_result.get("docs_checked_at_publish"))
     summary["docs_required"] = bool(publish_result.get("docs_required"))
@@ -8344,6 +8350,7 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"docs_targets: {summary.get('docs_targets') or []}")
     print(f"meaningful_changes_detected: {format_bool(summary.get('meaningful_changes_detected'))}")
     print(f"last_published_commit: {summary.get('last_published_commit') or '(none)'}")
+    print(f"current_publish_candidate_commit: {summary.get('current_publish_candidate_commit') or '(none)'}")
     print(f"diff_files_detected: {summary.get('diff_files_detected') or []}")
     print(f"ignored_changes: {summary.get('ignored_changes') or []}")
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
@@ -8404,6 +8411,7 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"retry_reason: {publish_result.get('retry_reason') or '(none)'}")
     print(f"meaningful_changes_detected: {format_bool(publish_result.get('meaningful_changes_detected'))}")
     print(f"last_published_commit: {publish_result.get('last_published_commit') or '(none)'}")
+    print(f"current_publish_candidate_commit: {publish_result.get('current_publish_candidate_commit') or '(none)'}")
     print(f"diff_files_detected: {publish_result.get('diff_files_detected') or []}")
     print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
