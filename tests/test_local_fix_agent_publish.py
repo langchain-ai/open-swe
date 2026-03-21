@@ -2563,6 +2563,42 @@ def test_ensure_validation_record_reuses_existing_success(monkeypatch: pytest.Mo
     assert result["validation_commit"] == "abc123"
 
 
+def test_ensure_validation_record_refreshes_current_commit_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    states = [
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "abc123",
+            "validation_result": "failed",
+            "validation_state": "failed",
+            "reason": "pytest failed",
+        },
+        {
+            "current_commit": "abc123",
+            "last_validated_commit": "abc123",
+            "validation_result": "success",
+            "validation_state": "success",
+            "reason": "validated",
+        },
+    ]
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(lfa, "resolve_publish_validation_state", lambda current_repo: states.pop(0))
+    monkeypatch.setattr(
+        lfa,
+        "run_repo_validation_command",
+        lambda current_repo, validation_command, mode, confidence, target="", files_changed=None: calls.append((validation_command, mode)) or {"ok": True, "validation_result": "success", "reason": "", "output": ""},
+    )
+
+    result = lfa.ensure_validation_record_for_current_commit(repo, validation_command="pytest -q")
+
+    assert result["ok"] is True
+    assert result["validation_record_created"] is True
+    assert result["validation_record_reused"] is False
+    assert result["validation_result"] == "success"
+    assert calls == [("pytest -q", "finalization-prepare")]
+
+
 def test_ensure_validation_record_failed_validation_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     states = [

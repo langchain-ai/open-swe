@@ -172,7 +172,7 @@ Successful code changes are not complete until the canonical finalizer runs:
 ```
 
 That finalizer is the only required post-success path. It handles meaningful-change detection, docs drift detection and docs updates, revalidation, validation gating, and the real publish/noop/blocked result.
-It also creates or reuses a commit-linked validation record through the agent before publish, so finalization does not stop on a missing validation record for the current commit.
+It also creates or reuses a successful commit-linked validation record through the agent before publish, so finalization does not stop on a missing or stale failed validation record for the current commit.
 
 Validated runs now finalize automatically after successful validation unless you explicitly opt out with `--no-finalize`. `--no-publish-on-success` remains as a compatibility alias for stopping before the publish/finalization step.
 

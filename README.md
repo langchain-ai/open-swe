@@ -194,7 +194,7 @@ Successful code changes are not considered complete until the canonical finalize
 
 That finalizer is the single guarded path for:
 
-- creating or reusing a commit-linked validation record through the agent
+- creating or reusing a successful commit-linked validation record through the agent
 - meaningful change detection
 - docs drift detection and docs updates
 - revalidation after docs/code changes
@@ -206,7 +206,7 @@ Validated runs now finalize automatically after successful validation unless you
 
 If you use `--no-finalize`, the run is treated as incomplete rather than successful because the canonical finalizer did not run.
 
-If the current commit does not already have a validation record, `./scripts/fixpublish.sh` first runs the agent in validation-record mode before the real publish/finalization step.
+If the current commit does not already have a successful validation record, `./scripts/fixpublish.sh` first runs the agent in validation-record mode before the real publish/finalization step.
 
 Before a real publish attempt, the agent now runs a pre-publish docs check. It decides whether docs are required, which docs targets are affected, and whether the refresh mode is `patch`, `rewrite`, or `none`. If docs drift is detected, the tool updates docs before publish, reruns validation when it has a validation command or discovered validation plan, and blocks publish if the docs refresh or revalidation fails.
 

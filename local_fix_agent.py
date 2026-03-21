@@ -3455,10 +3455,10 @@ def ensure_validation_record_for_current_commit(
     state = resolve_publish_validation_state(repo)
     current_commit = str(state.get("current_commit") or parse_head_commit(repo) or "").strip()
     last_commit = str(state.get("last_validated_commit") or "").strip()
-    if current_commit and last_commit == current_commit:
-        validation_result = str(state.get("validation_result") or state.get("validation_state") or "blocked").strip() or "blocked"
+    validation_result = str(state.get("validation_result") or state.get("validation_state") or "blocked").strip() or "blocked"
+    if current_commit and last_commit == current_commit and validation_result == "success":
         return {
-            "ok": validation_result == "success",
+            "ok": True,
             "validation_record_created": False,
             "validation_record_reused": True,
             "validation_commit": current_commit,
@@ -3473,9 +3473,13 @@ def ensure_validation_record_for_current_commit(
             "validation_record_created": False,
             "validation_record_reused": False,
             "validation_commit": current_commit,
-            "validation_result": "blocked",
+            "validation_result": validation_result if current_commit and last_commit == current_commit else "blocked",
             "validation_command": "",
-            "reason": "no validation command is available to create a validation record for the current commit",
+            "reason": (
+                f"no validation command is available to refresh the current commit validation record (last result: {validation_result})"
+                if current_commit and last_commit == current_commit
+                else "no validation command is available to create a validation record for the current commit"
+            ),
         }
     validation_run = run_repo_validation_command(
         repo,

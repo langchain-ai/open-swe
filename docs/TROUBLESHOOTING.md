@@ -12,6 +12,8 @@ The canonical finalization command is:
 ./scripts/fixpublish.sh
 ```
 
+That finalizer creates or reuses a successful commit-linked validation record through the agent before it continues to docs handling and publish.
+
 Use `--no-finalize` only when you intentionally want to stop after validation and skip the required finalization step. `--no-publish-on-success` remains as a compatibility alias.
 
 If you do that, the run reports `FINAL: validation succeeded, finalization skipped (incomplete)` instead of a successful completion.
