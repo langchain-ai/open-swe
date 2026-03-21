@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import ast
 import atexit
 import argparse
+import difflib
 import fnmatch
 import hashlib
 import json
@@ -138,6 +139,8 @@ DEFAULT_PROBE_FOLLOW_UP_LIMIT = 2
 DEFAULT_PROBE_USER_AGENT = "local-fix-agent/1.0"
 PROBE_SECRET_NAME_RE = re.compile(r"(?i)(token|key|secret|password|passwd|cookie|auth|signature|credential|session)")
 DEFAULT_PATTERN_REPO_INCLUDE_GLOBS = ["*.py"]
+CONFIG_TASKS = {"validate", "cleanup", "compare", "generate", "align"}
+CONFIG_TYPES = {"auto", "nginx", "reverse_proxy", "php_ini", "php_fpm_pool"}
 DEFAULT_PATTERN_REPO_MAX_FILES = 200
 
 
@@ -704,9 +707,9 @@ def filtered_git_status_output(
 ) -> str:
     output = raw_git_status_output(repo)
     try:
-        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs, ignore_path_predicate)).strip()
+        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs, ignore_path_predicate))
     except TypeError:
-        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs)).strip()
+        return "\n".join(filter_status_lines(output, ignore_all_ignored_dirs))
 
 
 def meaningful_changed_paths(repo: Path, ignore_path_predicate=is_ignored_change_path) -> list[str]:
@@ -759,6 +762,20 @@ def classify_git_working_tree(repo: Path, ignore_path_predicate=is_ignored_chang
         "unstaged_paths": unstaged_paths,
         "untracked_paths": untracked_paths,
     }
+
+
+def git_cached_staged_paths(repo: Path, paths: list[str] | None = None) -> list[str]:
+    command = ["git", "diff", "--cached", "--name-only"]
+    scoped_paths = [str(path).strip() for path in (paths or []) if str(path).strip()]
+    if scoped_paths:
+        command.extend(["--", *scoped_paths])
+    try:
+        code, output = run_subprocess(command, repo)
+    except Exception:
+        return []
+    if code != 0:
+        return []
+    return [line.strip() for line in output.splitlines() if line.strip()]
 
 
 def classify_publishable_changes(
@@ -1641,7 +1658,9 @@ def normalize_publish_working_tree_audit(
 ) -> dict:
     expected = set(expected_paths or [])
     fallback_paths = publish_meaningful_changed_paths(repo) if publish_current_mode else meaningful_changed_paths(repo)
-    staged_paths = list(working_tree.get("staged_paths") or [])
+    staged_paths = git_cached_staged_paths(repo, list(expected) if expected else None)
+    if not staged_paths:
+        staged_paths = list(working_tree.get("staged_paths") or [])
     if not staged_paths and working_tree.get("has_staged"):
         staged_paths = list(fallback_paths)
     remaining_paths = sorted(set(working_tree.get("unstaged_paths") or []) | set(working_tree.get("untracked_paths") or []))
@@ -9869,6 +9888,417 @@ def interactive_workflow_mode(session: dict) -> str:
     return mode if mode in {"guided", "quick"} else "guided"
 
 
+def classify_config_file(config_path: Path, content: str = "") -> dict:
+    path_text = config_path.as_posix().lower()
+    name = config_path.name.lower()
+    lowered = content.lower()
+    if name == "php.ini" or path_text.endswith("/php.ini"):
+        return {"config_type": "php_ini", "classification_source": "path_rule", "confidence": "high"}
+    if "/pool.d/" in path_text or name.endswith(".pool.conf"):
+        return {"config_type": "php_fpm_pool", "classification_source": "path_rule", "confidence": "high"}
+    if "nginx" in path_text or "/conf.d/" in path_text:
+        return {"config_type": "nginx", "classification_source": "path_rule", "confidence": "high"}
+    if any(token in lowered for token in ["pm =", "listen =", "pm.max_children", "php-fpm", "[www]"]):
+        return {"config_type": "php_fpm_pool", "classification_source": "content_pattern", "confidence": "high"}
+    if any(token in lowered for token in ["memory_limit", "upload_max_filesize", "post_max_size", "[php]"]):
+        return {"config_type": "php_ini", "classification_source": "content_pattern", "confidence": "high"}
+    if any(token in lowered for token in ["proxy_pass", "upstream ", "server {", "location /", "http {", "events {"]):
+        config_type = "nginx" if any(token in lowered for token in ["server {", "location /", "http {", "events {"]) else "reverse_proxy"
+        return {"config_type": config_type, "classification_source": "content_pattern", "confidence": "medium"}
+    if name.endswith(".conf"):
+        return {"config_type": "reverse_proxy", "classification_source": "extension", "confidence": "low"}
+    if name.endswith(".ini"):
+        return {"config_type": "php_ini", "classification_source": "extension", "confidence": "low"}
+    return {"config_type": "reverse_proxy", "classification_source": "fallback", "confidence": "low"}
+
+
+def default_config_validation_command(config_path: Path, config_type: str) -> str:
+    normalized = str(config_type or "auto").strip()
+    quoted_path = shlex.quote(str(config_path))
+    if normalized in {"nginx", "reverse_proxy"}:
+        return f"nginx -t -c {quoted_path}"
+    if normalized == "php_fpm_pool":
+        return "php-fpm -t"
+    if normalized == "php_ini":
+        return f"php -n -c {quoted_path} -m"
+    return ""
+
+
+def parse_config_assignment(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith(("#", ";", "[")):
+        return None
+    if "=" not in line:
+        return None
+    key, value = line.split("=", 1)
+    return key.strip(), value.strip()
+
+
+def derive_config_style_hints(content: str, config_type: str) -> dict:
+    hints = {
+        "spaces_around_equals": True,
+        "indent": "    ",
+        "config_type": config_type,
+    }
+    for line in content.splitlines():
+        if "=" in line and parse_config_assignment(line):
+            hints["spaces_around_equals"] = " = " in line
+            break
+    for line in content.splitlines():
+        if line.startswith((" ", "\t")) and line.strip():
+            indent_match = re.match(r"^([ \t]+)", line)
+            if indent_match:
+                hints["indent"] = indent_match.group(1)
+                break
+    return hints
+
+
+def resolve_config_pattern_source(pattern_repo_value: str | None) -> Path | None:
+    selected = str(pattern_repo_value or "").strip()
+    if not selected or selected in {"auto", "none"}:
+        return None
+    if selected == "default":
+        return default_pattern_repo_path()
+    candidate = normalize_pattern_repo_path(selected)
+    return candidate if candidate.exists() else None
+
+
+def load_config_style_hints(pattern_repo_value: str | None, config_type: str) -> dict:
+    root = resolve_config_pattern_source(pattern_repo_value)
+    if root is None or not root.exists():
+        return {}
+    candidates: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in IGNORE_DIRS for part in path.parts):
+            continue
+        candidates.append(path)
+        if len(candidates) >= 30:
+            break
+    for candidate in candidates:
+        try:
+            content = candidate.read_text()
+        except OSError:
+            continue
+        detected = classify_config_file(candidate, content)
+        if detected.get("config_type") != config_type:
+            continue
+        hints = derive_config_style_hints(content, config_type)
+        hints["source_path"] = str(candidate)
+        hints["confidence"] = detected.get("confidence", "low")
+        return hints
+    return {}
+
+
+def normalize_ini_assignment_line(line: str, *, spaces_around_equals: bool) -> str:
+    parsed = parse_config_assignment(line)
+    if not parsed:
+        return line.rstrip()
+    key, value = parsed
+    separator = " = " if spaces_around_equals else "="
+    return f"{key}{separator}{value}"
+
+
+def normalize_common_config_lines(content: str) -> list[str]:
+    lines: list[str] = []
+    blank_pending = False
+    for raw in content.splitlines():
+        stripped = raw.rstrip()
+        if not stripped:
+            if not blank_pending:
+                lines.append("")
+            blank_pending = True
+            continue
+        blank_pending = False
+        lines.append(stripped)
+    while lines and not lines[-1]:
+        lines.pop()
+    return lines
+
+
+def cleanup_config_content(content: str, config_type: str, style_hints: dict | None = None) -> str:
+    hints = style_hints or {}
+    spaces_around_equals = bool(hints.get("spaces_around_equals", True))
+    lines = normalize_common_config_lines(content)
+    normalized: list[str] = []
+    for line in lines:
+        if config_type in {"php_ini", "php_fpm_pool"}:
+            normalized.append(normalize_ini_assignment_line(line, spaces_around_equals=spaces_around_equals))
+        else:
+            normalized.append(line)
+    return "\n".join(normalized).rstrip() + "\n"
+
+
+def align_config_content(content: str, config_type: str, style_hints: dict | None = None) -> str:
+    return cleanup_config_content(content, config_type, style_hints=style_hints)
+
+
+def generate_config_template(config_type: str, config_path: Path, style_hints: dict | None = None) -> str:
+    hints = style_hints or {}
+    indent = str(hints.get("indent") or "    ")
+    spaces_around_equals = bool(hints.get("spaces_around_equals", True))
+    separator = " = " if spaces_around_equals else "="
+    if config_type in {"nginx", "reverse_proxy"}:
+        return (
+            "server {\n"
+            f"{indent}listen 80;\n"
+            f"{indent}server_name example.test;\n\n"
+            f"{indent}location / {{\n"
+            f"{indent}{indent}proxy_pass http://127.0.0.1:8080;\n"
+            f"{indent}{indent}proxy_set_header Host $host;\n"
+            f"{indent}{indent}proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            f"{indent}}}\n"
+            "}\n"
+        )
+    if config_type == "php_ini":
+        return (
+            "[PHP]\n"
+            f"memory_limit{separator}256M\n"
+            f"upload_max_filesize{separator}32M\n"
+            f"post_max_size{separator}32M\n"
+            f"max_execution_time{separator}60\n"
+        )
+    if config_type == "php_fpm_pool":
+        return (
+            "[www]\n"
+            f"user{separator}www-data\n"
+            f"group{separator}www-data\n"
+            f"listen{separator}/run/php/php-fpm.sock\n"
+            f"pm{separator}dynamic\n"
+            f"pm.max_children{separator}10\n"
+            f"pm.start_servers{separator}2\n"
+            f"pm.min_spare_servers{separator}1\n"
+            f"pm.max_spare_servers{separator}3\n"
+        )
+    return f"# generated config for {config_path.name}\n"
+
+
+def summarize_config_diff(before: str, after: str, *, limit: int = 12) -> dict:
+    diff_lines = list(
+        difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+        )
+    )
+    changed_lines = [line for line in diff_lines if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))]
+    return {
+        "changed_line_count": len(changed_lines),
+        "diff_preview": diff_lines[:limit],
+    }
+
+
+def run_config_validation(repo: Path, command: str) -> dict:
+    if not command.strip():
+        return {"validation_result": "skipped", "validation_command": "", "output": "", "ok": True}
+    code, output = run_subprocess(command, repo, shell=True)
+    return {
+        "validation_result": "success" if code == 0 else "blocked",
+        "validation_command": command,
+        "output": output,
+        "ok": code == 0,
+    }
+
+
+def detect_config_task_confidence(config_type: str, classification_confidence: str, pattern_source_used: str, validation_command: str) -> str:
+    score = 0
+    if classification_confidence == "high":
+        score += 2
+    elif classification_confidence == "medium":
+        score += 1
+    if pattern_source_used not in {"", "none", "auto"}:
+        score += 1
+    if validation_command:
+        score += 1
+    if config_type in {"nginx", "php_ini", "php_fpm_pool"}:
+        score += 1
+    if score >= 4:
+        return "high"
+    if score >= 2:
+        return "medium"
+    return "low"
+
+
+def run_config_workflow(
+    repo: Path,
+    *,
+    config_path: Path,
+    task: str,
+    config_type: str = "auto",
+    compare_path: str = "",
+    validation_command: str = "",
+    pattern_repo_value: str = "",
+) -> dict:
+    result = {
+        "config_path": str(config_path),
+        "task": task,
+        "config_type": "unknown",
+        "classification_source": "fallback",
+        "validation_command": "",
+        "validation_result": "not_run",
+        "changes_made": False,
+        "confidence": "low",
+        "pattern_source_used": pattern_repo_value or "none",
+        "patterns_applied": [],
+        "comparison_target": compare_path or "",
+        "compare_summary": "",
+        "diff_preview": [],
+        "blocked_reason": "",
+        "what_happened": "",
+        "ok": False,
+    }
+    original_exists = config_path.exists()
+    original_content = ""
+    if task != "generate" and not original_exists:
+        result["blocked_reason"] = f"Missing config path: {config_path}"
+        result["what_happened"] = "The config workflow blocked because the config file does not exist."
+        return result
+    if original_exists:
+        try:
+            original_content = config_path.read_text()
+        except OSError as exc:
+            result["blocked_reason"] = str(exc)
+            result["what_happened"] = "The config workflow blocked because the config file could not be read."
+            return result
+    detected = classify_config_file(config_path, original_content)
+    resolved_type = detected.get("config_type", "reverse_proxy") if config_type == "auto" else config_type
+    result["config_type"] = str(resolved_type)
+    result["classification_source"] = str(detected.get("classification_source", "fallback"))
+    style_hints = load_config_style_hints(pattern_repo_value, resolved_type)
+    if compare_path and task in {"align", "generate"}:
+        reference_path = Path(compare_path).expanduser()
+        if not reference_path.is_absolute():
+            reference_path = (repo / reference_path).resolve()
+        if not reference_path.exists():
+            result["blocked_reason"] = f"Missing comparison config: {reference_path}"
+            result["what_happened"] = "The config workflow blocked because the style reference file does not exist."
+            return result
+        try:
+            reference_content = reference_path.read_text()
+        except OSError as exc:
+            result["blocked_reason"] = str(exc)
+            result["what_happened"] = "The config workflow blocked because the style reference file could not be read."
+            return result
+        style_hints = {**style_hints, **derive_config_style_hints(reference_content, resolved_type), "source_path": str(reference_path)}
+        result["patterns_applied"] = sorted(set(list(result.get("patterns_applied") or []) + ["reference_config_style"]))
+    if style_hints and "trusted_config_style" not in list(result.get("patterns_applied") or []):
+        result["patterns_applied"] = list(result.get("patterns_applied") or []) + ["trusted_config_style"]
+    effective_validation = validation_command.strip() or ("" if task == "compare" else default_config_validation_command(config_path, resolved_type))
+    result["validation_command"] = effective_validation
+    result["confidence"] = detect_config_task_confidence(
+        resolved_type,
+        str(detected.get("confidence", "low")),
+        pattern_repo_value or "none",
+        effective_validation,
+    )
+    if task == "compare":
+        comparison_target = Path(compare_path).expanduser()
+        result["comparison_target"] = str(comparison_target)
+        if not comparison_target.exists():
+            result["blocked_reason"] = f"Missing comparison config: {comparison_target}"
+            result["what_happened"] = "The config workflow blocked because the comparison file does not exist."
+            return result
+        try:
+            comparison_content = comparison_target.read_text()
+        except OSError as exc:
+            result["blocked_reason"] = str(exc)
+            result["what_happened"] = "The config workflow blocked because the comparison file could not be read."
+            return result
+        diff_summary = summarize_config_diff(original_content, comparison_content)
+        result["compare_summary"] = f"{diff_summary['changed_line_count']} line(s) differ"
+        result["diff_preview"] = diff_summary["diff_preview"]
+        validation = run_config_validation(repo, effective_validation) if effective_validation else {"validation_result": "skipped", "ok": True, "validation_command": "", "output": ""}
+        result["validation_result"] = validation["validation_result"]
+        result["validation_command"] = validation.get("validation_command", effective_validation)
+        result["ok"] = bool(validation.get("ok", True))
+        result["what_happened"] = "Compared the two configs and reported the diff summary."
+        if not result["ok"]:
+            result["blocked_reason"] = str(validation.get("output") or "config validation failed").strip()
+        return result
+    if task == "validate":
+        validation = run_config_validation(repo, effective_validation)
+        result["validation_result"] = validation["validation_result"]
+        result["ok"] = bool(validation["ok"])
+        if not result["ok"]:
+            result["blocked_reason"] = str(validation.get("output") or "config validation failed").strip()
+            result["what_happened"] = "The config file failed validation."
+        else:
+            result["what_happened"] = "The config file validated successfully."
+        return result
+    if task == "generate":
+        rendered = generate_config_template(resolved_type, config_path, style_hints=style_hints)
+    elif task == "align":
+        rendered = align_config_content(original_content, resolved_type, style_hints=style_hints)
+    else:
+        rendered = cleanup_config_content(original_content, resolved_type, style_hints=style_hints)
+    result["changes_made"] = rendered != original_content
+    diff_summary = summarize_config_diff(original_content, rendered)
+    result["diff_preview"] = diff_summary["diff_preview"]
+    if not result["changes_made"] and task != "generate":
+        validation = run_config_validation(repo, effective_validation) if effective_validation else {"validation_result": "skipped", "ok": True, "validation_command": "", "output": ""}
+        result["validation_result"] = validation["validation_result"]
+        result["ok"] = bool(validation["ok"])
+        if not result["ok"]:
+            result["blocked_reason"] = str(validation.get("output") or "config validation failed").strip()
+            result["what_happened"] = "No cleanup changes were kept because validation did not pass."
+        else:
+            result["what_happened"] = "The config was already aligned with the current cleanup/style rules."
+        return result
+    created_parent = False
+    if not config_path.parent.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        created_parent = True
+    config_path.write_text(rendered)
+    validation = run_config_validation(repo, effective_validation) if effective_validation else {"validation_result": "skipped", "ok": True, "validation_command": "", "output": ""}
+    result["validation_result"] = validation["validation_result"]
+    result["ok"] = bool(validation["ok"])
+    if not validation["ok"]:
+        if original_exists:
+            config_path.write_text(original_content)
+        elif config_path.exists():
+            config_path.unlink()
+            if created_parent:
+                try:
+                    config_path.parent.rmdir()
+                except OSError:
+                    pass
+        result["changes_made"] = False
+        result["blocked_reason"] = str(validation.get("output") or "config validation failed").strip()
+        result["what_happened"] = "The config changes were reverted because validation failed."
+        return result
+    if task == "generate":
+        result["what_happened"] = "Generated a new config file and validated it successfully."
+    elif task == "align":
+        result["what_happened"] = "Aligned the config with the selected style hints and validated it successfully."
+    else:
+        result["what_happened"] = "Cleaned up the config and kept the changes because validation passed."
+    return result
+
+
+def print_config_workflow_result(result: dict) -> None:
+    print("=== CONFIG WORKFLOW ===")
+    print(f"config_path: {result.get('config_path', '')}")
+    print(f"config_type: {result.get('config_type', 'unknown')}")
+    print(f"task: {result.get('task', '')}")
+    print(f"validation_command: {result.get('validation_command', '')}")
+    print(f"validation_result: {result.get('validation_result', 'not_run')}")
+    print(f"changes_made: {format_bool(bool(result.get('changes_made')))}")
+    print(f"confidence: {result.get('confidence', 'low')}")
+    print(f"pattern_source_used: {result.get('pattern_source_used', 'none')}")
+    print(f"patterns_applied: {result.get('patterns_applied', [])}")
+    if result.get("comparison_target"):
+        print(f"comparison_target: {result.get('comparison_target')}")
+        print(f"compare_summary: {result.get('compare_summary', '')}")
+    if result.get("diff_preview"):
+        print(f"diff_preview: {result.get('diff_preview')}")
+    if result.get("blocked_reason"):
+        print(f"blocked_reason: {result.get('blocked_reason')}")
+    print(f"what_happened: {result.get('what_happened', '')}")
+
+
 def print_interactive_header(session: dict) -> None:
     print("\n=== LOCAL FIX AGENT APP ===")
     print(f"default_repo: {session.get('repo') or Path.cwd()}")
@@ -9914,6 +10344,11 @@ def interactive_workflow_registry() -> dict[str, dict]:
             "label": "Import a script into training",
             "description": "Sanitize, validate, and add a script to the private training repo.",
             "handler": interactive_import_training_action,
+        },
+        "config_workflow": {
+            "label": "Work with a config file",
+            "description": "Validate, clean up, compare, align, or generate a config file with real validation commands.",
+            "handler": interactive_config_action,
         },
         "inspect_patterns": {
             "label": "Inspect learned patterns",
@@ -11278,6 +11713,166 @@ def interactive_publish_validated_action(session: dict) -> dict:
             {"label": "ensure validation record", "args": ensure_args},
             {"label": "publish validated state", "args": publish_args},
         ],
+    }
+
+
+def render_interactive_config_result(action: dict, executed: list[dict]) -> None:
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    config_type = interactive_extract_output_value(combined_output, "config_type") or str(action.get("inputs", {}).get("config_type") or "unknown")
+    task = interactive_extract_output_value(combined_output, "task") or str(action.get("inputs", {}).get("task") or "")
+    validation_result = interactive_extract_output_value(combined_output, "validation_result") or "blocked"
+    changes_made = interactive_extract_output_value(combined_output, "changes_made") or "false"
+    confidence = interactive_extract_output_value(combined_output, "confidence") or str(action.get("inputs", {}).get("confidence") or "low")
+    blocked_reason = interactive_extract_output_value(combined_output, "blocked_reason")
+    validation_command = interactive_extract_output_value(combined_output, "validation_command") or str(action.get("inputs", {}).get("validation_command") or "")
+    pattern_source_used = interactive_extract_output_value(combined_output, "pattern_source_used") or str(action.get("inputs", {}).get("pattern_source") or "none")
+    plain_english = "The config workflow completed."
+    if validation_result == "success" and task == "cleanup":
+        plain_english = "Cleaned up the config and kept the changes because validation passed."
+    elif validation_result == "success" and task == "validate":
+        plain_english = "The config file validated successfully."
+    elif validation_result == "success" and task == "compare":
+        plain_english = "Compared the two configs and reported the diff summary."
+    elif validation_result == "success" and task == "generate":
+        plain_english = "Generated a new config file and validated it successfully."
+    elif validation_result == "success" and task == "align":
+        plain_english = "Aligned the config with the selected style hints and validated it successfully."
+    elif blocked_reason:
+        plain_english = "The config workflow was blocked because validation failed or the inputs were unsafe."
+    interactive_print_result(
+        action.get("workflow") or "Work with a config file",
+        success=validation_result in {"success", "skipped"},
+        fields=[
+            ("config_path", action.get("inputs", {}).get("config_path") or "(unknown)"),
+            ("config_type", config_type),
+            ("task", task),
+            ("validation_command", validation_command or "(none)"),
+            ("validation_result", validation_result),
+            ("changes_made", changes_made),
+            ("confidence", confidence),
+            ("pattern_source_used", pattern_source_used),
+        ],
+        blocked_reason=blocked_reason if validation_result not in {"success", "skipped"} else "",
+        next_step="Adjust the validation command or config inputs, then rerun the config workflow." if validation_result not in {"success", "skipped"} else "",
+        what_happened=plain_english,
+    )
+
+
+def interactive_config_action(session: dict) -> dict:
+    quick_mode = interactive_workflow_mode(session) == "quick"
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    repo_path = Path(repo).expanduser()
+    config_path_value = interactive_prompt_text("Config path:")
+    config_path = Path(config_path_value).expanduser()
+    if not config_path.is_absolute():
+        config_path = (repo_path / config_path).resolve()
+    existing_content = ""
+    if config_path.exists() and config_path.is_file():
+        try:
+            existing_content = config_path.read_text()
+        except OSError:
+            existing_content = ""
+    detected = classify_config_file(config_path, existing_content)
+    selected_type = "auto" if quick_mode else interactive_prompt_select(
+        "How should this config type be chosen?",
+        [
+            ("auto", "Auto-detect (recommended)"),
+            ("nginx", "NGINX"),
+            ("reverse_proxy", "Generic reverse proxy"),
+            ("php_ini", "php.ini"),
+            ("php_fpm_pool", "PHP-FPM pool"),
+        ],
+        default_key="auto",
+    )
+    resolved_type = str(detected.get("config_type") or "reverse_proxy") if selected_type == "auto" else selected_type
+    task = interactive_prompt_select(
+        "What should happen to this config?",
+        [
+            ("validate", "Validate"),
+            ("cleanup", "Clean up / normalize"),
+            ("compare", "Compare"),
+            ("generate", "Generate new"),
+            ("align", "Align with known-good style"),
+        ],
+        default_key="validate" if quick_mode else "cleanup",
+    )
+    compare_path = ""
+    if task in {"compare", "align"}:
+        prompt = "Config to compare against:" if task == "compare" else "Known-good style reference (optional):"
+        compare_path = interactive_prompt_text(prompt, "")
+    default_validation = default_config_validation_command(config_path, resolved_type)
+    validation_mode = "auto" if quick_mode else interactive_prompt_select(
+        "How should this config be validated?",
+        [
+            ("auto", "Auto-detect (recommended)"),
+            ("default", "Use default command"),
+            ("custom", "Enter custom command"),
+            ("skip", "Skip validation"),
+        ],
+        default_key="auto" if task != "compare" else "skip",
+    )
+    validation_command = ""
+    if validation_mode == "custom":
+        validation_command = interactive_prompt_text("Custom validation command:")
+    elif validation_mode in {"auto", "default"}:
+        validation_command = default_validation
+    pattern_source = "none"
+    pattern_args: list[str] = []
+    if task in {"generate", "align"}:
+        if quick_mode:
+            pattern_source = "auto"
+        else:
+            pattern_source, pattern_args = interactive_select_pattern_repo(session, "Pattern source:")
+    advanced_options = False
+    notes: list[str] = [
+        f"classification_source: {detected.get('classification_source', 'fallback')}",
+        f"detection_confidence: {detected.get('confidence', 'low')}",
+    ]
+    if not quick_mode and interactive_prompt_yes_no("Show advanced options?", default=False):
+        advanced_options = True
+        if task == "generate" and interactive_prompt_yes_no("Skip validation for generated config?", default=False):
+            validation_mode = "skip"
+            validation_command = ""
+        if task in {"cleanup", "align"} and interactive_prompt_yes_no("Use a custom compare/style reference path?", default=False):
+            compare_path = interactive_prompt_text("Reference config path:", compare_path)
+    args = build_interactive_common_args(session, repo=repo, include_proxy=False, include_output=False)
+    args.extend(["--config-file", str(config_path), "--config-task", task, "--config-type", selected_type])
+    if compare_path:
+        args.extend(["--config-compare", compare_path])
+    if validation_mode != "skip" and validation_command:
+        args.extend(["--config-validation-cmd", validation_command])
+    if pattern_args:
+        args.extend(pattern_args)
+    confidence = detect_config_task_confidence(
+        resolved_type,
+        str(detected.get("confidence", "low")),
+        pattern_source,
+        validation_command,
+    )
+    return {
+        "workflow": "Work with a config file",
+        "description": "Use this to validate, clean up, compare, align, or generate config files without restarting services.",
+        "scaffolded": False,
+        "inputs": {
+            "repo": repo,
+            "config_path": str(config_path),
+            "config_type": resolved_type,
+            "task": task,
+            "validation_command": validation_command or "(none)",
+            "pattern_source": pattern_source,
+            "confidence": confidence,
+            "workflow_mode": "quick" if quick_mode else "guided",
+            "advanced_options": advanced_options,
+        },
+        "notes": notes + ([f"compare_path: {compare_path}"] if compare_path else []),
+        "commands": [
+            {
+                "label": "work with config",
+                "args": args,
+                "compact_preview": f"{task} the {resolved_type} config",
+            }
+        ],
+        "result_renderer": render_interactive_config_result,
     }
 
 
@@ -13177,6 +13772,7 @@ def publish_validated_run(
     result["docs_updated"] = bool(docs_stage.get("docs_updated"))
     result["docs_refresh_mode"] = str(docs_stage.get("docs_refresh_mode") or "none")
     result["docs_targets"] = list(docs_stage.get("docs_targets") or [])
+    result["docs_updated_targets"] = list(docs_stage.get("updated_targets") or [])
     result.update(
         summarize_docs_publish_reporting(
             docs_check_performed=result["docs_checked_at_publish"],
@@ -13327,6 +13923,12 @@ def publish_validated_run(
             result["summary_status"] = "publishing existing committed repo state"
             set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
         else:
+            docs_updated_targets = list(result.get("docs_updated_targets") or [])
+            if docs_updated_targets:
+                code, output = run_subprocess(["git", "add", "-A", "--", *docs_updated_targets], repo)
+                if code != 0:
+                    return finish("blocked", f"Publish blocked because staging docs updates failed: {output}")
+                result["actions"].append("staged docs updates")
             ignored_changes = list(result.get("ignored_changes") or [])
             staging_ok, audit = ensure_publish_staging(result["meaningful_paths"], restore_paths=ignored_changes)
             staged_paths = audit["staged_paths"]
@@ -16538,6 +17140,11 @@ def main():
     parser.add_argument("--interactive", action="store_true", help="Launch the top-level interactive terminal app.")
     parser.add_argument("--repo", help="Path to repo")
     parser.add_argument("--script", help="Path to a Python script; validation commands are discovered automatically.")
+    parser.add_argument("--config-file", help="Path to a config file for validate/cleanup/compare/generate/align workflows.")
+    parser.add_argument("--config-task", choices=sorted(CONFIG_TASKS), help="Config workflow task: validate, cleanup, compare, generate, or align.")
+    parser.add_argument("--config-type", choices=sorted(CONFIG_TYPES), default="auto", help="Config workflow type override.")
+    parser.add_argument("--config-compare", help="Comparison or style-reference config path for compare/align tasks.")
+    parser.add_argument("--config-validation-cmd", help="Custom validation command for config workflows.")
     parser.add_argument("--target", help="SSH host for remote execution.")
     parser.add_argument("--test-cmd", help="Test command")
     parser.add_argument("test_cmd_positional", nargs=argparse.REMAINDER, help="Optional test command for wrapper usage.")
@@ -16660,7 +17267,7 @@ def main():
 
     repo, args.test_cmd, args.max_steps, args.max_file_chars, resolved_mode, mode_source, config_path, recent_state_path, safety_settings, target = resolve_run_settings(
         args,
-        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record and not args.probe_url and not args.sync_conflicts and not args.script_validate_only,
+        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record and not args.probe_url and not args.sync_conflicts and not args.script_validate_only and not args.config_file,
     )
     if not target and not repo.exists():
         print(f"Missing repo path: {repo}", file=sys.stderr)
@@ -16700,6 +17307,30 @@ def main():
                 raise SystemExit(1)
             return
         generation_probe_result = probe_result
+    if args.config_file:
+        config_target_path = Path(args.config_file).expanduser()
+        if not config_target_path.is_absolute():
+            config_target_path = (repo / config_target_path).resolve()
+        compare_target = str(args.config_compare or "").strip()
+        if compare_target:
+            compare_path = Path(compare_target).expanduser()
+            if not compare_path.is_absolute():
+                compare_target = str((repo / compare_path).resolve())
+            else:
+                compare_target = str(compare_path)
+        result = run_config_workflow(
+            repo,
+            config_path=config_target_path,
+            task=str(args.config_task or "validate"),
+            config_type=str(args.config_type or "auto"),
+            compare_path=compare_target,
+            validation_command=str(args.config_validation_cmd or ""),
+            pattern_repo_value=str(args.pattern_repo or ""),
+        )
+        print_config_workflow_result(result)
+        if not result.get("ok"):
+            raise SystemExit(1)
+        return
     pattern_repo_mutation_mode = bool(
         args.learn_from
         or args.import_pattern_files
@@ -17458,7 +18089,7 @@ def main():
     branch_name = ensure_branch_per_run(repo)
     pattern_memory = load_pattern_memory(repo)
     artifact_dir = create_run_artifact_dir(repo)
-    publish_baseline_paths = meaningful_changed_paths(repo) if args.publish else []
+    publish_baseline_paths = meaningful_changed_paths(repo) if publish_requested else []
 
     messages = [
         {
@@ -17815,7 +18446,7 @@ def main():
                     args.dry_run,
                     args.show_diff,
                     resolved_mode,
-                    args.publish,
+                    publish_requested,
                     args.publish_message or "",
                 )
                 if finalization.get("rejected"):
@@ -18766,7 +19397,7 @@ def main():
                             args.dry_run,
                             args.show_diff,
                             resolved_mode,
-                            args.publish,
+                            publish_requested,
                             args.publish_message or "",
                         )
                         if finalization.get("rejected"):

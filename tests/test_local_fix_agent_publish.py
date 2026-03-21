@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,6 +87,229 @@ def make_preflight(**overrides: object) -> dict:
     }
     data.update(overrides)
     return data
+
+
+def run_successful_main_publish_flow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    salvaged_tool_call: bool = False,
+    use_real_post_success_publish: bool = False,
+) -> dict:
+    repo = tmp_path / ("repo_salvaged" if salvaged_tool_call else "repo")
+    repo.mkdir(parents=True)
+    (repo / "tool.py").write_text("print('ok')\n")
+    artifact_dir = repo / ".artifacts"
+    artifact_dir.mkdir()
+
+    monkeypatch.setattr(sys, "argv", ["local_fix_agent.py", "--repo", str(repo), "--test-cmd", "pytest -q"])
+    monkeypatch.setattr(
+        lfa,
+        "resolve_run_settings",
+        lambda args, require_test_cmd: (
+            repo,
+            "pytest -q",
+            1,
+            4000,
+            "fix",
+            "explicit",
+            repo / "config.json",
+            repo / "recent.json",
+            {},
+            "",
+        ),
+    )
+    monkeypatch.setattr(lfa, "configure_execution_target", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "configure_subprocess_safety", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "load_agent_config", lambda *args, **kwargs: ({}, repo / "config.json"))
+    monkeypatch.setattr(lfa, "configure_publish_ignore_paths", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        lfa,
+        "select_pattern_repo",
+        lambda *args, **kwargs: {"selected": "none", "reason": "test", "confidence": "high", "path": None},
+    )
+    monkeypatch.setattr(lfa, "sync_with_upstream_before_workflow", lambda *args, **kwargs: lfa.make_upstream_sync_result())
+    monkeypatch.setattr(lfa, "maybe_handle_merge_conflicts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "ensure_branch_per_run", lambda current_repo: "agent-run-test")
+    monkeypatch.setattr(lfa, "load_pattern_memory", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "create_run_artifact_dir", lambda current_repo: artifact_dir)
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(lfa, "build_system_prompt", lambda *args, **kwargs: "system")
+    monkeypatch.setattr(lfa, "build_user_prompt", lambda *args, **kwargs: "user")
+    monkeypatch.setattr(lfa, "progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "startup_signal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "summarize_run_metrics", lambda metrics: "summary")
+    monkeypatch.setattr(lfa, "append_run_metrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "analyze_run_comparison", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "build_action_summary", lambda *args, **kwargs: ("", "", "", ""))
+    monkeypatch.setattr(lfa, "write_run_artifacts", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "update_recent_state", lambda *args, **kwargs: repo / "recent.json")
+    monkeypatch.setattr(lfa, "format_run_artifact_summary", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "print_post_success_publish_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "print_publish_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "print_merge_conflict_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "format_final_operator_summary", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "publish_summary_requires_failure", lambda summary: False)
+    monkeypatch.setattr(lfa, "should_track_modified_file", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "save_pattern_memory", lambda *args, **kwargs: None)
+    monkeypatch.setattr(lfa, "extract_diagnosis_explanation", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "extract_diff_reasoning", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "extract_edit_plan", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "extract_edit_scope", lambda *args, **kwargs: "")
+    monkeypatch.setattr(lfa, "extract_test_alignment", lambda *args, **kwargs: "")
+    monkeypatch.setattr(
+        lfa,
+        "extract_pseudo_tool_call",
+        lambda text: ("run_shell", "{}") if salvaged_tool_call else None,
+    )
+
+    tool_calls = []
+    if not salvaged_tool_call:
+        tool_calls = [
+            SimpleNamespace(
+                id="tool-1",
+                type="function",
+                function=SimpleNamespace(name="run_shell", arguments="{}"),
+            )
+        ]
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content="run_shell({})" if salvaged_tool_call else "",
+                    tool_calls=tool_calls,
+                )
+            )
+        ]
+    )
+    monkeypatch.setattr(lfa, "call_model", lambda *args, **kwargs: response)
+    monkeypatch.setattr(
+        lfa,
+        "handle_tool",
+        lambda repo_path, max_file_chars, tool_name, tool_args, tests_passed: json.dumps(
+            {"ok": True, "output": "ok", "command": "pytest -q"}
+        )
+        if tool_name == "run_shell"
+        else json.dumps({"ok": True}),
+    )
+
+    captured: dict[str, object] = {"publish_calls": 0}
+
+    def fake_finalize_success(
+        repo_path: Path,
+        max_file_chars: int,
+        messages,
+        tests_passed: bool,
+        attempt_number: int,
+        test_cmd: str,
+        failure_context: dict,
+        primary_file: str,
+        best_attempt: dict | None,
+        current_strategy_type: str,
+        dry_run: bool,
+        show_diff: bool,
+        mode: str,
+        publish_requested: bool,
+        publish_message: str,
+    ) -> dict:
+        captured["finalize_publish_requested"] = publish_requested
+        return {
+            "committed": False,
+            "rejected": False,
+            "output": "publish mode: commit deferred",
+            "candidate_results": [],
+            "chosen_candidate": "current_patch",
+            "changed_paths": ["local_fix_agent.py"],
+            "confidence_level": "HIGH",
+        }
+
+    def fake_run_post_success_publish(
+        repo_path: Path,
+        test_cmd: str,
+        attempt_number: int,
+        confidence_level: str,
+        artifact_dir_path: Path | None,
+        changed_paths: list[str],
+        publish_branch: str,
+        publish_pr: bool,
+        publish_merge: bool,
+        publish_merge_local_main: bool,
+        publish_message: str,
+        target: str,
+        blocked_reason: str | None,
+        baseline_paths: list[str],
+        dry_run_mode: bool,
+        publish_mode: str,
+        validation_succeeded: bool,
+        publish_requested: bool,
+        **kwargs,
+    ) -> dict:
+        captured["publish_calls"] = int(captured["publish_calls"]) + 1
+        captured["run_post_success_publish_requested"] = publish_requested
+        captured["baseline_paths"] = baseline_paths
+        captured["changed_paths"] = changed_paths
+        captured["publish_mode"] = publish_mode
+        return {
+            "validation_result": "success",
+            "publish_requested": publish_requested,
+            "publish_triggered": True,
+            "publish_mode": publish_mode,
+            "publish_result": "success",
+            "publish_reason": "validated",
+            "publish_result_detail": {"final": {"status": "success"}},
+        }
+
+    monkeypatch.setattr(lfa, "finalize_success", fake_finalize_success)
+    if use_real_post_success_publish:
+        def fake_publish_validated_run(
+            repo_path: Path,
+            test_cmd: str,
+            attempt_number: int,
+            confidence_level: str,
+            artifact_dir_path: Path | None,
+            changed_paths: list[str],
+            publish_branch: str,
+            publish_pr: bool,
+            publish_merge: bool,
+            publish_merge_local_main: bool,
+            publish_message: str,
+            target: str,
+            blocked_reason: str | None,
+            baseline_paths: list[str],
+            dry_run_mode: bool,
+            publish_current_mode: bool = False,
+            validation_state: str = "success",
+            force_publish: bool = False,
+            auto_stage_safe_paths: bool = True,
+            auto_remediate_blockers: bool = True,
+            explain_staging: bool = False,
+        ) -> dict:
+            captured["publish_validated_run_calls"] = int(captured.get("publish_validated_run_calls", 0)) + 1
+            captured["publish_validated_run_changed_paths"] = changed_paths
+            captured["publish_validated_run_baseline_paths"] = baseline_paths
+            captured["publish_validated_run_validation_state"] = validation_state
+            return {
+                "published": True,
+                "publish_scope": "validated_run",
+                "triggered": True,
+                "validation_state": validation_state,
+                "publish_reason": "validated",
+                "docs_checked_at_publish": True,
+                "docs_check_performed": True,
+                "docs_required": True,
+                "docs_updated": True,
+                "docs_refresh_mode": "patch",
+                "docs_targets": ["README.md"],
+                "final": {"status": "success"},
+                "verification": {"reason": ""},
+            }
+
+        monkeypatch.setattr(lfa, "publish_validated_run", fake_publish_validated_run)
+    else:
+        monkeypatch.setattr(lfa, "run_post_success_publish", fake_run_post_success_publish)
+
+    lfa.main()
+    return captured
 
 
 def test_build_publish_preflight_detects_https(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,6 +493,78 @@ def test_publish_change_helpers_ignore_known_state_files_consistently(monkeypatc
     assert working_tree["has_staged"] is False
     assert working_tree["has_unstaged"] is False
     assert working_tree["has_untracked"] is False
+
+
+def test_filtered_git_status_output_preserves_leading_status_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (
+            0,
+            " M local_fix_agent.py\n M README.md\n",
+        ),
+    )
+
+    status_output = lfa.filtered_git_status_output(Path("/tmp/repo"), ignore_all_ignored_dirs=True)
+
+    assert status_output == " M local_fix_agent.py\n M README.md"
+
+
+def test_classify_git_working_tree_treats_first_line_unstaged_file_as_unstaged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (
+            0,
+            " M local_fix_agent.py\n M README.md\n",
+        ),
+    )
+
+    working_tree = lfa.classify_git_working_tree(Path("/tmp/repo"), ignore_path_predicate=lfa.is_publish_ignored_change_path)
+
+    assert working_tree["clean"] is False
+    assert working_tree["has_staged"] is False
+    assert working_tree["has_unstaged"] is True
+    assert working_tree["staged_paths"] == []
+    assert working_tree["unstaged_paths"] == ["local_fix_agent.py", "README.md"]
+
+
+def test_normalize_publish_working_tree_audit_prefers_cached_diff_for_staged_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path("/tmp/repo")
+
+    def fake_run_subprocess(command, cwd, shell=False):
+        if command[:4] == ["git", "diff", "--cached", "--name-only"]:
+            return 0, "docs/RUNBOOK.md\nlocal_fix_agent.py\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "publish_meaningful_changed_paths",
+        lambda current_repo: ["README.md", "docs/RUNBOOK.md", "local_fix_agent.py"],
+    )
+
+    audit = lfa.normalize_publish_working_tree_audit(
+        repo,
+        {
+            "has_staged": True,
+            "staged_paths": [],
+            "has_unstaged": True,
+            "unstaged_paths": ["README.md"],
+            "has_untracked": False,
+            "untracked_paths": [],
+            "status_output": "M  docs/RUNBOOK.md\nM  local_fix_agent.py\n M README.md\n",
+        },
+        ["README.md", "docs/RUNBOOK.md", "local_fix_agent.py"],
+        publish_current_mode=True,
+    )
+
+    assert audit["staged_paths"] == ["docs/RUNBOOK.md", "local_fix_agent.py"]
+    assert audit["remaining_paths"] == ["README.md"]
 
 
 def test_meaningful_content_fingerprint_excludes_ignored_state_files(tmp_path: Path) -> None:
@@ -3035,6 +3332,56 @@ def test_resolve_publish_requested_preserves_publish_only_mode() -> None:
     assert lfa.resolve_publish_requested(args) is True
 
 
+def test_successful_main_run_invokes_publish_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured = run_successful_main_publish_flow(monkeypatch, tmp_path)
+
+    assert captured["finalize_publish_requested"] is True
+    assert captured["run_post_success_publish_requested"] is True
+    assert captured["publish_calls"] == 1
+    assert captured["changed_paths"] == ["local_fix_agent.py"]
+    assert captured["baseline_paths"] == ["local_fix_agent.py"]
+    assert captured["publish_mode"] == "validated-run"
+
+
+def test_successful_main_run_invokes_publish_by_default_for_salvaged_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = run_successful_main_publish_flow(monkeypatch, tmp_path, salvaged_tool_call=True)
+
+    assert captured["finalize_publish_requested"] is True
+    assert captured["run_post_success_publish_requested"] is True
+    assert captured["publish_calls"] == 1
+    assert captured["baseline_paths"] == ["local_fix_agent.py"]
+
+
+def test_multiple_successful_runs_each_attempt_publish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    first = run_successful_main_publish_flow(monkeypatch, tmp_path / "first")
+    second = run_successful_main_publish_flow(monkeypatch, tmp_path / "second")
+
+    assert first["publish_calls"] == 1
+    assert second["publish_calls"] == 1
+    assert first["run_post_success_publish_requested"] is True
+    assert second["run_post_success_publish_requested"] is True
+
+
+def test_successful_main_run_reaches_publish_validated_run_and_docs_reporting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = run_successful_main_publish_flow(
+        monkeypatch,
+        tmp_path,
+        use_real_post_success_publish=True,
+    )
+
+    assert captured["finalize_publish_requested"] is True
+    assert captured["publish_validated_run_calls"] == 1
+    assert captured["publish_validated_run_changed_paths"] == ["local_fix_agent.py"]
+    assert captured["publish_validated_run_baseline_paths"] == ["local_fix_agent.py"]
+    assert captured["publish_validated_run_validation_state"] == "success"
+
+
 def test_recommended_publish_current_command_uses_finalizer_script() -> None:
     assert lfa.recommended_publish_current_command(include_pr=True) == "./scripts/fixpublish.sh"
 
@@ -5620,6 +5967,132 @@ def test_publish_validated_run_docs_update_is_included_in_published_result(monke
     assert result["docs_refresh_mode"] == "patch"
     assert result["docs_targets"] == ["README.md"]
     assert any(cmd[:3] == ["git", "add", "-A"] for cmd in commands)
+
+
+def test_publish_current_repo_state_stages_docs_updated_targets_before_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    stage_state = {"docs_added": False, "all_added": False}
+
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(
+        lfa,
+        "build_publish_preflight",
+        lambda current_repo, branch: make_preflight(origin_owner="tophat1720", current_user="tophat1720", origin_url="git@github.com:tophat1720/demo.git"),
+    )
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(
+        lfa,
+        "publish_meaningful_changed_paths",
+        lambda current_repo: ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md", "local_fix_agent.py"],
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M README.md\n M docs/RUNBOOK.md\n M docs/TROUBLESHOOTING.md\n M local_fix_agent.py\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md", "local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_prepublish_docs_stage",
+        lambda current_repo, test_cmd, changed_paths, publish_current_mode=False: {
+            "docs_checked_at_publish": True,
+            "docs_required": True,
+            "docs_updated": True,
+            "docs_refresh_mode": "rewrite",
+            "docs_targets": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"],
+            "blocked": False,
+            "reason": "",
+            "updated_targets": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"],
+        },
+    )
+
+    def fake_classify_publish_working_tree(current_repo: Path) -> dict:
+        if stage_state["all_added"]:
+            return {
+                "status_output": "M  README.md\nM  docs/RUNBOOK.md\nM  docs/TROUBLESHOOTING.md\nM  local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": False,
+                "has_staged": True,
+                "has_untracked": False,
+                "staged_paths": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md", "local_fix_agent.py"],
+                "unstaged_paths": [],
+                "untracked_paths": [],
+            }
+        if stage_state["docs_added"]:
+            return {
+                "status_output": "M  README.md\nM  docs/RUNBOOK.md\nM  docs/TROUBLESHOOTING.md\n M local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": True,
+                "has_staged": True,
+                "has_untracked": False,
+                "staged_paths": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"],
+                "unstaged_paths": ["local_fix_agent.py"],
+                "untracked_paths": [],
+            }
+        return {
+            "status_output": " M README.md\n M docs/RUNBOOK.md\n M docs/TROUBLESHOOTING.md\n M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": ["README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md", "local_fix_agent.py"],
+            "untracked_paths": [],
+        }
+
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", fake_classify_publish_working_tree)
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "add", "-A", "--", "README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"]:
+            stage_state["docs_added"] = True
+            return 0, ""
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["all_added"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        return 0, ""
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["published"] is True
+    assert ["git", "add", "-A", "--", "README.md", "docs/RUNBOOK.md", "docs/TROUBLESHOOTING.md"] in commands
 
 
 def test_publish_validated_run_docs_failure_blocks_publish(monkeypatch: pytest.MonkeyPatch) -> None:

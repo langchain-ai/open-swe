@@ -45,6 +45,7 @@ def test_interactive_workflow_registry_contains_required_menu_items() -> None:
         "publish_current",
         "publish_validated",
         "import_training",
+        "config_workflow",
         "inspect_patterns",
         "manage_patterns",
         "probe",
@@ -54,6 +55,7 @@ def test_interactive_workflow_registry_contains_required_menu_items() -> None:
     ]
     assert registry["probe"]["label"] == "Probe API / M3U8 endpoint"
     assert registry["fix_validate"]["label"] == "Fix or validate a script"
+    assert registry["config_workflow"]["label"] == "Work with a config file"
 
 
 def test_interactive_fix_validate_action_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -92,6 +94,8 @@ def test_interactive_fix_validate_action_default_path(monkeypatch: pytest.Monkey
         "--script",
         str(script),
     ]
+    assert "--no-publish-on-success" not in action["commands"][0]["args"]
+    assert "--no-finalize" not in action["commands"][0]["args"]
 
 
 def test_interactive_fix_validate_action_custom_validation_and_advanced_flags(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -183,6 +187,72 @@ def test_interactive_publish_validated_action_builds_canonical_command_pair(monk
         "--publish-only",
         "--publish-pr",
     ]
+
+
+def test_interactive_config_action_builds_nginx_cleanup_command(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = repo / "nginx.conf"
+    config_path.write_text("server {\n    listen 80;   \n}\n")
+    monkeypatch.setattr(
+        "builtins.input",
+        InputFeeder(
+            [
+                str(repo),
+                str(config_path),
+                "1",
+                "2",
+                "1",
+                "n",
+            ]
+        ),
+    )
+
+    action = lfa.interactive_config_action({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})
+
+    assert action["workflow"] == "Work with a config file"
+    assert action["inputs"]["config_type"] == "nginx"
+    assert action["inputs"]["task"] == "cleanup"
+    assert "nginx -t -c" in action["inputs"]["validation_command"]
+    assert action["commands"][0]["args"] == [
+        "--repo",
+        str(repo),
+        "--config-file",
+        str(config_path),
+        "--config-task",
+        "cleanup",
+        "--config-type",
+        "auto",
+        "--config-validation-cmd",
+        f"nginx -t -c {str(config_path)}",
+    ]
+
+
+def test_interactive_config_action_detects_php_fpm_validate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    config_path = repo / "pool.d" / "www.conf"
+    config_path.parent.mkdir()
+    config_path.write_text("[www]\nlisten = /run/php/php-fpm.sock\npm = dynamic\n")
+    monkeypatch.setattr(
+        "builtins.input",
+        InputFeeder(
+            [
+                str(repo),
+                str(config_path),
+                "1",
+                "1",
+                "1",
+                "n",
+            ]
+        ),
+    )
+
+    action = lfa.interactive_config_action({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})
+
+    assert action["inputs"]["config_type"] == "php_fpm_pool"
+    assert action["inputs"]["task"] == "validate"
+    assert action["inputs"]["validation_command"] == "php-fpm -t"
 
 
 def make_publish_preflight(
@@ -384,7 +454,7 @@ def test_interactive_menu_prints_all_required_items_and_probe_is_not_default(
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setattr(lfa.sys, "stdin", DummyStdin())
-    monkeypatch.setattr("builtins.input", InputFeeder(["11"]))
+    monkeypatch.setattr("builtins.input", InputFeeder(["12"]))
 
     exit_code = lfa.run_interactive_app({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})
 
@@ -396,6 +466,7 @@ def test_interactive_menu_prints_all_required_items_and_probe_is_not_default(
     assert "Publish current repo state" in output
     assert "Publish last validated run" in output
     assert "Import a script into training" in output
+    assert "Work with a config file" in output
     assert "Inspect learned patterns" in output
     assert "Manage patterns" in output
     assert "Probe API / M3U8 endpoint" in output
@@ -424,7 +495,7 @@ def test_interactive_menu_routes_to_probe_handler_without_making_it_default(
 
     monkeypatch.setattr(lfa, "interactive_probe_action", fake_probe_handler)
     monkeypatch.setattr(lfa.sys, "stdin", DummyStdin())
-    monkeypatch.setattr("builtins.input", InputFeeder(["8", "2", "11"]))
+    monkeypatch.setattr("builtins.input", InputFeeder(["9", "2", "12"]))
 
     exit_code = lfa.run_interactive_app({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})
 
@@ -453,7 +524,7 @@ def test_interactive_back_and_cancel_work(monkeypatch: pytest.MonkeyPatch, capsy
 
     monkeypatch.setattr(lfa, "interactive_fix_validate_action", fake_fix_handler)
     monkeypatch.setattr(lfa.sys, "stdin", DummyStdin())
-    monkeypatch.setattr("builtins.input", InputFeeder(["1", "2", "11"]))
+    monkeypatch.setattr("builtins.input", InputFeeder(["1", "2", "12"]))
 
     exit_code = lfa.run_interactive_app({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})
 
@@ -1078,7 +1149,7 @@ def test_interactive_publish_blocked_followup_shows_expert_analysis(
     monkeypatch.setattr(lfa.sys, "stdin", DummyStdin())
     monkeypatch.setattr(
         "builtins.input",
-        InputFeeder(["3", str(repo), "1", "1", "", "1", "n", "1", "1", "4", "11"]),
+        InputFeeder(["3", str(repo), "1", "1", "", "1", "n", "1", "1", "4", "12"]),
     )
 
     exit_code = lfa.run_interactive_app({"repo": str(repo), "http_proxy": "", "https_proxy": "", "output": "human"})

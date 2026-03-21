@@ -92,7 +92,7 @@ AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --last --publish --publish-pr 
 
 Use `python local_fix_agent.py --interactive` when you want a guided front-end instead of assembling flags by hand.
 
-The interactive mode is now the shared top-level app shell for the whole agent. The menu skeleton and backend routing stay shared across the system, and the main guided workflows now include fixing, creating new scripts, publishing, and training import.
+The interactive mode is now the shared top-level app shell for the whole agent. The menu skeleton and backend routing stay shared across the system, and the main guided workflows now include fixing, creating new scripts, config maintenance, publishing, and training import.
 
 The interactive app has two operator modes:
 
@@ -109,6 +109,7 @@ The top-level menu covers:
 
 - fix or validate a script
 - create a new script
+- work with a config file
 - publish current repo state
 - publish last validated run
 - import a script into training
@@ -204,6 +205,52 @@ The result screen summarizes:
 - a plain-English `what_happened` summary
 
 Generation confidence is strongest when trusted patterns match the task, probe findings reduce network ambiguity, and the tool can select a concrete validation command. It drops when the task is vague or network behavior remains unverified.
+
+### Work with a config file
+
+Use this when you want to validate, clean up, compare, align, or generate a config file without hand-assembling validation commands.
+
+The workflow currently supports:
+
+- `nginx`
+- generic reverse proxy configs
+- `php.ini`
+- PHP-FPM pool configs
+
+The guided flow asks for:
+
+- repo path
+- config path
+- config type: auto-detect or explicit type
+- task: `validate`, `cleanup`, `compare`, `generate`, or `align`
+- validation command choice: auto/default/custom/skip
+- pattern source when generation or style alignment should follow trusted examples
+- advanced options only when requested
+
+The safe editing model is:
+
+1. read the config
+2. generate or normalize the candidate content
+3. run the selected validation command
+4. keep the change only if validation succeeds
+
+Default validation commands include:
+
+- `nginx -t -c <path>`
+- `php-fpm -t`
+- `php -n -c <path> -m`
+
+The workflow does not reload or restart services by default.
+
+The result screen summarizes:
+
+- `config_type`
+- `task`
+- `validation_result`
+- `changes_made`
+- `confidence`
+- `blocked_reason` when relevant
+- a plain-English `what_happened` summary
 
 ### Publish current repo state
 
