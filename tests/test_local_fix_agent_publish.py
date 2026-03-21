@@ -213,6 +213,24 @@ def test_classify_publishable_changes_treats_docs_code_and_tests_as_meaningful(m
     assert result["ignored_changes"] == [".ai_publish_state.json"]
 
 
+def test_classify_publish_path_marks_state_file_as_ignored() -> None:
+    result = lfa.classify_publish_path(".ai_publish_state.json")
+
+    assert result["file_type"] == "state"
+    assert result["classification_source"] == "explicit_ignore"
+    assert result["publishable"] is False
+    assert result["publish_reason"] == "internal state file"
+
+
+def test_classify_publish_path_marks_unknown_text_artifact_as_non_publishable() -> None:
+    result = lfa.classify_publish_path("c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt")
+
+    assert result["file_type"] == "artifact"
+    assert result["classification_source"] in {"pattern_match", "extension"}
+    assert result["publishable"] is False
+    assert result["publish_reason"] == "generated/artifact file"
+
+
 def test_classify_publishable_changes_uses_last_published_commit_diff(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run_subprocess(command, cwd, shell=False):
         if command[:3] == ["git", "status", "--short"]:
@@ -2042,6 +2060,20 @@ def test_existing_pr_prevents_duplicate_creation(monkeypatch: pytest.MonkeyPatch
             "reason": "",
         },
     )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -2103,15 +2135,18 @@ def test_publish_current_clean_tree_results_in_noop(monkeypatch: pytest.MonkeyPa
     assert result["control_path"] == "noop"
     assert result["reason"] == "no meaningful changes to publish"
     assert result["final"]["status"] == "noop"
-    assert commands == []
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_stage_result"] == "not_needed"
+    assert commands == [["git", "status", "--short", "--untracked-files=all"]]
 
     lfa.print_publish_summary(result)
     assert "mode_summary: no meaningful changes to publish" in capsys.readouterr().out
 
 
-def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_current_unstaged_change_auto_stages_publishable_file(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
+    stage_state = {"after_add": False}
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
     monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
     monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
@@ -2136,11 +2171,14 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
         lfa,
         "classify_git_working_tree",
         lambda current_repo: {
-            "status_output": " M local_fix_agent.py",
+            "status_output": "M  local_fix_agent.py" if stage_state["after_add"] else " M local_fix_agent.py",
             "clean": False,
-            "has_unstaged": True,
-            "has_staged": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
             "has_untracked": False,
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [],
         },
     )
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
@@ -2159,6 +2197,20 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
             "reason": "",
         },
     )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -2166,14 +2218,22 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
             return 0, ""
         if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
             return 0, "1 0\n"
-        if command == ["git", "add", "-A"]:
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
             return 0, ""
-        if command == ["git", "diff", "--cached", "--quiet"]:
-            return 1, ""
         if command[:2] == ["git", "commit"]:
             return 0, ""
         if command[:3] == ["git", "push", "-u"]:
             return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps(
+                {
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "baseRefName": "main",
+                    "headRefName": "feature",
+                }
+            )
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
@@ -2181,20 +2241,38 @@ def test_publish_current_unstaged_change_stages_with_git_add_a(monkeypatch: pyte
     result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["published"] is True
-    assert result["summary_status"] == "staged current repo state"
-    assert commands[:3] == [
-        ["git", "add", "-A"],
-        ["git", "diff", "--cached", "--quiet"],
-        ["git", "commit", "-m", "chore: publish current repo state"],
+    assert result["summary_status"] == "staged 1 publishable file(s)"
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] == "success"
+    assert result["auto_staged_paths"] == ["local_fix_agent.py"]
+    assert result["staging_summary"] == {"auto_staged": 1, "ignored": 0, "blocked": 0}
+    assert result["staging_decision_reason"] == "safe publishable files were auto-staged and re-audited successfully"
+    assert result["file_decisions"] == [
+        {
+            "path": "local_fix_agent.py",
+            "file_type": "code",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+            "tracked": True,
+            "staged": True,
+            "unstaged": False,
+            "untracked": False,
+            "action": "auto_staged",
+            "reason": "safe tracked code file",
+        }
     ]
+    assert ["git", "add", "-A", "--", "local_fix_agent.py"] in commands
+    assert ["git", "commit", "-m", "chore: publish current repo state"] in commands
     assert ["git", "fetch", "origin", "main"] in commands
     assert ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"] in commands
     assert ["git", "push", "-u", "origin", "feature"] in commands
 
 
-def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_current_safe_file_plus_internal_state_proceeds(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
+    stage_state = {"after_add": False}
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
     monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
     monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
@@ -2203,15 +2281,253 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
     monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
     monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
     monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
-    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["new_file.txt"])
-    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "?? new_file.txt")
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["docs/README.md"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M docs/README.md\n?? .ai_publish_state.json\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["docs/README.md"],
+            "ignored_changes": [".ai_publish_state.json"],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": "M  docs/README.md\n?? .ai_publish_state.json" if stage_state["after_add"] else " M docs/README.md\n?? .ai_publish_state.json",
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": True,
+            "staged_paths": ["docs/README.md"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["docs/README.md"],
+            "untracked_paths": [".ai_publish_state.json"],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "docs/README.md"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps({"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN", "baseRefName": "main", "headRefName": "feature"})
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "success"
+    assert result["safe_staged_paths"] == ["docs/README.md"]
+    assert result["ignored_nonblocking_paths"] == [".ai_publish_state.json"]
+    assert result["true_blockers"] == []
+    assert result["blocker_count"] == 0
+    assert result["publishable_ready"] is True
+    assert result["blocked_file_analysis"] == []
+    assert ["git", "add", "-A", "--", "docs/README.md"] in commands
+
+
+def test_publish_current_ignored_internal_files_only_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": "?? .ai_publish_state.json\n",
+            "meaningful_changes_detected": False,
+            "meaningful_paths": [],
+            "ignored_changes": [".ai_publish_state.json"],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "raw_git_status_output", lambda current_repo: "?? .ai_publish_state.json\n")
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "noop"
+    assert result["ignored_nonblocking_paths"] == [".ai_publish_state.json"]
+    assert result["true_blockers"] == []
+    assert result["blocker_count"] == 0
+    assert result["publishable_ready"] is True
+
+
+def test_publish_current_safe_file_plus_artifact_auto_removes_and_publishes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact_name = "c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt"
+    (repo / artifact_name).write_text("temporary artifact\n")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": f" M local_fix_agent.py\n?? {artifact_name}\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": (
+                f"M  local_fix_agent.py\n?? {artifact_name}"
+                if stage_state["after_add"] and (repo / artifact_name).exists()
+                else "M  local_fix_agent.py"
+                if stage_state["after_add"]
+                else f" M local_fix_agent.py\n?? {artifact_name}"
+            ),
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": bool((repo / artifact_name).exists()),
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [artifact_name] if (repo / artifact_name).exists() else [],
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "success"
+    assert result["published"] is True
+    assert result["safe_staged_paths"] == ["local_fix_agent.py"]
+    assert result["true_blockers"] == []
+    assert result["blocker_count"] == 0
+    assert result["publishable_ready"] is True
+    assert result["blocker_remediation_attempted"] is True
+    assert result["blocker_remediation_result"] == "success"
+    assert result["auto_removed_paths"] == [artifact_name]
+    assert result["remaining_true_blockers"] == []
+    assert not (repo / artifact_name).exists()
+    assert ["git", "add", "-A", "--", "local_fix_agent.py"] in commands
+    assert any(cmd[:2] == ["git", "commit"] for cmd in commands)
+    assert any(cmd[:3] == ["git", "push", "-u"] for cmd in commands)
+
+
+def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["new_file.py"])
+    monkeypatch.setattr(lfa, "filtered_git_status_output", lambda current_repo, ignore_all_ignored_dirs=True: "?? new_file.py")
     monkeypatch.setattr(
         lfa,
         "classify_publishable_changes",
         lambda current_repo: {
-            "status_output": "?? new_file.txt",
+            "status_output": "?? new_file.py",
             "meaningful_changes_detected": True,
-            "meaningful_paths": ["new_file.txt"],
+            "meaningful_paths": ["new_file.py"],
             "ignored_changes": [],
         },
     )
@@ -2219,11 +2535,14 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
         lfa,
         "classify_git_working_tree",
         lambda current_repo: {
-            "status_output": "?? new_file.txt",
+            "status_output": "A  new_file.py" if stage_state["after_add"] else "?? new_file.py",
             "clean": False,
             "has_unstaged": False,
-            "has_staged": False,
-            "has_untracked": True,
+            "has_staged": stage_state["after_add"],
+            "has_untracked": not stage_state["after_add"],
+            "staged_paths": ["new_file.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [],
+            "untracked_paths": [] if stage_state["after_add"] else ["new_file.py"],
         },
     )
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
@@ -2242,6 +2561,20 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
             "reason": "",
         },
     )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -2249,14 +2582,22 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
             return 0, ""
         if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
             return 0, "1 0\n"
-        if command == ["git", "add", "-A"]:
+        if command == ["git", "add", "-A", "--", "new_file.py"]:
+            stage_state["after_add"] = True
             return 0, ""
-        if command == ["git", "diff", "--cached", "--quiet"]:
-            return 1, ""
         if command[:2] == ["git", "commit"]:
             return 0, ""
         if command[:3] == ["git", "push", "-u"]:
             return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps(
+                {
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "baseRefName": "main",
+                    "headRefName": "feature",
+                }
+            )
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
@@ -2264,20 +2605,37 @@ def test_publish_current_untracked_files_stage_and_continue(monkeypatch: pytest.
     result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
     assert result["published"] is True
-    assert result["working_tree"]["has_untracked"] is True
-    assert commands[:3] == [
-        ["git", "add", "-A"],
-        ["git", "diff", "--cached", "--quiet"],
-        ["git", "commit", "-m", "chore: publish current repo state"],
+    assert result["working_tree"]["staged_paths"] == ["new_file.py"]
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] == "success"
+    assert result["auto_staged_paths"] == ["new_file.py"]
+    assert result["staging_summary"] == {"auto_staged": 1, "ignored": 0, "blocked": 0}
+    assert result["file_decisions"] == [
+        {
+            "path": "new_file.py",
+            "file_type": "code",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+            "tracked": True,
+            "staged": True,
+            "unstaged": False,
+            "untracked": False,
+            "action": "auto_staged",
+            "reason": "safe new publishable code file",
+        }
     ]
+    assert ["git", "add", "-A", "--", "new_file.py"] in commands
+    assert ["git", "commit", "-m", "chore: publish current repo state"] in commands
     assert ["git", "fetch", "origin", "main"] in commands
     assert ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"] in commands
     assert ["git", "push", "-u", "origin", "feature"] in commands
 
 
-def test_publish_current_does_not_reference_specific_files(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_publish_current_auto_stage_targets_publishable_files_only(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
+    stage_state = {"after_add": False}
     monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
     monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
     monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
@@ -2301,22 +2659,68 @@ def test_publish_current_does_not_reference_specific_files(monkeypatch: pytest.M
     monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
     monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
     monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": "M  README.md\nM  local_fix_agent.py" if stage_state["after_add"] else " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": False,
+            "staged_paths": ["README.md", "local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [],
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
-        if command == ["git", "add", "-A"]:
+        if command == ["git", "fetch", "origin", "main"]:
             return 0, ""
-        if command == ["git", "diff", "--cached", "--quiet"]:
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
             return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps(
+                {
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "baseRefName": "main",
+                    "headRefName": "feature",
+                }
+            )
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
 
     result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
 
-    assert result["control_path"] == "noop"
-    assert commands == [["git", "add", "-A"], ["git", "diff", "--cached", "--quiet"]]
-    assert all("README.md" not in cmd for cmd in commands)
+    assert result["published"] is True
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] == "success"
+    assert result["auto_staged_paths"] == ["local_fix_agent.py"]
+    assert any(cmd[:4] == ["git", "add", "-A", "--"] for cmd in commands)
+    assert ["git", "commit", "-m", "chore: publish current repo state"] in commands
 
 
 def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2369,6 +2773,20 @@ def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pyte
             "reason": "",
         },
     )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
 
     def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
         commands.append(command)
@@ -2391,7 +2809,7 @@ def test_validated_run_publish_still_stages_tracked_files_only(monkeypatch: pyte
     )
 
     assert result["published"] is True
-    assert commands[0] == ["git", "add", "-A", "--", "local_fix_agent.py"]
+    assert ["git", "add", "-A", "--", "local_fix_agent.py"] in commands
 
 
 def test_low_confidence_persisted_state_triggers_recompute() -> None:
@@ -2461,6 +2879,9 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
         publish_current_mode: bool = False,
         validation_state: str = "success",
         force_publish: bool = False,
+        auto_stage_safe_paths: bool = True,
+        auto_remediate_blockers: bool = True,
+        explain_staging: bool = False,
     ) -> dict:
         captured.update(
             {
@@ -2481,9 +2902,12 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
                 "dry_run_mode": dry_run_mode,
                 "publish_current_mode": publish_current_mode,
                 "validation_state": validation_state,
-                "force_publish": force_publish,
-            }
-        )
+                    "force_publish": force_publish,
+                    "auto_stage_safe_paths": auto_stage_safe_paths,
+                    "auto_remediate_blockers": auto_remediate_blockers,
+                    "explain_staging": explain_staging,
+                }
+            )
         return {"recommended_command": "old", "final": {"status": "noop"}}
 
     monkeypatch.setattr(lfa, "publish_validated_run", fake_publish_validated_run)
@@ -2508,6 +2932,7 @@ def test_publish_current_repo_state_uses_current_changes(monkeypatch: pytest.Mon
     assert captured["publish_current_mode"] is True
     assert captured["validation_state"] == "success"
     assert captured["force_publish"] is False
+    assert captured["auto_remediate_blockers"] is True
     assert result["recommended_command"] == "./scripts/fixpublish.sh"
 
 
@@ -2534,11 +2959,17 @@ def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: py
         publish_current_mode: bool = False,
         validation_state: str = "success",
         force_publish: bool = False,
+        auto_stage_safe_paths: bool = True,
+        auto_remediate_blockers: bool = True,
+        explain_staging: bool = False,
     ) -> dict:
         captured["repo"] = current_repo
         captured["test_cmd"] = test_cmd
         captured["validation_state"] = validation_state
         captured["force_publish"] = force_publish
+        captured["auto_stage_safe_paths"] = auto_stage_safe_paths
+        captured["auto_remediate_blockers"] = auto_remediate_blockers
+        captured["explain_staging"] = explain_staging
         return {
             "published": True,
             "publish_scope": "validated_run",
@@ -2581,6 +3012,7 @@ def test_run_post_success_publish_triggers_on_validation_success(monkeypatch: py
     assert captured["test_cmd"] == "pytest -q"
     assert captured["validation_state"] == "success"
     assert captured["force_publish"] is False
+    assert captured["auto_remediate_blockers"] is True
 
 
 def test_resolve_publish_requested_defaults_to_true() -> None:
@@ -2823,6 +3255,9 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         auto_revalidated: bool = False,
         validation_reused: bool = False,
         auto_revalidation_result: str = "not_needed",
+        auto_stage_safe_paths: bool = True,
+        auto_remediate_blockers: bool = True,
+        explain_staging: bool = False,
     ) -> dict:
         captured["repo"] = repo
         captured["publish_branch"] = publish_branch
@@ -2834,6 +3269,9 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
         captured["auto_revalidated"] = auto_revalidated
         captured["validation_reused"] = validation_reused
         captured["auto_revalidation_result"] = auto_revalidation_result
+        captured["auto_stage_safe_paths"] = auto_stage_safe_paths
+        captured["auto_remediate_blockers"] = auto_remediate_blockers
+        captured["explain_staging"] = explain_staging
         return {
             "published": True,
             "publish_scope": "current_repo_state",
@@ -2874,6 +3312,7 @@ def test_run_post_success_publish_uses_current_repo_state_mode(monkeypatch: pyte
     assert captured["publish_branch"] == "feature/publish"
     assert captured["validation_state"] == "success"
     assert captured["validation_commit_match"] is True
+    assert captured["auto_remediate_blockers"] is True
 
 
 def test_run_post_success_publish_without_publish_flag_does_not_publish(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2993,6 +3432,19 @@ def test_format_final_operator_summary_distinguishes_publish_failure() -> None:
     assert lfa.format_final_operator_summary(summary) == "FINAL: validation succeeded, publish failed"
 
 
+def test_format_final_operator_summary_distinguishes_publish_blocked_from_mergeability_blocked() -> None:
+    summary = {
+        "validation_result": "success",
+        "publish_requested": True,
+        "publish_triggered": True,
+        "publish_result": "blocked",
+        "publish_reason": "staging blocked",
+        "final_workflow_result": "blocked",
+    }
+
+    assert lfa.format_final_operator_summary(summary) == "FINAL: validation succeeded, publish blocked"
+
+
 def test_format_final_operator_summary_prefers_previous_pr_on_noop_reuse() -> None:
     summary = {
         "validation_result": "blocked",
@@ -3065,6 +3517,27 @@ def test_publish_validated_run_can_create_and_merge_pr_when_safe(monkeypatch: py
             "remote_head": "abc123",
             "synced": True,
             "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "locally_verify_pr_mergeability",
+        lambda current_repo, base_branch, head_branch: {
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+            "pr_mergeability_reason": "",
         },
     )
 
@@ -4153,9 +4626,15 @@ def test_publish_current_repo_state_main_branch_with_only_ignored_changes_noops(
     assert result["triggered"] is False
     assert result["final"]["status"] == "noop"
     assert result["reason"] == "no meaningful changes to publish"
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_stage_result"] == "not_needed"
     assert result["ignored_changes"] == [".ai_publish_state.json", ".fix_agent_docs_state.json"]
     assert result["meaningful_paths"] == []
-    assert commands == [["git", "rev-parse", "HEAD"], ["git", "rev-parse", "HEAD"]]
+    assert commands == [
+        ["git", "rev-parse", "HEAD"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--short", "--untracked-files=all"],
+    ]
 
 
 def test_publish_current_repo_state_only_state_file_change_uses_real_classification_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4188,14 +4667,783 @@ def test_publish_current_repo_state_only_state_file_change_uses_real_classificat
     assert result["triggered"] is False
     assert result["final"]["status"] == "noop"
     assert result["reason"] == "no meaningful changes to publish"
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_stage_result"] == "not_needed"
     assert result["meaningful_changes_detected"] is False
     assert result["meaningful_paths"] == []
     assert result["ignored_changes"] == [".ai_publish_state.json"]
+    assert result["staging_summary"] == {"auto_staged": 0, "ignored": 1, "blocked": 0}
+    assert result["staging_decision_reason"] == "only excluded/internal files were detected"
+    assert result["file_decisions"] == [
+        {
+            "path": ".ai_publish_state.json",
+            "file_type": "state",
+            "classification_source": "explicit_ignore",
+            "publishable": False,
+            "publish_reason": "internal state file",
+            "tracked": True,
+            "staged": False,
+            "unstaged": True,
+            "untracked": False,
+            "action": "ignored",
+            "reason": "internal state file",
+        }
+    ]
     assert commands == [
         ["git", "rev-parse", "HEAD"],
         ["git", "rev-parse", "HEAD"],
         ["git", "status", "--short", "--untracked-files=all"],
+        ["git", "status", "--short", "--untracked-files=all"],
     ]
+
+
+def test_publish_current_repo_state_publishes_docs_code_and_tests_while_excluding_state_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    publishable_paths = [
+        "docs/README.md",
+        "local_fix_agent.py",
+        "tests/test_local_fix_agent_publish.py",
+    ]
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: publishable_paths)
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": (
+                " M docs/README.md\n"
+                " M local_fix_agent.py\n"
+                " M tests/test_local_fix_agent_publish.py\n"
+                " M .ai_publish_state.json\n"
+            ),
+            "meaningful_changes_detected": True,
+            "meaningful_paths": publishable_paths,
+            "ignored_changes": [".ai_publish_state.json"],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": (
+                "M  docs/README.md\n"
+                "M  local_fix_agent.py\n"
+                "M  tests/test_local_fix_agent_publish.py\n"
+                " M .ai_publish_state.json\n"
+                if stage_state["after_add"]
+                else
+                " M docs/README.md\n"
+                " M local_fix_agent.py\n"
+                " M tests/test_local_fix_agent_publish.py\n"
+                " M .ai_publish_state.json\n"
+            ),
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": False,
+            "staged_paths": publishable_paths if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else publishable_paths,
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", *publishable_paths]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["published"] is True
+    assert result["ignored_changes"] == [".ai_publish_state.json"]
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] == "success"
+    assert result["staging_summary"] == {"auto_staged": 3, "ignored": 1, "blocked": 0}
+    assert any(
+        item["path"] == ".ai_publish_state.json"
+        and item["file_type"] == "state"
+        and item["action"] == "ignored"
+        and item["reason"] == "internal state file"
+        for item in result["file_decisions"]
+    )
+    assert result["working_tree"]["staged_paths"] == publishable_paths
+    assert ["git", "add", "-A", "--", *publishable_paths] in commands
+    assert ["git", "commit", "-m", "chore: publish current repo state"] in commands
+    assert ["git", "push", "-u", "origin", "feature"] in commands
+
+
+def test_publish_current_repo_state_blocks_if_publishable_changes_remain_unstaged_after_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["docs/README.md", "local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M docs/README.md\n M local_fix_agent.py\n M .ai_publish_state.json\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["docs/README.md", "local_fix_agent.py"],
+            "ignored_changes": [".ai_publish_state.json"],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": (
+                " M docs/README.md\n"
+                " M local_fix_agent.py\n"
+                " M .ai_publish_state.json\n"
+                if not stage_state["after_add"]
+                else
+                " M docs/README.md\n"
+                " M local_fix_agent.py\n"
+                " M .ai_publish_state.json\n"
+            ),
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": ["docs/README.md", "local_fix_agent.py"],
+            "untracked_paths": [],
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "docs/README.md", "local_fix_agent.py"] or command == ["git", "add", "-A", "--", "local_fix_agent.py", "docs/README.md"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["published"] is False
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] in {"partial", "blocked"}
+    assert result["staging_summary"]["blocked"] == 0
+    assert result["safe_stage_candidate_paths"] == ["docs/README.md", "local_fix_agent.py"]
+    assert result["true_blockers"] == []
+    assert result["blocker_count"] == 0
+    assert result["publishable_ready"] is False
+    assert "publishable changes remained unstaged after staging" in result["reason"]
+    assert "docs/README.md" in result["reason"]
+    assert not any(cmd[:2] == ["git", "commit"] for cmd in commands)
+    assert not any(cmd[:3] == ["git", "push", "-u"] for cmd in commands)
+
+
+def test_publish_current_repo_state_reuses_existing_pr_and_pushes_new_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "https://github.com/octocat/demo/pull/7")
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M local_fix_agent.py\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": "M  local_fix_agent.py" if stage_state["after_add"] else " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": False,
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "abc123",
+            "remote_head": "abc123",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "locally_verify_pr_mergeability",
+        lambda current_repo, base_branch, head_branch: {
+            "pr_mergeability_source": "local_fallback",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+            "pr_mergeability_reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        if command[:3] == ["gh", "pr", "view"]:
+            return 0, json.dumps(
+                {
+                    "mergeable": "MERGEABLE",
+                    "mergeStateStatus": "CLEAN",
+                    "baseRefName": "main",
+                    "headRefName": "feature",
+                }
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", True, False, False, "", "", False)
+
+    assert result["published"] is True
+    assert result["auto_stage_attempted"] is True
+    assert result["auto_stage_result"] == "success"
+    assert result["pr_already_exists"] is True
+    assert result["pr_created_or_reused"] is True
+    assert result["pr_url"] == "https://github.com/octocat/demo/pull/7"
+    assert ["git", "commit", "-m", "chore: publish current repo state"] in commands
+    assert ["git", "push", "-u", "origin", "feature"] in commands
+    assert not any(cmd[:3] == ["gh", "pr", "create"] for cmd in commands)
+
+
+def test_publish_current_repo_state_unsafe_file_blocks_with_manual_staging_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["notes.txt"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M notes.txt\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["notes.txt"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": " M notes.txt",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": ["notes.txt"],
+            "untracked_paths": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd, shell=False: (_ for _ in ()).throw(AssertionError(f"unexpected command: {command}")),
+    )
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_stage_result"] == "blocked"
+    assert result["remaining_unstaged_paths"] == ["notes.txt"]
+    assert result["remaining_unstaged"] == [
+        {
+            "path": "notes.txt",
+            "file_type": "artifact",
+            "classification_source": "extension",
+            "publishable": False,
+            "tracked": True,
+            "staged": False,
+            "unstaged": True,
+            "untracked": False,
+            "reason": "generated/artifact file",
+        }
+    ]
+    assert result["staging_summary"] == {"auto_staged": 0, "ignored": 0, "blocked": 1}
+    assert result["file_decisions"] == [
+        {
+            "path": "notes.txt",
+            "file_type": "artifact",
+            "classification_source": "extension",
+            "publishable": False,
+            "publish_reason": "generated/artifact file",
+            "tracked": True,
+            "staged": False,
+            "unstaged": True,
+            "untracked": False,
+            "action": "true_blocker",
+            "reason": "unknown/generated artifact; requires manual review",
+        }
+    ]
+    assert result["safe_staged_paths"] == []
+    assert result["ignored_nonblocking_paths"] == []
+    assert result["true_blockers"] == [{"path": "notes.txt", "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"}]
+    assert result["blocker_count"] == 1
+    assert result["publishable_ready"] is False
+    assert result["staging_decision_reason"] == "one or more files were classified as unknown/artifact and require manual review"
+    assert result["staging_reason"] == "ambiguous or unsafe file requires manual review"
+    assert "git add -- notes.txt" in result["next_action"]
+    assert result["blocked_file_analysis"][0]["recommended_action"] == "inspect manually before staging"
+    assert "git restore --staged -- notes.txt" in result["blocked_file_analysis"][0]["recommended_commands"]
+
+
+def test_publish_current_repo_state_strict_no_auto_remediate_preserves_block(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact_name = "c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt"
+    (repo / artifact_name).write_text("temporary artifact\n")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": f" M local_fix_agent.py\n?? {artifact_name}\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": f"M  local_fix_agent.py\n?? {artifact_name}" if stage_state["after_add"] else f" M local_fix_agent.py\n?? {artifact_name}",
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": True,
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": [artifact_name],
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False, auto_remediate_blockers=False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["blocker_remediation_attempted"] is False
+    assert result["blocker_remediation_result"] == "not_needed"
+    assert result["true_blockers"] == [{"path": artifact_name, "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"}]
+    assert result["remaining_true_blockers"] == [{"path": artifact_name, "file_type": "artifact", "reason": "unknown/generated artifact; requires manual review"}]
+    assert (repo / artifact_name).exists()
+    assert not any(cmd[:2] == ["git", "commit"] for cmd in commands)
+
+
+def test_publish_current_repo_state_resolves_safe_artifact_but_blocks_on_ambiguous_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifact_name = "c7c5dc0cfd3d57af083f1ae879ccfb868f2f2e76.txt"
+    (repo / artifact_name).write_text("temporary artifact\n")
+    commands: list[list[str]] = []
+    stage_state = {"after_add": False}
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py", "settings.data"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": f" M local_fix_agent.py\n?? {artifact_name}\n?? settings.data\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py", "settings.data"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": (
+                "M  local_fix_agent.py\n?? settings.data\n"
+                if stage_state["after_add"] and not (repo / artifact_name).exists()
+                else f" M local_fix_agent.py\n?? {artifact_name}\n?? settings.data\n"
+                if not stage_state["after_add"]
+                else f"M  local_fix_agent.py\n?? {artifact_name}\n?? settings.data\n"
+            ),
+            "clean": False,
+            "has_unstaged": not stage_state["after_add"],
+            "has_staged": stage_state["after_add"],
+            "has_untracked": True,
+            "staged_paths": ["local_fix_agent.py"] if stage_state["after_add"] else [],
+            "unstaged_paths": [] if stage_state["after_add"] else ["local_fix_agent.py"],
+            "untracked_paths": ["settings.data"] + ([artifact_name] if (repo / artifact_name).exists() else []),
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            stage_state["after_add"] = True
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["blocker_remediation_attempted"] is True
+    assert result["blocker_remediation_result"] in {"partial", "blocked"}
+    assert result["auto_removed_paths"] == [artifact_name]
+    assert result["remaining_true_blockers"] == [{"path": "settings.data", "file_type": "unknown", "reason": "unknown/generated artifact; requires manual review"}]
+    assert result["true_blockers"] == [{"path": "settings.data", "file_type": "unknown", "reason": "unknown/generated artifact; requires manual review"}]
+    assert not (repo / artifact_name).exists()
+    assert any(item["path"] == "settings.data" for item in result["blocked_file_analysis"])
+
+
+def test_publish_current_repo_state_no_auto_stage_blocks_with_exact_manual_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(
+        lfa,
+        "detect_publish_environment",
+        lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False},
+    )
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "abc123")
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "publish_meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": " M local_fix_agent.py\n",
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "classify_publish_working_tree",
+        lambda current_repo: {
+            "status_output": " M local_fix_agent.py",
+            "clean": False,
+            "has_unstaged": True,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": ["local_fix_agent.py"],
+            "untracked_paths": [],
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "fetch", "origin", "main"]:
+            return 0, ""
+        if command == ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"]:
+            return 0, "1 0\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_current_repo_state(repo, "", False, False, False, "", "", False, auto_stage_safe_paths=False)
+
+    assert result["final"]["status"] == "blocked"
+    assert result["auto_stage_attempted"] is False
+    assert result["auto_stage_result"] == "blocked"
+    assert result["staging_reason"] == "automatic staging disabled by --no-auto-stage"
+    assert result["staging_decision_reason"] == "automatic staging is disabled; manual staging is required for safe publishable files"
+    assert result["remaining_unstaged_paths"] == ["local_fix_agent.py"]
+    assert result["safe_stage_candidate_paths"] == ["local_fix_agent.py"]
+    assert result["true_blockers"] == []
+    assert result["blocker_count"] == 0
+    assert result["publishable_ready"] is False
+    assert "git add -- local_fix_agent.py" in result["next_action"]
+    assert result["blocked_file_analysis"][0]["recommended_action"] == "stage and include in publish"
+    assert result["blocked_analysis_summary"]["primary_next_step"] == "stage the publishable file changes, then rerun publish"
+    assert not any(cmd[:3] == ["git", "add", "-A"] for cmd in commands)
+
+
+def test_recommend_publish_block_action_internal_state_file() -> None:
+    analysis = lfa.recommend_publish_block_action(
+        Path("/tmp/repo"),
+        {
+            "path": ".ai_publish_state.json",
+            "file_type": "state",
+            "classification_source": "explicit_ignore",
+            "publishable": False,
+            "tracked": True,
+            "staged": False,
+            "unstaged": True,
+            "untracked": False,
+        },
+    )
+
+    assert analysis["recommended_action"] == "leave untracked / do not publish"
+    assert "internal state file" in analysis["blocking_reason"]
+
+
+def test_recommend_publish_block_action_generated_root_artifact() -> None:
+    analysis = lfa.recommend_publish_block_action(
+        Path("/tmp/repo"),
+        {
+            "path": "c76abc1234567890ef.txt",
+            "file_type": "artifact",
+            "classification_source": "pattern_match",
+            "publishable": False,
+            "tracked": False,
+            "staged": False,
+            "unstaged": False,
+            "untracked": True,
+        },
+    )
+
+    assert analysis["confidence"] == "high"
+    assert analysis["recommended_action"] == "remove generated artifact"
+    assert "rm c76abc1234567890ef.txt" in analysis["recommended_commands"]
+
+
+def test_print_publish_summary_shows_staging_block_analysis(capsys: pytest.CaptureFixture[str]) -> None:
+    result = lfa.make_publish_result()
+    result["final"]["status"] = "blocked"
+    result["blocked_file_analysis"] = [
+        {
+            "path": "notes.txt",
+            "file_type": "artifact",
+            "classification_source": "extension",
+            "publishable": False,
+            "confidence": "high",
+            "blocking_reason": "file looks like generated output or a temporary artifact and does not match publishable patterns",
+            "recommended_action": "remove generated artifact",
+            "recommended_commands": ["rm notes.txt", "echo '*.txt' >> .gitignore"],
+        }
+    ]
+    result["blocked_analysis_summary"] = {
+        "blocked_count": 1,
+        "primary_next_step": "remove or ignore the artifact-style file, then rerun publish",
+        "fallback_next_step": "inspect the file manually if you intended to keep it in the repo",
+        "rerun_command": "./scripts/fixpublish.sh",
+    }
+
+    lfa.print_publish_summary(result)
+
+    output = capsys.readouterr().out
+    assert "=== STAGING BLOCK ANALYSIS ===" in output
+    assert "recommended_action: remove generated artifact" in output
+    assert "rerun: ./scripts/fixpublish.sh" in output
+
+
+def test_print_publish_summary_explain_staging_shows_file_decisions(capsys: pytest.CaptureFixture[str]) -> None:
+    result = lfa.make_publish_result()
+    result["explain_staging"] = True
+    result["staging_summary"] = {"auto_staged": 1, "ignored": 1, "blocked": 1}
+    result["staging_decision_reason"] = "one or more files were classified as unknown/artifact and require manual review"
+    result["file_decisions"] = [
+        {
+            "path": "local_fix_agent.py",
+            "file_type": "code",
+            "classification_source": "extension",
+            "publishable": True,
+            "action": "auto_staged",
+            "reason": "safe tracked code file",
+        },
+        {
+            "path": ".ai_publish_state.json",
+            "file_type": "state",
+            "classification_source": "explicit_ignore",
+            "publishable": False,
+            "action": "ignored",
+            "reason": "internal state file",
+        },
+        {
+            "path": "notes.txt",
+            "file_type": "artifact",
+            "classification_source": "extension",
+            "publishable": False,
+            "action": "blocked",
+            "reason": "unknown/generated artifact; requires manual review",
+        },
+    ]
+
+    lfa.print_publish_summary(result)
+
+    output = capsys.readouterr().out
+    assert "=== STAGING FILE DECISIONS ===" in output
+    assert "file_decision: path=local_fix_agent.py file_type=code" in output
+    assert "file_decision: path=.ai_publish_state.json file_type=state" in output
+    assert "file_decision: path=notes.txt file_type=artifact" in output
 
 
 def test_run_prepublish_docs_stage_no_docs_impact_returns_no_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4215,6 +5463,18 @@ def test_run_prepublish_docs_stage_no_docs_impact_returns_no_update(tmp_path: Pa
     assert result["docs_required"] is False
     assert result["docs_updated"] is False
     assert result["docs_refresh_mode"] == "none"
+
+    docs_reporting = lfa.summarize_docs_publish_reporting(
+        docs_check_performed=result["docs_checked_at_publish"],
+        docs_required=result["docs_required"],
+        docs_updated=result["docs_updated"],
+        blocked=result["blocked"],
+        reason=result["reason"],
+    )
+
+    assert docs_reporting["docs_check_performed"] is True
+    assert docs_reporting["docs_status"] == "up_to_date"
+    assert docs_reporting["docs_reason"] == "no documentation changes detected"
 
 
 def test_run_prepublish_docs_stage_updates_and_revalidates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4352,6 +5612,9 @@ def test_publish_validated_run_docs_update_is_included_in_published_result(monke
 
     assert result["published"] is True
     assert result["docs_checked_at_publish"] is True
+    assert result["docs_check_performed"] is True
+    assert result["docs_status"] == "updated"
+    assert result["docs_reason"] == "documentation updated due to code changes"
     assert result["docs_required"] is True
     assert result["docs_updated"] is True
     assert result["docs_refresh_mode"] == "patch"
@@ -4400,6 +5663,9 @@ def test_publish_validated_run_docs_failure_blocks_publish(monkeypatch: pytest.M
     )
 
     assert result["published"] is False
+    assert result["docs_check_performed"] is True
+    assert result["docs_status"] == "required_but_blocked"
+    assert result["docs_reason"] == "docs update completed, but revalidation failed: pytest failed"
     assert result["final"]["status"] == "blocked"
     assert result["reason"] == "docs update completed, but revalidation failed: pytest failed"
 
@@ -4426,10 +5692,93 @@ def test_print_post_success_publish_summary_includes_docs_fields(capsys: pytest.
     out = capsys.readouterr().out
 
     assert "docs_checked_at_publish: true" in out
+    assert "docs_check_performed: true" in out
+    assert "docs_status: updated" in out
+    assert "docs_reason: documentation updated due to code changes" in out
     assert "docs_required: true" in out
     assert "docs_updated: true" in out
     assert "docs_refresh_mode: patch" in out
     assert "docs_targets: ['README.md', 'docs/RUNBOOK.md']" in out
+
+
+def test_print_publish_summary_includes_blocked_docs_reporting(capsys: pytest.CaptureFixture[str]) -> None:
+    result = {
+        "final": {"status": "blocked"},
+        "target": {},
+        "environment": {},
+        "fingerprint": {},
+        "actions": [],
+        "control_path": "blocked_docs",
+        "state_loaded": True,
+        "state_reset": False,
+        "reused_fork": False,
+        "transport_locked": False,
+        "state_confidence": "high",
+        "remote_url": "",
+        "normalized_origin": "",
+        "auth_transport": "https",
+        "branch": "feature",
+        "meaningful_changes_detected": True,
+        "last_published_commit": "abc122",
+        "current_publish_candidate_commit": "abc123",
+        "diff_files_detected": ["local_fix_agent.py"],
+        "ignored_changes": [],
+        "meaningful_paths": ["local_fix_agent.py"],
+        "docs_checked_at_publish": True,
+        "docs_required": True,
+        "docs_updated": False,
+        "docs_refresh_mode": "patch",
+        "docs_targets": ["README.md"],
+        "base_branch": "main",
+        "prepublish_base_alignment_attempted": False,
+        "branch_diverged": False,
+        "alignment_needed": False,
+        "alignment_result": "not_needed",
+        "alignment_changed_commit": False,
+        "validation_rerun_after_alignment": False,
+        "validation_state": "success",
+        "validation_commit_match": True,
+        "fingerprint_match": True,
+        "auto_revalidated": False,
+        "validation_reused": False,
+        "auto_revalidation_result": "not_needed",
+        "last_validated_commit": "abc123",
+        "current_commit": "abc123",
+        "validation_age_seconds": 5,
+        "publish_reason": "validated",
+        "reason": "docs update completed, but revalidation failed: pytest failed",
+        "pr_already_exists": False,
+        "pr_created_or_reused": False,
+        "pr_merged": False,
+        "local_main_synced": False,
+        "noop": False,
+        "commit_sha": "",
+        "pr_url": None,
+        "previous_publish_branch": "",
+        "previous_pr_url": "",
+        "previous_commit": "",
+        "verification": {},
+        "pr_requested": False,
+        "pr_status": "not_requested",
+        "pr_mergeable": "unknown",
+        "pr_conflicts_detected": False,
+        "pr_mergeability_source": "github",
+        "pr_mergeable_final": "unknown",
+        "pr_conflicts_detected_final": False,
+        "pr_mergeability_repair_attempted": False,
+        "pr_mergeability_repair_result": "not_needed",
+        "final_workflow_result": "blocked",
+    }
+
+    lfa.print_publish_summary(result)
+    out = capsys.readouterr().out
+
+    assert "docs_checked_at_publish: true" in out
+    assert "docs_check_performed: true" in out
+    assert "docs_status: required_but_blocked" in out
+    assert "docs_reason: docs update completed, but revalidation failed: pytest failed" in out
+    assert "docs_required: true" in out
+    assert "docs_updated: false" in out
 
 
 def test_print_post_success_publish_summary_includes_final_pr_mergeability_fields(

@@ -3,6 +3,7 @@ from pathlib import Path, PurePosixPath
 import ast
 import atexit
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -10,12 +11,15 @@ import re
 import secrets
 import shutil
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 from typing import Sequence
-from urllib.parse import urlparse
+import urllib.error
+import urllib.request
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunsplit
 
 MODEL = "qwen2.5-coder:14b"
 DEFAULT_MAX_STEPS = 40
@@ -128,6 +132,13 @@ API_SAFETY_STATE = {
     "cooldowns_triggered": 0,
     "last_rate_limit_output": "",
 }
+DEFAULT_PROBE_TIMEOUT_SECONDS = 8
+DEFAULT_PROBE_MAX_BYTES = 32768
+DEFAULT_PROBE_FOLLOW_UP_LIMIT = 2
+DEFAULT_PROBE_USER_AGENT = "local-fix-agent/1.0"
+PROBE_SECRET_NAME_RE = re.compile(r"(?i)(token|key|secret|password|passwd|cookie|auth|signature|credential|session)")
+DEFAULT_PATTERN_REPO_INCLUDE_GLOBS = ["*.py"]
+DEFAULT_PATTERN_REPO_MAX_FILES = 200
 
 
 def is_likely_rate_limited(output: str) -> bool:
@@ -718,22 +729,35 @@ def classify_git_working_tree(repo: Path, ignore_path_predicate=is_ignored_chang
     has_unstaged = False
     has_staged = False
     has_untracked = False
+    staged_paths: list[str] = []
+    unstaged_paths: list[str] = []
+    untracked_paths: list[str] = []
     for line in status_output.splitlines():
+        path = extract_status_path(line)
         if line.startswith("??"):
             has_untracked = True
+            if path and path not in untracked_paths:
+                untracked_paths.append(path)
             continue
         staged_flag = line[0] if len(line) > 0 else " "
         unstaged_flag = line[1] if len(line) > 1 else " "
         if staged_flag not in {" ", "?"}:
             has_staged = True
+            if path and path not in staged_paths:
+                staged_paths.append(path)
         if unstaged_flag != " ":
             has_unstaged = True
+            if path and path not in unstaged_paths:
+                unstaged_paths.append(path)
     return {
         "status_output": status_output,
         "clean": not status_output.strip(),
         "has_unstaged": has_unstaged,
         "has_staged": has_staged,
         "has_untracked": has_untracked,
+        "staged_paths": staged_paths,
+        "unstaged_paths": unstaged_paths,
+        "untracked_paths": untracked_paths,
     }
 
 
@@ -812,6 +836,867 @@ def classify_publish_working_tree(repo: Path) -> dict:
         return classify_git_working_tree(repo, ignore_path_predicate=is_publish_ignored_change_path)
     except TypeError:
         return classify_git_working_tree(repo)
+
+
+PUBLISH_GENERATED_DIRS = {
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "htmlcov",
+    "site",
+}
+PUBLISH_GENERATED_SUFFIXES = {
+    ".pyc",
+}
+PUBLISH_ARTIFACT_SUFFIXES = {
+    ".cache",
+    ".diff",
+    ".log",
+    ".orig",
+    ".out",
+    ".patch",
+    ".rej",
+    ".temp",
+    ".tmp",
+    ".txt",
+}
+PUBLISH_CONFIG_SUFFIXES = {".cfg", ".ini", ".json", ".toml", ".yaml", ".yml"}
+PUBLISH_CODE_SUFFIXES = {".js", ".jsx", ".py", ".ts", ".tsx"}
+DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS = True
+DEFAULT_PUBLISH_AUTO_IGNORE_KNOWN_JUNK = False
+
+
+def _publish_config_block(config: dict | None) -> dict:
+    if not isinstance(config, dict):
+        return {}
+    block = config.get("publish_blockers", {})
+    return block if isinstance(block, dict) else {}
+
+
+def _publish_config_globs(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(item).strip() for item in values if str(item).strip()]
+
+
+def load_publish_blocker_policy(repo: Path, *, auto_remediate: bool = True) -> dict:
+    config, _config_path = load_agent_config(None, repo)
+    publish_blockers = _publish_config_block(config)
+    known_junk_globs = _publish_config_globs(publish_blockers.get("known_junk_globs", []))
+    safe_ignore_globs = _publish_config_globs(publish_blockers.get("safe_ignore_globs", []))
+    safe_remove_globs = _publish_config_globs(publish_blockers.get("safe_remove_globs", []))
+    return {
+        "auto_remediate": bool(auto_remediate),
+        "auto_remove_safe_artifacts": bool(publish_blockers.get("auto_remove_safe_artifacts", DEFAULT_PUBLISH_AUTO_REMOVE_SAFE_ARTIFACTS)),
+        "auto_ignore_known_junk": bool(publish_blockers.get("auto_ignore_known_junk", DEFAULT_PUBLISH_AUTO_IGNORE_KNOWN_JUNK)),
+        "known_junk_globs": known_junk_globs,
+        "safe_ignore_globs": safe_ignore_globs,
+        "safe_remove_globs": safe_remove_globs,
+    }
+
+
+def publish_path_matches_any_glob(path: str, globs: list[str]) -> str:
+    normalized = str(path or "").strip()
+    for pattern in globs:
+        if fnmatch.fnmatch(normalized, pattern):
+            return pattern
+    return ""
+
+
+def is_high_confidence_safe_artifact_path(path: str, analysis: dict, policy: dict) -> bool:
+    normalized = str(path or "").strip()
+    rel = Path(normalized) if normalized else Path()
+    hashed_root_txt = bool(rel.parts and len(rel.parts) == 1 and re.fullmatch(r"[0-9a-f]{24,}\.txt", rel.name.lower()))
+    if hashed_root_txt:
+        return True
+    if publish_path_matches_any_glob(normalized, list(policy.get("safe_remove_globs") or [])):
+        return True
+    if publish_path_matches_any_glob(normalized, list(policy.get("known_junk_globs") or [])):
+        return True
+    return str(analysis.get("classification_source") or "") in {"pattern_match", "path_rule"} and str(analysis.get("file_type") or "") in {"artifact", "generated"}
+
+
+def classify_publish_path(path: str) -> dict:
+    normalized = str(path or "").strip()
+    rel = Path(normalized) if normalized else Path()
+    suffix = rel.suffix.lower()
+    lowered = rel.name.lower()
+    hashed_artifact = bool(re.fullmatch(r"[0-9a-f]{24,}(?:\.[a-z0-9]+)?", lowered))
+    if not normalized:
+        return {
+            "path": "",
+            "file_type": "unknown",
+            "classification_source": "fallback",
+            "publishable": False,
+            "publish_reason": "unknown file type",
+        }
+    if rel.is_absolute() or any(part == ".." for part in rel.parts):
+        return {
+            "path": normalized,
+            "file_type": "unknown",
+            "classification_source": "path_rule",
+            "publishable": False,
+            "publish_reason": "outside allowed publish paths",
+        }
+    if is_publish_ignored_change_path(normalized):
+        return {
+            "path": normalized,
+            "file_type": "state",
+            "classification_source": "explicit_ignore",
+            "publishable": False,
+            "publish_reason": "internal state file",
+        }
+    if any(part in PUBLISH_GENERATED_DIRS for part in rel.parts):
+        return {
+            "path": normalized,
+            "file_type": "generated",
+            "classification_source": "path_rule",
+            "publishable": False,
+            "publish_reason": "generated/artifact file",
+        }
+    if normalized == "README.md" or normalized.startswith("docs/"):
+        return {
+            "path": normalized,
+            "file_type": "docs",
+            "classification_source": "path_rule",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if suffix == ".md":
+        return {
+            "path": normalized,
+            "file_type": "docs",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if normalized.startswith("tests/"):
+        return {
+            "path": normalized,
+            "file_type": "test",
+            "classification_source": "path_rule",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if rel.name.startswith("test_") or rel.name.endswith("_test.py"):
+        return {
+            "path": normalized,
+            "file_type": "test",
+            "classification_source": "pattern_match",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if normalized.startswith("scripts/"):
+        return {
+            "path": normalized,
+            "file_type": "script",
+            "classification_source": "path_rule",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if suffix == ".sh":
+        return {
+            "path": normalized,
+            "file_type": "script",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if suffix in PUBLISH_CONFIG_SUFFIXES:
+        return {
+            "path": normalized,
+            "file_type": "config",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    if suffix in PUBLISH_GENERATED_SUFFIXES:
+        return {
+            "path": normalized,
+            "file_type": "generated",
+            "classification_source": "extension",
+            "publishable": False,
+            "publish_reason": "generated/artifact file",
+        }
+    if hashed_artifact:
+        return {
+            "path": normalized,
+            "file_type": "artifact",
+            "classification_source": "pattern_match",
+            "publishable": False,
+            "publish_reason": "generated/artifact file",
+        }
+    if suffix in PUBLISH_ARTIFACT_SUFFIXES:
+        return {
+            "path": normalized,
+            "file_type": "artifact",
+            "classification_source": "extension",
+            "publishable": False,
+            "publish_reason": "generated/artifact file",
+        }
+    if suffix in PUBLISH_CODE_SUFFIXES:
+        return {
+            "path": normalized,
+            "file_type": "code",
+            "classification_source": "extension",
+            "publishable": True,
+            "publish_reason": "matches code/docs/tests/config patterns",
+        }
+    return {
+        "path": normalized,
+        "file_type": "unknown",
+        "classification_source": "fallback",
+        "publishable": False,
+        "publish_reason": "unknown file type",
+    }
+
+
+def collect_publish_working_tree_entries(repo: Path, status_output: str = "") -> list[dict]:
+    entries: dict[str, dict] = {}
+    source_output = status_output
+    if not source_output:
+        try:
+            source_output = raw_git_status_output(repo)
+        except Exception:
+            source_output = ""
+    for line in source_output.splitlines():
+        path = extract_status_path(line)
+        if not path:
+            continue
+        entry = entries.setdefault(
+            path,
+            {
+                "path": path,
+                "status_lines": [],
+                "tracked": True,
+                "staged": False,
+                "unstaged": False,
+                "untracked": False,
+            },
+        )
+        entry["status_lines"].append(line)
+        if line.startswith("??"):
+            entry["tracked"] = False
+            entry["untracked"] = True
+            continue
+        staged_flag = line[0] if len(line) > 0 else " "
+        unstaged_flag = line[1] if len(line) > 1 else " "
+        if staged_flag not in {" ", "?"}:
+            entry["staged"] = True
+        if unstaged_flag != " ":
+            entry["unstaged"] = True
+    enriched: list[dict] = []
+    for path in sorted(entries):
+        item = dict(entries[path])
+        item.update(classify_publish_path(path))
+        enriched.append(item)
+    return enriched
+
+
+def build_publish_file_decisions(
+    entries: list[dict],
+    *,
+    expected_paths: list[str] | None = None,
+    staged_paths: list[str] | None = None,
+    remaining_paths: list[str] | None = None,
+    auto_staged_paths: list[str] | None = None,
+    auto_stage_entry_state: dict[str, dict] | None = None,
+) -> tuple[list[dict], dict, list[dict], str]:
+    expected = set(expected_paths or [])
+    staged = set(staged_paths or [])
+    remaining = set(remaining_paths or [])
+    auto_staged = set(auto_staged_paths or [])
+    auto_stage_state = auto_stage_entry_state or {}
+    decisions: list[dict] = []
+    remaining_unstaged: list[dict] = []
+    summary = {"auto_staged": 0, "ignored": 0, "blocked": 0}
+    for entry in entries:
+        path = str(entry.get("path") or "")
+        if expected and path not in expected and path not in remaining and not is_publish_ignored_change_path(path):
+            continue
+        decision = {
+            "path": path,
+            "file_type": entry.get("file_type") or "unknown",
+            "classification_source": entry.get("classification_source") or "fallback",
+            "publishable": bool(entry.get("publishable")),
+            "publish_reason": entry.get("publish_reason") or "",
+            "tracked": bool(entry.get("tracked", True)),
+            "staged": bool(entry.get("staged")),
+            "unstaged": bool(entry.get("unstaged")),
+            "untracked": bool(entry.get("untracked")),
+            "action": "",
+            "reason": "",
+        }
+        if not decision["publishable"]:
+            if decision["file_type"] == "state":
+                decision["action"] = "ignored"
+                decision["reason"] = decision["publish_reason"] or "explicitly ignored"
+                summary["ignored"] += 1
+            elif path in remaining:
+                decision["action"] = "true_blocker"
+                decision["reason"] = "unknown/generated artifact; requires manual review"
+                summary["blocked"] += 1
+                remaining_unstaged.append(
+                    {
+                        "path": path,
+                        "file_type": decision["file_type"],
+                        "classification_source": decision["classification_source"],
+                        "publishable": decision["publishable"],
+                        "tracked": decision["tracked"],
+                        "staged": decision["staged"],
+                        "unstaged": decision["unstaged"],
+                        "untracked": decision["untracked"],
+                        "reason": decision["publish_reason"] or decision["reason"],
+                    }
+                )
+            else:
+                decision["action"] = "ignored"
+                decision["reason"] = decision["publish_reason"] or "non-publishable file"
+                summary["ignored"] += 1
+            decisions.append(decision)
+            continue
+        if path in remaining:
+            decision["action"] = "needs_staging"
+            decision["reason"] = "publishable file still requires manual staging"
+            remaining_unstaged.append(
+                {
+                    "path": path,
+                    "file_type": decision["file_type"],
+                    "classification_source": decision["classification_source"],
+                    "publishable": decision["publishable"],
+                    "tracked": decision["tracked"],
+                    "staged": decision["staged"],
+                    "unstaged": decision["unstaged"],
+                    "untracked": decision["untracked"],
+                    "reason": decision["reason"],
+                }
+            )
+        elif path in auto_staged:
+            decision["action"] = "auto_staged"
+            pre_stage = auto_stage_state.get(path) or {}
+            if pre_stage.get("untracked") or not pre_stage.get("tracked", True):
+                decision["reason"] = f"safe new publishable {decision['file_type']} file"
+            else:
+                decision["reason"] = f"safe tracked {decision['file_type']} file"
+            summary["auto_staged"] += 1
+        elif path in staged:
+            decision["action"] = "already_staged"
+            decision["reason"] = "publishable file already staged"
+        else:
+            decision["action"] = "ignored"
+            decision["reason"] = "not part of current publish set"
+            summary["ignored"] += 1
+        decisions.append(decision)
+    if summary["blocked"]:
+        overall_reason = "one or more files were classified as unknown/artifact and require manual review"
+        if any(item.get("reason") == "publishable file still requires manual staging" for item in remaining_unstaged):
+            overall_reason = "one or more publishable files still require manual staging"
+    elif summary["auto_staged"]:
+        overall_reason = "safe publishable files were auto-staged and re-audited successfully"
+    elif summary["ignored"] and not expected:
+        overall_reason = "only excluded/internal files were detected"
+    else:
+        overall_reason = "all publishable changes already staged"
+    return decisions, summary, remaining_unstaged, overall_reason
+
+
+def summarize_publish_decision_sets(decisions: list[dict], remaining_unstaged: list[dict] | None = None) -> dict:
+    safe_staged_paths = [
+        str(item.get("path") or "")
+        for item in decisions
+        if str(item.get("action") or "") in {"auto_staged", "already_staged"}
+    ]
+    ignored_nonblocking_paths = [
+        str(item.get("path") or "")
+        for item in decisions
+        if str(item.get("action") or "") == "ignored"
+    ]
+    safe_stage_candidate_paths = [
+        str(item.get("path") or "")
+        for item in decisions
+        if str(item.get("action") or "") == "needs_staging"
+    ]
+    unresolved = list(remaining_unstaged or [])
+    true_blockers = [
+        {
+            "path": str(item.get("path") or ""),
+            "file_type": str(item.get("file_type") or "unknown"),
+            "reason": str(item.get("reason") or ""),
+        }
+        for item in decisions
+        if str(item.get("action") or "") == "true_blocker"
+    ]
+    return {
+        "safe_staged_paths": [path for path in safe_staged_paths if path],
+        "ignored_nonblocking_paths": [path for path in ignored_nonblocking_paths if path],
+        "safe_stage_candidate_paths": [path for path in safe_stage_candidate_paths if path],
+        "true_blockers": true_blockers,
+        "blocker_count": len(true_blockers),
+        "publishable_ready": not bool(true_blockers) and not bool(safe_stage_candidate_paths),
+        "unresolved_paths": [str(item.get("path") or "") for item in unresolved if item.get("path")],
+    }
+
+
+def publish_classification_confidence(entry: dict) -> str:
+    source = str(entry.get("classification_source") or "fallback")
+    file_type = str(entry.get("file_type") or "unknown")
+    if source in {"explicit_ignore", "path_rule", "pattern_match"}:
+        return "high"
+    if source == "extension" and file_type not in {"unknown"}:
+        return "medium"
+    return "low"
+
+
+def recommend_publish_block_action(repo: Path, item: dict) -> dict:
+    path = str(item.get("path") or "")
+    file_type = str(item.get("file_type") or "unknown")
+    publishable = bool(item.get("publishable"))
+    tracked = bool(item.get("tracked", True))
+    untracked = bool(item.get("untracked"))
+    classification_source = str(item.get("classification_source") or "fallback")
+    confidence = publish_classification_confidence(item)
+    rel_path = Path(path)
+    existing_similar = False
+    try:
+        if rel_path.suffix:
+            existing_similar = any(
+                candidate != rel_path and candidate.suffix.lower() == rel_path.suffix.lower()
+                for candidate in repo.rglob(f"*{rel_path.suffix}")
+            )
+    except Exception:
+        existing_similar = False
+    if publishable:
+        blocking_reason = "publishable file is still outside the staged publish set"
+        recommended_action = "stage and include in publish"
+        commands = [f"git add -- {shlex.quote(path)}"]
+        if not tracked or untracked:
+            reason_suffix = "new publishable file under a repo path that is normally published"
+        else:
+            reason_suffix = "tracked publishable file changed after the last staging step"
+        return {
+            "path": path,
+            "file_type": file_type,
+            "classification_source": classification_source,
+            "publishable": publishable,
+            "tracked": tracked,
+            "staged": bool(item.get("staged")),
+            "unstaged": bool(item.get("unstaged")),
+            "untracked": untracked,
+            "confidence": confidence,
+            "blocking_reason": f"{blocking_reason}; {reason_suffix}",
+            "recommended_action": recommended_action,
+            "recommended_commands": commands,
+        }
+    if file_type == "state":
+        return {
+            "path": path,
+            "file_type": file_type,
+            "classification_source": classification_source,
+            "publishable": publishable,
+            "tracked": tracked,
+            "staged": bool(item.get("staged")),
+            "unstaged": bool(item.get("unstaged")),
+            "untracked": untracked,
+            "confidence": "high",
+            "blocking_reason": "internal state file should not drive publish decisions",
+            "recommended_action": "leave untracked / do not publish",
+            "recommended_commands": [f"git restore --staged -- {shlex.quote(path)}"] if tracked and item.get("staged") else [],
+        }
+    if file_type in {"artifact", "generated"}:
+        ignore_pattern = rel_path.name if rel_path.parent == Path(".") or str(rel_path.parent) == "." else f"{rel_path.parent.as_posix()}/{rel_path.name}"
+        commands = []
+        if tracked:
+            commands.append(f"git restore --staged -- {shlex.quote(path)}")
+        if untracked or not tracked:
+            commands.append(f"rm {shlex.quote(path)}")
+            if existing_similar or rel_path.suffix:
+                pattern = f"*{rel_path.suffix}" if rel_path.suffix else ignore_pattern
+                commands.append(f"echo {shlex.quote(pattern)} >> .gitignore")
+        return {
+            "path": path,
+            "file_type": file_type,
+            "classification_source": classification_source,
+            "publishable": publishable,
+            "tracked": tracked,
+            "staged": bool(item.get("staged")),
+            "unstaged": bool(item.get("unstaged")),
+            "untracked": untracked,
+            "confidence": "high" if file_type == "artifact" else confidence,
+            "blocking_reason": "file looks like generated output or a temporary artifact and does not match publishable patterns",
+            "recommended_action": "remove generated artifact" if untracked or not tracked else "inspect manually before staging",
+            "recommended_commands": commands,
+        }
+    return {
+        "path": path,
+        "file_type": file_type,
+        "classification_source": classification_source,
+        "publishable": publishable,
+        "tracked": tracked,
+        "staged": bool(item.get("staged")),
+        "unstaged": bool(item.get("unstaged")),
+        "untracked": untracked,
+        "confidence": confidence,
+        "blocking_reason": "file does not match a safe publishable pattern and needs operator review",
+        "recommended_action": "inspect manually before staging",
+        "recommended_commands": [f"git add -- {shlex.quote(path)}", f"git restore --staged -- {shlex.quote(path)}"] if path else [],
+    }
+
+
+def analyze_publish_blockers(repo: Path, entries: list[dict]) -> list[dict]:
+    analyses: list[dict] = []
+    for entry in entries:
+        analyses.append(recommend_publish_block_action(repo, entry))
+    return analyses
+
+
+def classify_publish_blocker_remediation(repo: Path, analysis: dict, policy: dict) -> dict:
+    path = str(analysis.get("path") or "")
+    file_type = str(analysis.get("file_type") or "unknown")
+    confidence = str(analysis.get("confidence") or "low")
+    recommended_action = str(analysis.get("recommended_action") or "")
+    tracked = bool(analysis.get("tracked", True))
+    untracked = bool(analysis.get("untracked"))
+    matched_ignore_pattern = publish_path_matches_any_glob(path, list(policy.get("safe_ignore_globs") or []))
+    matched_known_junk = publish_path_matches_any_glob(path, list(policy.get("known_junk_globs") or []))
+    matched_safe_remove = publish_path_matches_any_glob(path, list(policy.get("safe_remove_globs") or []))
+    if recommended_action == "leave untracked / do not publish":
+        return {
+            "path": path,
+            "remediation_class": "policy_resolvable",
+            "operation": "nonblocking",
+            "reason": "internal or ignored file does not need publish remediation",
+            "commands": [],
+            "ignore_pattern": "",
+        }
+    if (
+        policy.get("auto_remediate")
+        and policy.get("auto_remove_safe_artifacts")
+        and confidence == "high"
+        and file_type in {"artifact", "generated"}
+        and recommended_action == "remove generated artifact"
+        and (untracked or not tracked)
+        and is_high_confidence_safe_artifact_path(path, analysis, policy)
+    ):
+        ignore_pattern = matched_ignore_pattern if policy.get("auto_ignore_known_junk") else ""
+        if not ignore_pattern and policy.get("auto_ignore_known_junk") and matched_known_junk:
+            ignore_pattern = matched_known_junk
+        return {
+            "path": path,
+            "remediation_class": "auto_resolvable_safe",
+            "operation": "remove",
+            "reason": "high-confidence temporary artifact can be removed safely before publish",
+            "commands": [f"rm {shlex.quote(path)}"] + ([f"echo {shlex.quote(ignore_pattern)} >> .gitignore"] if ignore_pattern else []),
+            "ignore_pattern": ignore_pattern,
+            "matched_policy_pattern": matched_safe_remove or matched_known_junk or "",
+        }
+    if (
+        policy.get("auto_remediate")
+        and policy.get("auto_ignore_known_junk")
+        and confidence == "high"
+        and file_type in {"artifact", "generated"}
+        and recommended_action == "remove generated artifact"
+        and (untracked or not tracked)
+        and (matched_ignore_pattern or matched_known_junk)
+    ):
+        ignore_pattern = matched_ignore_pattern or matched_known_junk
+        return {
+            "path": path,
+            "remediation_class": "policy_resolvable",
+            "operation": "ignore",
+            "reason": "high-confidence junk output matches an explicit safe ignore policy",
+            "commands": [f"echo {shlex.quote(ignore_pattern)} >> .gitignore"],
+            "ignore_pattern": ignore_pattern,
+            "matched_policy_pattern": ignore_pattern,
+        }
+    return {
+        "path": path,
+        "remediation_class": "ambiguous_requires_manual_review",
+        "operation": "manual_review",
+        "reason": "blocker is not in an auto-remediable safe class",
+        "commands": list(analysis.get("recommended_commands") or []),
+        "ignore_pattern": "",
+    }
+
+
+def append_line_if_missing(path: Path, line: str) -> bool:
+    existing = ""
+    try:
+        if path.exists():
+            existing = path.read_text()
+    except OSError:
+        return False
+    normalized = line.strip()
+    lines = {item.strip() for item in existing.splitlines() if item.strip()}
+    if normalized in lines:
+        return True
+    new_text = existing
+    if new_text and not new_text.endswith("\n"):
+        new_text += "\n"
+    new_text += normalized + "\n"
+    try:
+        path.write_text(new_text)
+    except OSError:
+        return False
+    return True
+
+
+def remediate_publish_blockers(repo: Path, analyses: list[dict], policy: dict) -> dict:
+    result = {
+        "attempted": False,
+        "result": "not_needed",
+        "auto_removed_paths": [],
+        "auto_ignored_patterns": [],
+        "resolved_paths": [],
+        "remaining_paths": [],
+        "details": [],
+    }
+    if not analyses or not policy.get("auto_remediate"):
+        return result
+    gitignore_path = repo / ".gitignore"
+    partial = False
+    for item in analyses:
+        remediation = classify_publish_blocker_remediation(repo, item, policy)
+        detail = {
+            "path": str(item.get("path") or ""),
+            "remediation_class": remediation.get("remediation_class", "ambiguous_requires_manual_review"),
+            "operation": remediation.get("operation", "manual_review"),
+            "reason": remediation.get("reason", ""),
+            "applied": False,
+        }
+        if remediation.get("remediation_class") != "auto_resolvable_safe":
+            if remediation.get("remediation_class") == "policy_resolvable" and remediation.get("operation") == "ignore":
+                ignore_pattern = str(remediation.get("ignore_pattern") or "")
+                if ignore_pattern and append_line_if_missing(gitignore_path, ignore_pattern):
+                    result["attempted"] = True
+                    detail["applied"] = True
+                    result["resolved_paths"].append(detail["path"])
+                    if ignore_pattern not in result["auto_ignored_patterns"]:
+                        result["auto_ignored_patterns"].append(ignore_pattern)
+                    result["details"].append(detail)
+                    continue
+                partial = True
+            result["remaining_paths"].append(detail["path"])
+            result["details"].append(detail)
+            continue
+        target = repo / detail["path"]
+        if not target.exists():
+            detail["applied"] = True
+        else:
+            try:
+                if target.is_file() or target.is_symlink():
+                    target.unlink()
+                else:
+                    result["remaining_paths"].append(detail["path"])
+                    detail["reason"] = "refused to auto-remove a non-file blocker"
+                    result["details"].append(detail)
+                    partial = True
+                    continue
+                detail["applied"] = True
+            except OSError as exc:
+                result["remaining_paths"].append(detail["path"])
+                detail["reason"] = f"failed to remove blocker automatically: {exc}"
+                result["details"].append(detail)
+                partial = True
+                continue
+        result["attempted"] = True
+        result["auto_removed_paths"].append(detail["path"])
+        result["resolved_paths"].append(detail["path"])
+        ignore_pattern = str(remediation.get("ignore_pattern") or "")
+        if ignore_pattern:
+            if append_line_if_missing(gitignore_path, ignore_pattern):
+                if ignore_pattern not in result["auto_ignored_patterns"]:
+                    result["auto_ignored_patterns"].append(ignore_pattern)
+            else:
+                partial = True
+        result["details"].append(detail)
+    if result["attempted"] and not result["remaining_paths"] and not partial:
+        result["result"] = "success"
+    elif result["attempted"] and result["resolved_paths"]:
+        result["result"] = "partial" if result["remaining_paths"] or partial else "success"
+    elif result["remaining_paths"]:
+        result["result"] = "blocked"
+    return result
+
+
+def summarize_publish_block_categories(analyses: list[dict]) -> dict:
+    safe_stage = [item for item in analyses if item.get("recommended_action") == "stage and include in publish"]
+    ignored_nonblocking = [item for item in analyses if item.get("recommended_action") == "leave untracked / do not publish"]
+    true_blockers = [
+        item
+        for item in analyses
+        if item.get("recommended_action") not in {"stage and include in publish", "leave untracked / do not publish"}
+    ]
+    return {
+        "safe_stage_candidates": safe_stage,
+        "ignored_nonblocking": ignored_nonblocking,
+        "true_blockers": true_blockers,
+    }
+
+
+def summarize_publish_block_analysis(analyses: list[dict], rerun_command: str = "./scripts/fixpublish.sh") -> dict:
+    categories = summarize_publish_block_categories(analyses)
+    safe_stage = categories["safe_stage_candidates"]
+    ignored_nonblocking = categories["ignored_nonblocking"]
+    true_blockers = categories["true_blockers"]
+    if not analyses:
+        return {
+            "blocked_count": 0,
+            "blocker_count": 0,
+            "safe_stage_candidate_count": 0,
+            "ignored_nonblocking_count": 0,
+            "safe_staged_paths": [],
+            "ignored_nonblocking_paths": [],
+            "true_blockers": [],
+            "publishable_ready": True,
+            "primary_next_step": "",
+            "fallback_next_step": "",
+            "rerun_command": rerun_command,
+        }
+    artifact_like = [item for item in true_blockers if item.get("recommended_action") in {"remove generated artifact", "inspect manually before staging"}]
+    if safe_stage and not true_blockers:
+        primary = "stage the publishable file changes, then rerun publish"
+        fallback = "inspect the file manually if you did not intend to publish it"
+    elif artifact_like:
+        primary = "remove or ignore the artifact-style file, then rerun publish"
+        fallback = "inspect the file manually if you intended to keep it in the repo"
+    else:
+        primary = "inspect the blocking files manually before rerunning publish"
+        fallback = "stage only the files you intentionally want to publish"
+    return {
+        "blocked_count": len(analyses),
+        "blocker_count": len(true_blockers),
+        "safe_stage_candidate_count": len(safe_stage),
+        "ignored_nonblocking_count": len(ignored_nonblocking),
+        "safe_staged_paths": [str(item.get("path") or "") for item in safe_stage if item.get("path")],
+        "ignored_nonblocking_paths": [str(item.get("path") or "") for item in ignored_nonblocking if item.get("path")],
+        "true_blockers": [
+            {
+                "path": str(item.get("path") or ""),
+                "file_type": str(item.get("file_type") or "unknown"),
+                "recommended_action": str(item.get("recommended_action") or ""),
+            }
+            for item in true_blockers
+        ],
+        "publishable_ready": not bool(true_blockers) and not bool(safe_stage),
+        "primary_next_step": primary,
+        "fallback_next_step": fallback,
+        "rerun_command": rerun_command,
+    }
+
+
+def print_publish_block_analysis(analyses: list[dict], summary: dict) -> None:
+    if not analyses:
+        return
+    categories = summarize_publish_block_categories(analyses)
+    safe_stage = categories["safe_stage_candidates"]
+    ignored_nonblocking = categories["ignored_nonblocking"]
+    true_blockers = categories["true_blockers"]
+    print("=== STAGING BLOCK ANALYSIS ===")
+    blocker_count = int(summary.get("blocker_count") or len(true_blockers))
+    if blocker_count:
+        label = "true blocker" if blocker_count == 1 else "true blockers"
+        print(f"Publish blocked by {blocker_count} {label}:")
+    elif safe_stage:
+        label = "safe publishable file" if len(safe_stage) == 1 else "safe publishable files"
+        print(f"Publish paused because {len(safe_stage)} {label} still need staging:")
+    else:
+        print(f"Publish blocked by {int(summary.get('blocked_count') or len(analyses))} unresolved file(s):")
+    if summary.get("safe_staged_paths"):
+        print(f"safe_staged_paths: {summary.get('safe_staged_paths')}")
+    if summary.get("ignored_nonblocking_paths"):
+        print(f"ignored_nonblocking_paths: {summary.get('ignored_nonblocking_paths')}")
+    if summary.get("true_blockers"):
+        print(f"true_blockers: {summary.get('true_blockers')}")
+    for item in analyses:
+        print(f"- {item.get('path')}")
+        print(f"  type: {item.get('file_type')}")
+        print(f"  classification_source: {item.get('classification_source')}")
+        print(f"  publishable: {format_bool(item.get('publishable'))}")
+        print(f"  confidence: {item.get('confidence')}")
+        print(f"  reason: {item.get('blocking_reason')}")
+        if item.get("remediation_class"):
+            print(f"  remediation_class: {item.get('remediation_class')}")
+        print(f"  recommended_action: {item.get('recommended_action')}")
+        commands = list(item.get("recommended_commands") or [])
+        if commands:
+            print("  commands:")
+            for command in commands:
+                print(f"    {command}")
+    if summary.get("primary_next_step"):
+        print(f"next_step_primary: {summary.get('primary_next_step')}")
+    if summary.get("fallback_next_step"):
+        print(f"next_step_fallback: {summary.get('fallback_next_step')}")
+    if summary.get("rerun_command"):
+        print(f"rerun: {summary.get('rerun_command')}")
+
+
+def normalize_publish_working_tree_audit(
+    repo: Path,
+    working_tree: dict,
+    expected_paths: list[str] | None = None,
+    *,
+    publish_current_mode: bool = False,
+) -> dict:
+    expected = set(expected_paths or [])
+    fallback_paths = publish_meaningful_changed_paths(repo) if publish_current_mode else meaningful_changed_paths(repo)
+    staged_paths = list(working_tree.get("staged_paths") or [])
+    if not staged_paths and working_tree.get("has_staged"):
+        staged_paths = list(fallback_paths)
+    remaining_paths = sorted(set(working_tree.get("unstaged_paths") or []) | set(working_tree.get("untracked_paths") or []))
+    if not remaining_paths and (working_tree.get("has_unstaged") or working_tree.get("has_untracked")):
+        remaining_paths = list(fallback_paths)
+    if expected:
+        staged_paths = [path for path in staged_paths if path in expected]
+    entry_status_output = ""
+    try:
+        entry_status_output = raw_git_status_output(repo)
+    except Exception:
+        entry_status_output = str(working_tree.get("status_output") or "")
+    return {
+        "staged_paths": staged_paths,
+        "remaining_paths": remaining_paths,
+        "entries": collect_publish_working_tree_entries(repo, status_output=entry_status_output),
+    }
+
+
+def is_safe_publish_auto_stage_path(path: str) -> bool:
+    return classify_publish_path(path).get("file_type") in {"code", "config", "docs", "script", "test"}
+
+
+def split_publish_auto_stage_paths(paths: list[str]) -> tuple[list[str], list[str]]:
+    safe_paths: list[str] = []
+    blocked_paths: list[str] = []
+    for path in paths:
+        if is_publish_ignored_change_path(path):
+            continue
+        if is_safe_publish_auto_stage_path(path):
+            if path not in safe_paths:
+                safe_paths.append(path)
+            continue
+        if path not in blocked_paths:
+            blocked_paths.append(path)
+    return safe_paths, blocked_paths
+
+
+def format_manual_staging_commands(paths: list[str], restore_paths: list[str] | None = None) -> list[str]:
+    commands: list[str] = []
+    for path in paths:
+        commands.append(f"git add -- {shlex.quote(path)}")
+    restore_candidates = [path for path in (restore_paths or []) if path]
+    if restore_candidates:
+        commands.append("git restore --staged -- " + " ".join(shlex.quote(path) for path in restore_candidates))
+    return commands
+
+
+def format_manual_staging_handoff(reason: str, paths: list[str], restore_paths: list[str] | None = None) -> str:
+    commands = format_manual_staging_commands(paths, restore_paths=restore_paths)
+    lines = [reason.strip() or "Manual staging is required."]
+    if commands:
+        lines.append("Run:")
+        lines.extend(commands)
+    return "\n".join(lines)
 
 
 def compute_meaningful_content_fingerprint(repo: Path, publish_changes: dict) -> str:
@@ -1399,6 +2284,9 @@ def maybe_handle_merge_conflicts(
     target: str,
     dry_run_mode: bool,
     force_publish: bool,
+    auto_stage_safe_paths: bool = True,
+    auto_remediate_blockers: bool = True,
+    explain_staging: bool = False,
     no_auto_merge_conflicts: bool = False,
 ) -> dict | None:
     merge_result = resolve_merge_conflicts(repo, validation_command=validation_command, no_auto_merge_conflicts=no_auto_merge_conflicts)
@@ -1448,6 +2336,9 @@ def maybe_handle_merge_conflicts(
             True,
             True,
             force_publish,
+            auto_stage_safe_paths,
+            auto_remediate_blockers,
+            explain_staging,
         )
         print(format_final_operator_summary(publish_summary))
     else:
@@ -2169,6 +3060,39 @@ def run_prepublish_docs_stage(repo: Path, test_cmd: str, changed_paths: list[str
             + (str(revalidation.get("output") or "").strip() or "(no output)")
         )
     return result
+
+
+def summarize_docs_publish_reporting(
+    docs_check_performed: bool,
+    docs_required: bool,
+    docs_updated: bool,
+    blocked: bool = False,
+    reason: str = "",
+) -> dict:
+    normalized_reason = str(reason or "").strip()
+    if not docs_check_performed:
+        return {
+            "docs_check_performed": False,
+            "docs_status": "up_to_date",
+            "docs_reason": "documentation check not performed",
+        }
+    if blocked:
+        return {
+            "docs_check_performed": True,
+            "docs_status": "required_but_blocked",
+            "docs_reason": normalized_reason or "docs changes required but validation/publish blocked",
+        }
+    if docs_updated:
+        return {
+            "docs_check_performed": True,
+            "docs_status": "updated",
+            "docs_reason": "documentation updated due to code changes",
+        }
+    return {
+        "docs_check_performed": True,
+        "docs_status": "up_to_date",
+        "docs_reason": "no documentation changes detected",
+    }
 
 
 def repo_files(repo: Path) -> list[str]:
@@ -3005,12 +3929,15 @@ def build_effective_pattern_memory(pattern_repo: Path) -> dict:
             candidate_rel = str(source.get("candidate_path") or source.get("repo_rel_path") or "").strip()
         else:
             candidate_rel = str(source.get("repo_rel_path") or "").strip()
-        if not candidate_rel:
-            continue
-        candidate_path = repo_root / candidate_rel
-        if not candidate_path.exists() or not candidate_path.is_file():
-            continue
-        extracted = extract_script_patterns_with_metadata(repo_root, candidate_path, source)
+        if str(source.get("source_kind") or "") == "collection":
+            extracted = extract_collection_patterns_from_record(source)
+        else:
+            if not candidate_rel:
+                continue
+            candidate_path = repo_root / candidate_rel
+            if not candidate_path.exists() or not candidate_path.is_file():
+                continue
+            extracted = extract_script_patterns_with_metadata(repo_root, candidate_path, source)
         for pattern in extracted:
             override = resolve_pattern_override(controls, pattern)
             if isinstance(override, dict) and override.get("action") == "forget":
@@ -3874,6 +4801,9 @@ def extract_script_features(script_path: Path) -> dict:
             "entrypoints": [],
             "top_level_calls": False,
             "functions": [],
+            "url_literals": [],
+            "mentions_m3u8": False,
+            "uses_network_client": False,
         }
     try:
         tree = ast.parse(text)
@@ -3888,6 +4818,9 @@ def extract_script_features(script_path: Path) -> dict:
             "entrypoints": [],
             "top_level_calls": False,
             "functions": [],
+            "url_literals": re.findall(r"https?://[^\s\"'<>]+", text)[:6],
+            "mentions_m3u8": ".m3u8" in text.lower() or "#extm3u" in text.lower(),
+            "uses_network_client": any(token in text.lower() for token in ["requests.", "httpx.", "urllib.request", "aiohttp", "urlopen("]),
         }
 
     imported_names = set()
@@ -3910,6 +4843,10 @@ def extract_script_features(script_path: Path) -> dict:
             top_level_calls = True
 
     lowered = text.lower()
+    url_literals = re.findall(r"https?://[^\s\"'<>]+", text)[:6]
+    uses_network_client = any(name in imported_names for name in {"requests", "httpx", "urllib", "aiohttp"}) or any(
+        token in lowered for token in ["requests.", "httpx.", "urllib.request", "urlopen(", "build_opener("]
+    )
     return {
         "text": text,
         "tree": tree,
@@ -3920,6 +4857,9 @@ def extract_script_features(script_path: Path) -> dict:
         "entrypoints": sorted(set(entrypoints)),
         "top_level_calls": top_level_calls,
         "functions": functions,
+        "url_literals": url_literals,
+        "mentions_m3u8": ".m3u8" in lowered or "#extm3u" in lowered,
+        "uses_network_client": uses_network_client,
     }
 
 
@@ -3950,6 +4890,172 @@ def find_nearby_pytest_targets(repo: Path, script_path: Path) -> list[dict]:
             }
         )
     return candidates
+
+
+def recommend_script_probe_targets(features: dict) -> list[dict]:
+    urls = [str(item).strip() for item in (features.get("url_literals") or []) if str(item).strip()]
+    recommendations: list[dict] = []
+    seen: set[str] = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        probe_type = "m3u8_summary" if url.lower().endswith(".m3u8") or features.get("mentions_m3u8") else "json_summary"
+        reason = (
+            "script references an HLS playlist and live playlist structure may affect parsing or validation"
+            if probe_type == "m3u8_summary"
+            else "script references a live HTTP endpoint and response shape may affect parsing or auth handling"
+        )
+        recommendations.append(
+            {
+                "endpoint": redact_probe_url(url)[0],
+                "probe_type": probe_type,
+                "reason": reason,
+            }
+        )
+    if not recommendations and features.get("uses_network_client"):
+        recommendations.append(
+            {
+                "endpoint": "",
+                "probe_type": "headers_summary",
+                "reason": "script appears network-dependent; probe the live endpoint before changing parsing, auth, or proxy logic",
+            }
+        )
+    return recommendations[:3]
+
+
+def extract_probe_header_candidates(text: str) -> dict[str, str]:
+    header_candidates: dict[str, str] = {}
+    patterns = [
+        "Accept",
+        "Authorization",
+        "Cookie",
+        "Origin",
+        "Referer",
+        "User-Agent",
+        "X-API-Key",
+        "X-Api-Key",
+    ]
+    for header in patterns:
+        match = re.search(rf'["\']{re.escape(header)}["\']\s*:\s*["\']([^"\n]{{1,200}})["\']', str(text or ""))
+        if match:
+            header_candidates[header] = match.group(1)
+    return header_candidates
+
+
+def classify_network_dependency(features: dict) -> dict:
+    url_literals = [str(item).strip() for item in (features.get("url_literals") or []) if str(item).strip()]
+    mentions_m3u8 = bool(features.get("mentions_m3u8"))
+    uses_network_client = bool(features.get("uses_network_client"))
+    if mentions_m3u8 and url_literals:
+        return {"detected": True, "confidence": "high", "reason": "script references a concrete HLS playlist URL"}
+    if uses_network_client and url_literals:
+        return {"detected": True, "confidence": "high", "reason": "script uses an HTTP client and embeds a concrete live endpoint"}
+    if mentions_m3u8 or uses_network_client:
+        return {"detected": True, "confidence": "medium", "reason": "script appears network-dependent but does not expose one clear endpoint"}
+    return {"detected": False, "confidence": "low", "reason": ""}
+
+
+def prefer_safer_validation_step(plan: dict) -> dict | None:
+    current_primary = str(plan.get("primary_command") or "")
+    fallback_order = ["import", "cli_help", "module_help"]
+    ranked = [item for item in plan.get("candidates", []) if isinstance(item, dict)]
+    for kind in fallback_order:
+        for candidate in ranked:
+            if candidate.get("kind") != kind:
+                continue
+            if candidate.get("command") == current_primary and kind != "import":
+                continue
+            return candidate
+    return None
+
+
+def apply_probe_findings_to_validation_plan(plan: dict, probe_findings: list[dict]) -> dict:
+    enriched = dict(plan)
+    findings = [dict(item) for item in probe_findings if isinstance(item, dict)]
+    enriched["probe_findings"] = findings
+    enriched["auto_probe_used"] = bool(findings)
+    enriched["probe_reasoning"] = ""
+    if not findings:
+        return enriched
+    primary_finding = findings[0]
+    endpoint = str(primary_finding.get("endpoint") or "(unknown endpoint)")
+    summary = str(primary_finding.get("summary") or primary_finding.get("error") or "")
+    if not primary_finding.get("ok") or primary_finding.get("status_code") in {401, 403, 407}:
+        safer = prefer_safer_validation_step(enriched)
+        if safer:
+            enriched["chosen_stack"] = [enriched.get("chosen_stack", [])[0], safer] if enriched.get("chosen_stack") else [safer]
+            enriched["primary_command"] = safer.get("command", enriched.get("primary_command", ""))
+            enriched["limited_validation"] = True
+            enriched["only_syntax_import_validation"] = all(
+                step.get("kind") in {"syntax", "import", "cli_help", "module_help"}
+                for step in enriched.get("chosen_stack", [])
+            )
+            enriched["confidence_level"] = "low"
+            enriched["limited_reason"] = (
+                "Live probe indicates the endpoint is auth/proxy constrained or unreachable; "
+                "runtime validation was downgraded to a safer non-network path."
+            )
+            enriched["probe_reasoning"] = f"Used live probe evidence from {endpoint} to choose a safer validation path: {summary}"
+            return enriched
+    if primary_finding.get("ok"):
+        enriched["probe_reasoning"] = f"Used live probe evidence from {endpoint} to confirm endpoint behavior before repair: {summary}"
+    else:
+        enriched["probe_reasoning"] = f"Attempted live probe for {endpoint} but it remained inconclusive: {summary}"
+    return enriched
+
+
+def maybe_enrich_validation_plan_with_probes(plan: dict) -> dict:
+    if not isinstance(plan, dict) or not plan.get("active"):
+        return plan
+    if plan.get("auto_probe_evaluated"):
+        return plan
+    enriched = dict(plan)
+    enriched["auto_probe_evaluated"] = True
+    dependency = enriched.get("network_dependency") or {}
+    recommendations = [item for item in enriched.get("probe_recommendations", []) if isinstance(item, dict)]
+    if not dependency.get("detected") or dependency.get("confidence") != "high" or not recommendations:
+        enriched.setdefault("auto_probe_used", False)
+        enriched.setdefault("probe_findings", [])
+        enriched.setdefault("probe_reasoning", "")
+        return enriched
+    endpoint = str(recommendations[0].get("endpoint") or "").strip()
+    if not endpoint:
+        enriched.setdefault("auto_probe_used", False)
+        enriched.setdefault("probe_findings", [])
+        enriched.setdefault("probe_reasoning", "")
+        return enriched
+    probe_kwargs = {
+        "probe_type": str(recommendations[0].get("probe_type") or "auto"),
+        "custom_headers": {},
+        "http_proxy": "",
+        "https_proxy": "",
+    }
+    if sys.stdin.isatty():
+        if not prompt_yes_no("Probe endpoint now to validate live API/M3U8 behavior?", default=True):
+            enriched.setdefault("auto_probe_used", False)
+            enriched.setdefault("probe_findings", [])
+            enriched["probe_reasoning"] = "Interactive operator declined the suggested live probe."
+            return enriched
+        default_probe_type = "m3u8" if "m3u8" in probe_kwargs["probe_type"] else "api"
+        endpoint_choice = input(f"Endpoint type [api/m3u8] ({default_probe_type}): ").strip().lower() or default_probe_type
+        if endpoint_choice == "m3u8":
+            probe_kwargs["probe_type"] = "m3u8_summary"
+        elif endpoint_choice == "api":
+            probe_kwargs["probe_type"] = "json_summary"
+        if not prompt_yes_no(
+            f"Use proxy settings for the probe? [{'yes' if API_SAFETY_STATE.get('proxy_enabled') else 'no'}]",
+            default=bool(API_SAFETY_STATE.get("proxy_enabled")),
+        ):
+            probe_kwargs["http_proxy"] = ""
+            probe_kwargs["https_proxy"] = ""
+        else:
+            probe_kwargs["http_proxy"] = API_SAFETY_STATE.get("http_proxy", "")
+            probe_kwargs["https_proxy"] = API_SAFETY_STATE.get("https_proxy", "")
+        if prompt_yes_no("Include headers detected from the script in the probe request?", default=False):
+            probe_kwargs["custom_headers"] = enriched.get("suggested_probe_headers") or {}
+    probe = probe_endpoint(endpoint, **probe_kwargs)
+    return apply_probe_findings_to_validation_plan(enriched, [probe])
 
 
 def discover_context_candidates(repo: Path, script_rel: str, module_name: str, script_stem: str) -> list[dict]:
@@ -4277,6 +5383,9 @@ def build_script_validation_plan(repo: Path, script_path: Path) -> dict:
     confidence_value = chosen_extra.get("confidence", 0.5) if chosen_extra else 0.5
     confidence_level = "high" if confidence_value >= 0.85 else ("medium" if confidence_value >= 0.6 else "low")
     only_syntax_import = all(step.get("kind") in {"syntax", "import"} for step in chosen_stack)
+    probe_recommendations = recommend_script_probe_targets(features)
+    network_dependency = classify_network_dependency(features)
+    suggested_probe_headers = extract_probe_header_candidates(features.get("text") or "")
     return {
         "active": True,
         "mode": "script",
@@ -4289,6 +5398,13 @@ def build_script_validation_plan(repo: Path, script_path: Path) -> dict:
         "primary_command": primary_command,
         "confidence_level": confidence_level,
         "function_validation": function_validation,
+        "network_dependency": network_dependency,
+        "probe_recommendations": probe_recommendations,
+        "suggested_probe_headers": suggested_probe_headers,
+        "auto_probe_evaluated": False,
+        "auto_probe_used": False,
+        "probe_findings": [],
+        "probe_reasoning": "",
         "limited_validation": limited_validation,
         "only_syntax_import_validation": only_syntax_import,
         "limited_reason": (
@@ -4396,7 +5512,42 @@ def format_validation_plan_summary(plan: dict) -> str:
         lines.append("Validation coverage: limited to syntax/import checks.")
     if plan.get("limited_reason"):
         lines.append(plan["limited_reason"])
+    dependency = plan.get("network_dependency") or {}
+    if dependency.get("detected"):
+        lines.append(
+            "Network dependency: "
+            f"{dependency.get('confidence', 'low')} "
+            f"({dependency.get('reason') or 'network-like behavior detected'})"
+        )
+    if plan.get("probe_recommendations"):
+        lines.append("Suggested live probes:")
+        for item in plan.get("probe_recommendations", [])[:3]:
+            endpoint = item.get("endpoint") or "<endpoint required>"
+            lines.append(f"- [{item.get('probe_type')}] {endpoint} ({item.get('reason') or 'live endpoint evidence may help'})")
+    if plan.get("auto_probe_used"):
+        lines.append("Automatic probe findings:")
+        for item in plan.get("probe_findings", [])[:2]:
+            lines.append(
+                f"- [{item.get('probe_type')}] {item.get('endpoint') or '(none)'} "
+                f"status={item.get('status_code') or 0} summary={item.get('summary') or item.get('error') or '(none)'}"
+            )
+    if plan.get("probe_reasoning"):
+        lines.append(f"Probe reasoning: {plan.get('probe_reasoning')}")
     return "\n".join(lines)
+
+
+def print_script_validation_only_result(script_path: Path, plan: dict, validation_run: dict, probe_planned: bool = False) -> None:
+    print("\n=== SCRIPT VALIDATION RESULT ===")
+    print(f"script_path: {script_path}")
+    print(f"validation_command: {plan.get('primary_command') or '(auto-detect)'}")
+    print(f"validation_result: {'success' if validation_run.get('ok') else 'blocked'}")
+    if validation_run.get("failed_step"):
+        print(f"failed_step: {(validation_run.get('failed_step') or {}).get('command') or '(none)'}")
+    if plan.get("probe_reasoning"):
+        print(f"probe_reasoning: {plan.get('probe_reasoning')}")
+    print(f"probing_used: {format_bool(probe_planned or plan.get('auto_probe_used'))}")
+    if not validation_run.get("ok"):
+        print(f"blocked_reason: {validation_run.get('output') or 'validation failed'}")
 
 
 def pattern_keywords_from_text(text: str) -> list[str]:
@@ -4467,6 +5618,8 @@ def make_script_pattern_entry(
         "source_files": [source_rel],
         "source_repo_path": str((source_record or {}).get("repo_rel_path") or source_rel),
         "source_origin": str((source_record or {}).get("origin_path") or ""),
+        "source_subpath": str((source_record or {}).get("source_subpath") or ""),
+        "import_scope": str((source_record or {}).get("import_scope") or "file"),
         "trust_level": str((source_record or {}).get("trust_level") or "trusted"),
         "tags": list((source_record or {}).get("tags") or []),
         "pattern_type": pattern_type,
@@ -4882,6 +6035,140 @@ def infer_curated_pattern_destination(pattern_repo: Path, source_path: Path | st
     return ensure_pattern_repo(pattern_repo) / "curated" / trust_level / f"{slug}-{digest}{suffix}"
 
 
+def pattern_collection_storage_name(source_root: Path | str) -> str:
+    source_name = str(source_root)
+    slug = slugify_pattern_import_name(Path(source_name).name or source_name)
+    digest = hashlib.sha256(source_name.encode("utf-8")).hexdigest()[:8]
+    return f"{slug}-{digest}"
+
+
+def infer_pattern_collection_candidate_destination(pattern_repo: Path, collection_name: str, source_subpath: str) -> Path:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    rel = PurePosixPath(str(source_subpath or "").strip("/"))
+    return repo_root / "imports" / "candidates" / collection_name / rel
+
+
+def infer_pattern_collection_curated_destination(pattern_repo: Path, collection_name: str, source_subpath: str, trust_level: str) -> Path:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    rel = PurePosixPath(str(source_subpath or "").strip("/"))
+    return repo_root / "imports" / trust_level / collection_name / rel
+
+
+def normalize_collection_globs(values: Sequence[str] | None, default: Sequence[str]) -> list[str]:
+    normalized: list[str] = []
+    for item in values or []:
+        candidate = str(item or "").strip()
+        if candidate and candidate not in normalized:
+            normalized.append(candidate)
+    return normalized or list(default)
+
+
+def classify_pattern_import_scope(source_root: Path) -> str:
+    root = source_root.resolve()
+    return "repo" if (root / ".git").exists() else "folder"
+
+
+def summarize_path_suffix(path: Path) -> str:
+    suffix = path.suffix.lower()
+    return suffix or "<no_ext>"
+
+
+def classify_validation_command_kind(command: str) -> str:
+    lowered = str(command or "").lower()
+    if not lowered:
+        return ""
+    if "pytest" in lowered:
+        return "pytest"
+    if "py_compile" in lowered:
+        return "syntax"
+    if "--help" in lowered:
+        return "cli_help"
+    if "python -c" in lowered or "python3 -c" in lowered:
+        return "function"
+    return "custom"
+
+
+def naming_style_for_path(path: Path) -> str:
+    stem = path.stem
+    if re.fullmatch(r"[a-z0-9_]+", stem):
+        return "snake_case"
+    if re.fullmatch(r"[a-z0-9-]+", stem):
+        return "kebab_case"
+    return "mixed"
+
+
+def scan_pattern_source_collection(
+    source_root: Path,
+    *,
+    include_globs: Sequence[str] | None = None,
+    exclude_globs: Sequence[str] | None = None,
+    max_files: int = DEFAULT_PATTERN_REPO_MAX_FILES,
+    max_depth: int = 0,
+) -> dict:
+    root = source_root.expanduser().resolve()
+    include_patterns = normalize_collection_globs(include_globs, DEFAULT_PATTERN_REPO_INCLUDE_GLOBS)
+    exclude_patterns = normalize_collection_globs(exclude_globs, [])
+    if not root.exists() or not root.is_dir():
+        return {
+            "ok": False,
+            "source_root": str(root),
+            "import_scope": "folder",
+            "candidate_paths": [],
+            "ignored_paths": [],
+            "ignored_count": 0,
+            "file_type_counts": {},
+            "blocked_reason": f"source collection not found: {root}",
+            "include_globs": include_patterns,
+            "exclude_globs": exclude_patterns,
+        }
+    candidates: list[Path] = []
+    ignored_paths: list[str] = []
+    file_type_counts: dict[str, int] = {}
+    for current_root, dirnames, filenames in os.walk(root):
+        current_path = Path(current_root)
+        rel_dir = current_path.relative_to(root)
+        dirnames[:] = [name for name in dirnames if name not in IGNORE_DIRS and not name.startswith(".")]
+        if max_depth and rel_dir != Path(".") and len(rel_dir.parts) >= max_depth:
+            dirnames[:] = []
+        for filename in sorted(filenames):
+            if filename.startswith("."):
+                ignored_paths.append(str((rel_dir / filename).as_posix()))
+                continue
+            rel_path = (rel_dir / filename) if rel_dir != Path(".") else Path(filename)
+            rel_text = rel_path.as_posix()
+            file_type_counts[summarize_path_suffix(rel_path)] = file_type_counts.get(summarize_path_suffix(rel_path), 0) + 1
+            if max_depth and len(rel_path.parts) - 1 > max_depth:
+                ignored_paths.append(rel_text)
+                continue
+            pure_rel = PurePosixPath(rel_text)
+            if exclude_patterns and any(pure_rel.match(pattern) for pattern in exclude_patterns):
+                ignored_paths.append(rel_text)
+                continue
+            if include_patterns and not any(pure_rel.match(pattern) for pattern in include_patterns):
+                ignored_paths.append(rel_text)
+                continue
+            candidates.append(root / rel_path)
+            if max_files and len(candidates) >= max_files:
+                break
+        if max_files and len(candidates) >= max_files:
+            break
+    return {
+        "ok": True,
+        "source_root": str(root),
+        "import_scope": classify_pattern_import_scope(root),
+        "candidate_paths": [str(path) for path in candidates],
+        "candidate_rel_paths": [str(path.relative_to(root).as_posix()) for path in candidates],
+        "candidate_count": len(candidates),
+        "ignored_paths": ignored_paths[:20],
+        "ignored_count": len(ignored_paths),
+        "file_type_counts": dict(sorted(file_type_counts.items())),
+        "include_globs": include_patterns,
+        "exclude_globs": exclude_patterns,
+        "collection_name": pattern_collection_storage_name(root),
+        "blocked_reason": "",
+    }
+
+
 def sanitize_pattern_script_content(content: str) -> tuple[str, bool]:
     sanitized = content
     replacements = [
@@ -4921,6 +6208,904 @@ def sanitize_pattern_script_content(content: str) -> tuple[str, bool]:
     for pattern, replacement in replacements:
         sanitized = pattern.sub(replacement, sanitized)
     return sanitized, sanitized != content
+
+
+def import_pattern_source_record(
+    pattern_repo: Path,
+    source_value: str,
+    *,
+    trust_level: str,
+    tags: list[str] | None = None,
+    note: str = "",
+    candidate_path: Path | None = None,
+    curated_path: Path | None = None,
+    source_metadata: dict | None = None,
+) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    trust = trust_level if trust_level in PATTERN_TRUST_LEVELS else "trusted"
+    metadata = dict(source_metadata or {})
+    fetched = fetch_pattern_source(source_value, repo_root)
+    source_origin = str(fetched.get("source_origin") or source_value)
+    candidate_destination = candidate_path or infer_pattern_import_destination(repo_root, source_origin, trust)
+    candidate_destination.parent.mkdir(parents=True, exist_ok=True)
+    source_id = str(metadata.get("id") or pattern_repo_source_id(candidate_destination.relative_to(repo_root), trust))
+    base_record = {
+        "id": source_id,
+        "repo_rel_path": "",
+        "candidate_path": "",
+        "origin_path": source_origin,
+        "source_type": fetched.get("source_type", "local"),
+        "source_origin": source_origin,
+        "acquisition_method": fetched.get("acquisition_method", "direct"),
+        "proxy_used": bool(fetched.get("proxy_used")),
+        "sanitized_path": "",
+        "trust_level": trust,
+        "tags": list(tags or []),
+        "note": note,
+        "imported_at": int(time.time()),
+        "sanitized_changed": False,
+        "sanitization_applied": False,
+        "validation_status": "blocked",
+        "validation_passed": False,
+        "validation_command": "",
+        "repair_needed": False,
+        "repair_output": "",
+        "promotion_state": "candidate",
+        "promotion_state_detail": "candidate",
+        "promoted": False,
+        "candidate_imported": False,
+        "limited_validation": False,
+        "blocked_reason": "",
+        "final_destination": "",
+        "import_scope": str(metadata.get("import_scope") or "file"),
+        "source_repo_path": str(metadata.get("source_repo_path") or ""),
+        "source_subpath": str(metadata.get("source_subpath") or Path(source_origin).name),
+        "source_kind": str(metadata.get("source_kind") or "file"),
+        "collection_name": str(metadata.get("collection_name") or ""),
+        "detected_pattern_families": [],
+    }
+    if not fetched.get("ok"):
+        base_record["blocked_reason"] = str(fetched.get("blocked_reason") or "source acquisition failed")
+        return base_record
+    raw_content = str(fetched.get("content") or "")
+    sanitized_content, changed = sanitize_pattern_script_content(raw_content)
+    candidate_destination.write_text(sanitized_content)
+    validation = run_candidate_validation(repo_root, candidate_destination)
+    repaired = False
+    repair_result = {"ok": False, "output": "", "command": []}
+    if not validation.get("passed"):
+        repair_result = repair_training_candidate(repo_root, candidate_destination)
+        if repair_result.get("ok"):
+            repaired = True
+            validation = run_candidate_validation(repo_root, candidate_destination)
+    blocked = not validation.get("passed")
+    promote = bool(validation.get("passed")) and not blocked and not validation.get("limited_validation")
+    final_destination = curated_path or infer_curated_pattern_destination(repo_root, source_origin, trust)
+    repo_rel_path = str(candidate_destination.relative_to(repo_root))
+    curated_rel = ""
+    if promote:
+        final_destination.parent.mkdir(parents=True, exist_ok=True)
+        final_destination.write_text(candidate_destination.read_text())
+        curated_rel = str(final_destination.relative_to(repo_root))
+        repo_rel_path = curated_rel
+    record = {
+        **base_record,
+        "repo_rel_path": repo_rel_path,
+        "candidate_path": str(candidate_destination.relative_to(repo_root)),
+        "sanitized_path": str(candidate_destination),
+        "sanitized_changed": changed,
+        "sanitization_applied": True,
+        "validation_status": "passed" if validation.get("passed") else ("blocked" if blocked else "failed"),
+        "validation_passed": bool(validation.get("passed")),
+        "validation_command": validation.get("validation_command", ""),
+        "repair_needed": repaired,
+        "repair_output": repair_result.get("output", ""),
+        "promotion_state": "curated" if promote else "candidate",
+        "promotion_state_detail": (f"curated_{trust}" if promote else "candidate"),
+        "promoted": promote,
+        "candidate_imported": True,
+        "limited_validation": bool(validation.get("limited_validation")),
+        "blocked_reason": "" if validation.get("passed") else (repair_result.get("output", "") or "validation blocked"),
+        "final_destination": curated_rel,
+    }
+    analysis_path = repo_root / repo_rel_path
+    if analysis_path.exists() and analysis_path.is_file():
+        extracted = extract_script_patterns_with_metadata(repo_root, analysis_path, record)
+        record["detected_pattern_families"] = sorted(
+            {
+                str(item.get("family") or item.get("pattern_type") or "").strip()
+                for item in extracted
+                if str(item.get("family") or item.get("pattern_type") or "").strip()
+            }
+        )
+    return record
+
+
+def build_pattern_collection_summary(
+    pattern_repo: Path,
+    source_root: Path,
+    scan_summary: dict,
+    imported_sources: list[dict],
+    *,
+    trust_level: str,
+    tags: list[str] | None = None,
+) -> dict:
+    repo_root = ensure_pattern_repo(pattern_repo)
+    promoted_sources = [item for item in imported_sources if item.get("promoted")]
+    family_counts: dict[str, int] = {}
+    helper_counts: dict[str, int] = {}
+    top_directories: dict[str, int] = {}
+    validation_kinds: dict[str, int] = {}
+    naming_counts: dict[str, int] = {}
+    for source in promoted_sources:
+        for family in source.get("detected_pattern_families") or []:
+            family_counts[str(family)] = family_counts.get(str(family), 0) + 1
+        subpath = Path(str(source.get("source_subpath") or ""))
+        if subpath.parts:
+            top_directories[subpath.parts[0]] = top_directories.get(subpath.parts[0], 0) + 1
+        naming = naming_style_for_path(subpath if subpath.name else Path(str(source.get("origin_path") or "script.py")))
+        naming_counts[naming] = naming_counts.get(naming, 0) + 1
+        validation_kind = classify_validation_command_kind(str(source.get("validation_command") or ""))
+        if validation_kind:
+            validation_kinds[validation_kind] = validation_kinds.get(validation_kind, 0) + 1
+        stored_rel = str(source.get("repo_rel_path") or source.get("candidate_path") or "")
+        stored_path = repo_root / stored_rel if stored_rel else None
+        if stored_path and stored_path.exists() and stored_path.is_file():
+            features = extract_script_features(stored_path)
+            for func in features.get("functions", []):
+                if func.name not in {"main", "run", "cli"} and not func.name.startswith("__"):
+                    helper_counts[func.name] = helper_counts.get(func.name, 0) + 1
+    common_helpers = sorted([name for name, count in helper_counts.items() if count >= 2])[:5]
+    dominant_validation = max(validation_kinds.items(), key=lambda item: item[1])[0] if validation_kinds else ""
+    dominant_naming = max(naming_counts.items(), key=lambda item: item[1])[0] if naming_counts else ""
+    return {
+        "source_root": str(source_root.resolve()),
+        "import_scope": scan_summary.get("import_scope") or classify_pattern_import_scope(source_root),
+        "collection_name": scan_summary.get("collection_name") or pattern_collection_storage_name(source_root),
+        "candidate_count": len(imported_sources),
+        "promoted_total": len(promoted_sources),
+        "promoted_trusted_count": sum(1 for item in imported_sources if item.get("promoted") and item.get("trust_level") == "trusted"),
+        "promoted_experimental_count": sum(1 for item in imported_sources if item.get("promoted") and item.get("trust_level") == "experimental"),
+        "blocked_count": sum(1 for item in imported_sources if not item.get("promoted")),
+        "file_type_counts": dict(scan_summary.get("file_type_counts") or {}),
+        "ignored_count": int(scan_summary.get("ignored_count") or 0),
+        "ignored_paths": list(scan_summary.get("ignored_paths") or []),
+        "candidate_rel_paths": list(scan_summary.get("candidate_rel_paths") or []),
+        "pattern_family_counts": dict(sorted(family_counts.items())),
+        "top_directories": dict(sorted(top_directories.items())),
+        "common_helpers": common_helpers,
+        "validation_kinds": dict(sorted(validation_kinds.items())),
+        "dominant_validation_kind": dominant_validation,
+        "dominant_naming_style": dominant_naming,
+        "source_files": [str(item.get("source_subpath") or "") for item in promoted_sources],
+        "tags": list(tags or []),
+        "trust_level": trust_level,
+    }
+
+
+def make_collection_pattern_entry(
+    source_record: dict,
+    pattern_type: str,
+    summary: str,
+    confidence: float,
+    keywords: list[str],
+    *,
+    normalized_examples: dict | None = None,
+    source_files: list[str] | None = None,
+) -> dict:
+    collection_name = str(source_record.get("collection_name") or "collection")
+    pattern_id = re.sub(r"[^a-z0-9_.-]+", "-", f"collection-{collection_name}-{pattern_type}".lower()).strip("-")
+    promotion_state = str(source_record.get("effective_promotion_state") or source_record.get("promotion_state_detail") or source_record.get("promotion_state") or "candidate")
+    trust_level = str(source_record.get("effective_trust_level") or source_record.get("trust_level") or "trusted")
+    return {
+        "id": pattern_id,
+        "name": pattern_type.replace("_", " "),
+        "family": pattern_type,
+        "source_files": list(source_files or source_record.get("collection_summary", {}).get("source_files") or []),
+        "source_repo_path": str(source_record.get("repo_rel_path") or f"collection/{collection_name}"),
+        "source_origin": str(source_record.get("source_origin") or source_record.get("origin_path") or ""),
+        "source_subpath": str(source_record.get("source_subpath") or "."),
+        "import_scope": str(source_record.get("import_scope") or "folder"),
+        "trust_level": trust_level,
+        "tags": list(source_record.get("tags") or []),
+        "pattern_type": pattern_type,
+        "summary": summary,
+        "applicability_context": infer_script_pattern_task_tags(pattern_type, summary),
+        "confidence": round(confidence, 2),
+        "keywords": sorted(set(keywords))[:16],
+        "normalized_examples": normalized_examples or {},
+        "anti_pattern_note": "",
+        "success_count": 0,
+        "promotion_state": promotion_state,
+        "promotion_method": str(source_record.get("promotion_method") or "automatic"),
+        "promotion_reason": str(source_record.get("promotion_reason") or "learned from curated collection source"),
+        "timestamp": int(source_record.get("promotion_timestamp") or source_record.get("imported_at") or 0),
+    }
+
+
+def extract_collection_patterns_from_record(source_record: dict) -> list[dict]:
+    summary = dict(source_record.get("collection_summary") or {})
+    promoted_total = int(summary.get("promoted_total") or 0)
+    if promoted_total <= 0:
+        return []
+    source_files = list(summary.get("source_files") or [])
+    collection_name = str(summary.get("collection_name") or source_record.get("collection_name") or "collection")
+    keyword_seed = pattern_keywords_from_text(
+        " ".join(
+            [
+                collection_name,
+                str(summary.get("source_root") or ""),
+                " ".join(source_files[:10]),
+                " ".join((summary.get("pattern_family_counts") or {}).keys()),
+                " ".join((summary.get("common_helpers") or [])),
+            ]
+        )
+    )
+    patterns: list[dict] = []
+    if summary.get("top_directories"):
+        patterns.append(
+            make_collection_pattern_entry(
+                source_record,
+                "repo_structure",
+                f"Collection groups related scripts under {', '.join(list(summary.get('top_directories', {}).keys())[:4])}.",
+                0.82,
+                keyword_seed + ["layout", "structure", "collection"],
+                normalized_examples={"top_directories": summary.get("top_directories")},
+                source_files=source_files,
+            )
+        )
+    if summary.get("common_helpers"):
+        patterns.append(
+            make_collection_pattern_entry(
+                source_record,
+                "shared_helper_structure",
+                f"Collection reuses helper functions such as {', '.join(summary.get('common_helpers', [])[:3])}.",
+                0.8,
+                keyword_seed + list(summary.get("common_helpers") or []) + ["helpers"],
+                normalized_examples={"helpers": summary.get("common_helpers")},
+                source_files=source_files,
+            )
+        )
+    dominant_naming = str(summary.get("dominant_naming_style") or "")
+    if dominant_naming:
+        patterns.append(
+            make_collection_pattern_entry(
+                source_record,
+                "naming_convention",
+                f"Collection primarily uses {dominant_naming} module naming.",
+                0.76,
+                keyword_seed + [dominant_naming, "naming"],
+                normalized_examples={"style": dominant_naming},
+                source_files=source_files,
+            )
+        )
+    dominant_validation = str(summary.get("dominant_validation_kind") or "")
+    if dominant_validation:
+        patterns.append(
+            make_collection_pattern_entry(
+                source_record,
+                "validation_strategy",
+                f"Collection commonly validates scripts with {dominant_validation}.",
+                0.84,
+                keyword_seed + [dominant_validation, "validation"],
+                normalized_examples={"style": dominant_validation, "validation_kind": dominant_validation},
+                source_files=source_files,
+            )
+        )
+    family_counts = dict(summary.get("pattern_family_counts") or {})
+    for family, count in sorted(family_counts.items()):
+        if int(count or 0) < 2:
+            continue
+        confidence = min(0.95, 0.72 + (float(count) / float(promoted_total or 1)) * 0.18)
+        patterns.append(
+            make_collection_pattern_entry(
+                source_record,
+                str(family),
+                f"Across {count} curated files in the collection, {family.replace('_', ' ')} appears as a shared convention.",
+                confidence,
+                keyword_seed + [str(family), "shared", "collection"],
+                source_files=source_files,
+            )
+        )
+    return patterns
+
+
+def print_pattern_collection_preview(preview: dict) -> None:
+    print("=== PATTERN COLLECTION PREVIEW ===")
+    print(f"source_root: {preview.get('source_root', '')}")
+    print(f"import_scope: {preview.get('import_scope', 'folder')}")
+    print(f"candidate_count: {preview.get('candidate_count', 0)}")
+    print(f"file_type_counts: {preview.get('file_type_counts', {})}")
+    print(f"ignored_count: {preview.get('ignored_count', 0)}")
+    if preview.get("ignored_paths"):
+        print(f"ignored_paths: {preview.get('ignored_paths')}")
+    if preview.get("candidate_rel_paths"):
+        print(f"candidate_paths: {preview.get('candidate_rel_paths')[:10]}")
+    if preview.get("blocked_reason"):
+        print(f"blocked_reason: {preview.get('blocked_reason')}")
+
+
+def redact_probe_url(raw_url: str) -> tuple[str, bool]:
+    text = str(raw_url or "").strip()
+    if not text:
+        return "", False
+    try:
+        parsed = urlsplit(text)
+    except ValueError:
+        return text, False
+    redacted = False
+    hostname = parsed.hostname or ""
+    if parsed.username or parsed.password:
+        redacted = True
+        user = "<REDACTED_USER>"
+        pass_part = ":<REDACTED_PASS>" if parsed.password is not None else ""
+        hostport = hostname
+        if parsed.port is not None:
+            hostport = f"{hostname}:{parsed.port}"
+        netloc = f"{user}{pass_part}@{hostport}"
+    else:
+        netloc = parsed.netloc
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    redacted_items: list[tuple[str, str]] = []
+    for key, value in query_items:
+        if PROBE_SECRET_NAME_RE.search(key):
+            redacted_items.append((key, "<REDACTED>"))
+            redacted = True
+        else:
+            redacted_items.append((key, value))
+    return urlunsplit((parsed.scheme, netloc, parsed.path, urlencode(redacted_items), parsed.fragment)), redacted
+
+
+def redact_probe_header_value(name: str, value: str) -> tuple[str, bool]:
+    header_name = str(name or "").strip()
+    header_value = str(value or "")
+    lowered = header_name.lower()
+    if lowered == "authorization":
+        return "Bearer <REDACTED>", True
+    if lowered in {"cookie", "set-cookie"}:
+        return "<REDACTED_COOKIE>", True
+    if PROBE_SECRET_NAME_RE.search(header_name):
+        return "<REDACTED>", True
+    redacted_url, changed = redact_probe_url(header_value)
+    if changed:
+        return redacted_url, True
+    token_match = re.search(r"(?i)\b(sk-[A-Za-z0-9]{12,}|gh[pous]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})\b", header_value)
+    if token_match:
+        return token_match.re.sub("<REDACTED_TOKEN>", header_value), True
+    return header_value, False
+
+
+def redact_probe_headers(headers: dict[str, str]) -> tuple[dict[str, str], bool]:
+    redacted_headers: dict[str, str] = {}
+    changed = False
+    for key, value in headers.items():
+        safe_value, safe_changed = redact_probe_header_value(key, value)
+        redacted_headers[str(key)] = safe_value
+        changed = changed or safe_changed
+    return redacted_headers, changed
+
+
+def build_probe_proxy_map(http_proxy: str = "", https_proxy: str = "") -> dict[str, str]:
+    proxy_map: dict[str, str] = {}
+    candidates = {
+        "http": http_proxy or CURRENT_SUBPROCESS_ENV.get("HTTP_PROXY") or CURRENT_SUBPROCESS_ENV.get("http_proxy") or os.environ.get("HTTP_PROXY", "") or os.environ.get("http_proxy", ""),
+        "https": https_proxy or CURRENT_SUBPROCESS_ENV.get("HTTPS_PROXY") or CURRENT_SUBPROCESS_ENV.get("https_proxy") or os.environ.get("HTTPS_PROXY", "") or os.environ.get("https_proxy", ""),
+        "all": CURRENT_SUBPROCESS_ENV.get("ALL_PROXY") or CURRENT_SUBPROCESS_ENV.get("all_proxy") or os.environ.get("ALL_PROXY", "") or os.environ.get("all_proxy", ""),
+    }
+    for scheme, value in candidates.items():
+        if value:
+            proxy_map[scheme] = value
+    return proxy_map
+
+
+def probe_uses_proxy(url: str, proxy_map: dict[str, str]) -> bool:
+    scheme = urlsplit(str(url or "")).scheme.lower()
+    return bool(proxy_map.get(scheme) or proxy_map.get("all"))
+
+
+def parse_probe_header_args(header_args: list[str] | None) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for item in header_args or []:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        if ":" not in raw:
+            raise ValueError(f"Invalid --probe-header value: {raw!r}. Expected 'Name: value'.")
+        name, value = raw.split(":", 1)
+        if not name.strip():
+            raise ValueError(f"Invalid --probe-header value: {raw!r}. Header name is required.")
+        headers[name.strip()] = value.strip()
+    return headers
+
+
+def build_probe_headers(
+    *,
+    custom_headers: dict[str, str] | None = None,
+    bearer_token: str = "",
+    cookies: str = "",
+    user_agent: str = "",
+) -> tuple[dict[str, str], bool]:
+    headers = {str(key): str(value) for key, value in (custom_headers or {}).items()}
+    if bearer_token:
+        headers["Authorization"] = f"Bearer {bearer_token}"
+    if cookies:
+        headers["Cookie"] = cookies
+    headers.setdefault("User-Agent", user_agent or DEFAULT_PROBE_USER_AGENT)
+    _, redacted = redact_probe_headers(headers)
+    redacted = redacted or bool(bearer_token) or bool(cookies)
+    return headers, redacted
+
+
+def looks_like_json_body(content_type: str, text: str) -> bool:
+    lowered_type = str(content_type or "").lower()
+    stripped = str(text or "").lstrip()
+    return "json" in lowered_type or stripped.startswith("{") or stripped.startswith("[")
+
+
+def summarize_json_shape(value: object, depth: int = 0) -> object:
+    if depth > 2:
+        return type(value).__name__
+    if isinstance(value, dict):
+        summary: dict[str, object] = {}
+        for key in list(value.keys())[:8]:
+            summary[str(key)] = summarize_json_shape(value[key], depth + 1)
+        return summary
+    if isinstance(value, list):
+        if not value:
+            return ["empty"]
+        return [summarize_json_shape(value[0], depth + 1)]
+    return type(value).__name__
+
+
+def classify_uri_reference_mode(uris: list[str]) -> str:
+    if not uris:
+        return "none"
+    has_absolute = any(urlparse(item).scheme in {"http", "https"} for item in uris)
+    has_relative = any(urlparse(item).scheme not in {"http", "https"} for item in uris)
+    if has_absolute and has_relative:
+        return "mixed"
+    if has_absolute:
+        return "absolute"
+    return "relative"
+
+
+class ProbeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.redirect_chain: list[dict] = []
+
+    def _record(self, req: urllib.request.Request, code: int, headers) -> None:
+        location = headers.get("Location", "")
+        safe_from, _ = redact_probe_url(req.full_url)
+        safe_to, _ = redact_probe_url(urljoin(req.full_url, location))
+        self.redirect_chain.append(
+            {
+                "status_code": int(code),
+                "from": safe_from,
+                "to": safe_to,
+            }
+        )
+
+    def http_error_301(self, req, fp, code, msg, headers):
+        self._record(req, code, headers)
+        return super().http_error_301(req, fp, code, msg, headers)
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        self._record(req, code, headers)
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    def http_error_303(self, req, fp, code, msg, headers):
+        self._record(req, code, headers)
+        return super().http_error_303(req, fp, code, msg, headers)
+
+    def http_error_307(self, req, fp, code, msg, headers):
+        self._record(req, code, headers)
+        return super().http_error_307(req, fp, code, msg, headers)
+
+    def http_error_308(self, req, fp, code, msg, headers):
+        self._record(req, code, headers)
+        return super().http_error_308(req, fp, code, msg, headers)
+
+
+def bounded_http_fetch(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    timeout_seconds: int = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_PROBE_MAX_BYTES,
+    http_proxy: str = "",
+    https_proxy: str = "",
+) -> dict:
+    proxy_map = build_probe_proxy_map(http_proxy=http_proxy, https_proxy=https_proxy)
+    redirect_handler = ProbeRedirectHandler()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxy_map), redirect_handler)
+    request = urllib.request.Request(url, headers=headers or {}, method=method.upper())
+    result = {
+        "ok": False,
+        "status_code": 0,
+        "content_type": "",
+        "headers": {},
+        "body_text": "",
+        "body_bytes": b"",
+        "truncated": False,
+        "redirect_chain": [],
+        "redirected": False,
+        "final_url": url,
+        "proxy_used": probe_uses_proxy(url, proxy_map),
+        "proxy_map": proxy_map,
+        "error": "",
+        "timed_out": False,
+    }
+    try:
+        with opener.open(request, timeout=max(1, int(timeout_seconds))) as response:
+            body_bytes = response.read(max_bytes + 1)
+            truncated = len(body_bytes) > max_bytes
+            if truncated:
+                body_bytes = body_bytes[:max_bytes]
+            result.update(
+                {
+                    "ok": True,
+                    "status_code": int(getattr(response, "status", response.getcode())),
+                    "content_type": str(response.headers.get("Content-Type", "")),
+                    "headers": {str(key): str(value) for key, value in response.headers.items()},
+                    "body_bytes": body_bytes,
+                    "body_text": body_bytes.decode("utf-8", errors="replace"),
+                    "truncated": truncated,
+                    "final_url": response.geturl(),
+                }
+            )
+    except urllib.error.HTTPError as exc:
+        body_bytes = exc.read(max_bytes + 1)
+        truncated = len(body_bytes) > max_bytes
+        if truncated:
+            body_bytes = body_bytes[:max_bytes]
+        result.update(
+            {
+                "ok": True,
+                "status_code": int(exc.code),
+                "content_type": str(exc.headers.get("Content-Type", "")),
+                "headers": {str(key): str(value) for key, value in exc.headers.items()},
+                "body_bytes": body_bytes,
+                "body_text": body_bytes.decode("utf-8", errors="replace"),
+                "truncated": truncated,
+                "final_url": exc.geturl() or url,
+                "error": str(exc),
+            }
+        )
+    except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
+        message = str(getattr(exc, "reason", exc) or exc)
+        result["error"] = message
+        result["timed_out"] = "timed out" in message.lower()
+    result["redirect_chain"] = redirect_handler.redirect_chain
+    result["redirected"] = bool(redirect_handler.redirect_chain)
+    return result
+
+
+def summarize_rate_limit_headers(headers: dict[str, str]) -> dict[str, str]:
+    selected: dict[str, str] = {}
+    for key, value in headers.items():
+        lowered = key.lower()
+        if lowered.startswith("x-ratelimit") or lowered in {"ratelimit-limit", "ratelimit-remaining", "ratelimit-reset", "retry-after"}:
+            selected[key] = value
+    return selected
+
+
+def analyze_api_probe_response(fetch_result: dict) -> dict:
+    body_text = str(fetch_result.get("body_text") or "")
+    content_type = str(fetch_result.get("content_type") or "")
+    is_json = looks_like_json_body(content_type, body_text)
+    json_summary: dict[str, object] = {
+        "body_is_json": False,
+        "json_top_level_keys": [],
+        "json_shape": {},
+    }
+    if is_json:
+        try:
+            parsed = json.loads(body_text)
+            json_summary["body_is_json"] = True
+            if isinstance(parsed, dict):
+                json_summary["json_top_level_keys"] = list(parsed.keys())[:10]
+            json_summary["json_shape"] = summarize_json_shape(parsed)
+        except json.JSONDecodeError:
+            pass
+    status_code = int(fetch_result.get("status_code") or 0)
+    auth_hint = ""
+    if status_code == 401:
+        auth_hint = "authentication appears required or the bearer token was rejected"
+    elif status_code == 403:
+        auth_hint = "request was forbidden; auth, origin, or anti-bot checks may apply"
+    elif status_code == 407:
+        auth_hint = "proxy authentication appears required"
+    summary_bits = [
+        f"status={status_code or 'unreachable'}",
+        f"content_type={content_type or 'unknown'}",
+    ]
+    if json_summary["body_is_json"]:
+        summary_bits.append("json body detected")
+    if auth_hint:
+        summary_bits.append(auth_hint)
+    return {
+        **json_summary,
+        "rate_limit_headers": summarize_rate_limit_headers(fetch_result.get("headers") or {}),
+        "auth_failure_hint": auth_hint,
+        "summary": "; ".join(summary_bits),
+    }
+
+
+def parse_m3u8_attributes(text: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for match in re.finditer(r'([A-Z0-9-]+)=("[^"]*"|[^,]+)', str(text or "")):
+        value = match.group(2).strip()
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        attrs[match.group(1)] = value
+    return attrs
+
+
+def analyze_m3u8_playlist(
+    playlist_url: str,
+    playlist_text: str,
+    *,
+    request_headers: dict[str, str] | None = None,
+    timeout_seconds: int = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_PROBE_MAX_BYTES,
+    follow_up_limit: int = DEFAULT_PROBE_FOLLOW_UP_LIMIT,
+    http_proxy: str = "",
+    https_proxy: str = "",
+) -> dict:
+    stripped = str(playlist_text or "").strip()
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    is_valid = bool(lines and lines[0].startswith("#EXTM3U"))
+    variant_uris: list[str] = []
+    segment_uris: list[str] = []
+    audio_groups: list[str] = []
+    subtitle_groups: list[str] = []
+    playlist_type = "unknown"
+    target_duration = None
+    media_sequence = None
+    key_tags_present = False
+    pending_variant = False
+    for line in lines:
+        if line.startswith("#EXT-X-STREAM-INF"):
+            pending_variant = True
+            attrs = parse_m3u8_attributes(line.partition(":")[2])
+            if attrs.get("AUDIO"):
+                audio_groups.append(attrs["AUDIO"])
+            if attrs.get("SUBTITLES"):
+                subtitle_groups.append(attrs["SUBTITLES"])
+            continue
+        if line.startswith("#EXT-X-TARGETDURATION"):
+            try:
+                target_duration = int(line.partition(":")[2].strip())
+            except ValueError:
+                target_duration = None
+            continue
+        if line.startswith("#EXT-X-MEDIA-SEQUENCE"):
+            try:
+                media_sequence = int(line.partition(":")[2].strip())
+            except ValueError:
+                media_sequence = None
+            continue
+        if line.startswith("#EXT-X-MEDIA:"):
+            attrs = parse_m3u8_attributes(line.partition(":")[2])
+            media_type = attrs.get("TYPE", "").upper()
+            if media_type == "AUDIO" and attrs.get("GROUP-ID"):
+                audio_groups.append(attrs["GROUP-ID"])
+            if media_type == "SUBTITLES" and attrs.get("GROUP-ID"):
+                subtitle_groups.append(attrs["GROUP-ID"])
+            continue
+        if line.startswith("#EXT-X-KEY"):
+            key_tags_present = True
+            continue
+        if line.startswith("#"):
+            continue
+        if pending_variant:
+            variant_uris.append(line)
+            pending_variant = False
+        else:
+            segment_uris.append(line)
+    if variant_uris:
+        playlist_type = "master"
+    elif any(line.startswith("#EXTINF") for line in lines) or segment_uris:
+        playlist_type = "media"
+    if not is_valid:
+        playlist_type = "unknown"
+    follow_up_results: list[dict] = []
+    sample_targets = variant_uris if playlist_type == "master" else segment_uris
+    for rel_uri in sample_targets[: max(0, min(int(follow_up_limit), DEFAULT_PROBE_FOLLOW_UP_LIMIT))]:
+        absolute = urljoin(playlist_url, rel_uri)
+        follow = bounded_http_fetch(
+            absolute,
+            method="HEAD",
+            headers=request_headers,
+            timeout_seconds=timeout_seconds,
+            max_bytes=min(max_bytes, 2048),
+            http_proxy=http_proxy,
+            https_proxy=https_proxy,
+        )
+        safe_url, _ = redact_probe_url(absolute)
+        follow_up_results.append(
+            {
+                "url": safe_url,
+                "ok": bool(follow.get("ok")),
+                "status_code": int(follow.get("status_code") or 0),
+                "redirected": bool(follow.get("redirected")),
+            }
+        )
+    uri_reference_mode = classify_uri_reference_mode(variant_uris if playlist_type == "master" else segment_uris)
+    return {
+        "valid_playlist": is_valid,
+        "playlist_type": playlist_type if playlist_type in {"master", "media"} else "unknown",
+        "variant_count": len(variant_uris),
+        "sample_variant_uris": [redact_probe_url(urljoin(playlist_url, item))[0] for item in variant_uris[:3]],
+        "audio_group_references": sorted(set(audio_groups)),
+        "subtitle_group_references": sorted(set(subtitle_groups)),
+        "target_duration": target_duration,
+        "media_sequence": media_sequence,
+        "segment_count": len(segment_uris),
+        "segment_sample_count": min(len(segment_uris), 3),
+        "sample_segment_uris": [redact_probe_url(urljoin(playlist_url, item))[0] for item in segment_uris[:3]],
+        "key_tags_present": key_tags_present,
+        "uri_reference_mode": uri_reference_mode,
+        "sample_uri_probe_results": follow_up_results,
+        "summary": (
+            f"playlist_type={playlist_type if is_valid else 'invalid'}; "
+            f"variants={len(variant_uris)}; segments={len(segment_uris)}; "
+            f"keys_present={str(key_tags_present).lower()}"
+        ),
+    }
+
+
+def determine_probe_mode(endpoint: str, requested_mode: str = "auto") -> str:
+    mode = str(requested_mode or "auto").strip().lower()
+    if mode and mode != "auto":
+        return mode
+    parsed = urlparse(str(endpoint or ""))
+    path = parsed.path.lower()
+    if path.endswith(".m3u8"):
+        return "m3u8_summary"
+    return "json_summary"
+
+
+def probe_endpoint(
+    endpoint: str,
+    *,
+    probe_type: str = "auto",
+    method: str = "",
+    custom_headers: dict[str, str] | None = None,
+    bearer_token: str = "",
+    cookies: str = "",
+    user_agent: str = "",
+    http_proxy: str = "",
+    https_proxy: str = "",
+    timeout_seconds: int = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_PROBE_MAX_BYTES,
+    follow_up_limit: int = DEFAULT_PROBE_FOLLOW_UP_LIMIT,
+) -> dict:
+    resolved_probe_type = determine_probe_mode(endpoint, probe_type)
+    headers, header_redacted = build_probe_headers(
+        custom_headers=custom_headers,
+        bearer_token=bearer_token,
+        cookies=cookies,
+        user_agent=user_agent,
+    )
+    request_method = (method or ("HEAD" if resolved_probe_type in {"head", "headers_summary"} else "GET")).upper()
+    fetch_result = bounded_http_fetch(
+        endpoint,
+        method=request_method,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        max_bytes=max_bytes,
+        http_proxy=http_proxy,
+        https_proxy=https_proxy,
+    )
+    safe_endpoint, endpoint_redacted = redact_probe_url(endpoint)
+    safe_final_url, final_redacted = redact_probe_url(str(fetch_result.get("final_url") or endpoint))
+    redacted_headers, header_values_redacted = redact_probe_headers(fetch_result.get("headers") or {})
+    proxy_issue = "proxy" in str(fetch_result.get("error") or "").lower() or int(fetch_result.get("status_code") or 0) == 407
+    result = {
+        "probe_type": resolved_probe_type,
+        "endpoint": safe_endpoint,
+        "method": request_method,
+        "status_code": int(fetch_result.get("status_code") or 0),
+        "content_type": str(fetch_result.get("content_type") or ""),
+        "redirected": bool(fetch_result.get("redirected")),
+        "redirect_chain": fetch_result.get("redirect_chain") or [],
+        "final_url": safe_final_url,
+        "proxy_used": bool(fetch_result.get("proxy_used")),
+        "proxy_likely_worked": bool(fetch_result.get("proxy_used")) and bool(fetch_result.get("ok")),
+        "redactions_applied": bool(header_redacted or endpoint_redacted or final_redacted or header_values_redacted),
+        "response_headers": redacted_headers,
+        "ok": bool(fetch_result.get("ok")),
+        "timed_out": bool(fetch_result.get("timed_out")),
+        "truncated": bool(fetch_result.get("truncated")),
+        "summary": "",
+        "confidence": "low",
+        "probe_confidence": "low",
+        "error": str(fetch_result.get("error") or ""),
+        "auth_failure_hint": "",
+        "rate_limit_headers": {},
+    }
+    if not fetch_result.get("ok"):
+        error_text = str(fetch_result.get("error") or "request failed")
+        result["summary"] = error_text
+        result["auth_failure_hint"] = "proxy/auth issue likely" if proxy_issue else ""
+        return result
+    if resolved_probe_type in {"json_summary", "get", "headers_summary", "head"}:
+        api_summary = analyze_api_probe_response(fetch_result)
+        result["body_is_json"] = bool(api_summary.get("body_is_json"))
+        result["json_top_level_keys"] = api_summary.get("json_top_level_keys") or []
+        result["json_shape"] = api_summary.get("json_shape") or {}
+        result["auth_failure_hint"] = str(api_summary.get("auth_failure_hint") or "")
+        result["rate_limit_headers"] = api_summary.get("rate_limit_headers") or {}
+        result["summary"] = str(api_summary.get("summary") or "")
+        result["confidence"] = "high" if result.get("body_is_json") or result["status_code"] in {200, 204} else "medium"
+    elif resolved_probe_type == "m3u8_summary":
+        playlist_info = analyze_m3u8_playlist(
+            endpoint,
+            str(fetch_result.get("body_text") or ""),
+            request_headers=headers,
+            timeout_seconds=timeout_seconds,
+            max_bytes=max_bytes,
+            follow_up_limit=follow_up_limit,
+            http_proxy=http_proxy,
+            https_proxy=https_proxy,
+        )
+        result.update(playlist_info)
+        if result.get("status_code") in {401, 403, 407}:
+            result["auth_failure_hint"] = "playlist fetch suggests auth or proxy restrictions"
+        result["confidence"] = "high" if playlist_info.get("valid_playlist") else "medium"
+        result["summary"] = str(playlist_info.get("summary") or "")
+    result["probe_confidence"] = result["confidence"]
+    return result
+
+
+def print_probe_result(probe: dict, output_format: str = "human") -> None:
+    if output_format == "json":
+        print(json.dumps(probe, indent=2, sort_keys=True))
+        return
+    print("=== NETWORK PROBE ===")
+    print(f"probe_type: {probe.get('probe_type') or 'get'}")
+    print(f"endpoint: {probe.get('endpoint') or '(none)'}")
+    print(f"method: {probe.get('method') or 'GET'}")
+    print(f"status_code: {probe.get('status_code') or 0}")
+    print(f"content_type: {probe.get('content_type') or '(unknown)'}")
+    print(f"redirected: {format_bool(probe.get('redirected'))}")
+    print(f"proxy_used: {format_bool(probe.get('proxy_used'))}")
+    print(f"proxy_likely_worked: {format_bool(probe.get('proxy_likely_worked'))}")
+    print(f"redactions_applied: {format_bool(probe.get('redactions_applied'))}")
+    print(f"probe_confidence: {probe.get('probe_confidence') or probe.get('confidence') or 'low'}")
+    print(f"summary: {probe.get('summary') or '(none)'}")
+    if probe.get("error"):
+        print(f"error: {probe.get('error')}")
+    if probe.get("redirect_chain"):
+        print(f"redirect_chain: {probe.get('redirect_chain')}")
+    if probe.get("rate_limit_headers"):
+        print(f"rate_limit_headers: {probe.get('rate_limit_headers')}")
+    if probe.get("auth_failure_hint"):
+        print(f"auth_failure_hint: {probe.get('auth_failure_hint')}")
+    if probe.get("probe_type") in {"head", "headers_summary"} and probe.get("response_headers"):
+        print(f"response_headers: {probe.get('response_headers')}")
+    if probe.get("probe_type") == "m3u8_summary":
+        print(f"valid_playlist: {format_bool(probe.get('valid_playlist'))}")
+        print(f"playlist_type: {probe.get('playlist_type') or 'unknown'}")
+        print(f"variant_count: {probe.get('variant_count') or 0}")
+        print(f"sample_variant_uris: {probe.get('sample_variant_uris') or []}")
+        print(f"audio_group_references: {probe.get('audio_group_references') or []}")
+        print(f"subtitle_group_references: {probe.get('subtitle_group_references') or []}")
+        print(f"target_duration: {probe.get('target_duration')}")
+        print(f"media_sequence: {probe.get('media_sequence')}")
+        print(f"segment_count: {probe.get('segment_count') or 0}")
+        print(f"segment_sample_count: {probe.get('segment_sample_count') or 0}")
+        print(f"sample_segment_uris: {probe.get('sample_segment_uris') or []}")
+        print(f"key_tags_present: {format_bool(probe.get('key_tags_present'))}")
+        print(f"uri_reference_mode: {probe.get('uri_reference_mode') or 'none'}")
+        print(f"sample_uri_probe_results: {probe.get('sample_uri_probe_results') or []}")
+    else:
+        print(f"body_is_json: {format_bool(probe.get('body_is_json'))}")
+        print(f"json_top_level_keys: {probe.get('json_top_level_keys') or []}")
+        print(f"json_shape: {probe.get('json_shape') or {}}")
 
 
 def run_candidate_validation(pattern_repo: Path, candidate_path: Path) -> dict:
@@ -4963,92 +7148,15 @@ def import_pattern_files(
     existing_by_id = {item.get("id", ""): item for item in sources}
     pattern_count_before = len(load_script_pattern_memory(repo_root).get("patterns", []))
     for file_value in file_paths:
-        fetched = fetch_pattern_source(file_value, repo_root)
-        source_origin = str(fetched.get("source_origin") or file_value)
-        candidate_path = infer_pattern_import_destination(repo_root, source_origin, trust)
-        candidate_path.parent.mkdir(parents=True, exist_ok=True)
-        source_id = pattern_repo_source_id(candidate_path.relative_to(repo_root), trust)
-        if not fetched.get("ok"):
-            record = {
-                "id": source_id,
-                "repo_rel_path": "",
-                "candidate_path": "",
-                "origin_path": source_origin,
-                "source_type": fetched.get("source_type", "local"),
-                "source_origin": source_origin,
-                "acquisition_method": fetched.get("acquisition_method", "direct"),
-                "proxy_used": bool(fetched.get("proxy_used")),
-                "sanitized_path": "",
-                "trust_level": trust,
-                "tags": list(tags or []),
-                "note": note,
-                "imported_at": int(time.time()),
-                "sanitized_changed": False,
-                "sanitization_applied": False,
-                "validation_status": "blocked",
-                "validation_passed": False,
-                "validation_command": "",
-                "repair_needed": False,
-                "repair_output": "",
-                "promotion_state": "candidate",
-                "promoted": False,
-                "candidate_imported": False,
-                "limited_validation": False,
-                "blocked_reason": str(fetched.get("blocked_reason") or "source acquisition failed"),
-                "final_destination": "",
-            }
-            existing_by_id[source_id] = record
-            imported.append(record)
-            continue
-        raw_content = str(fetched.get("content") or "")
-        sanitized_content, changed = sanitize_pattern_script_content(raw_content)
-        candidate_path.write_text(sanitized_content)
-        validation = run_candidate_validation(repo_root, candidate_path)
-        repaired = False
-        repair_result = {"ok": False, "output": "", "command": []}
-        if not validation.get("passed"):
-            repair_result = repair_training_candidate(repo_root, candidate_path)
-            if repair_result.get("ok"):
-                repaired = True
-                validation = run_candidate_validation(repo_root, candidate_path)
-        blocked = not validation.get("passed")
-        promote = bool(validation.get("passed")) and not blocked and not validation.get("limited_validation")
-        final_trust = trust
-        curated_rel = ""
-        if promote:
-            curated_path = infer_curated_pattern_destination(repo_root, source_origin, trust)
-            curated_path.parent.mkdir(parents=True, exist_ok=True)
-            curated_path.write_text(candidate_path.read_text())
-            curated_rel = str(curated_path.relative_to(repo_root))
-        record = {
-            "id": source_id,
-            "repo_rel_path": curated_rel or str(candidate_path.relative_to(repo_root)),
-            "candidate_path": str(candidate_path.relative_to(repo_root)),
-            "origin_path": source_origin,
-            "source_type": fetched.get("source_type", "local"),
-            "source_origin": source_origin,
-            "acquisition_method": fetched.get("acquisition_method", "direct"),
-            "proxy_used": bool(fetched.get("proxy_used")),
-            "sanitized_path": str(candidate_path),
-            "trust_level": final_trust,
-            "tags": list(tags or []),
-            "note": note,
-            "imported_at": int(time.time()),
-            "sanitized_changed": changed,
-            "sanitization_applied": changed,
-            "validation_status": "passed" if validation.get("passed") else ("blocked" if blocked else "failed"),
-            "validation_passed": bool(validation.get("passed")),
-            "validation_command": validation.get("validation_command", ""),
-            "repair_needed": repaired,
-            "repair_output": repair_result.get("output", ""),
-            "promotion_state": "curated" if promote else "candidate",
-            "promoted": promote,
-            "candidate_imported": True,
-            "limited_validation": bool(validation.get("limited_validation")),
-            "blocked_reason": "" if validation.get("passed") else (repair_result.get("output", "") or "validation blocked"),
-            "final_destination": curated_rel,
-        }
-        existing_by_id[source_id] = record
+        record = import_pattern_source_record(
+            repo_root,
+            file_value,
+            trust_level=trust,
+            tags=tags,
+            note=note,
+            source_metadata={"import_scope": "file"},
+        )
+        existing_by_id[record["id"]] = record
         imported.append(record)
     catalog["sources"] = sorted(existing_by_id.values(), key=lambda item: item.get("repo_rel_path", ""))
     save_pattern_source_catalog(repo_root, catalog)
@@ -5061,6 +7169,143 @@ def import_pattern_files(
         "learned_patterns": learn_result.get("learned_patterns", []),
         "learned_pattern_delta": len(learn_result.get("memory", {}).get("patterns", [])) - pattern_count_before,
         "relearn_triggered": promoted_trusted,
+    }
+
+
+def import_pattern_repo_collection(
+    pattern_repo: Path,
+    source_root: Path | str,
+    *,
+    trust_level: str = "trusted",
+    tags: list[str] | None = None,
+    note: str = "",
+    include_globs: Sequence[str] | None = None,
+    exclude_globs: Sequence[str] | None = None,
+    max_files: int = DEFAULT_PATTERN_REPO_MAX_FILES,
+    max_depth: int = 0,
+) -> dict:
+    trust = trust_level if trust_level in PATTERN_TRUST_LEVELS else "trusted"
+    repo_root, created_repo = ensure_pattern_repo_status(pattern_repo)
+    source_path = Path(source_root).expanduser().resolve()
+    preview = scan_pattern_source_collection(
+        source_path,
+        include_globs=include_globs,
+        exclude_globs=exclude_globs,
+        max_files=max_files,
+        max_depth=max_depth,
+    )
+    if not preview.get("ok"):
+        return {
+            "pattern_repo": str(repo_root),
+            "created_repo": created_repo,
+            "import_scope": preview.get("import_scope") or "folder",
+            "source_root": str(source_path),
+            "candidate_count": 0,
+            "imported_sources": [],
+            "repo_level_patterns_added": 0,
+            "pattern_memory_delta": 0,
+            "promoted_trusted_count": 0,
+            "promoted_experimental_count": 0,
+            "blocked_count": 0,
+            "preview": preview,
+            "blocked_reason": preview.get("blocked_reason") or "collection scan failed",
+            "relearn_triggered": False,
+        }
+    catalog = load_pattern_source_catalog(repo_root)
+    existing_by_id = {item.get("id", ""): item for item in catalog.get("sources", []) if isinstance(item, dict)}
+    pattern_count_before = len(load_script_pattern_memory(repo_root).get("patterns", []))
+    collection_name = str(preview.get("collection_name") or pattern_collection_storage_name(source_path))
+    imported: list[dict] = []
+    for absolute, rel_text in zip(preview.get("candidate_paths", []), preview.get("candidate_rel_paths", [])):
+        candidate_path = infer_pattern_collection_candidate_destination(repo_root, collection_name, rel_text)
+        curated_path = infer_pattern_collection_curated_destination(repo_root, collection_name, rel_text, trust)
+        record = import_pattern_source_record(
+            repo_root,
+            absolute,
+            trust_level=trust,
+            tags=tags,
+            note=note,
+            candidate_path=candidate_path,
+            curated_path=curated_path,
+            source_metadata={
+                "import_scope": preview.get("import_scope") or "folder",
+                "source_repo_path": str(source_path),
+                "source_subpath": rel_text,
+                "source_kind": "file",
+                "collection_name": collection_name,
+                "id": pattern_repo_source_id(f"{collection_name}:{rel_text}", trust),
+            },
+        )
+        existing_by_id[record["id"]] = record
+        imported.append(record)
+    collection_summary = build_pattern_collection_summary(
+        repo_root,
+        source_path,
+        preview,
+        imported,
+        trust_level=trust,
+        tags=tags,
+    )
+    collection_record = {
+        "id": pattern_repo_source_id(f"collection:{collection_name}", trust),
+        "repo_rel_path": f"collection/{collection_name}",
+        "candidate_path": "",
+        "origin_path": str(source_path),
+        "source_type": "local",
+        "source_origin": str(source_path),
+        "acquisition_method": "scan",
+        "proxy_used": False,
+        "sanitized_path": "",
+        "trust_level": trust,
+        "tags": list(tags or []),
+        "note": note,
+        "imported_at": int(time.time()),
+        "sanitized_changed": False,
+        "sanitization_applied": False,
+        "validation_status": "passed" if collection_summary.get("promoted_total") else "blocked",
+        "validation_passed": bool(collection_summary.get("promoted_total")),
+        "validation_command": "",
+        "repair_needed": False,
+        "repair_output": "",
+        "promotion_state": "curated" if collection_summary.get("promoted_total") else "candidate",
+        "promotion_state_detail": (f"curated_{trust}" if collection_summary.get("promoted_total") else "candidate"),
+        "promoted": bool(collection_summary.get("promoted_total")),
+        "candidate_imported": False,
+        "limited_validation": False,
+        "blocked_reason": "" if collection_summary.get("promoted_total") else "no curated files were promoted from the collection",
+        "final_destination": "",
+        "import_scope": str(collection_summary.get("import_scope") or preview.get("import_scope") or "folder"),
+        "source_repo_path": str(source_path),
+        "source_subpath": ".",
+        "source_kind": "collection",
+        "collection_name": collection_name,
+        "collection_summary": collection_summary,
+    }
+    repo_level_patterns = extract_collection_patterns_from_record(collection_record)
+    existing_by_id[collection_record["id"]] = collection_record
+    catalog["sources"] = sorted(existing_by_id.values(), key=lambda item: item.get("repo_rel_path", ""))
+    save_pattern_source_catalog(repo_root, catalog)
+    relearn_triggered = bool(imported)
+    learn_result = relearn_patterns_from_repo(repo_root) if relearn_triggered else {"learned_patterns": [], "memory": load_script_pattern_memory(repo_root)}
+    memory_delta = len(learn_result.get("memory", {}).get("patterns", [])) - pattern_count_before
+    return {
+        "pattern_repo": str(repo_root),
+        "created_repo": created_repo,
+        "import_scope": preview.get("import_scope") or "folder",
+        "source_root": str(source_path),
+        "candidate_count": len(imported),
+        "imported_sources": imported,
+        "preview": preview,
+        "collection_summary": collection_summary,
+        "repo_level_patterns_added": len(repo_level_patterns),
+        "pattern_memory_delta": memory_delta,
+        "learned_patterns": learn_result.get("learned_patterns", []),
+        "learned_pattern_delta": memory_delta,
+        "promoted_trusted_count": collection_summary.get("promoted_trusted_count", 0),
+        "promoted_experimental_count": collection_summary.get("promoted_experimental_count", 0),
+        "blocked_count": collection_summary.get("blocked_count", 0),
+        "relearn_triggered": relearn_triggered,
+        "blocked_reason": "",
     }
 
 
@@ -5105,6 +7350,9 @@ def relearn_patterns_from_repo(pattern_repo: Path) -> dict:
     memory = {"patterns": [], "sources": [], "updated_at": 0}
     learned_patterns: list[dict] = []
     for source_record in scan_pattern_repo_sources(repo_root):
+        if str(source_record.get("source_kind") or "") == "collection":
+            learned_patterns.extend(extract_collection_patterns_from_record(source_record))
+            continue
         repo_rel = str(source_record.get("repo_rel_path") or "").strip()
         if not repo_rel:
             continue
@@ -5209,6 +7457,8 @@ def enrich_pattern_entry(pattern: dict, source_record: dict | None = None) -> di
         "summary": str(pattern.get("summary") or ""),
         "anti_pattern_note": str(pattern.get("anti_pattern_note") or ""),
         "source_repo_path": str(pattern.get("source_repo_path") or source_file),
+        "source_subpath": str(pattern.get("source_subpath") or source_record.get("source_subpath") or ""),
+        "import_scope": str(pattern.get("import_scope") or source_record.get("import_scope") or "file"),
         "source_files": list(pattern.get("source_files") or []),
         "keywords": list(pattern.get("keywords") or []),
         "family": str(pattern.get("family") or pattern.get("pattern_type") or ""),
@@ -6069,6 +8319,59 @@ def select_validation_stack(plan: dict, selection: dict) -> dict:
     return copied
 
 
+def override_validation_stack_for_new_script(
+    plan: dict,
+    repo: Path,
+    script_path: Path,
+    *,
+    mode: str = "auto",
+    custom_command: str = "",
+) -> dict:
+    normalized_mode = str(mode or "auto").strip().lower()
+    if normalized_mode in {"", "auto"}:
+        return dict(plan)
+    copied = dict(plan)
+    script_rel = str(plan.get("script_rel_path") or relative_script_path(repo, script_path))
+    syntax_step = {"command": f"python -m py_compile {shlex.quote(script_rel)}", "kind": "syntax"}
+    if normalized_mode == "skip":
+        copied["chosen_stack"] = []
+        copied["primary_command"] = ""
+        copied["limited_validation"] = True
+        copied["limited_reason"] = "Validation was skipped by operator request."
+        copied["confidence_level"] = "low"
+        copied["validation_mode"] = "skip"
+        return copied
+    if normalized_mode == "syntax":
+        copied["chosen_stack"] = [syntax_step]
+        copied["primary_command"] = syntax_step["command"]
+        copied["limited_validation"] = True
+        copied["limited_reason"] = "Validation is limited to syntax checks."
+        copied["confidence_level"] = "medium"
+        copied["validation_mode"] = "syntax"
+        return copied
+    if normalized_mode == "cli_help":
+        cli_help_step = next((step for step in list(plan.get("chosen_stack") or []) if step.get("kind") == "cli_help"), None)
+        if not cli_help_step:
+            cli_help_step = {"command": f"python {shlex.quote(script_rel)} --help", "kind": "cli_help"}
+        copied["chosen_stack"] = [syntax_step, cli_help_step]
+        copied["primary_command"] = cli_help_step["command"]
+        copied["limited_validation"] = False
+        copied["limited_reason"] = ""
+        copied["confidence_level"] = "medium"
+        copied["validation_mode"] = "cli_help"
+        return copied
+    if normalized_mode == "custom" and custom_command.strip():
+        custom_step = {"command": custom_command.strip(), "kind": "custom"}
+        copied["chosen_stack"] = [syntax_step, custom_step]
+        copied["primary_command"] = custom_step["command"]
+        copied["limited_validation"] = False
+        copied["limited_reason"] = ""
+        copied["confidence_level"] = "medium"
+        copied["validation_mode"] = "custom"
+        return copied
+    return copied
+
+
 def summarize_style_match(style_signals: dict, expected_conventions: list[str]) -> tuple[int, str]:
     if not expected_conventions:
         return 10, "no explicit convention expectations"
@@ -6092,8 +8395,303 @@ def analyze_generated_script_style(script_path: Path) -> dict:
     }
 
 
-def render_new_script(repo: Path, output_path: Path, purpose: str, selection: dict) -> dict:
+def extract_generation_urls(text: str) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in re.findall(r"https?://[^\s'\"<>)]+", str(text or "")):
+        candidate = str(match).strip().rstrip(".,")
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        found.append(candidate)
+    return found
+
+
+def classify_new_script_network_intent(purpose: str, output_path: Path, explicit_endpoint: str = "") -> dict:
+    text = f"{purpose} {output_path.name} {output_path.stem}".strip()
+    lowered = text.lower()
+    urls = extract_generation_urls(text)
+    if explicit_endpoint:
+        urls = [explicit_endpoint, *[item for item in urls if item != explicit_endpoint]]
+    mentions_api = any(token in lowered for token in ["api", "json", "http", "https", "rest", "graphql", "endpoint"])
+    mentions_m3u8 = any(token in lowered for token in ["m3u8", "playlist", "hls", "segment", "variant", "extm3u"])
+    mentions_proxy = any(token in lowered for token in ["proxy", "auth", "header", "bearer", "cookie", "redirect"])
+    network_detected = bool(urls or mentions_api or mentions_m3u8 or mentions_proxy)
+    kind = "local"
+    confidence = "low"
+    reason = ""
+    endpoint = urls[0] if urls else explicit_endpoint
+    if endpoint.lower().endswith(".m3u8") or mentions_m3u8:
+        kind = "m3u8"
+        confidence = "high" if endpoint else "medium"
+        reason = "task mentions HLS/M3U8 playlist behavior"
+    elif endpoint or mentions_api:
+        kind = "api"
+        confidence = "high" if endpoint else "medium"
+        reason = "task mentions a live API or HTTP response shape"
+    elif mentions_proxy:
+        kind = "api"
+        confidence = "medium"
+        reason = "task mentions proxy/auth/header handling for outbound requests"
+    return {
+        "detected": network_detected,
+        "kind": kind,
+        "confidence": confidence,
+        "reason": reason,
+        "endpoint": endpoint,
+        "urls": urls,
+    }
+
+
+def summarize_generation_probe_findings(probe_result: dict | None) -> dict:
+    if not isinstance(probe_result, dict) or not probe_result:
+        return {"used": False, "summary": "", "details": [], "key_findings": []}
+    probe_type = str(probe_result.get("probe_type") or "auto")
+    details: list[str] = []
+    key_findings: list[str] = []
+    if probe_type == "m3u8_summary":
+        playlist_type = str(probe_result.get("playlist_type") or "unknown")
+        variant_count = int(probe_result.get("variant_count") or 0)
+        segment_sample_count = int(probe_result.get("segment_sample_count") or 0)
+        key_tags_present = bool(probe_result.get("key_tags_present"))
+        details.extend(
+            [
+                f"playlist_type={playlist_type}",
+                f"variant_count={variant_count}",
+                f"segment_sample_count={segment_sample_count}",
+                f"key_tags_present={format_bool(key_tags_present)}",
+            ]
+        )
+        if probe_result.get("relative_uri_mode"):
+            details.append(f"uri_mode={probe_result.get('relative_uri_mode')}")
+        if probe_result.get("sample_variant_uris"):
+            key_findings.append("sample_variants=" + ",".join(list(probe_result.get("sample_variant_uris") or [])[:2]))
+        if probe_result.get("sample_segment_uris"):
+            key_findings.append("sample_segments=" + ",".join(list(probe_result.get("sample_segment_uris") or [])[:2]))
+    else:
+        status_code = str(probe_result.get("status_code") or "")
+        content_type = str(probe_result.get("content_type") or "")
+        details.extend(
+            [
+                f"status_code={status_code or 'unknown'}",
+                f"content_type={content_type or 'unknown'}",
+                f"redirected={format_bool(bool(probe_result.get('redirected')))}",
+            ]
+        )
+        if probe_result.get("body_is_json"):
+            keys = list(probe_result.get("json_top_level_keys") or [])[:6]
+            key_findings.append("json_keys=" + ",".join(keys))
+        if probe_result.get("auth_failure_hint"):
+            key_findings.append(str(probe_result.get("auth_failure_hint")))
+    summary = str(probe_result.get("summary") or probe_result.get("error") or "")
+    if key_findings:
+        summary = (summary + "; " if summary else "") + "; ".join(key_findings[:3])
+    return {
+        "used": True,
+        "summary": summary,
+        "details": details,
+        "key_findings": key_findings,
+    }
+
+
+def infer_generation_structure(selection: dict, task_intent: dict, probe_summary: dict) -> dict:
+    applied = [item for item in selection.get("applied", []) if isinstance(item, dict)]
+    applied_types = {str(item.get("pattern_type") or "") for item in applied}
+    collection_patterns = [
+        item for item in applied
+        if str(item.get("import_scope") or "") in {"repo", "folder"}
+        or str(item.get("pattern_type") or "") in {"repo_structure", "shared_helper_structure", "naming_convention"}
+    ]
+    script_kind = str(task_intent.get("kind") or "local")
+    structure = ["main entrypoint", "argument parsing"]
+    if script_kind in {"api", "m3u8"}:
+        structure.extend(["request helper", "response parsing"])
+    if "logging_style" in applied_types:
+        structure.append("logging setup")
+    if "proxy_handling" in applied_types or task_intent.get("detected"):
+        structure.append("proxy-aware networking")
+    if "retry_backoff" in applied_types:
+        structure.append("retry loop")
+    if "shared_helper_structure" in {str(item.get("pattern_type") or "") for item in collection_patterns}:
+        structure.append("named helper functions")
+    if probe_summary.get("used"):
+        structure.append("probe-guided parsing")
+    return {
+        "script_kind": script_kind,
+        "applied_types": sorted(applied_types),
+        "collection_patterns": [str(item.get("pattern_type") or "") for item in collection_patterns],
+        "structure": structure,
+    }
+
+
+def score_new_script_generation_confidence(
+    selection: dict,
+    repo_selection: dict,
+    task_intent: dict,
+    probe_summary: dict,
+    validation_plan: dict | None = None,
+) -> tuple[str, list[str]]:
+    score = 0.0
+    reasons: list[str] = []
+    applied = [item for item in selection.get("applied", []) if isinstance(item, dict)]
+    trusted = [item for item in applied if str(item.get("trust_level") or "trusted") == "trusted"]
+    if trusted:
+        score += min(3.0, 1.0 + 0.75 * len(trusted))
+        reasons.append("trusted learned patterns matched the task")
+    elif applied:
+        score += 1.25
+        reasons.append("some learned patterns matched, but trust or relevance was weaker")
+    coverage = selection.get("coverage", {}) if isinstance(selection.get("coverage"), dict) else {}
+    if coverage.get("domain_coverage_ok") and coverage.get("domain_specific_patterns_applied"):
+        score += 1.5
+        reasons.append("domain-specific repo patterns matched the task")
+    elif str(repo_selection.get("selected") or "none") not in {"none", "default"} and not coverage.get("domain_coverage_ok", True):
+        score -= 1.0
+        reasons.append("selected repo had weak domain coverage for this task")
+    if probe_summary.get("used") and task_intent.get("detected"):
+        score += 2.0
+        reasons.append("live endpoint evidence reduced network ambiguity")
+    elif task_intent.get("detected") and not probe_summary.get("used"):
+        score -= 1.0
+        reasons.append("network behavior is inferred without live endpoint evidence")
+    if isinstance(validation_plan, dict) and validation_plan.get("primary_command"):
+        score += 1.5
+        reasons.append("a concrete validation plan was selected")
+        if validation_plan.get("limited_validation"):
+            score -= 0.5
+            reasons.append("validation plan is limited")
+    else:
+        score -= 1.0
+        reasons.append("no strong validation plan was available")
+    purpose = str(task_intent.get("purpose") or "")
+    if len(purpose.split()) < 3:
+        score -= 0.5
+        reasons.append("task description is brief and leaves some ambiguity")
+    if score >= 5.0:
+        return "high", reasons
+    if score >= 2.75:
+        return "medium", reasons
+    return "low", reasons
+
+
+def build_new_script_generation_plan(
+    repo: Path,
+    output_path: Path,
+    purpose: str,
+    selection: dict,
+    repo_selection: dict,
+    *,
+    probe_result: dict | None = None,
+) -> dict:
+    task_intent = classify_new_script_network_intent(purpose, output_path, explicit_endpoint=str((probe_result or {}).get("endpoint") or ""))
+    task_intent["purpose"] = purpose
+    probe_summary = summarize_generation_probe_findings(probe_result)
+    structure = infer_generation_structure(selection, task_intent, probe_summary)
+    selected_patterns = [
+        {
+            "pattern_type": str(item.get("pattern_type") or ""),
+            "trust_level": str(item.get("trust_level") or "trusted"),
+            "source_repo_path": str(item.get("source_repo_path") or ""),
+            "reason": "; ".join(list(item.get("reasons") or [])[:2]),
+        }
+        for item in selection.get("applied", [])
+        if isinstance(item, dict)
+    ]
+    validation_outline = (
+        "CLI help or import-based validation will be selected after rendering."
+        if structure.get("script_kind") == "local"
+        else "Generated networking code will be validated with syntax plus the safest available runtime or import check."
+    )
+    return {
+        "task_purpose": purpose,
+        "output_path": str(output_path),
+        "pattern_source_used": str(repo_selection.get("selected") or "none"),
+        "pattern_repo_reason": str(repo_selection.get("reason") or ""),
+        "task_intent": task_intent,
+        "selected_patterns": selected_patterns,
+        "probe_used": bool(probe_summary.get("used")),
+        "probe_summary": probe_summary,
+        "proposed_script_structure": structure.get("structure", []),
+        "script_kind": structure.get("script_kind", "local"),
+        "validation_outline": validation_outline,
+        "generation_confidence": "low",
+        "confidence_reasons": [],
+    }
+
+
+def finalize_new_script_generation_plan(plan: dict, validation_plan: dict, selection: dict | None = None, repo_selection: dict | None = None) -> dict:
+    finalized = dict(plan)
+    validation_summary = ""
+    if validation_plan.get("primary_command"):
+        validation_summary = str(validation_plan.get("primary_command") or "")
+    elif validation_plan.get("chosen_stack"):
+        validation_summary = ", ".join(
+            str(item.get("command") or "") for item in list(validation_plan.get("chosen_stack") or [])[:2] if item.get("command")
+        )
+    finalized["validation_plan"] = validation_summary or "no strong validation plan"
+    confidence, reasons = score_new_script_generation_confidence(
+        selection or {
+            "applied": list(finalized.get("selected_patterns") or []),
+            "coverage": {},
+        },
+        repo_selection or {"selected": finalized.get("pattern_source_used", "none")},
+        finalized.get("task_intent", {}),
+        finalized.get("probe_summary", {}),
+        validation_plan,
+    )
+    finalized["generation_confidence"] = confidence
+    finalized["confidence_reasons"] = reasons
+    return finalized
+
+
+def maybe_prepare_new_script_probe(
+    purpose: str,
+    output_path: Path,
+    *,
+    explicit_probe_result: dict | None = None,
+    explicit_probe_url: str = "",
+    explicit_probe_type: str = "auto",
+    probe_headers: dict[str, str] | None = None,
+    bearer_token: str = "",
+    cookies: str = "",
+    user_agent: str = "",
+    method: str = "",
+    http_proxy: str = "",
+    https_proxy: str = "",
+    timeout_seconds: int = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_PROBE_MAX_BYTES,
+    follow_up_limit: int = DEFAULT_PROBE_FOLLOW_UP_LIMIT,
+) -> dict:
+    if isinstance(explicit_probe_result, dict) and explicit_probe_result:
+        return explicit_probe_result
+    task_intent = classify_new_script_network_intent(purpose, output_path, explicit_endpoint=explicit_probe_url)
+    endpoint = str(explicit_probe_url or task_intent.get("endpoint") or "").strip()
+    if not task_intent.get("detected") or task_intent.get("confidence") != "high" or not endpoint:
+        return {}
+    probe_type = explicit_probe_type if explicit_probe_type and explicit_probe_type != "auto" else (
+        "m3u8_summary" if str(task_intent.get("kind") or "") == "m3u8" else "json_summary"
+    )
+    return probe_endpoint(
+        endpoint,
+        probe_type=probe_type,
+        method=method,
+        custom_headers=probe_headers or {},
+        bearer_token=bearer_token,
+        cookies=cookies,
+        user_agent=user_agent,
+        http_proxy=http_proxy,
+        https_proxy=https_proxy,
+        timeout_seconds=max(1, int(timeout_seconds or DEFAULT_PROBE_TIMEOUT_SECONDS)),
+        max_bytes=max(512, int(max_bytes or DEFAULT_PROBE_MAX_BYTES)),
+        follow_up_limit=max(0, int(follow_up_limit or DEFAULT_PROBE_FOLLOW_UP_LIMIT)),
+    )
+
+
+def render_new_script(repo: Path, output_path: Path, purpose: str, selection: dict, generation_plan: dict | None = None) -> dict:
     applied_types = {item.get("pattern_type", "") for item in selection.get("applied", [])}
+    generation_plan = generation_plan or {}
+    script_kind = str(generation_plan.get("script_kind") or "local")
+    probe_result = generation_plan.get("probe_result") if isinstance(generation_plan.get("probe_result"), dict) else {}
     cli_style = "argparse"
     for item in selection.get("applied", []):
         normalized = item.get("normalized_examples", {}) if isinstance(item.get("normalized_examples"), dict) else {}
@@ -6101,15 +8699,214 @@ def render_new_script(repo: Path, output_path: Path, purpose: str, selection: di
             cli_style = normalized["style"]
             break
     use_logging = "logging_style" in applied_types
+    use_proxy = "proxy_handling" in applied_types or script_kind in {"api", "m3u8"}
+    use_retry = "retry_backoff" in applied_types
     entrypoint = "main"
     if any(item.get("pattern_type") == "entrypoint" for item in selection.get("applied", [])):
         entrypoint = "main"
     docstring = purpose.strip() or f"Local utility generated for {output_path.stem}."
+    default_url = ""
+    if probe_result:
+        candidate = str(probe_result.get("final_url") or probe_result.get("endpoint") or "").strip()
+        safe_candidate, redacted = redact_probe_url(candidate)
+        default_url = "" if redacted else safe_candidate
+    elif generation_plan.get("task_intent", {}).get("endpoint"):
+        candidate = str(generation_plan.get("task_intent", {}).get("endpoint") or "")
+        safe_candidate, redacted = redact_probe_url(candidate)
+        default_url = "" if redacted else safe_candidate
+    key_names = list((probe_result or {}).get("json_top_level_keys") or [])[:6]
+    playlist_type = str((probe_result or {}).get("playlist_type") or "unknown")
+    variant_count = int((probe_result or {}).get("variant_count") or 0)
+    key_tags_present = bool((probe_result or {}).get("key_tags_present"))
+    target_duration = int((probe_result or {}).get("target_duration") or 0)
+    media_sequence = int((probe_result or {}).get("media_sequence") or 0)
+
+    if script_kind == "api":
+        lines = [f'""" {docstring} """'.replace('" ', '"').replace(' "', '"')]
+        imports = [
+            "import argparse",
+            "import json",
+            "import os",
+            "import urllib.error",
+            "import urllib.request",
+        ]
+        if use_logging:
+            imports.append("import logging")
+        lines.extend(imports)
+        lines.append("")
+        if default_url:
+            lines.append(f"DEFAULT_URL = {default_url!r}")
+        else:
+            lines.append("DEFAULT_URL = ''")
+        lines.append(f"PROBED_TOP_LEVEL_KEYS = {key_names!r}")
+        lines.append("")
+        lines.append("def configured_proxy_map() -> dict[str, str]:")
+        lines.append("    proxies: dict[str, str] = {}")
+        lines.append("    for key, scheme in [('HTTP_PROXY', 'http'), ('HTTPS_PROXY', 'https')]:")
+        lines.append("        value = os.getenv(key) or os.getenv(key.lower())")
+        lines.append("        if value:")
+        lines.append("            proxies[scheme] = value")
+        lines.append("    return proxies")
+        lines.append("")
+        lines.append("def build_headers(args: object) -> dict[str, str]:")
+        lines.append("    headers: dict[str, str] = {'Accept': 'application/json'}")
+        lines.append("    user_agent = getattr(args, 'user_agent', '')")
+        lines.append("    bearer_token = getattr(args, 'bearer_token', '')")
+        lines.append("    header_items = list(getattr(args, 'header', []) or [])")
+        lines.append("    if user_agent:")
+        lines.append("        headers['User-Agent'] = user_agent")
+        lines.append("    if bearer_token:")
+        lines.append("        headers['Authorization'] = f'Bearer {bearer_token}'")
+        lines.append("    for item in header_items:")
+        lines.append("        if ':' not in item:")
+        lines.append("            continue")
+        lines.append("        name, value = item.split(':', 1)")
+        lines.append("        headers[name.strip()] = value.strip()")
+        lines.append("    return headers")
+        lines.append("")
+        lines.append("def fetch_json(url: str, timeout: float, headers: dict[str, str], proxies: dict[str, str]) -> dict:")
+        lines.append("    opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))")
+        lines.append("    request = urllib.request.Request(url, headers=headers)")
+        lines.append("    with opener.open(request, timeout=timeout) as response:")
+        lines.append("        payload = response.read()")
+        lines.append("        final_url = response.geturl()")
+        lines.append("        status_code = getattr(response, 'status', response.getcode())")
+        lines.append("        content_type = response.headers.get_content_type()")
+        lines.append("        parsed = json.loads(payload.decode('utf-8', errors='replace'))")
+        lines.append("    return {")
+        lines.append("        'status_code': status_code,")
+        lines.append("        'final_url': final_url,")
+        lines.append("        'content_type': content_type,")
+        lines.append("        'top_level_keys': list(parsed.keys())[:10] if isinstance(parsed, dict) else [],")
+        lines.append("        'payload': parsed,")
+        lines.append("    }")
+        lines.append("")
+        lines.append(f"def {entrypoint}() -> int:")
+        lines.append("    parser = argparse.ArgumentParser()")
+        lines.append("    parser.add_argument('--url', default=DEFAULT_URL)")
+        lines.append("    parser.add_argument('--timeout', type=float, default=10.0)")
+        lines.append("    parser.add_argument('--user-agent', default='')")
+        lines.append("    parser.add_argument('--bearer-token', default='')")
+        lines.append("    parser.add_argument('--header', action='append', default=[])")
+        lines.append("    args = parser.parse_args()")
+        lines.append("    if not args.url:")
+        lines.append("        parser.error('Provide --url or generate the script with a concrete endpoint.')")
+        if use_logging:
+            lines.append("    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')")
+            lines.append("    logging.info('requesting %s', args.url)")
+        lines.append("    result = fetch_json(args.url, args.timeout, build_headers(args), configured_proxy_map())")
+        lines.append("    summary = {")
+        lines.append("        'status_code': result['status_code'],")
+        lines.append("        'final_url': result['final_url'],")
+        lines.append("        'content_type': result['content_type'],")
+        lines.append("        'top_level_keys': result['top_level_keys'],")
+        lines.append("        'probed_top_level_keys': PROBED_TOP_LEVEL_KEYS,")
+        lines.append("    }")
+        lines.append("    print(json.dumps(summary, indent=2, sort_keys=True))")
+        lines.append("    return 0")
+        lines.append("")
+        lines.append('if __name__ == "__main__":')
+        lines.append(f"    raise SystemExit({entrypoint}())")
+        content = "\n".join(lines) + "\n"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content)
+        return {
+            "path": str(output_path),
+            "content": content,
+            "selection": selection,
+            "script_kind": script_kind,
+        }
+
+    if script_kind == "m3u8":
+        lines = [f'""" {docstring} """'.replace('" ', '"').replace(' "', '"')]
+        imports = [
+            "import argparse",
+            "import json",
+            "import os",
+            "import urllib.request",
+            "from urllib.parse import urljoin",
+        ]
+        if use_logging:
+            imports.append("import logging")
+        lines.extend(imports)
+        lines.append("")
+        lines.append(f"DEFAULT_URL = {default_url!r}" if default_url else "DEFAULT_URL = ''")
+        lines.append(f"PROBED_PLAYLIST_TYPE = {playlist_type!r}")
+        lines.append(f"PROBED_VARIANT_COUNT = {variant_count}")
+        lines.append(f"PROBED_KEY_TAGS_PRESENT = {key_tags_present!r}")
+        lines.append(f"PROBED_TARGET_DURATION = {target_duration}")
+        lines.append(f"PROBED_MEDIA_SEQUENCE = {media_sequence}")
+        lines.append("")
+        lines.append("def configured_proxy_map() -> dict[str, str]:")
+        lines.append("    proxies: dict[str, str] = {}")
+        lines.append("    for key, scheme in [('HTTP_PROXY', 'http'), ('HTTPS_PROXY', 'https')]:")
+        lines.append("        value = os.getenv(key) or os.getenv(key.lower())")
+        lines.append("        if value:")
+        lines.append("            proxies[scheme] = value")
+        lines.append("    return proxies")
+        lines.append("")
+        lines.append("def fetch_text(url: str, timeout: float) -> str:")
+        lines.append("    opener = urllib.request.build_opener(urllib.request.ProxyHandler(configured_proxy_map()))")
+        lines.append("    with opener.open(url, timeout=timeout) as response:")
+        lines.append("        return response.read().decode('utf-8', errors='replace')")
+        lines.append("")
+        lines.append("def summarize_playlist(base_url: str, text: str) -> dict[str, object]:")
+        lines.append("    lines = [line.strip() for line in text.splitlines() if line.strip()]")
+        lines.append("    variant_uris = [lines[index + 1] for index, line in enumerate(lines[:-1]) if line.startswith('#EXT-X-STREAM-INF')]")
+        lines.append("    segment_uris = [line for line in lines if not line.startswith('#')]")
+        lines.append("    key_tags = [line for line in lines if line.startswith('#EXT-X-KEY')]")
+        lines.append("    playlist_type = 'master' if variant_uris else 'media'")
+        lines.append("    target_duration = next((int(line.split(':', 1)[1]) for line in lines if line.startswith('#EXT-X-TARGETDURATION:')), 0)")
+        lines.append("    media_sequence = next((int(line.split(':', 1)[1]) for line in lines if line.startswith('#EXT-X-MEDIA-SEQUENCE:')), 0)")
+        lines.append("    sample_variants = [urljoin(base_url, item) for item in variant_uris[:3]]")
+        lines.append("    sample_segments = [urljoin(base_url, item) for item in segment_uris[:3]]")
+        lines.append("    uri_mode = 'relative' if any(not item.startswith(('http://', 'https://')) for item in variant_uris[:1] + segment_uris[:1]) else 'absolute'")
+        lines.append("    return {")
+        lines.append("        'playlist_type': playlist_type,")
+        lines.append("        'variant_count': len(variant_uris),")
+        lines.append("        'segment_count': len(segment_uris),")
+        lines.append("        'sample_variant_uris': sample_variants,")
+        lines.append("        'sample_segment_uris': sample_segments,")
+        lines.append("        'key_tags_present': bool(key_tags),")
+        lines.append("        'target_duration': target_duration,")
+        lines.append("        'media_sequence': media_sequence,")
+        lines.append("        'uri_mode': uri_mode,")
+        lines.append("        'probed_playlist_type': PROBED_PLAYLIST_TYPE,")
+        lines.append("        'probed_variant_count': PROBED_VARIANT_COUNT,")
+        lines.append("        'probed_key_tags_present': PROBED_KEY_TAGS_PRESENT,")
+        lines.append("    }")
+        lines.append("")
+        lines.append(f"def {entrypoint}() -> int:")
+        lines.append("    parser = argparse.ArgumentParser()")
+        lines.append("    parser.add_argument('--url', default=DEFAULT_URL)")
+        lines.append("    parser.add_argument('--timeout', type=float, default=10.0)")
+        lines.append("    args = parser.parse_args()")
+        lines.append("    if not args.url:")
+        lines.append("        parser.error('Provide --url or generate the script with a concrete playlist endpoint.')")
+        if use_logging:
+            lines.append("    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')")
+            lines.append("    logging.info('fetching playlist %s', args.url)")
+        lines.append("    summary = summarize_playlist(args.url, fetch_text(args.url, args.timeout))")
+        lines.append("    print(json.dumps(summary, indent=2, sort_keys=True))")
+        lines.append("    return 0")
+        lines.append("")
+        lines.append('if __name__ == "__main__":')
+        lines.append(f"    raise SystemExit({entrypoint}())")
+        content = "\n".join(lines) + "\n"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content)
+        return {
+            "path": str(output_path),
+            "content": content,
+            "selection": selection,
+            "script_kind": script_kind,
+        }
+
     lines = [f'""" {docstring} """'.replace('" ', '"').replace(' "', '"')]
     imports = ["import argparse"]
     if "config_loading" in applied_types:
         imports.extend(["import json", "from pathlib import Path"])
-    if "proxy_handling" in applied_types:
+    if use_proxy:
         imports.append("import os")
     if use_logging:
         imports.append("import logging")
@@ -6122,7 +8919,7 @@ def render_new_script(repo: Path, output_path: Path, purpose: str, selection: di
         lines.append("        return {}")
         lines.append("    return json.loads(config_path.read_text())")
         lines.append("")
-    if "proxy_handling" in applied_types:
+    if use_proxy:
         lines.append("def configured_proxy() -> str:")
         lines.append("    return os.getenv('HTTP_PROXY') or os.getenv('http_proxy') or ''")
         lines.append("")
@@ -6154,10 +8951,12 @@ def render_new_script(repo: Path, output_path: Path, purpose: str, selection: di
         lines.append("    normalized = normalize_name(value)")
     lines.append("    if args.prefix:")
     lines.append("        normalized = normalize_name(args.prefix) + '-' + normalized")
-    if "proxy_handling" in applied_types:
+    if use_proxy:
         lines.append("    proxy_value = configured_proxy()")
         lines.append("    if proxy_value:")
         lines.append("        print(f'proxy={proxy_value}')")
+    if use_retry:
+        lines.append("    # Retry behavior can be added around external operations if this utility grows beyond local normalization.")
     lines.append("    print(normalized)")
     lines.append("    return 0")
     lines.append("")
@@ -6170,6 +8969,69 @@ def render_new_script(repo: Path, output_path: Path, purpose: str, selection: di
         "path": str(output_path),
         "content": content,
         "selection": selection,
+        "script_kind": script_kind,
+    }
+
+
+def prepare_new_script_generation(
+    repo: Path,
+    output_path: Path,
+    purpose: str,
+    selection: dict,
+    repo_selection: dict,
+    *,
+    probe_result: dict | None = None,
+    probe_url: str = "",
+    probe_type: str = "auto",
+    probe_headers: dict[str, str] | None = None,
+    probe_bearer_token: str = "",
+    probe_cookie: str = "",
+    probe_user_agent: str = "",
+    probe_method: str = "",
+    http_proxy: str = "",
+    https_proxy: str = "",
+    probe_timeout: int = DEFAULT_PROBE_TIMEOUT_SECONDS,
+    probe_max_bytes: int = DEFAULT_PROBE_MAX_BYTES,
+    probe_follow_up: int = DEFAULT_PROBE_FOLLOW_UP_LIMIT,
+) -> dict:
+    resolved_probe = maybe_prepare_new_script_probe(
+        purpose,
+        output_path,
+        explicit_probe_result=probe_result,
+        explicit_probe_url=probe_url,
+        explicit_probe_type=probe_type,
+        probe_headers=probe_headers,
+        bearer_token=probe_bearer_token,
+        cookies=probe_cookie,
+        user_agent=probe_user_agent,
+        method=probe_method,
+        http_proxy=http_proxy,
+        https_proxy=https_proxy,
+        timeout_seconds=probe_timeout,
+        max_bytes=probe_max_bytes,
+        follow_up_limit=probe_follow_up,
+    )
+    generation_plan = build_new_script_generation_plan(
+        repo,
+        output_path,
+        purpose,
+        selection,
+        repo_selection,
+        probe_result=resolved_probe,
+    )
+    generation_plan["probe_result"] = resolved_probe
+    rendered = render_new_script(repo, output_path, purpose, selection, generation_plan)
+    validation_plan = build_script_validation_plan(output_path.parent, output_path)
+    if resolved_probe:
+        validation_plan = apply_probe_findings_to_validation_plan(validation_plan, [resolved_probe])
+    chosen_plan = select_validation_stack(validation_plan, selection)
+    finalized_generation_plan = finalize_new_script_generation_plan(generation_plan, chosen_plan, selection, repo_selection)
+    return {
+        "rendered": rendered,
+        "generation_plan": finalized_generation_plan,
+        "validation_plan": validation_plan,
+        "chosen_validation_plan": chosen_plan,
+        "probe_result": resolved_probe,
     }
 
 
@@ -6914,6 +9776,1856 @@ def prompt_yes_no(question: str, default: bool = False) -> bool:
     return answer in {"y", "yes"}
 
 
+def interactive_prompt_text(question: str, default: str = "") -> str:
+    suffix = f" [Enter={default}] " if default else " "
+    while True:
+        try:
+            answer = input(question + suffix).strip()
+        except EOFError:
+            return default
+        if answer == "?":
+            print("help: enter a value or press Enter to accept the default")
+            continue
+        return answer or default
+
+
+def interactive_prompt_yes_no(question: str, default: bool = False) -> bool:
+    suffix = " [Enter=Y/n] " if default else " [y/Enter=N] "
+    while True:
+        try:
+            answer = input(question + suffix).strip().lower()
+        except EOFError:
+            return default
+        if answer == "?":
+            print("help: enter y or n, or press Enter to accept the default")
+            continue
+        if not answer:
+            return default
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("Invalid selection. Enter y, n, or ? for help.")
+
+
+def interactive_prompt_select(question: str, options: list[tuple[str, str]], default_key: str = "") -> str:
+    default_index = 1
+    for idx, (key, _) in enumerate(options, start=1):
+        if key == default_key:
+            default_index = idx
+            break
+    while True:
+        print(question)
+        for idx, (_, label) in enumerate(options, start=1):
+            marker = " [Enter]" if idx == default_index else ""
+            print(f"[{idx}] {label}{marker}")
+        choice = interactive_prompt_text("Select an option:", str(default_index))
+        if choice == "?":
+            print("help: enter the number or key for one option, or press Enter for the default")
+            continue
+        if choice in {"\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D"}:
+            return options[default_index - 1][0]
+        if choice.isdigit():
+            numeric = int(choice)
+            if 1 <= numeric <= len(options):
+                return options[numeric - 1][0]
+        for key, _label in options:
+            if choice == key:
+                return key
+        print("Invalid selection. Choose one of the listed numbers.")
+
+
+def build_interactive_common_args(session: dict, repo: str = "", include_proxy: bool = True, include_output: bool = False) -> list[str]:
+    args: list[str] = []
+    repo_value = str(repo or session.get("repo") or "").strip()
+    if repo_value:
+        args.extend(["--repo", repo_value])
+    if include_proxy:
+        if str(session.get("http_proxy") or "").strip():
+            args.extend(["--http-proxy", str(session["http_proxy"]).strip()])
+        if str(session.get("https_proxy") or "").strip():
+            args.extend(["--https-proxy", str(session["https_proxy"]).strip()])
+    output_value = str(session.get("output") or "human").strip()
+    if include_output and output_value and output_value != "human":
+        args.extend(["--output", output_value])
+    return args
+
+
+def format_interactive_cli_command(args: list[str]) -> str:
+    script_name = Path(__file__).name
+    return "python " + " ".join([shlex.quote(script_name), *[shlex.quote(item) for item in args]])
+
+
+def interactive_standard_scaffold_note() -> str:
+    return "This workflow is scaffolded and routed correctly; deeper prompts will be added next."
+
+
+def interactive_section(title: str) -> None:
+    print(f"\n=== {title.upper()} ===")
+
+
+def interactive_workflow_mode(session: dict) -> str:
+    mode = str(session.get("interaction_mode") or "guided").strip().lower()
+    return mode if mode in {"guided", "quick"} else "guided"
+
+
+def print_interactive_header(session: dict) -> None:
+    print("\n=== LOCAL FIX AGENT APP ===")
+    print(f"default_repo: {session.get('repo') or Path.cwd()}")
+    print(f"interaction_mode: {session.get('interaction_mode') or 'guided'}")
+    print("navigation: select a workflow, review the action, then choose run, back, or cancel")
+
+
+def interactive_next_step_prompt() -> str:
+    return interactive_prompt_select(
+        "Next step:",
+        [
+            ("run", "Run this action"),
+            ("back", "Back to main menu"),
+            ("cancel", "Cancel and exit interactive mode"),
+        ],
+        default_key="run",
+    )
+
+
+def interactive_workflow_registry() -> dict[str, dict]:
+    return {
+        "fix_validate": {
+            "label": "Fix or validate a script",
+            "description": "Fix one script and run validation, or validate a script without editing it.",
+            "handler": interactive_fix_validate_action,
+        },
+        "new_script": {
+            "label": "Create a new script",
+            "description": "Create a new script from learned patterns, optionally using live endpoint evidence when network truth matters.",
+            "handler": interactive_new_script_action,
+        },
+        "publish_current": {
+            "label": "Publish current repo state",
+            "description": "Safely publish the current repo state through the guarded finalizer path.",
+            "handler": interactive_publish_current_action,
+        },
+        "publish_validated": {
+            "label": "Publish last validated run",
+            "description": "Use this when a validated state already exists and you want the canonical finalizer flow.",
+            "handler": interactive_publish_validated_action,
+        },
+        "import_training": {
+            "label": "Import a script into training",
+            "description": "Sanitize, validate, and add a script to the private training repo.",
+            "handler": interactive_import_training_action,
+        },
+        "inspect_patterns": {
+            "label": "Inspect learned patterns",
+            "description": "Use this to review learned patterns or pattern sources without changing them.",
+            "handler": interactive_inspect_patterns_action,
+        },
+        "manage_patterns": {
+            "label": "Manage patterns",
+            "description": "Use this to promote, demote, or forget a pattern or source through the existing controls.",
+            "handler": interactive_manage_patterns_action,
+        },
+        "probe": {
+            "label": "Probe API / M3U8 endpoint",
+            "description": "Use this when endpoint truth matters for debugging or validation. It is only one workflow in the app.",
+            "handler": interactive_probe_action,
+        },
+        "sync_conflicts": {
+            "label": "Sync / repair repo conflicts",
+            "description": "Use this to inspect or repair merge-conflict states through the conflict-handling backend.",
+            "handler": interactive_sync_conflicts_action,
+        },
+        "settings": {
+            "label": "Settings / advanced options",
+            "description": "Use this to update session defaults such as repo path, proxy settings, and output mode.",
+            "handler": interactive_update_settings,
+        },
+        "exit": {
+            "label": "Exit",
+            "description": "Leave the interactive app.",
+            "handler": None,
+        },
+    }
+
+
+def print_interactive_action_summary(action: dict) -> None:
+    interactive_section("Confirmation summary")
+    print(f"workflow: {action.get('workflow') or '(unknown)'}")
+    if action.get("description"):
+        print(f"when_to_use: {action.get('description')}")
+    if action.get("scaffolded"):
+        print(f"status: {interactive_standard_scaffold_note()}")
+    for key, value in (action.get("inputs") or {}).items():
+        print(f"{key}: {value}")
+    for note in action.get("notes") or []:
+        print(f"note: {note}")
+    commands = action.get("commands") or []
+    if commands:
+        print("command_preview:")
+        for item in commands:
+            label = str(item.get("label") or "command")
+            compact_preview = str(item.get("compact_preview") or label)
+            print(f"- {compact_preview}")
+        print("equivalent_command:")
+        for item in commands:
+            label = str(item.get("label") or "command")
+            preview_command = str(item.get("preview_command") or "").strip()
+            if preview_command:
+                print(f"- {label}: {preview_command}")
+            else:
+                print(f"- {label}: {format_interactive_cli_command(item.get('args') or [])}")
+
+
+def run_interactive_backend_command(args: list[str]) -> dict:
+    run_command = [sys.executable, str(Path(__file__).resolve()), *args]
+    completed = subprocess.Popen(
+        run_command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    captured_lines: list[str] = []
+    assert completed.stdout is not None
+    for line in completed.stdout:
+        print(line, end="")
+        captured_lines.append(line)
+    return_code = completed.wait()
+    return {
+        "returncode": return_code,
+        "output": "".join(captured_lines),
+    }
+
+
+def interactive_extract_output_value(output: str, key: str) -> str:
+    prefix = f"{key}:"
+    value = ""
+    for line in output.splitlines():
+        if line.startswith(prefix):
+            value = line[len(prefix):].strip()
+    return value
+
+
+def interactive_preview_shell_command(args: list[str]) -> str:
+    return " ".join(shlex.quote(item) for item in args)
+
+
+def interactive_result_status(success: bool) -> str:
+    return "success" if success else "blocked"
+
+
+def interactive_print_result(
+    workflow: str,
+    *,
+    success: bool,
+    fields: list[tuple[str, str]],
+    what_happened: str,
+    blocked_reason: str = "",
+    next_step: str = "",
+) -> None:
+    interactive_section("Workflow result")
+    print(f"workflow: {workflow}")
+    print(f"status: {interactive_result_status(success)}")
+    for key, value in fields:
+        print(f"{key}: {value}")
+    if blocked_reason and not success:
+        print(f"blocked_reason: {blocked_reason}")
+    if next_step and not success:
+        print(f"next_step: {next_step}")
+    print(f"what_happened: {what_happened}")
+
+
+def interactive_handle_publish_blocked_followup(action: dict) -> str:
+    preflight = action.get("result_context", {}).get("preflight", {}) or {}
+    analyses = list(preflight.get("blocked_file_analysis") or [])
+    if not analyses:
+        return "continue"
+    while True:
+        choice = interactive_prompt_select(
+            "Publish is blocked by unstaged files. What next?",
+            [
+                ("show", "Show file analysis"),
+                ("stage_safe", "Stage safe files only"),
+                ("show_ignore", "Show ignore/remove suggestions"),
+                ("back", "Back to main menu"),
+                ("cancel", "Cancel"),
+            ],
+            default_key="show",
+        )
+        if choice == "show":
+            print("")
+            print_publish_block_analysis(analyses, preflight.get("blocked_analysis_summary") or {})
+            continue
+        if choice == "show_ignore":
+            print("=== SUGGESTED IGNORE / REMOVE ACTIONS ===")
+            for item in analyses:
+                if item.get("recommended_action") in {"remove generated artifact", "leave untracked / do not publish", "inspect manually before staging"}:
+                    print(f"- {item.get('path')}: {item.get('recommended_action')}")
+                    for command in item.get("recommended_commands") or []:
+                        print(f"  {command}")
+            continue
+        if choice == "stage_safe":
+            safe_paths = [str(item.get("path") or "") for item in analyses if item.get("recommended_action") == "stage and include in publish" and item.get("path")]
+            if not safe_paths:
+                print("No blocked files are safe stage candidates.")
+                continue
+            if not interactive_prompt_yes_no("Stage the safe publishable files now?", default=False):
+                continue
+            repo = Path(str(action.get("inputs", {}).get("repo") or Path.cwd())).expanduser()
+            code, output = run_subprocess(["git", "add", "--", *safe_paths], repo)
+            if code == 0:
+                print(f"staged_safe_files: {safe_paths}")
+            else:
+                print(f"stage_safe_files_failed: {output.strip() or 'git add failed'}")
+            continue
+        return choice
+
+
+def render_interactive_fix_validate_result(action: dict, executed: list[dict]) -> None:
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    return_code = next((int(item.get("returncode", 0)) for item in reversed(executed)), 0)
+    workflow_mode = str(action.get("inputs", {}).get("mode") or "fix_and_validate")
+    validation_result = interactive_extract_output_value(combined_output, "validation_result")
+    if not validation_result:
+        final_summary = interactive_extract_output_value(combined_output, "FINAL")
+        if return_code == 0:
+            validation_result = "success"
+        elif final_summary and "blocked" in final_summary.lower():
+            validation_result = "blocked"
+        else:
+            validation_result = "failed"
+    pattern_line = (
+        interactive_extract_output_value(combined_output, "learned patterns applied")
+        or interactive_extract_output_value(combined_output, "patterns applied")
+        or "(not reported)"
+    )
+    blocked_reason = interactive_extract_output_value(combined_output, "blocked_reason") or interactive_extract_output_value(combined_output, "reason")
+    final_summary = interactive_extract_output_value(combined_output, "FINAL")
+    validation_command_used = (
+        interactive_extract_output_value(combined_output, "validation_command")
+        or str(action.get("result_context", {}).get("validation_command_used") or "")
+        or str(action.get("inputs", {}).get("validation_choice") or "")
+    )
+    probing_used = "yes" if bool(action.get("result_context", {}).get("probe_planned")) else "no"
+    publish_status = ""
+    if final_summary and "publish" in final_summary.lower():
+        publish_status = final_summary
+    elif workflow_mode == "fix_and_validate":
+        publish_status = "(see backend output)"
+    plain_english = "The run completed."
+    if workflow_mode == "validate_only":
+        if validation_result == "success":
+            plain_english = "The script was validated successfully."
+        elif validation_result == "blocked":
+            plain_english = "The run blocked because the validation command failed."
+        else:
+            plain_english = "The script did not pass validation."
+    else:
+        if validation_result == "success":
+            plain_english = "The agent fixed issues, reran validation, and the script now passes."
+        elif validation_result == "blocked":
+            plain_english = "The run blocked because the validation command failed."
+        else:
+            plain_english = "The fix/validation run did not complete successfully."
+    if bool(action.get("result_context", {}).get("probe_planned")):
+        plain_english += " A network probe was used to inspect the endpoint before validation."
+    interactive_print_result(
+        action.get("workflow") or "Fix or validate a script",
+        success=validation_result == "success",
+        fields=[
+            ("script_path", action.get("inputs", {}).get("script_path") or "(unknown)"),
+            ("validation_result", validation_result),
+            ("validation_command_used", validation_command_used or "(auto)"),
+            ("patterns_applied", pattern_line),
+            ("probing_used", probing_used),
+            ("publish_or_finalization_status", publish_status or "(not reported)"),
+        ],
+        blocked_reason=blocked_reason if validation_result != "success" else "",
+        next_step="Check the validation command output above and rerun with a narrower target or a custom command." if validation_result != "success" else "",
+        what_happened=plain_english,
+    )
+
+
+def render_interactive_new_script_result(action: dict, executed: list[dict]) -> None:
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    return_code = next((int(item.get("returncode", 0)) for item in reversed(executed)), 0)
+    result_context = action.get("result_context", {}) or {}
+    script_generated = interactive_extract_output_value(combined_output, "script_generated") or "true"
+    output_path = interactive_extract_output_value(combined_output, "output_path") or str(action.get("inputs", {}).get("output_path") or "(unknown)")
+    pattern_source_used = interactive_extract_output_value(combined_output, "pattern_source_used") or str(action.get("inputs", {}).get("pattern_source") or "default")
+    patterns_applied = interactive_extract_output_value(combined_output, "patterns_applied") or "(not reported)"
+    probe_used = interactive_extract_output_value(combined_output, "probe_used") or ("yes" if action.get("result_context", {}).get("probe_planned") else "no")
+    key_probe_findings = interactive_extract_output_value(combined_output, "key_probe_findings") or "(none)"
+    validation_plan = interactive_extract_output_value(combined_output, "validation_plan") or "(not reported)"
+    generation_confidence = interactive_extract_output_value(combined_output, "generation_confidence") or "low"
+    validation_success = interactive_extract_output_value(combined_output, "validation_success")
+    validation_result = interactive_extract_output_value(combined_output, "validation_result") or ("success" if validation_success == "True" else ("blocked" if return_code != 0 else "success"))
+    script_kind = interactive_extract_output_value(combined_output, "script_kind") or "local"
+    repair_attempted = str(result_context.get("repair_attempted") or "false").lower() in {"true", "1", "yes"}
+    repair_result = str(result_context.get("repair_result") or "not_needed")
+    publish_result = interactive_extract_output_value(combined_output, "publish_result") or ("not_requested" if not result_context.get("publish_attempted") else "")
+    pr_url = interactive_extract_output_value(combined_output, "pr_url") or ""
+    success = return_code == 0 and validation_result in {"success", "skipped"}
+    blocked_reason = interactive_extract_output_value(combined_output, "validation_output") or interactive_extract_output_value(combined_output, "blocked_reason")
+    plain_english = "The new script was created locally and not published."
+    if validation_result == "success" and repair_attempted and repair_result == "success":
+        plain_english = "Generated the script, repaired validation issues, and the script now passes."
+    elif validation_result == "success" and script_kind == "api" and probe_used.lower() == "true":
+        plain_english = "Generated a network-aware script using live API probe results and validated it successfully."
+    elif validation_result == "success" and script_kind == "m3u8" and probe_used.lower() == "true":
+        plain_english = "Generated an HLS/M3U8 utility using playlist inspection and validated it successfully."
+    elif validation_result == "success":
+        plain_english = "Generated a new CLI script using trusted patterns and validated it successfully."
+    elif validation_result == "skipped":
+        plain_english = "The new script was created locally, but validation was skipped."
+    elif repair_attempted and repair_result != "success":
+        plain_english = "Script generation succeeded, but validation failed and the repair pass did not recover it."
+    else:
+        plain_english = "Script generation succeeded, but validation failed and the run was blocked."
+    if publish_result == "success":
+        if probe_used.lower() == "true":
+            plain_english = "Generated a network-aware script using live endpoint evidence and published it safely."
+        else:
+            plain_english = "Generated a new script, validated it, and published it safely."
+    elif result_context.get("publish_attempted") and publish_result and publish_result != "not_requested":
+        plain_english = "The new script was generated and validated, but publish was blocked."
+    next_step = ""
+    if not success and validation_result != "skipped":
+        next_step = "Review the validation failure above, rerun repair on the generated script, or regenerate with a clearer purpose or validation command."
+    if result_context.get("publish_attempted") and publish_result and publish_result != "success":
+        next_step = "Review the publish blocker above, fix it, then rerun the publish workflow for this repo."
+    interactive_print_result(
+        action.get("workflow") or "Create a new script",
+        success=success,
+        fields=[
+            ("script_generated", script_generated),
+            ("output_path", output_path),
+            ("generation_confidence", generation_confidence),
+            ("pattern_source_used", pattern_source_used),
+            ("patterns_applied", patterns_applied),
+            ("probe_used", probe_used),
+            ("key_probe_findings", key_probe_findings),
+            ("validation_result", validation_result),
+            ("validation_plan", validation_plan),
+            ("repair_attempted", format_bool(repair_attempted)),
+            ("repair_result", repair_result),
+            ("publish_result", publish_result or "not_requested"),
+            ("pr_url", pr_url or "(none)"),
+        ],
+        blocked_reason=blocked_reason if not success and validation_result != "skipped" else "",
+        next_step=next_step,
+        what_happened=plain_english,
+    )
+
+
+def interactive_default_new_script_output(repo: Path, purpose: str, domain_hint: str) -> str:
+    words = [token for token in re.findall(r"[a-z0-9]+", purpose.lower()) if token not in {"a", "an", "the", "and", "for", "with", "from", "into"}]
+    stem = "_".join(words[:4]) if words else "generated_tool"
+    if domain_hint in {"api", "m3u8", "proxy_auth"}:
+        prefix = "network"
+    elif domain_hint == "cli":
+        prefix = "cli"
+    else:
+        prefix = "generated"
+    return str((repo / "scripts" / f"{prefix}_{stem}.py").resolve())
+
+
+def interactive_new_script_pattern_source(session: dict, quick_mode: bool) -> tuple[str, list[str], str | None]:
+    if quick_mode:
+        return "auto", [], None
+    choice = interactive_prompt_select(
+        "Which pattern source should shape the new script?",
+        [
+            ("auto", "Auto (recommended)"),
+            ("default", "Default pattern repo"),
+            ("none", "None"),
+            ("specific", "Specific repo or path"),
+        ],
+        default_key="auto",
+    )
+    if choice == "default":
+        return "default", ["--pattern-repo", "default"], "default"
+    if choice == "none":
+        return "none", ["--pattern-repo", "none"], "none"
+    if choice == "specific":
+        value = interactive_prompt_text("Pattern repo name or path:")
+        return value or "specific", (["--pattern-repo", value] if value else []), value or None
+    return "auto", [], None
+
+
+def interactive_new_script_validation_choice(quick_mode: bool, output_path: Path) -> tuple[str, str, str]:
+    if quick_mode:
+        return "auto", "", "auto-detect"
+    choice = interactive_prompt_select(
+        "How should the new script be validated?",
+        [
+            ("auto", "Auto-detect (recommended)"),
+            ("syntax", "Syntax only"),
+            ("cli_help", "CLI help check"),
+            ("custom", "Enter custom command"),
+        ],
+        default_key="auto",
+    )
+    custom_command = ""
+    if choice == "custom":
+        custom_command = interactive_prompt_text("Custom validation command:")
+        return choice, custom_command, custom_command or "custom"
+    if choice == "cli_help":
+        return choice, "", f"python {output_path.name} --help"
+    if choice == "syntax":
+        return choice, "", f"python -m py_compile {output_path.name}"
+    return choice, "", "auto-detect"
+
+
+def interactive_plan_new_script_generation(
+    repo_path: Path,
+    purpose: str,
+    output_path: Path,
+    *,
+    pattern_repo_cli: str | None,
+    probe_planned: str,
+) -> tuple[dict, dict]:
+    config_values, _config_path = load_agent_config(None, repo_path)
+    repo_selection = select_pattern_repo(
+        config_values,
+        pattern_repo_cli,
+        "new-script",
+        purpose,
+        script_path=output_path,
+    )
+    selection, repo_selection = resolve_pattern_selection(
+        config_values,
+        repo_selection,
+        "new-script",
+        purpose,
+        script_path=output_path,
+    )
+    preview_plan = build_new_script_generation_plan(
+        repo_path,
+        output_path,
+        purpose,
+        selection,
+        repo_selection,
+        probe_result=None,
+    )
+    if probe_planned != "no":
+        preview_plan["probe_used"] = True
+        preview_plan["probe_summary"] = {"used": True, "summary": probe_planned, "details": [], "key_findings": []}
+    return selection, preview_plan
+
+
+def interactive_new_script_failure_handler(action: dict, executed: list[dict], failure: dict, run_item) -> dict:
+    result_context = action.setdefault("result_context", {})
+    if not result_context.get("repair_allowed"):
+        result_context["repair_attempted"] = False
+        result_context["repair_result"] = "not_allowed"
+        return {"recovered": False, "returncode": int(failure.get("returncode", 1))}
+    if not bool(action.get("inputs", {}).get("output_path")):
+        result_context["repair_attempted"] = False
+        result_context["repair_result"] = "not_possible"
+        return {"recovered": False, "returncode": int(failure.get("returncode", 1))}
+    failure_output = str(failure.get("output") or "")
+    if "script_generated: true" not in failure_output and not Path(str(action.get("inputs", {}).get("output_path") or "")).exists():
+        result_context["repair_attempted"] = False
+        result_context["repair_result"] = "not_possible"
+        return {"recovered": False, "returncode": int(failure.get("returncode", 1))}
+    repair_command = dict(result_context.get("repair_command") or {})
+    if not repair_command:
+        result_context["repair_attempted"] = False
+        result_context["repair_result"] = "not_configured"
+        return {"recovered": False, "returncode": int(failure.get("returncode", 1))}
+    result_context["repair_attempted"] = True
+    repair_result = run_item(repair_command)
+    if repair_result.get("returncode") == 0:
+        result_context["repair_result"] = "success"
+        return {"recovered": True, "executed": [repair_result]}
+    result_context["repair_result"] = "failed"
+    return {"recovered": False, "executed": [repair_result], "returncode": int(repair_result.get("returncode", 1))}
+
+
+def interactive_new_script_post_success_handler(action: dict, executed: list[dict], run_item) -> dict:
+    result_context = action.setdefault("result_context", {})
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    validation_result = interactive_extract_output_value(combined_output, "validation_result") or ("success" if interactive_extract_output_value(combined_output, "validation_success") == "True" else "")
+    if validation_result != "success":
+        result_context["publish_attempted"] = False
+        return {"returncode": 0}
+    if not interactive_prompt_yes_no("Publish this new script now?", default=False):
+        result_context["publish_attempted"] = False
+        return {"returncode": 0}
+    publish_command = dict(result_context.get("publish_command") or {})
+    if not publish_command:
+        result_context["publish_attempted"] = False
+        return {"returncode": 0}
+    result_context["publish_attempted"] = True
+    publish_result = run_item(publish_command)
+    return {"executed": [publish_result], "returncode": int(publish_result.get("returncode", 0))}
+
+
+def interactive_new_script_action(session: dict) -> dict:
+    session_mode = interactive_workflow_mode(session)
+    workflow_mode = interactive_prompt_select(
+        "Run this workflow in which mode?",
+        [("guided", "Guided (recommended)"), ("quick", "Quick")],
+        default_key=session_mode,
+    )
+    quick_mode = workflow_mode == "quick"
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    repo_path = Path(repo).expanduser()
+    purpose = interactive_prompt_text("What should the new script do?")
+    domain_choice = "auto"
+    if not quick_mode:
+        domain_choice = interactive_prompt_select(
+            "Which script domain best fits?",
+            [
+                ("auto", "Auto-detect (recommended)"),
+                ("local", "Local utility"),
+                ("cli", "CLI tool"),
+                ("api", "API client"),
+                ("m3u8", "M3U8 / HLS utility"),
+                ("proxy_auth", "Proxy/auth utility"),
+                ("parser", "Parser / transformer"),
+                ("other", "Other"),
+            ],
+            default_key="auto",
+        )
+    output_default = interactive_default_new_script_output(repo_path, purpose, domain_choice) if purpose else str((repo_path / "scripts" / "generated_tool.py").resolve())
+    output_path = interactive_prompt_text("Output path:", output_default)
+    resolved_output = Path(output_path).expanduser()
+    if not resolved_output.is_absolute():
+        resolved_output = (repo_path / resolved_output).resolve()
+    output_display = relative_script_path(repo_path, resolved_output) if str(resolved_output).startswith(str(repo_path)) else str(resolved_output)
+    pattern_source, pattern_args, pattern_repo_cli = interactive_new_script_pattern_source(session, quick_mode)
+    intent = classify_new_script_network_intent(purpose, resolved_output)
+    effective_kind = str(intent.get("kind") or "local")
+    if domain_choice == "api":
+        effective_kind = "api"
+    elif domain_choice == "m3u8":
+        effective_kind = "m3u8"
+    elif domain_choice == "proxy_auth":
+        effective_kind = "api"
+    elif domain_choice in {"local", "cli", "parser", "other"}:
+        effective_kind = "local"
+    should_offer_probe = effective_kind in {"api", "m3u8"} or (domain_choice == "proxy_auth") or bool(intent.get("detected"))
+    probe_planned = "no"
+    probe_endpoint = ""
+    use_proxy = False
+    include_headers = False
+    probe_type = "auto"
+    if should_offer_probe and interactive_prompt_yes_no("This script appears network-dependent. Probe first?", default=bool(intent.get("confidence") == "high" and not quick_mode)):
+        endpoint_type = interactive_prompt_select(
+            "Endpoint type:",
+            [("api", "API"), ("m3u8", "M3U8")],
+            default_key="m3u8" if effective_kind == "m3u8" else "api",
+        )
+        probe_endpoint = interactive_prompt_text("Endpoint / URL:", str(intent.get("endpoint") or ""))
+        use_proxy = interactive_prompt_yes_no(
+            "Use proxy settings for this probe?",
+            default=bool(session.get("http_proxy") or session.get("https_proxy")),
+        )
+        include_headers = interactive_prompt_yes_no("Include headers/auth from the request context when relevant?", default=False)
+        probe_type = "m3u8_summary" if endpoint_type == "m3u8" else "json_summary"
+        probe_planned = f"yes ({endpoint_type} -> {probe_endpoint})"
+    validation_choice, custom_validation_command, validation_display = interactive_new_script_validation_choice(quick_mode, resolved_output)
+    allow_repair = True
+    allow_publish_offer = True
+    advanced_notes: list[str] = []
+    if not quick_mode and interactive_prompt_yes_no("Show advanced options?", default=False):
+        allow_repair = interactive_prompt_yes_no("Allow automatic repair if generation validation fails?", default=True)
+        allow_publish_offer = interactive_prompt_yes_no("Offer publish after a successful generation?", default=True)
+        if interactive_prompt_yes_no("Skip validation after generation?", default=False):
+            validation_choice = "skip"
+            validation_display = "skip validation"
+            custom_validation_command = ""
+        if not pattern_repo_cli and pattern_source != "specific" and interactive_prompt_yes_no("Override pattern repo explicitly?", default=False):
+            override_repo = interactive_prompt_text("Pattern repo name or path:")
+            if override_repo:
+                pattern_source = override_repo
+                pattern_repo_cli = override_repo
+                pattern_args = ["--pattern-repo", override_repo]
+        advanced_notes.append(f"repair_on_failure: {format_bool(allow_repair)}")
+    selection, preview_plan = interactive_plan_new_script_generation(
+        repo_path,
+        purpose,
+        resolved_output,
+        pattern_repo_cli=pattern_repo_cli,
+        probe_planned=probe_planned,
+    )
+    likely_patterns = [str(item.get("pattern_type") or "") for item in list(selection.get("applied") or [])[:4] if item.get("pattern_type")]
+    expected_structure = list(preview_plan.get("proposed_script_structure") or [])
+    generate_command = build_interactive_common_args(session, repo=repo, include_proxy=use_proxy, include_output=True)
+    generate_command.extend(pattern_args)
+    generate_command.extend(["--new-script", output_display, "--new-script-purpose", purpose])
+    if validation_choice != "auto":
+        generate_command.extend(["--new-script-validation-mode", validation_choice])
+    if custom_validation_command:
+        generate_command.extend(["--test-cmd", custom_validation_command])
+    if probe_endpoint:
+        generate_command.extend(["--probe-url", probe_endpoint, "--probe-type", probe_type])
+    repair_command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+    repair_command.extend(["--script", output_display, "--no-finalize"])
+    repair_command.extend(pattern_args)
+    if validation_choice == "custom" and custom_validation_command:
+        repair_command.extend(["--test-cmd", custom_validation_command])
+    elif validation_choice == "cli_help":
+        repair_command.extend(["--test-cmd", f"python {output_display} --help"])
+    elif validation_choice == "syntax":
+        repair_command.extend(["--test-cmd", f"python -m py_compile {output_display}"])
+    publish_command = {
+        "label": "publish new script",
+        "compact_preview": "Publish the new script through the guarded finalizer",
+        "preview_command": "fixpublish",
+        "run_command": ["./scripts/fixpublish.sh"],
+        "cwd": str(repo_path),
+    }
+    notes = [
+        f"generation_plan: {preview_plan.get('task_purpose') or purpose}",
+        "patterns_likely_to_be_applied: " + (str(likely_patterns) if likely_patterns else "[]"),
+        "expected_script_structure: " + (str(expected_structure) if expected_structure else "['main entrypoint']"),
+        f"planned_validation_method: {validation_display}",
+    ]
+    if probe_planned != "no":
+        notes.append(f"probe_plan: {probe_planned}")
+    elif intent.get("detected"):
+        notes.append(f"network_detection: {intent.get('reason')}")
+    notes.extend(advanced_notes)
+    return {
+        "workflow": "Create a new script",
+        "description": "Use this to turn a script idea into generated code, validation, and an optional safe publish handoff.",
+        "inputs": {
+            "repo": repo,
+            "purpose": purpose,
+            "output_path": output_display,
+            "script_domain": domain_choice,
+            "pattern_source": pattern_source,
+            "probe_planned": probe_planned,
+            "validation_plan": validation_display,
+            "workflow_mode": workflow_mode,
+        },
+        "notes": notes,
+        "commands": [
+            {
+                "label": "create script",
+                "compact_preview": "Generate the new script and run the selected validation plan",
+                "args": generate_command,
+            }
+        ],
+        "result_renderer": render_interactive_new_script_result,
+        "failure_handler": interactive_new_script_failure_handler,
+        "post_success_handler": interactive_new_script_post_success_handler if allow_publish_offer else None,
+        "result_context": {
+            "probe_planned": probe_planned != "no",
+            "repair_allowed": allow_repair and validation_choice != "skip",
+            "repair_attempted": False,
+            "repair_result": "not_needed",
+            "publish_attempted": False,
+            "repair_command": {
+                "label": "repair generated script",
+                "compact_preview": "Repair and revalidate the generated script",
+                "args": repair_command,
+            },
+            "publish_command": publish_command,
+        },
+    }
+
+
+def interactive_publish_preflight_state(
+    repo: Path,
+    *,
+    auto_stage_safe_files: bool,
+    auto_remediate_blockers: bool,
+    run_validation_if_needed: str,
+    force_publish: bool,
+) -> dict:
+    branch = current_git_branch(repo)
+    changes = classify_publishable_changes(repo)
+    working_tree = classify_publish_working_tree(repo)
+    audit = normalize_publish_working_tree_audit(
+        repo,
+        working_tree,
+        list(changes.get("meaningful_paths") or []),
+        publish_current_mode=True,
+    )
+    decisions, summary, remaining_unstaged, overall_reason = build_publish_file_decisions(
+        list(audit.get("entries") or []),
+        expected_paths=list(changes.get("meaningful_paths") or []),
+        staged_paths=audit.get("staged_paths") or [],
+        remaining_paths=audit.get("remaining_paths") or [],
+    )
+    decision_sets = summarize_publish_decision_sets(decisions, remaining_unstaged)
+    unresolved_for_analysis = [
+        item
+        for item in remaining_unstaged
+        if item.get("path") in set(decision_sets.get("safe_stage_candidate_paths") or [])
+        or item.get("path") in {str(entry.get("path") or "") for entry in (decision_sets.get("true_blockers") or [])}
+    ]
+    blocker_policy = load_publish_blocker_policy(repo, auto_remediate=auto_remediate_blockers)
+    blocked_file_analysis = [
+        {**item, **classify_publish_blocker_remediation(repo, item, blocker_policy)}
+        for item in analyze_publish_blockers(repo, unresolved_for_analysis)
+    ]
+    blocked_analysis_summary = summarize_publish_block_analysis(blocked_file_analysis)
+    blocked_analysis_summary["safe_staged_paths"] = list(decision_sets.get("safe_staged_paths") or [])
+    blocked_analysis_summary["ignored_nonblocking_paths"] = list(decision_sets.get("ignored_nonblocking_paths") or [])
+    blocked_analysis_summary["true_blockers"] = list(decision_sets.get("true_blockers") or [])
+    blocked_analysis_summary["blocker_count"] = int(decision_sets.get("blocker_count") or 0)
+    blocked_analysis_summary["publishable_ready"] = bool(decision_sets.get("publishable_ready"))
+    validation_state = resolve_publish_validation_state(repo)
+    remembered_validation_command = latest_repo_validation_command(repo)
+    safe_paths = list(decision_sets.get("safe_stage_candidate_paths") or [])
+    blocked_paths = [str(item.get("path") or "") for item in (decision_sets.get("true_blockers") or [])]
+    auto_resolvable_blockers = [
+        str(item.get("path") or "")
+        for item in blocked_file_analysis
+        if str(item.get("remediation_class") or "") == "auto_resolvable_safe"
+    ]
+    unresolved_blockers_after_remediation = [
+        str(item.get("path") or "")
+        for item in blocked_file_analysis
+        if str(item.get("remediation_class") or "") != "auto_resolvable_safe"
+    ]
+    revalidation_planned = bool(
+        run_validation_if_needed == "auto"
+        and str(validation_state.get("validation_result") or "blocked") != "success"
+        and remembered_validation_command
+    )
+    would_block = False
+    would_block_reason = ""
+    if not changes.get("meaningful_changes_detected"):
+        would_block = False
+        would_block_reason = "no meaningful changes detected"
+    elif not auto_stage_safe_files and audit.get("remaining_paths"):
+        would_block = True
+        would_block_reason = (
+            "safe publishable files still need manual staging because automatic staging is disabled"
+            if safe_paths and not blocked_paths
+            else "publishable or ambiguous files remain unstaged and automatic staging is disabled"
+        )
+    elif auto_stage_safe_files and blocked_paths and unresolved_blockers_after_remediation:
+        would_block = True
+        would_block_reason = "one or more unsafe or ambiguous files would still require manual review"
+    elif (
+        str(validation_state.get("validation_result") or "blocked") != "success"
+        and not force_publish
+        and run_validation_if_needed == "skip"
+    ):
+        would_block = True
+        would_block_reason = "validation does not match the current repo state and revalidation was skipped"
+    elif (
+        str(validation_state.get("validation_result") or "blocked") != "success"
+        and not force_publish
+        and run_validation_if_needed == "auto"
+        and not remembered_validation_command
+    ):
+        would_block = True
+        would_block_reason = "validation is stale or missing and no remembered validation command is available for revalidation"
+    staging_plan = "all publishable changes already staged"
+    if audit.get("remaining_paths"):
+        if auto_stage_safe_files:
+            staging_plan = (
+                f"auto-stage {len(safe_paths)} safe path(s)"
+                + (f"; auto-resolve {len(auto_resolvable_blockers)} safe blocker(s)" if auto_resolvable_blockers and auto_remediate_blockers else "")
+                + (f"; manual review required for {len(unresolved_blockers_after_remediation)} unsafe path(s)" if unresolved_blockers_after_remediation else "")
+            )
+        else:
+            staging_plan = "manual staging required for remaining publishable files"
+    return {
+        "repo": str(repo),
+        "branch": branch,
+        "changes": changes,
+        "working_tree": working_tree,
+        "audit": audit,
+        "file_decisions": decisions,
+        "staging_summary": summary,
+        "remaining_unstaged": remaining_unstaged,
+        "safe_staged_paths": decision_sets.get("safe_staged_paths") or [],
+        "ignored_nonblocking_paths": decision_sets.get("ignored_nonblocking_paths") or [],
+        "safe_stage_candidate_paths": decision_sets.get("safe_stage_candidate_paths") or [],
+        "true_blockers": decision_sets.get("true_blockers") or [],
+        "blocker_count": int(decision_sets.get("blocker_count") or 0),
+        "publishable_ready": bool(decision_sets.get("publishable_ready")),
+        "auto_remediate_blockers": auto_remediate_blockers,
+        "auto_resolvable_blockers": auto_resolvable_blockers,
+        "unresolved_blockers_after_remediation": unresolved_blockers_after_remediation,
+        "blocked_file_analysis": blocked_file_analysis,
+        "blocked_analysis_summary": blocked_analysis_summary,
+        "staging_decision_reason": overall_reason,
+        "validation_state": validation_state,
+        "validation_record_exists": bool(validation_state.get("last_validated_commit")),
+        "validation_commit_match": bool(validation_state.get("validation_commit_match")),
+        "revalidation_planned": revalidation_planned,
+        "remembered_validation_command": remembered_validation_command,
+        "would_block": would_block,
+        "would_block_reason": would_block_reason,
+        "staging_plan": staging_plan,
+        "preflight": build_publish_preflight(repo, branch),
+    }
+
+
+def render_interactive_publish_result(action: dict, executed: list[dict]) -> None:
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    preflight = action.get("result_context", {}).get("preflight", {}) or {}
+    validation_result = interactive_extract_output_value(combined_output, "validation_result") or "blocked"
+    publish_triggered = interactive_extract_output_value(combined_output, "publish_triggered") or "false"
+    publish_result = (
+        interactive_extract_output_value(combined_output, "publish_result")
+        or interactive_extract_output_value(combined_output, "final_status")
+        or interactive_extract_output_value(combined_output, "final_workflow_result")
+        or "failed"
+    )
+    pr_url = interactive_extract_output_value(combined_output, "pr_url") or "(none)"
+    branch_used = interactive_extract_output_value(combined_output, "branch") or str(action.get("result_context", {}).get("preflight", {}).get("branch") or "(none)")
+    mergeability = interactive_extract_output_value(combined_output, "pr_mergeable_final") or interactive_extract_output_value(combined_output, "pr_mergeable") or "unknown"
+    blocked_reason = (
+        interactive_extract_output_value(combined_output, "blocked_reason")
+        or interactive_extract_output_value(combined_output, "publish_detail_reason")
+        or interactive_extract_output_value(combined_output, "staging_reason")
+        or interactive_extract_output_value(combined_output, "reason")
+    )
+    blocker_remediation_result = interactive_extract_output_value(combined_output, "blocker_remediation_result") or "not_needed"
+    auto_removed_paths = interactive_extract_output_value(combined_output, "auto_removed_paths") or "[]"
+    auto_revalidation_result = interactive_extract_output_value(combined_output, "auto_revalidation_result")
+    plain_english = "The publish workflow completed."
+    if publish_result == "success" and blocker_remediation_result == "success" and auto_removed_paths not in {"", "[]"}:
+        plain_english = "Removed safe temporary artifact blockers and continued publish."
+    elif publish_result == "success":
+        plain_english = "Changes were validated and published successfully."
+    elif publish_result == "blocked" and "unstaged" in blocked_reason.lower():
+        plain_english = "Publish blocked due to unstaged files."
+    elif auto_revalidation_result in {"success", "failed", "blocked"} and preflight.get("validation_commit_match") is False:
+        plain_english = "Publish required revalidation due to commit mismatch."
+    elif publish_result == "noop":
+        plain_english = "No meaningful changes detected; nothing was published."
+    elif publish_result == "blocked":
+        plain_english = "Publish blocked before changes could be pushed."
+    next_step = ""
+    if publish_result == "blocked":
+        blocked_summary = preflight.get("blocked_analysis_summary") or {}
+        next_step = str(blocked_summary.get("primary_next_step") or "")
+        if not next_step and blocked_reason:
+            next_step = "Review the blocker above, fix it, then rerun publish."
+    interactive_print_result(
+        action.get("workflow") or "Publish current repo state",
+        success=publish_result == "success",
+        fields=[
+            ("validation_result", validation_result),
+            ("publish_triggered", publish_triggered),
+            ("publish_result", publish_result),
+            ("blocker_remediation_result", blocker_remediation_result),
+            ("auto_removed_paths", auto_removed_paths),
+            ("pr_url", pr_url),
+            ("branch_used", branch_used),
+            ("mergeability_result", mergeability),
+        ],
+        blocked_reason=blocked_reason if publish_result != "success" else "",
+        next_step=next_step,
+        what_happened=plain_english,
+    )
+    if publish_result == "blocked" and preflight.get("blocked_file_analysis"):
+        print("")
+        print_publish_block_analysis(
+            preflight.get("blocked_file_analysis") or [],
+            preflight.get("blocked_analysis_summary") or {},
+        )
+
+
+def interactive_select_training_repo(session: dict) -> tuple[str, Path, list[str]]:
+    choice = interactive_prompt_select(
+        "Training repo:",
+        [
+            ("default", "Auto/default"),
+            ("existing", "Choose existing repo"),
+            ("create", "Create new repo"),
+        ],
+        default_key="default",
+    )
+    if choice == "default":
+        return "default", default_pattern_repo_path(), ["--pattern-repo", "default"]
+    selected = interactive_prompt_text("Pattern repo name or path:")
+    target_path = normalize_pattern_repo_path(selected) if selected else default_pattern_repo_path()
+    return selected or choice, target_path, ["--pattern-repo", str(target_path)]
+
+
+def confidence_label_from_score(score: float) -> str:
+    if score >= 0.85:
+        return "high"
+    if score >= 0.7:
+        return "medium"
+    return "low"
+
+
+def interactive_prepare_training_import(
+    *,
+    source_value: str,
+    source_type: str,
+    target_repo: Path,
+    requested_trust: str,
+    sanitize_before_import: bool,
+    validate_before_promote: bool,
+    allow_auto_fix: bool,
+    pattern_tags: list[str],
+    pattern_type_hint: str,
+) -> dict:
+    fetched = fetch_pattern_source(source_value, Path.cwd())
+    result = {
+        "ok": bool(fetched.get("ok")),
+        "source_type": fetched.get("source_type", source_type),
+        "source_origin": str(fetched.get("source_origin") or source_value),
+        "acquisition_method": str(fetched.get("acquisition_method") or "direct"),
+        "proxy_used": bool(fetched.get("proxy_used")),
+        "blocked_reason": str(fetched.get("blocked_reason") or ""),
+        "sanitized_changed": False,
+        "sanitization_applied": False,
+        "validation_result": "not_run",
+        "validation_passed": False,
+        "validation_command": "",
+        "repair_attempted": False,
+        "repair_result": "not_needed",
+        "repair_output": "",
+        "pattern_type": pattern_type_hint or "",
+        "applicability_context": [],
+        "confidence_score": 0.0,
+        "confidence_level": "low",
+        "recommended_trust": requested_trust,
+        "safe_for_trusted": False,
+        "warnings": [],
+    }
+    if not fetched.get("ok"):
+        return result
+    raw_content = str(fetched.get("content") or "")
+    sanitized_content = raw_content
+    changed = False
+    if sanitize_before_import:
+        sanitized_content, changed = sanitize_pattern_script_content(raw_content)
+    result["sanitized_changed"] = changed
+    result["sanitization_applied"] = sanitize_before_import
+    if changed:
+        result["warnings"].append("sanitization removed or redacted sensitive content")
+    with tempfile.TemporaryDirectory(prefix="lfa-import-preview-") as tmpdir:
+        preview_repo = Path(tmpdir)
+        candidate_path = preview_repo / (Path(parse_pattern_import_source(source_value).get("display_name") or "script.py").name or "script.py")
+        candidate_path.write_text(sanitized_content)
+        extracted = extract_script_patterns_with_metadata(
+            preview_repo,
+            candidate_path,
+            {
+                "source_origin": result["source_origin"],
+                "source_type": result["source_type"],
+                "tags": list(pattern_tags or []),
+                "trust_level": requested_trust,
+            },
+        )
+        if extracted:
+            top = max(extracted, key=lambda item: float(item.get("confidence", 0) or 0))
+            result["pattern_type"] = pattern_type_hint or str(top.get("pattern_type") or top.get("family") or "")
+            result["applicability_context"] = list(top.get("applicability_context") or [])
+            result["confidence_score"] = float(top.get("confidence", 0) or 0)
+            result["confidence_level"] = confidence_label_from_score(result["confidence_score"])
+        else:
+            result["pattern_type"] = pattern_type_hint or "unknown"
+            result["confidence_level"] = "low"
+            result["warnings"].append("pattern classification confidence is low")
+        if validate_before_promote:
+            validation = run_candidate_validation(preview_repo, candidate_path)
+            result["validation_passed"] = bool(validation.get("passed"))
+            result["validation_result"] = "success" if validation.get("passed") else "blocked"
+            result["validation_command"] = str(validation.get("validation_command") or "")
+            limited = bool(validation.get("limited_validation"))
+            if not validation.get("passed") and allow_auto_fix:
+                repair = repair_training_candidate(preview_repo, candidate_path)
+                result["repair_attempted"] = True
+                result["repair_output"] = str(repair.get("output") or "")
+                if repair.get("ok"):
+                    validation = run_candidate_validation(preview_repo, candidate_path)
+                    result["validation_passed"] = bool(validation.get("passed"))
+                    result["validation_result"] = "success" if validation.get("passed") else "blocked"
+                    result["validation_command"] = str(validation.get("validation_command") or "")
+                    limited = bool(validation.get("limited_validation"))
+                    result["repair_result"] = "success" if validation.get("passed") else "failed"
+                else:
+                    result["repair_result"] = "failed"
+            elif not validation.get("passed"):
+                result["repair_result"] = "skipped"
+            result["safe_for_trusted"] = bool(result["validation_passed"]) and not limited and result["confidence_level"] != "low"
+        else:
+            result["validation_result"] = "skipped"
+            result["warnings"].append("validation was skipped before promotion")
+        if result["confidence_level"] == "low":
+            result["recommended_trust"] = "experimental"
+            result["warnings"].append("low confidence suggests experimental trust")
+        elif not result["safe_for_trusted"] and requested_trust == "trusted":
+            result["recommended_trust"] = "experimental"
+    return result
+
+
+def render_interactive_import_training_result(action: dict, executed: list[dict]) -> None:
+    combined_output = "\n".join(str(item.get("output") or "") for item in executed)
+    result_context = action.get("result_context", {}) or {}
+    trust_level = str(result_context.get("final_trust") or action.get("inputs", {}).get("trust_level") or "trusted")
+    import_success = next((int(item.get("returncode", 0)) == 0 for item in reversed(executed)), False)
+    target_repo = interactive_extract_output_value(combined_output, "training_repo") or interactive_extract_output_value(combined_output, "pattern_repo") or str(action.get("inputs", {}).get("target_repo") or "")
+    learned_delta = interactive_extract_output_value(combined_output, "learned_pattern_delta") or "0"
+    warnings = list(result_context.get("warnings") or [])
+    validated = "validated=true" in combined_output or "validated=True" in combined_output
+    repaired = "repaired=true" in combined_output or "repaired=True" in combined_output
+    promoted = "promoted_to_training=true" in combined_output or "promoted_to_training=True" in combined_output
+    blocked_reason = interactive_extract_output_value(combined_output, "blocked_reason")
+    validation_result = str(result_context.get("validation_result") or action.get("inputs", {}).get("validation_result") or "not_run")
+    repair_result = str(result_context.get("repair_result") or action.get("inputs", {}).get("repair_result") or "not_needed")
+    plain_english = "Import did not complete."
+    if import_success and promoted and repaired:
+        plain_english = "The script required repair before being accepted into training."
+    elif import_success and promoted and trust_level == "trusted":
+        plain_english = "The script was sanitized, validated, and added as a trusted pattern."
+    elif import_success and trust_level == "experimental" and validation_result != "success":
+        plain_english = "The script failed validation and was added as experimental."
+    elif import_success and trust_level == "experimental":
+        plain_english = "The script was sanitized and added as an experimental pattern."
+    elif not import_success:
+        plain_english = "Import was blocked due to unsafe content."
+    interactive_print_result(
+        action.get("workflow") or "Import a script into training",
+        success=import_success,
+        fields=[
+            ("import_success", format_bool(import_success)),
+            ("target_repo_path", target_repo or "(none)"),
+            ("trust_level_applied", trust_level),
+            ("learned_pattern_count_change", learned_delta),
+            ("validation_result", validation_result),
+            ("repair_result", repair_result),
+            ("validated", format_bool(validated)),
+            ("repaired", format_bool(repaired)),
+        ] + ([("warnings", str(warnings))] if warnings else []),
+        blocked_reason=blocked_reason if not import_success else "",
+        next_step="Review the blocked reason, sanitize the source further, or retry with experimental trust." if not import_success else "",
+        what_happened=plain_english,
+    )
+
+
+def execute_interactive_action(action: dict) -> int:
+    commands = action.get("commands") or []
+    executed: list[dict] = []
+
+    def run_item(item: dict) -> dict:
+        label = str(item.get("label") or "command")
+        args = list(item.get("args") or [])
+        run_command = list(item.get("run_command") or [])
+        print(f"\n=== RUNNING: {label} ===")
+        result = run_interactive_backend_command(args) if not run_command else {
+            "returncode": 0,
+            "output": "",
+        }
+        if run_command:
+            completed = subprocess.Popen(
+                run_command,
+                cwd=str(item.get("cwd") or Path.cwd()),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            lines: list[str] = []
+            assert completed.stdout is not None
+            for line in completed.stdout:
+                print(line, end="")
+                lines.append(line)
+            result = {"returncode": completed.wait(), "output": "".join(lines)}
+        return {"label": label, **result}
+
+    for item in commands:
+        result = run_item(item)
+        executed.append(result)
+        if result["returncode"] != 0:
+            failure_handler = action.get("failure_handler")
+            if callable(failure_handler):
+                failure_result = failure_handler(action, executed, result, run_item)
+                if isinstance(failure_result, dict):
+                    if failure_result.get("executed"):
+                        executed.extend(list(failure_result.get("executed") or []))
+                    if failure_result.get("recovered"):
+                        continue
+                    if "returncode" in failure_result:
+                        result = {"label": result.get("label", "command"), "returncode": int(failure_result.get("returncode", result["returncode"])), "output": result.get("output", "")}
+            renderer = action.get("result_renderer")
+            if callable(renderer):
+                renderer(action, executed)
+            print(f"interactive_step_failed: {result['label']} exit_code={result['returncode']}")
+            return int(result["returncode"])
+    post_success_handler = action.get("post_success_handler")
+    if callable(post_success_handler):
+        post_success_result = post_success_handler(action, executed, run_item)
+        if isinstance(post_success_result, dict) and post_success_result.get("executed"):
+            executed.extend(list(post_success_result.get("executed") or []))
+        if isinstance(post_success_result, dict) and int(post_success_result.get("returncode", 0)) != 0:
+            renderer = action.get("result_renderer")
+            if callable(renderer):
+                renderer(action, executed)
+            return int(post_success_result.get("returncode", 0))
+    renderer = action.get("result_renderer")
+    if callable(renderer):
+        renderer(action, executed)
+    print("interactive_action_result: success")
+    return 0
+
+
+def interactive_select_pattern_repo(session: dict, prompt_label: str = "Pattern repo mode:") -> tuple[str, list[str]]:
+    choice = interactive_prompt_select(
+        prompt_label,
+        [
+            ("default", "Default / auto"),
+            ("none", "Disable learned patterns"),
+            ("specific", "Specific repo or path"),
+        ],
+        default_key="default",
+    )
+    if choice == "none":
+        return "none", ["--pattern-repo", "none"]
+    if choice == "specific":
+        value = interactive_prompt_text("Pattern repo name or path:")
+        return value, ["--pattern-repo", value] if value else []
+    return "default", []
+
+
+def interactive_fix_validate_action(session: dict) -> dict:
+    quick_mode = interactive_workflow_mode(session) == "quick"
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    repo_path = Path(repo).expanduser()
+    script = interactive_prompt_text("Script path:")
+    script_path = Path(script).expanduser()
+    mode = "fix_and_validate" if quick_mode else interactive_prompt_select(
+        "What should this run do?",
+        [("fix_and_validate", "Fix and validate (recommended)"), ("validate_only", "Validate only")],
+        default_key="fix_and_validate",
+    )
+    default_validation_command = latest_repo_validation_command(repo_path) if repo_path.exists() else ""
+    validation_choice = "auto_detect" if quick_mode else interactive_prompt_select(
+        "How should this be validated?",
+        [("auto_detect", "Auto-detect (recommended)"), ("use_default", "Use default"), ("custom", "Enter custom command")],
+        default_key="auto_detect",
+    )
+    selected_validation_command = ""
+    validation_note = ""
+    if validation_choice == "use_default":
+        if default_validation_command:
+            selected_validation_command = default_validation_command
+            validation_note = f"Using remembered validation command: {default_validation_command}"
+        else:
+            validation_choice = "auto_detect"
+            validation_note = "No remembered validation command exists for this repo, so auto-detect will be used."
+    if validation_choice == "custom":
+        selected_validation_command = interactive_prompt_text("Custom validation command:")
+    pattern_choice = "auto" if quick_mode else interactive_prompt_select(
+        "Which pattern repo should be used?",
+        [
+            ("auto", "Auto (recommended)"),
+            ("default", "Default pattern repo"),
+            ("none", "None"),
+            ("specific", "Specific repo or path"),
+        ],
+        default_key="auto",
+    )
+    pattern_mode = pattern_choice
+    pattern_args: list[str] = []
+    if pattern_choice == "default":
+        pattern_args = ["--pattern-repo", "default"]
+    elif pattern_choice == "none":
+        pattern_args = ["--pattern-repo", "none"]
+    elif pattern_choice == "specific":
+        specific_repo = interactive_prompt_text("Pattern repo name or path:")
+        pattern_mode = specific_repo or "specific"
+        if specific_repo:
+            pattern_args = ["--pattern-repo", specific_repo]
+    features = extract_script_features(script_path) if script_path.exists() and script_path.is_file() else {
+        "url_literals": [],
+        "mentions_m3u8": False,
+        "uses_network_client": False,
+        "text": "",
+    }
+    network_dependency = classify_network_dependency(features)
+    probe_recommendations = recommend_script_probe_targets(features)
+    probe_command: list[str] | None = None
+    probe_summary = "no"
+    if network_dependency.get("detected") and not quick_mode:
+        if interactive_prompt_yes_no("This script looks network-dependent. Probe endpoint now?", default=False):
+            probe_kind = interactive_prompt_select(
+                "Probe type:",
+                [("api", "API"), ("m3u8", "M3U8")],
+                default_key="m3u8" if features.get("mentions_m3u8") else "api",
+            )
+            obvious_endpoint = str((probe_recommendations[0].get("endpoint") if probe_recommendations else "") or "")
+            endpoint = interactive_prompt_text("Probe endpoint:", obvious_endpoint)
+            use_proxy = interactive_prompt_yes_no(
+                "Use proxy settings for this probe?",
+                default=bool(session.get("http_proxy") or session.get("https_proxy")),
+            )
+            include_headers = bool(extract_probe_header_candidates(features.get("text") or "")) and interactive_prompt_yes_no(
+                "Include headers detected from the script?",
+                default=False,
+            )
+            probe_command = build_interactive_common_args(session, repo=repo, include_proxy=use_proxy, include_output=True)
+            probe_command.extend(["--probe-url", endpoint, "--probe-type", "m3u8_summary" if probe_kind == "m3u8" else "json_summary"])
+            if include_headers:
+                for name, value in extract_probe_header_candidates(features.get("text") or "").items():
+                    probe_command.extend(["--probe-header", f"{name}: {value}"])
+            probe_summary = f"yes ({probe_kind} -> {endpoint})"
+    fix_command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+    fix_command.extend(["--script", script])
+    fix_command.extend(pattern_args)
+    advanced_notes: list[str] = []
+    if selected_validation_command:
+        fix_command.extend(["--test-cmd", selected_validation_command])
+    chosen_validation_display = selected_validation_command or ("auto-detect" if validation_choice == "auto_detect" else "default")
+    advanced_options = False
+    if not quick_mode and interactive_prompt_yes_no("Show advanced options?", default=False):
+        advanced_options = True
+        mode_choice = interactive_prompt_select(
+            "Which engine mode should be used?",
+            [("quick", "Quick"), ("safe", "Safe (recommended)"), ("deep", "Deep"), ("benchmark", "Benchmark")],
+            default_key="safe",
+        )
+        fix_command.extend(["--mode", mode_choice])
+        if interactive_prompt_yes_no("Disable auto-stage during finalization?", default=False):
+            fix_command.append("--no-auto-stage")
+        if interactive_prompt_yes_no("Disable auto-revalidation during publish/finalization?", default=False):
+            fix_command.append("--no-auto-revalidate")
+        if interactive_prompt_yes_no("Disable auto conflict resolution after sync?", default=False):
+            fix_command.append("--no-auto-conflict-resolution-after-sync")
+        if interactive_prompt_yes_no("Require manual conflict handling immediately?", default=False):
+            fix_command.append("--no-auto-merge-conflicts")
+        if pattern_choice != "specific" and interactive_prompt_yes_no("Override pattern repo explicitly?", default=False):
+            override_repo = interactive_prompt_text("Pattern repo name or path:")
+            if override_repo:
+                pattern_mode = override_repo
+                pattern_args = ["--pattern-repo", override_repo]
+                fix_command = [item for item in fix_command if item != "--pattern-repo" and item != "default" and item != "none"]
+                if "--pattern-repo" in fix_command:
+                    idx = fix_command.index("--pattern-repo")
+                    del fix_command[idx:idx + 2]
+                fix_command.extend(pattern_args)
+        if interactive_prompt_yes_no("Strict/manual behavior: skip finalization after a successful fix?", default=False):
+            fix_command.append("--no-finalize")
+    commands = []
+    if probe_command:
+        commands.append({"label": "probe endpoint", "args": probe_command, "compact_preview": "Run bounded live probe"})
+    if mode == "validate_only":
+        validate_command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+        validate_command.extend(["--script", script, "--script-validate-only"])
+        validate_command.extend(pattern_args)
+        if selected_validation_command:
+            validate_command.extend(["--test-cmd", selected_validation_command])
+        commands.append({"label": "validate script", "args": validate_command, "compact_preview": "Validate the script"})
+    else:
+        commands.append({"label": "fix/validate", "args": fix_command, "compact_preview": "Fix and validate the script"})
+    notes: list[str] = []
+    if validation_note:
+        notes.append(validation_note)
+    if network_dependency.get("detected"):
+        notes.append(
+            "Network-dependent signals detected: "
+            + str(network_dependency.get("reason") or "live endpoint behavior may matter")
+        )
+    return {
+        "workflow": "Fix or validate a script",
+        "description": "Use this when you want the agent to repair or validate one script through the existing backend.",
+        "scaffolded": False,
+        "inputs": {
+            "repo": repo,
+            "script_path": script,
+            "mode": mode,
+            "validation_choice": chosen_validation_display,
+            "pattern_source": pattern_mode,
+            "probe_planned": probe_summary,
+            "advanced_options": advanced_options,
+            "workflow_mode": "quick" if quick_mode else "guided",
+        },
+        "notes": notes,
+        "commands": commands,
+        "result_context": {
+            "probe_planned": bool(probe_command),
+            "validation_command_used": chosen_validation_display,
+        },
+        "result_renderer": render_interactive_fix_validate_result,
+    }
+
+
+def interactive_publish_current_action(session: dict) -> dict:
+    quick_mode = interactive_workflow_mode(session) == "quick"
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    repo_path = Path(repo).expanduser()
+    publish_mode = "normal" if quick_mode else interactive_prompt_select(
+        "How should publish run?",
+        [("normal", "Normal (recommended)"), ("force", "Force publish")],
+        default_key="normal",
+    )
+    auto_stage_safe_files = True if quick_mode else interactive_prompt_select(
+        "Auto-stage safe files?",
+        [("yes", "Yes (recommended)"), ("no", "No - manual staging")],
+        default_key="yes",
+    ) == "yes"
+    auto_remediate_blockers = True if quick_mode else interactive_prompt_yes_no(
+        "Auto-resolve safe blockers such as temporary artifacts?",
+        default=True,
+    )
+    run_validation_if_needed = "auto" if quick_mode else interactive_prompt_select(
+        "How should validation be handled?",
+        [("auto", "Auto (recommended)"), ("skip", "Skip")],
+        default_key="auto",
+    )
+    explain_staging = False
+    no_auto_conflict_resolution = False
+    if not quick_mode and interactive_prompt_yes_no("Show advanced options?", default=False):
+        explain_staging = interactive_prompt_yes_no("Print detailed staging explanation?", default=False)
+        no_auto_conflict_resolution = interactive_prompt_yes_no("Disable auto conflict resolution after sync?", default=False)
+    preflight = interactive_publish_preflight_state(
+        repo_path,
+        auto_stage_safe_files=auto_stage_safe_files,
+        auto_remediate_blockers=auto_remediate_blockers,
+        run_validation_if_needed=run_validation_if_needed,
+        force_publish=publish_mode == "force",
+    )
+    preview_args = ["./scripts/fixpublish.sh", "--repo", repo]
+    wrapper_args: list[str] = ["--repo", repo]
+    if publish_mode == "force":
+        preview_args.append("--force-publish")
+        wrapper_args.append("--force-publish")
+    if not auto_stage_safe_files:
+        preview_args.append("--no-auto-stage")
+        wrapper_args.append("--no-auto-stage")
+    if not auto_remediate_blockers:
+        preview_args.append("--no-auto-remediate-blockers")
+        wrapper_args.append("--no-auto-remediate-blockers")
+    if run_validation_if_needed == "skip":
+        preview_args.append("--no-auto-revalidate")
+        wrapper_args.append("--no-auto-revalidate")
+    if explain_staging:
+        preview_args.append("--explain-staging")
+        wrapper_args.append("--explain-staging")
+    if no_auto_conflict_resolution:
+        preview_args.append("--no-auto-conflict-resolution-after-sync")
+        wrapper_args.append("--no-auto-conflict-resolution-after-sync")
+    launcher_path = str((Path(__file__).resolve().parent / "scripts" / "fixpublish.sh").resolve())
+    return {
+        "workflow": "Publish current repo state",
+        "description": "Use this when you want to publish the current working tree through the guarded publish-current path.",
+        "scaffolded": False,
+        "inputs": {
+            "repo": repo,
+            "publish_mode": publish_mode,
+            "auto_remediate_safe_blockers": auto_remediate_blockers,
+            "files_to_be_published": preflight["changes"].get("meaningful_paths") or [],
+            "changed_files": preflight["changes"].get("meaningful_paths") or [],
+            "staged_paths": preflight["working_tree"].get("staged_paths") or [],
+            "unstaged_paths": sorted(set(preflight["working_tree"].get("unstaged_paths") or []) | set(preflight["working_tree"].get("untracked_paths") or [])),
+            "validation_record_exists": preflight["validation_record_exists"],
+            "validation_commit_match": preflight["validation_commit_match"],
+            "validation_status": preflight["validation_state"].get("validation_result") or "blocked",
+            "revalidation_will_run": preflight["revalidation_planned"],
+            "publish_would_block": preflight["would_block"],
+            "publish_block_reason": preflight["would_block_reason"] or "(none)",
+            "staging_plan": preflight["staging_plan"],
+            "workflow_mode": "quick" if quick_mode else "guided",
+        },
+        "notes": [
+            f"staging_decision_reason: {preflight['staging_decision_reason']}",
+            f"safe_staged_paths: {preflight.get('safe_staged_paths') or []}",
+            f"ignored_nonblocking_paths: {preflight.get('ignored_nonblocking_paths') or []}",
+            f"true_blockers: {preflight.get('true_blockers') or []}",
+            f"auto_resolvable_blockers: {preflight.get('auto_resolvable_blockers') or []}",
+            (
+                "remaining_unstaged: "
+                + ", ".join(
+                    f"{item.get('path')} ({item.get('reason')})"
+                    for item in (preflight["remaining_unstaged"] or [])
+                )
+            ) if preflight["remaining_unstaged"] else "remaining_unstaged: none",
+            (
+                "next_step_primary: "
+                + str((preflight.get("blocked_analysis_summary") or {}).get("primary_next_step") or "(none)")
+            ),
+        ],
+        "commands": [
+            {
+                "label": "publish current repo state",
+                "args": [],
+                "compact_preview": f"Run fixpublish ({'auto-stage on' if auto_stage_safe_files else 'manual staging'})",
+                "preview_command": interactive_preview_shell_command(preview_args),
+                "run_command": [launcher_path, *wrapper_args],
+            }
+        ],
+        "result_context": {"preflight": preflight},
+        "result_renderer": render_interactive_publish_result,
+    }
+
+
+def interactive_publish_validated_action(session: dict) -> dict:
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    default_behavior = interactive_prompt_yes_no("Use default finalizer behavior?", default=True)
+    ensure_args = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False) + ["--ensure-validation-record"]
+    publish_args = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False) + ["--publish-only"]
+    if default_behavior:
+        publish_args.append("--publish-pr")
+    return {
+        "workflow": "Publish last validated run",
+        "description": "Use this when a validated state already exists and you want the canonical finalizer flow.",
+        "scaffolded": True,
+        "inputs": {
+            "repo": repo,
+            "use_default_finalizer_behavior": default_behavior,
+        },
+        "notes": [
+            "This follows the canonical finalizer path: ensure a validation record, then publish.",
+            interactive_standard_scaffold_note(),
+        ],
+        "commands": [
+            {"label": "ensure validation record", "args": ensure_args},
+            {"label": "publish validated state", "args": publish_args},
+        ],
+    }
+
+
+def interactive_import_training_action(session: dict) -> dict:
+    quick_mode = interactive_workflow_mode(session) == "quick"
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    while True:
+        source_type = interactive_prompt_select(
+            "Where is the source script?",
+            [("local", "Local file (recommended)"), ("ssh", "SSH path"), ("http", "HTTP/HTTPS URL")],
+            default_key="local",
+        )
+        source_value = interactive_prompt_text("Source path or URL:")
+        target_repo_label, target_repo_path, pattern_args = interactive_select_training_repo(session)
+        raw_tags = "" if quick_mode else interactive_prompt_text("Pattern tags (comma-separated):", "")
+        pattern_tags = [item.strip() for item in raw_tags.split(",") if item.strip()]
+        pattern_type_hint = "" if quick_mode else interactive_prompt_text("Pattern type hint (optional):", "")
+        trust_level = "trusted" if quick_mode else interactive_prompt_select(
+            "How much trust should this source get?",
+            [("trusted", "Trusted"), ("experimental", "Experimental")],
+            default_key="trusted",
+        )
+        print("trust_level_help: trusted = used by default in runs; experimental = weaker influence")
+        sanitize_before_import = True if quick_mode else interactive_prompt_yes_no("Sanitize before import?", default=True)
+        validate_before_promote = True if quick_mode else interactive_prompt_yes_no("Validate and repair before promotion?", default=True)
+        allow_auto_fix = True if quick_mode else interactive_prompt_yes_no("Allow auto-fix during validation?", default=True)
+        note = ""
+        if not quick_mode and interactive_prompt_yes_no("Show advanced options?", default=False):
+            note = interactive_prompt_text("Optional note:", "")
+        preflight = interactive_prepare_training_import(
+            source_value=source_value,
+            source_type=source_type,
+            target_repo=target_repo_path,
+            requested_trust=trust_level,
+            sanitize_before_import=sanitize_before_import,
+            validate_before_promote=validate_before_promote,
+            allow_auto_fix=allow_auto_fix,
+            pattern_tags=pattern_tags,
+            pattern_type_hint=pattern_type_hint,
+        )
+        if not preflight.get("ok"):
+            print("\n=== IMPORT PRECHECK ===")
+            print(f"source_type: {preflight.get('source_type')}")
+            print(f"source_origin: {preflight.get('source_origin')}")
+            print(f"acquisition_method: {preflight.get('acquisition_method')}")
+            print(f"proxy_used: {format_bool(preflight.get('proxy_used'))}")
+            print(f"blocked_reason: {preflight.get('blocked_reason') or 'acquisition failed'}")
+            retry_action = interactive_prompt_select(
+                "Acquisition failed:",
+                [("retry", "Retry"), ("back", "Back to main menu"), ("cancel", "Cancel import")],
+                default_key="retry",
+            )
+            if retry_action == "retry":
+                continue
+            if retry_action == "cancel":
+                return {
+                    "workflow": "Import a script into training",
+                    "description": "Use this to feed a local, SSH, or URL-backed script into the private training repo.",
+                    "scaffolded": False,
+                    "inputs": {"repo": repo, "source": source_value, "source_type": source_type},
+                    "notes": ["Import cancelled after acquisition failure."],
+                    "commands": [],
+                    "app_navigation": "cancel",
+                }
+            return {
+                "workflow": "Import a script into training",
+                "description": "Use this to feed a local, SSH, or URL-backed script into the private training repo.",
+                "scaffolded": False,
+                "inputs": {"repo": repo, "source": source_value, "source_type": source_type},
+                "notes": ["Import precheck failed; return to the main menu to try another source."],
+                "commands": [],
+                "app_navigation": "back",
+            }
+        final_trust = trust_level
+        promotion_warning = ""
+        if trust_level == "trusted" and (not preflight.get("safe_for_trusted")):
+            fallback = interactive_prompt_select(
+                "Trusted promotion is not safe for this script:",
+                [("experimental", "Downgrade to experimental"), ("abort", "Abort import")],
+                default_key="experimental",
+            )
+            if fallback == "abort":
+                return {
+                    "workflow": "Import a script into training",
+                    "description": "Use this to feed a local, SSH, or URL-backed script into the private training repo.",
+                    "scaffolded": False,
+                    "inputs": {"repo": repo, "source": source_value, "source_type": source_type},
+                    "notes": ["Import aborted because trusted promotion was not safe."],
+                    "commands": [],
+                    "app_navigation": "back",
+                }
+            final_trust = "experimental"
+            promotion_warning = "Trusted promotion was blocked; the script will be imported with experimental trust."
+        command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+        command.extend(["--import-pattern-files", source_value, "--pattern-trust", final_trust])
+        command.extend(pattern_args)
+        if pattern_tags:
+            command.extend(["--pattern-tags", ",".join(pattern_tags)])
+        note_parts = []
+        if pattern_type_hint:
+            note_parts.append(f"pattern_type_hint={pattern_type_hint}")
+        if note:
+            note_parts.append(note)
+        if note_parts:
+            command.extend(["--pattern-note", "; ".join(note_parts)])
+        notes = [
+            f"acquisition_method: {preflight.get('acquisition_method')}",
+            f"proxy_used: {format_bool(preflight.get('proxy_used'))}",
+            f"sanitized_changed: {format_bool(preflight.get('sanitized_changed'))}",
+            f"validation_result: {preflight.get('validation_result')}",
+            f"repair_result: {preflight.get('repair_result')}",
+        ]
+        if promotion_warning:
+            notes.append(promotion_warning)
+        notes.extend([str(item) for item in preflight.get("warnings") or []])
+        return {
+            "workflow": "Import a script into training",
+            "description": "Use this to feed a local, SSH, or URL-backed script into the private training repo.",
+            "scaffolded": False,
+            "inputs": {
+                "repo": repo,
+                "source_type": source_type,
+                "source": source_value,
+                "training_repo": target_repo_label,
+                "target_repo": str(target_repo_path),
+                "sanitized": bool(preflight.get("sanitization_applied")),
+                "validation_result": preflight.get("validation_result"),
+                "validation_command": preflight.get("validation_command") or "(auto)",
+                "repair_result": preflight.get("repair_result"),
+                "pattern_type": preflight.get("pattern_type") or "(unknown)",
+                "applicability_context": preflight.get("applicability_context") or [],
+                "tags": pattern_tags or [],
+                "trust_level": final_trust,
+                "confidence": preflight.get("confidence_level"),
+                "workflow_mode": "quick" if quick_mode else "guided",
+            },
+            "notes": notes,
+            "commands": [{"label": "import training source", "args": command, "compact_preview": f"Import into training as {final_trust}"}],
+            "result_context": {
+                "final_trust": final_trust,
+                "warnings": preflight.get("warnings") or [],
+                "validation_result": preflight.get("validation_result"),
+                "repair_result": preflight.get("repair_result"),
+            },
+            "result_renderer": render_interactive_import_training_result,
+        }
+
+
+def interactive_inspect_patterns_action(session: dict) -> dict:
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    pattern_repo_mode, pattern_args = interactive_select_pattern_repo(session, "Pattern repo:")
+    inspect_target = interactive_prompt_select(
+        "Inspect:",
+        [("patterns", "Learned patterns"), ("sources", "Pattern sources")],
+        default_key="patterns",
+    )
+    command = build_interactive_common_args(session, repo=repo, include_proxy=False, include_output=True)
+    command.extend(pattern_args)
+    command.append("--list-patterns" if inspect_target == "patterns" else "--list-pattern-sources")
+    return {
+        "workflow": "Inspect learned patterns",
+        "description": "Use this to review learned patterns or pattern sources without changing them.",
+        "scaffolded": True,
+        "inputs": {
+            "repo": repo,
+            "pattern_repo": pattern_repo_mode,
+            "inspect_target": inspect_target,
+        },
+        "notes": [interactive_standard_scaffold_note()],
+        "commands": [{"label": "inspect patterns", "args": command}],
+    }
+
+
+def interactive_manage_patterns_action(session: dict) -> dict:
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    pattern_repo_mode, pattern_args = interactive_select_pattern_repo(session, "Pattern repo:")
+    target_kind = interactive_prompt_select(
+        "Manage target:",
+        [("pattern", "Pattern"), ("source", "Source")],
+        default_key="pattern",
+    )
+    action = interactive_prompt_select(
+        "Action:",
+        [("promote", "Promote"), ("demote", "Demote"), ("forget", "Forget")],
+        default_key="promote",
+    )
+    identifier = interactive_prompt_text("Pattern/source id or path:")
+    flag_name = {
+        ("pattern", "promote"): "--promote-pattern",
+        ("pattern", "demote"): "--demote-pattern",
+        ("pattern", "forget"): "--forget-pattern",
+        ("source", "promote"): "--promote-source",
+        ("source", "demote"): "--demote-source",
+        ("source", "forget"): "--forget-source",
+    }[(target_kind, action)]
+    command = build_interactive_common_args(session, repo=repo, include_proxy=False, include_output=True)
+    command.extend(pattern_args)
+    command.extend([flag_name, identifier])
+    return {
+        "workflow": "Manage patterns",
+        "description": "Use this to promote, demote, or forget a pattern or source through the existing controls.",
+        "scaffolded": True,
+        "inputs": {
+            "repo": repo,
+            "pattern_repo": pattern_repo_mode,
+            "target_kind": target_kind,
+            "action": action,
+            "identifier": identifier,
+        },
+        "notes": [interactive_standard_scaffold_note()],
+        "commands": [{"label": "manage patterns", "args": command}],
+    }
+
+
+def interactive_probe_action(session: dict) -> dict:
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    endpoint = interactive_prompt_text("Endpoint / URL:")
+    endpoint_type = interactive_prompt_select(
+        "Probe type:",
+        [("api", "API"), ("m3u8", "M3U8"), ("auto", "Auto-detect")],
+        default_key="auto",
+    )
+    use_proxy = interactive_prompt_yes_no("Use proxy settings?", default=bool(session.get("http_proxy") or session.get("https_proxy")))
+    probe_type = {"api": "json_summary", "m3u8": "m3u8_summary", "auto": "auto"}[endpoint_type]
+    command = build_interactive_common_args(session, repo=repo, include_proxy=use_proxy, include_output=True)
+    command.extend(["--probe-url", endpoint, "--probe-type", probe_type])
+    return {
+        "workflow": "Probe API / M3U8 endpoint",
+        "description": "Use this when endpoint truth matters for debugging or validation. It is only one workflow in the app.",
+        "scaffolded": True,
+        "inputs": {
+            "repo": repo,
+            "endpoint": endpoint,
+            "endpoint_type": endpoint_type,
+            "use_proxy": use_proxy,
+        },
+        "notes": [
+            "Probe output is bounded and secrets are redacted before printing.",
+            interactive_standard_scaffold_note(),
+        ],
+        "commands": [{"label": "probe endpoint", "args": command}],
+    }
+
+
+def interactive_sync_conflicts_action(session: dict) -> dict:
+    repo = interactive_prompt_text("Repo path:", str(session.get("repo") or Path.cwd()))
+    sync_mode = interactive_prompt_select(
+        "Conflict action:",
+        [("check", "Check/report conflicts"), ("repair", "Repair conflicts with defaults")],
+        default_key="check",
+    )
+    command = build_interactive_common_args(session, repo=repo, include_proxy=True, include_output=False)
+    command.append("--sync-conflicts")
+    if sync_mode == "check":
+        command.append("--no-auto-merge-conflicts")
+    return {
+        "workflow": "Sync/repair repo conflicts",
+        "description": "Use this to inspect or repair merge-conflict states through the conflict-handling backend.",
+        "scaffolded": True,
+        "inputs": {
+            "repo": repo,
+            "conflict_action": sync_mode,
+        },
+        "notes": [
+            "This uses the existing merge-conflict repair engine and blocks when conflicts remain ambiguous.",
+            interactive_standard_scaffold_note(),
+        ],
+        "commands": [{"label": "sync/repair conflicts", "args": command}],
+    }
+
+
+def interactive_update_settings(session: dict) -> None:
+    interactive_section("Settings")
+    session["repo"] = interactive_prompt_text("Default repo path:", str(session.get("repo") or Path.cwd()))
+    session["http_proxy"] = interactive_prompt_text("Default HTTP proxy:", str(session.get("http_proxy") or ""))
+    session["https_proxy"] = interactive_prompt_text("Default HTTPS proxy:", str(session.get("https_proxy") or ""))
+    session["output"] = interactive_prompt_select(
+        "Default output mode:",
+        [("human", "Human"), ("json", "JSON")],
+        default_key=str(session.get("output") or "human"),
+    )
+    session["interaction_mode"] = interactive_prompt_select(
+        "Default workflow mode:",
+        [("guided", "Guided (recommended)"), ("quick", "Quick")],
+        default_key=str(session.get("interaction_mode") or "guided"),
+    )
+    print("settings_updated: true")
+
+
+def run_interactive_app(initial_session: dict | None = None) -> int:
+    if not sys.stdin.isatty():
+        print("Interactive mode requires a terminal.", file=sys.stderr)
+        return 2
+    session = {
+        "repo": str((initial_session or {}).get("repo") or Path.cwd()),
+        "http_proxy": str((initial_session or {}).get("http_proxy") or ""),
+        "https_proxy": str((initial_session or {}).get("https_proxy") or ""),
+        "output": str((initial_session or {}).get("output") or "human"),
+        "interaction_mode": str((initial_session or {}).get("interaction_mode") or "guided"),
+    }
+    registry = interactive_workflow_registry()
+    while True:
+        print_interactive_header(session)
+        selection = interactive_prompt_select(
+            "\nMain menu:",
+            [
+                (key, f"{spec['label']} - {spec['description']}")
+                for key, spec in registry.items()
+            ],
+            default_key="fix_validate",
+        )
+        if selection == "exit":
+            print("Exiting interactive mode.")
+            return 0
+        if selection == "settings":
+            print(f"\nwhen_to_use: {registry['settings']['description']}")
+            interactive_update_settings(session)
+            continue
+        spec = registry[selection]
+        print(f"\nwhen_to_use: {spec['description']}")
+        action = spec["handler"](session)
+        if action.get("app_navigation") == "cancel":
+            print("Exiting interactive mode.")
+            return 0
+        if action.get("app_navigation") == "back":
+            continue
+        print_interactive_action_summary(action)
+        next_step = interactive_next_step_prompt()
+        if next_step == "cancel":
+            print("Exiting interactive mode.")
+            return 0
+        if next_step == "back":
+            continue
+        if next_step == "run":
+            code = execute_interactive_action(action)
+            if code != 0 and action.get("workflow") == "Publish current repo state":
+                followup = interactive_handle_publish_blocked_followup(action)
+                if followup == "cancel":
+                    print("Exiting interactive mode.")
+                    return code
+                if followup == "back":
+                    continue
+            if code != 0 and not interactive_prompt_yes_no("Return to the main menu?", default=True):
+                return code
+        if not interactive_prompt_yes_no("Return to the main menu?", default=True):
+            return 0
+
+
 def detect_default_branch(repo: Path) -> str:
     code, output = run_subprocess(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], repo)
     if code == 0 and output.strip():
@@ -7216,8 +11928,39 @@ def make_publish_result() -> dict:
             "has_unstaged": False,
             "has_staged": False,
             "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
         },
         "summary_status": "",
+        "auto_stage_attempted": False,
+        "auto_stage_result": "not_needed",
+        "auto_staged_paths": [],
+        "remaining_unstaged_paths": [],
+        "remaining_unstaged": [],
+        "blocked_file_analysis": [],
+        "blocked_analysis_summary": {},
+        "safe_staged_paths": [],
+        "ignored_nonblocking_paths": [],
+        "safe_stage_candidate_paths": [],
+        "true_blockers": [],
+        "blocker_count": 0,
+        "publishable_ready": False,
+        "blocker_remediation_attempted": False,
+        "blocker_remediation_result": "not_needed",
+        "auto_removed_paths": [],
+        "auto_ignored_patterns": [],
+        "remaining_true_blockers": [],
+        "file_decisions": [],
+        "staging_summary": {
+            "auto_staged": 0,
+            "ignored": 0,
+            "blocked": 0,
+        },
+        "_auto_stage_entry_state": {},
+        "staging_decision_reason": "",
+        "staging_reason": "",
+        "explain_staging": False,
         "noop": False,
         "requested": False,
         "attempted": False,
@@ -7259,6 +12002,9 @@ def make_publish_result() -> dict:
         "current_publish_candidate_commit": "",
         "diff_files_detected": [],
         "docs_checked_at_publish": False,
+        "docs_check_performed": False,
+        "docs_status": "up_to_date",
+        "docs_reason": "documentation check not performed",
         "docs_required": False,
         "docs_updated": False,
         "docs_refresh_mode": "none",
@@ -7440,7 +12186,7 @@ def format_final_operator_summary(summary: dict) -> str:
     detail_reason = str(summary.get("publish_detail_reason") or "").strip().lower()
     previous_pr_url = str(summary.get("previous_pr_url") or "").strip()
     final_workflow_result = str(summary.get("final_workflow_result") or "").strip()
-    if final_workflow_result == "blocked":
+    if final_workflow_result == "blocked" and publish_result == "success":
         return "FINAL: publish succeeded, PR mergeability blocked"
     if validation_result == "success":
         if publish_result == "success":
@@ -7453,6 +12199,8 @@ def format_final_operator_summary(summary: dict) -> str:
             if "already published" in reason or "already up to date" in reason or "no changes to publish" in reason:
                 return "FINAL: publish noop (already up to date)"
             return "FINAL: validation succeeded, publish noop"
+        if publish_result == "blocked":
+            return "FINAL: validation succeeded, publish blocked"
         if publish_requested:
             return f"FINAL: validation succeeded, publish {publish_result}"
         return "FINAL: validation succeeded"
@@ -8091,6 +12839,9 @@ def publish_validated_run(
     publish_current_mode: bool = False,
     validation_state: str = "success",
     force_publish: bool = False,
+    auto_stage_safe_paths: bool = True,
+    auto_remediate_blockers: bool = True,
+    explain_staging: bool = False,
 ) -> dict:
     result = make_publish_result()
     current_commit = parse_head_commit(repo) if is_git_repo(repo) else ""
@@ -8109,6 +12860,181 @@ def publish_validated_run(
     result["transport_locked"] = bool(publish_state.get("ssh_confirmed"))
     result["environment"] = detect_publish_environment()
     result["recommended_command"] = recommended_publish_command(include_pr=publish_pr or publish_merge)
+    result["explain_staging"] = explain_staging
+    blocker_policy = load_publish_blocker_policy(repo, auto_remediate=auto_remediate_blockers)
+
+    def audit_publish_staging(expected_paths: list[str]) -> dict:
+        working_tree = classify_publish_working_tree(repo)
+        result["working_tree"] = working_tree
+        audit = normalize_publish_working_tree_audit(
+            repo,
+            working_tree,
+            expected_paths,
+            publish_current_mode=publish_current_mode,
+        )
+        decisions, summary, remaining_unstaged, overall_reason = build_publish_file_decisions(
+            list(audit.get("entries") or []),
+            expected_paths=expected_paths,
+            staged_paths=audit["staged_paths"],
+            remaining_paths=audit["remaining_paths"],
+            auto_staged_paths=result.get("auto_staged_paths") or [],
+            auto_stage_entry_state=result.get("_auto_stage_entry_state") or {},
+        )
+        decision_sets = summarize_publish_decision_sets(decisions, remaining_unstaged)
+        unresolved_for_analysis = [
+            item
+            for item in remaining_unstaged
+            if item.get("path") in set(decision_sets.get("safe_stage_candidate_paths") or [])
+            or item.get("path") in {str(entry.get("path") or "") for entry in (decision_sets.get("true_blockers") or [])}
+        ]
+        result["file_decisions"] = decisions
+        result["staging_summary"] = summary
+        result["remaining_unstaged"] = remaining_unstaged
+        result["remaining_unstaged_paths"] = list(decision_sets.get("unresolved_paths") or [])
+        result["safe_staged_paths"] = list(decision_sets.get("safe_staged_paths") or [])
+        result["ignored_nonblocking_paths"] = list(decision_sets.get("ignored_nonblocking_paths") or [])
+        result["safe_stage_candidate_paths"] = list(decision_sets.get("safe_stage_candidate_paths") or [])
+        result["true_blockers"] = list(decision_sets.get("true_blockers") or [])
+        result["blocker_count"] = int(decision_sets.get("blocker_count") or 0)
+        result["publishable_ready"] = bool(decision_sets.get("publishable_ready"))
+        analyses = analyze_publish_blockers(repo, unresolved_for_analysis)
+        enriched_analyses: list[dict] = []
+        for item in analyses:
+            enriched = dict(item)
+            enriched.update(classify_publish_blocker_remediation(repo, item, blocker_policy))
+            enriched_analyses.append(enriched)
+        result["blocked_file_analysis"] = enriched_analyses
+        result["blocked_analysis_summary"] = summarize_publish_block_analysis(
+            result["blocked_file_analysis"],
+            rerun_command=result.get("recommended_command") or "./scripts/fixpublish.sh",
+        )
+        result["blocked_analysis_summary"]["safe_staged_paths"] = list(result.get("safe_staged_paths") or [])
+        result["blocked_analysis_summary"]["ignored_nonblocking_paths"] = list(result.get("ignored_nonblocking_paths") or [])
+        result["blocked_analysis_summary"]["true_blockers"] = list(result.get("true_blockers") or [])
+        result["blocked_analysis_summary"]["blocker_count"] = int(result.get("blocker_count") or 0)
+        result["blocked_analysis_summary"]["publishable_ready"] = bool(result.get("publishable_ready"))
+        result["remaining_true_blockers"] = list(result.get("true_blockers") or [])
+        if not result.get("staging_decision_reason"):
+            result["staging_decision_reason"] = overall_reason
+        return audit
+
+    def ensure_publish_staging(expected_paths: list[str], *, restore_paths: list[str] | None = None) -> tuple[bool, dict]:
+        audit = audit_publish_staging(expected_paths)
+        safe_stage_candidates = list(result.get("safe_stage_candidate_paths") or [])
+        true_blockers = list(result.get("true_blockers") or [])
+        if result.get("publishable_ready"):
+            if not result.get("staging_reason"):
+                result["staging_reason"] = "all publishable changes already staged"
+            result["staging_decision_reason"] = "all publishable changes already staged"
+            return True, audit
+        safe_paths, blocked_paths = split_publish_auto_stage_paths(audit["remaining_paths"])
+        result["remaining_unstaged_paths"] = list(result.get("remaining_unstaged_paths") or [])
+        if not auto_stage_safe_paths:
+            result["auto_stage_attempted"] = False
+            result["auto_stage_result"] = "blocked"
+            result["staging_reason"] = "automatic staging disabled by --no-auto-stage"
+            result["staging_decision_reason"] = (
+                "automatic staging is disabled; manual staging is required for safe publishable files"
+                if safe_stage_candidates and not true_blockers
+                else "automatic staging is disabled; manual review is required for unstaged publishable files"
+            )
+            result["next_action"] = format_manual_staging_handoff(
+                "Publish blocked because automatic staging is disabled.",
+                safe_stage_candidates or list(result.get("remaining_unstaged_paths") or []),
+                restore_paths=restore_paths,
+            )
+            audit_publish_staging(expected_paths)
+            return False, audit
+        if safe_paths:
+            result["auto_stage_attempted"] = True
+            entry_index = {str(item.get("path") or ""): item for item in (audit.get("entries") or [])}
+            for path in safe_paths:
+                source_entry = entry_index.get(path) or {}
+                result["_auto_stage_entry_state"][path] = {
+                    "tracked": bool(source_entry.get("tracked", True)),
+                    "untracked": bool(source_entry.get("untracked")),
+                }
+            code, output = run_subprocess(["git", "add", "-A", "--", *safe_paths], repo)
+            if code != 0:
+                result["auto_stage_result"] = "blocked"
+                result["staging_reason"] = f"automatic staging failed: {output}"
+                result["staging_decision_reason"] = "automatic staging failed; manual review is required"
+                result["next_action"] = format_manual_staging_handoff(
+                    "Publish blocked because automatic staging failed.",
+                    audit["remaining_paths"],
+                    restore_paths=restore_paths,
+                )
+                audit_publish_staging(expected_paths)
+                return False, audit
+            result["auto_staged_paths"] = sorted(set(list(result.get("auto_staged_paths") or []) + safe_paths))
+            audit = audit_publish_staging(expected_paths)
+        remediation_attempt_limit = 3
+        remediation_attempts = 0
+        while remediation_attempts < remediation_attempt_limit:
+            true_blockers = list(result.get("true_blockers") or [])
+            safe_stage_candidates = list(result.get("safe_stage_candidate_paths") or [])
+            if not true_blockers:
+                break
+            remediation = remediate_publish_blockers(repo, list(result.get("blocked_file_analysis") or []), blocker_policy)
+            if remediation.get("result") == "not_needed":
+                break
+            remediation_attempts += 1
+            result["blocker_remediation_attempted"] = bool(result.get("blocker_remediation_attempted")) or bool(remediation.get("attempted"))
+            result["auto_removed_paths"] = sorted(set(list(result.get("auto_removed_paths") or []) + list(remediation.get("auto_removed_paths") or [])))
+            result["auto_ignored_patterns"] = sorted(set(list(result.get("auto_ignored_patterns") or []) + list(remediation.get("auto_ignored_patterns") or [])))
+            previous_result = str(result.get("blocker_remediation_result") or "not_needed")
+            current_result = str(remediation.get("result") or "blocked")
+            if previous_result == "success" and current_result == "success":
+                result["blocker_remediation_result"] = "success"
+            elif previous_result in {"partial", "blocked"}:
+                result["blocker_remediation_result"] = previous_result
+            else:
+                result["blocker_remediation_result"] = current_result
+            audit = audit_publish_staging(expected_paths)
+            result["remaining_true_blockers"] = list(result.get("true_blockers") or [])
+            if current_result == "blocked":
+                break
+        remaining_after = list(result.get("remaining_unstaged_paths") or [])
+        safe_stage_candidates = list(result.get("safe_stage_candidate_paths") or [])
+        true_blockers = list(result.get("true_blockers") or [])
+        result["remaining_unstaged_paths"] = remaining_after
+        if true_blockers or safe_stage_candidates:
+            result["auto_stage_result"] = "partial" if result.get("auto_staged_paths") else "blocked"
+            blocked_reason = "ambiguous or unsafe file requires manual review" if true_blockers else "some publishable files still require manual staging after auto-stage"
+            result["staging_reason"] = blocked_reason
+            result["staging_decision_reason"] = (
+                "one or more files were classified as unknown/artifact and require manual review"
+                if true_blockers
+                else "one or more publishable files still require manual staging"
+            )
+            if result.get("blocker_remediation_attempted") and list(result.get("auto_removed_paths") or []):
+                result["staging_reason"] = "auto-resolved safe blockers, but one or more ambiguous files still require manual review"
+            result["next_action"] = format_manual_staging_handoff(
+                (
+                    "Publish blocked because one or more true blockers still require manual review."
+                    if true_blockers
+                    else "Publish blocked because some publishable files still require manual staging."
+                ),
+                safe_stage_candidates or remaining_after,
+                restore_paths=restore_paths,
+            )
+            audit_publish_staging(expected_paths)
+            return False, audit
+        if result.get("auto_staged_paths"):
+            result["auto_stage_result"] = "success"
+            result["staging_reason"] = "auto-staged safe publishable files"
+            result["staging_decision_reason"] = "safe publishable files were auto-staged and re-audited successfully"
+        if result.get("blocker_remediation_attempted"):
+            result["blocker_remediation_result"] = "success"
+            if list(result.get("auto_removed_paths") or []):
+                result["staging_reason"] = "removed safe temporary artifact blockers and continued publish"
+                result["staging_decision_reason"] = "high-confidence safe blockers were auto-resolved and the working tree was re-audited successfully"
+        elif not result.get("staging_reason"):
+            result["auto_stage_result"] = "not_needed"
+            result["staging_reason"] = "all publishable changes already staged"
+            result["staging_decision_reason"] = "all publishable changes already staged"
+        audit_publish_staging(expected_paths)
+        return True, audit
 
     def finish(status: str, reason: str = "", next_action: str = "") -> dict:
         if result.get("attempted"):
@@ -8222,6 +13148,26 @@ def publish_validated_run(
     result["current_publish_candidate_commit"] = publish_changes.get("current_commit") or current_head_for_diff or ""
     result["diff_files_detected"] = publish_changes.get("diff_files_detected") or []
     if not result["meaningful_changes_detected"]:
+        noop_entries = collect_publish_working_tree_entries(repo)
+        decisions, summary, remaining_unstaged, overall_reason = build_publish_file_decisions(
+            noop_entries,
+            expected_paths=[],
+            staged_paths=[],
+            remaining_paths=[],
+            auto_staged_paths=[],
+        )
+        result["file_decisions"] = decisions
+        result["staging_summary"] = summary
+        result["remaining_unstaged"] = remaining_unstaged
+        decision_sets = summarize_publish_decision_sets(decisions, remaining_unstaged)
+        result["remaining_unstaged_paths"] = list(decision_sets.get("unresolved_paths") or [])
+        result["safe_staged_paths"] = list(decision_sets.get("safe_staged_paths") or [])
+        result["ignored_nonblocking_paths"] = list(decision_sets.get("ignored_nonblocking_paths") or [])
+        result["safe_stage_candidate_paths"] = list(decision_sets.get("safe_stage_candidate_paths") or [])
+        result["true_blockers"] = list(decision_sets.get("true_blockers") or [])
+        result["blocker_count"] = int(decision_sets.get("blocker_count") or 0)
+        result["publishable_ready"] = bool(decision_sets.get("publishable_ready"))
+        result["staging_decision_reason"] = overall_reason
         result["control_path"] = "noop"
         result["summary_status"] = "no meaningful changes to publish"
         return finish("noop", "no meaningful changes to publish")
@@ -8231,6 +13177,15 @@ def publish_validated_run(
     result["docs_updated"] = bool(docs_stage.get("docs_updated"))
     result["docs_refresh_mode"] = str(docs_stage.get("docs_refresh_mode") or "none")
     result["docs_targets"] = list(docs_stage.get("docs_targets") or [])
+    result.update(
+        summarize_docs_publish_reporting(
+            docs_check_performed=result["docs_checked_at_publish"],
+            docs_required=result["docs_required"],
+            docs_updated=result["docs_updated"],
+            blocked=bool(docs_stage.get("blocked")),
+            reason=str(docs_stage.get("reason") or ""),
+        )
+    )
     if docs_stage.get("blocked"):
         result["control_path"] = "blocked_docs"
         return finish("blocked", str(docs_stage.get("reason") or "docs update blocked publish"))
@@ -8372,35 +13327,49 @@ def publish_validated_run(
             result["summary_status"] = "publishing existing committed repo state"
             set_publish_final(result, "failed", branch=branch_to_push, commit=commit_sha, remote=result["remote_url"], pr_url=None)
         else:
-            code, output = run_subprocess(["git", "add", "-A"], repo)
-            if code != 0:
-                return finish("blocked", f"Publish blocked because staging failed: {output}")
-            result["summary_status"] = "staged current repo state"
-
-            code, _ = run_subprocess(["git", "diff", "--cached", "--quiet"], repo)
-            if code == 0:
+            ignored_changes = list(result.get("ignored_changes") or [])
+            staging_ok, audit = ensure_publish_staging(result["meaningful_paths"], restore_paths=ignored_changes)
+            staged_paths = audit["staged_paths"]
+            if not staging_ok:
+                return finish(
+                    "blocked",
+                    "Publish blocked because publishable changes remained unstaged after staging: "
+                    + ", ".join((result.get("remaining_unstaged_paths") or audit["remaining_paths"])[:10]),
+                    result.get("next_action") or "",
+                )
+            if ignored_changes:
+                result["actions"].append("excluded internal files left unstaged")
+            if not staged_paths:
                 commit_ref = local_head or parse_head_commit(repo)
                 mark_publish_noop(result, "no changes to publish", branch_to_push, result["remote_url"], commit_ref)
                 return finish("noop")
-            if code not in {0, 1}:
-                return finish("blocked", "Publish blocked because staged-change detection failed.")
+            result["summary_status"] = f"staged {len(staged_paths)} publishable file(s)"
     else:
         code, output = run_subprocess(["git", "add", "-A", "--", *changed_paths], repo)
         if code != 0:
             return finish("blocked", f"Publish blocked because staging failed: {output}")
 
-        status_after_add = filtered_git_status_output(repo)
-        staged_paths = meaningful_changed_paths(repo)
+        staging_ok, audit = ensure_publish_staging(changed_paths)
+        staged_paths = audit["staged_paths"]
         unrelated_staged = sorted(set(staged_paths) - set(changed_paths))
         if unrelated_staged:
             return finish("blocked", "Publish blocked because staging picked up unrelated files: " + ", ".join(unrelated_staged[:10]))
-        if not status_after_add.strip():
+        missing_staged = sorted(set(changed_paths) - set(staged_paths))
+        if (result.get("remaining_unstaged_paths") or missing_staged) and not staging_ok:
+            blocked_paths = list(result.get("remaining_unstaged_paths") or missing_staged)
+            return finish(
+                "blocked",
+                "Publish blocked because requested publishable changes were not fully staged: " + ", ".join(blocked_paths[:10]),
+                result.get("next_action") or "",
+            )
+        if not staged_paths:
             commit_ref = local_head or parse_head_commit(repo)
             if already_pushed:
                 mark_publish_noop(result, "Publish noop: branch already up to date on origin.", branch_to_push, result["remote_url"], commit_ref)
                 return finish("noop")
             mark_publish_noop(result, "Publish noop: nothing to commit.", branch_to_push, result["remote_url"], commit_ref)
             return finish("noop")
+        result["summary_status"] = f"staged {len(staged_paths)} publishable file(s)"
 
     if not publish_existing_commit:
         commit_message = publish_message.strip() or "fix(agent): apply validated repair"
@@ -8615,10 +13584,14 @@ def publish_current_repo_state(
     auto_revalidated: bool = False,
     validation_reused: bool = False,
     auto_revalidation_result: str = "not_needed",
+    auto_stage_safe_paths: bool = True,
+    auto_remediate_blockers: bool = True,
+    explain_staging: bool = False,
 ) -> dict:
     if validation_state != "success" and not force_publish:
         result = make_publish_result()
         result["publish_scope"] = "current_repo_state"
+        result["explain_staging"] = explain_staging
         result["requested"] = True
         result["validation_state"] = validation_state
         result["validation_commit_match"] = validation_commit_match
@@ -8654,6 +13627,9 @@ def publish_current_repo_state(
         True,
         validation_state=validation_state,
         force_publish=force_publish,
+        auto_stage_safe_paths=auto_stage_safe_paths,
+        auto_remediate_blockers=auto_remediate_blockers,
+        explain_staging=explain_staging,
     )
     result["validation_commit_match"] = validation_commit_match
     result["fingerprint_match"] = fingerprint_match
@@ -8695,6 +13671,9 @@ def run_post_success_publish(
     validation_succeeded: bool,
     publish_requested: bool,
     force_publish: bool = False,
+    auto_stage_safe_paths: bool = True,
+    auto_remediate_blockers: bool = True,
+    explain_staging: bool = False,
 ) -> dict:
     validation_result = "success" if validation_succeeded else ("blocked" if blocked_reason else "failed")
     summary = {
@@ -8718,10 +13697,29 @@ def run_post_success_publish(
         "final_workflow_result": "",
         "publish_reason": "",
         "publish_detail_reason": "",
+        "auto_stage_attempted": False,
+        "auto_stage_result": "not_needed",
+        "auto_staged_paths": [],
+        "remaining_unstaged_paths": [],
+        "remaining_unstaged": [],
+        "blocked_file_analysis": [],
+        "blocked_analysis_summary": {},
+        "file_decisions": [],
+        "staging_summary": {
+            "auto_staged": 0,
+            "ignored": 0,
+            "blocked": 0,
+        },
+        "staging_decision_reason": "",
+        "staging_reason": "",
+        "explain_staging": explain_staging,
         "meaningful_changes_detected": False,
         "meaningful_paths": [],
         "ignored_changes": [],
         "docs_checked_at_publish": False,
+        "docs_check_performed": False,
+        "docs_status": "up_to_date",
+        "docs_reason": "documentation check not performed",
         "docs_required": False,
         "docs_updated": False,
         "docs_refresh_mode": "none",
@@ -8757,6 +13755,9 @@ def run_post_success_publish(
             auto_revalidated=bool(summary.get("auto_revalidated")),
             validation_reused=bool(summary.get("validation_reused")),
             auto_revalidation_result=str(summary.get("auto_revalidation_result") or "not_needed"),
+            auto_stage_safe_paths=auto_stage_safe_paths,
+            auto_remediate_blockers=auto_remediate_blockers,
+            explain_staging=explain_staging,
         )
         summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
@@ -8780,6 +13781,9 @@ def run_post_success_publish(
             dry_run_mode,
             validation_state=validation_result,
             force_publish=force_publish,
+            auto_stage_safe_paths=auto_stage_safe_paths,
+            auto_remediate_blockers=auto_remediate_blockers,
+            explain_staging=explain_staging,
         )
         summary["publish_triggered"] = bool(publish_result.get("triggered"))
         summary["publish_result_detail"] = publish_result
@@ -8814,16 +13818,57 @@ def run_post_success_publish(
             or publish_result.get("pr_reason")
             or ""
         )
+    docs_reporting = summarize_docs_publish_reporting(
+        docs_check_performed=bool(
+            publish_result.get("docs_check_performed", publish_result.get("docs_checked_at_publish"))
+        ),
+        docs_required=bool(publish_result.get("docs_required")),
+        docs_updated=bool(publish_result.get("docs_updated")),
+        blocked=bool(
+            publish_result.get("control_path") == "blocked_docs"
+            or (
+                bool(publish_result.get("docs_required"))
+                and not bool(publish_result.get("docs_updated"))
+                and bool(publish_result.get("reason"))
+            )
+        ),
+        reason=str(publish_result.get("docs_reason") or publish_result.get("reason") or ""),
+    )
     summary["pr_created_or_reused"] = bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists"))
     summary["pr_merged"] = bool(publish_result.get("pr_merged"))
     summary["local_main_synced"] = bool(publish_result.get("local_main_synced"))
     summary["meaningful_changes_detected"] = bool(publish_result.get("meaningful_changes_detected"))
     summary["meaningful_paths"] = publish_result.get("meaningful_paths") or []
     summary["ignored_changes"] = publish_result.get("ignored_changes") or []
+    summary["auto_stage_attempted"] = bool(publish_result.get("auto_stage_attempted"))
+    summary["auto_stage_result"] = str(publish_result.get("auto_stage_result") or "not_needed")
+    summary["auto_staged_paths"] = publish_result.get("auto_staged_paths") or []
+    summary["safe_staged_paths"] = publish_result.get("safe_staged_paths") or []
+    summary["ignored_nonblocking_paths"] = publish_result.get("ignored_nonblocking_paths") or []
+    summary["safe_stage_candidate_paths"] = publish_result.get("safe_stage_candidate_paths") or []
+    summary["true_blockers"] = publish_result.get("true_blockers") or []
+    summary["blocker_count"] = int(publish_result.get("blocker_count") or 0)
+    summary["publishable_ready"] = bool(publish_result.get("publishable_ready"))
+    summary["blocker_remediation_attempted"] = bool(publish_result.get("blocker_remediation_attempted"))
+    summary["blocker_remediation_result"] = str(publish_result.get("blocker_remediation_result") or "not_needed")
+    summary["auto_removed_paths"] = publish_result.get("auto_removed_paths") or []
+    summary["auto_ignored_patterns"] = publish_result.get("auto_ignored_patterns") or []
+    summary["remaining_true_blockers"] = publish_result.get("remaining_true_blockers") or []
+    summary["remaining_unstaged_paths"] = publish_result.get("remaining_unstaged_paths") or []
+    summary["remaining_unstaged"] = publish_result.get("remaining_unstaged") or []
+    summary["blocked_file_analysis"] = publish_result.get("blocked_file_analysis") or []
+    summary["blocked_analysis_summary"] = publish_result.get("blocked_analysis_summary") or {}
+    summary["file_decisions"] = publish_result.get("file_decisions") or []
+    summary["staging_summary"] = publish_result.get("staging_summary") or {"auto_staged": 0, "ignored": 0, "blocked": 0}
+    summary["staging_decision_reason"] = str(publish_result.get("staging_decision_reason") or "")
+    summary["staging_reason"] = str(publish_result.get("staging_reason") or "")
     summary["last_published_commit"] = publish_result.get("last_published_commit") or ""
     summary["current_publish_candidate_commit"] = publish_result.get("current_publish_candidate_commit") or ""
     summary["diff_files_detected"] = publish_result.get("diff_files_detected") or []
     summary["docs_checked_at_publish"] = bool(publish_result.get("docs_checked_at_publish"))
+    summary["docs_check_performed"] = bool(docs_reporting.get("docs_check_performed"))
+    summary["docs_status"] = str(docs_reporting.get("docs_status") or "up_to_date")
+    summary["docs_reason"] = str(docs_reporting.get("docs_reason") or "documentation check not performed")
     summary["docs_required"] = bool(publish_result.get("docs_required"))
     summary["docs_updated"] = bool(publish_result.get("docs_updated"))
     summary["docs_refresh_mode"] = str(publish_result.get("docs_refresh_mode") or "none")
@@ -8852,6 +13897,17 @@ def run_post_success_publish(
 
 
 def print_post_success_publish_summary(summary: dict) -> None:
+    docs_reporting = summarize_docs_publish_reporting(
+        docs_check_performed=bool(summary.get("docs_check_performed", summary.get("docs_checked_at_publish"))),
+        docs_required=bool(summary.get("docs_required")),
+        docs_updated=bool(summary.get("docs_updated")),
+        blocked=bool(
+            (summary.get("publish_result") == "blocked" or summary.get("final_workflow_result") == "blocked")
+            and bool(summary.get("docs_required"))
+            and not bool(summary.get("docs_updated"))
+        ),
+        reason=str(summary.get("docs_reason") or summary.get("publish_detail_reason") or ""),
+    )
     print("\n=== VALIDATION RESULT ===")
     print(f"validation_result: {summary.get('validation_result', 'failed')}")
     print(f"validation_state: {summary.get('validation_state', summary.get('validation_result', 'failed'))}")
@@ -8868,6 +13924,9 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"publish_triggered: {format_bool(summary.get('publish_triggered'))}")
     print(f"publish_mode: {summary.get('publish_mode') or 'validated-run'}")
     print(f"docs_checked_at_publish: {format_bool(summary.get('docs_checked_at_publish'))}")
+    print(f"docs_check_performed: {format_bool(docs_reporting.get('docs_check_performed'))}")
+    print(f"docs_status: {docs_reporting.get('docs_status') or 'up_to_date'}")
+    print(f"docs_reason: {docs_reporting.get('docs_reason') or 'documentation check not performed'}")
     print(f"docs_required: {format_bool(summary.get('docs_required'))}")
     print(f"docs_updated: {format_bool(summary.get('docs_updated'))}")
     print(f"docs_refresh_mode: {summary.get('docs_refresh_mode') or 'none'}")
@@ -8878,6 +13937,27 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"diff_files_detected: {summary.get('diff_files_detected') or []}")
     print(f"ignored_changes: {summary.get('ignored_changes') or []}")
     print(f"meaningful_paths: {summary.get('meaningful_paths') or []}")
+    print(f"auto_stage_attempted: {format_bool(summary.get('auto_stage_attempted'))}")
+    print(f"auto_stage_result: {summary.get('auto_stage_result') or 'not_needed'}")
+    print(f"auto_staged_paths: {summary.get('auto_staged_paths') or []}")
+    print(f"safe_staged_paths: {summary.get('safe_staged_paths') or []}")
+    print(f"ignored_nonblocking_paths: {summary.get('ignored_nonblocking_paths') or []}")
+    print(f"safe_stage_candidate_paths: {summary.get('safe_stage_candidate_paths') or []}")
+    print(f"true_blockers: {summary.get('true_blockers') or []}")
+    print(f"blocker_count: {summary.get('blocker_count', 0)}")
+    print(f"publishable_ready: {format_bool(summary.get('publishable_ready'))}")
+    print(f"blocker_remediation_attempted: {format_bool(summary.get('blocker_remediation_attempted'))}")
+    print(f"blocker_remediation_result: {summary.get('blocker_remediation_result') or 'not_needed'}")
+    print(f"auto_removed_paths: {summary.get('auto_removed_paths') or []}")
+    print(f"auto_ignored_patterns: {summary.get('auto_ignored_patterns') or []}")
+    print(f"remaining_true_blockers: {summary.get('remaining_true_blockers') or []}")
+    print(f"remaining_unstaged_paths: {summary.get('remaining_unstaged_paths') or []}")
+    print(f"remaining_unstaged: {summary.get('remaining_unstaged') or []}")
+    print(f"staging_summary: {summary.get('staging_summary') or {'auto_staged': 0, 'ignored': 0, 'blocked': 0}}")
+    print(f"staging_decision_reason: {summary.get('staging_decision_reason') or '(none)'}")
+    print(f"staging_reason: {summary.get('staging_reason') or '(none)'}")
+    print(f"blocked_file_analysis: {summary.get('blocked_file_analysis') or []}")
+    print(f"blocked_analysis_summary: {summary.get('blocked_analysis_summary') or {}}")
     print(f"base_branch: {summary.get('base_branch') or '(none)'}")
     print(f"prepublish_base_alignment_attempted: {format_bool(summary.get('prepublish_base_alignment_attempted'))}")
     print(f"branch_diverged: {format_bool(summary.get('branch_diverged'))}")
@@ -8907,6 +13987,24 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"final_workflow_result: {summary.get('final_workflow_result') or summary.get('publish_result') or 'failed'}")
     if summary.get("pr_mergeability_reason"):
         print(f"pr_mergeability_reason: {summary.get('pr_mergeability_reason')}")
+    if summary.get("explain_staging"):
+        print("\n=== STAGING FILE DECISIONS ===")
+        for item in summary.get("file_decisions") or []:
+            print(
+                "file_decision: "
+                f"path={item.get('path') or '(none)'} "
+                f"file_type={item.get('file_type') or 'unknown'} "
+                f"classification_source={item.get('classification_source') or 'fallback'} "
+                f"publishable={format_bool(item.get('publishable'))} "
+                f"action={item.get('action') or 'ignored'} "
+                f"reason={item.get('reason') or item.get('publish_reason') or '(none)'}"
+            )
+    if summary.get("blocked_file_analysis"):
+        print("")
+        print_publish_block_analysis(
+            summary.get("blocked_file_analysis") or [],
+            summary.get("blocked_analysis_summary") or {},
+        )
 
 
 def print_publish_summary(publish_result: dict) -> None:
@@ -8916,6 +14014,22 @@ def print_publish_summary(publish_result: dict) -> None:
     environment = publish_result.get("environment") or {}
     fingerprint = publish_result.get("fingerprint") or {}
     actions = publish_result.get("actions") or []
+    docs_reporting = summarize_docs_publish_reporting(
+        docs_check_performed=bool(
+            publish_result.get("docs_check_performed", publish_result.get("docs_checked_at_publish"))
+        ),
+        docs_required=bool(publish_result.get("docs_required")),
+        docs_updated=bool(publish_result.get("docs_updated")),
+        blocked=bool(
+            publish_result.get("control_path") == "blocked_docs"
+            or (
+                bool(publish_result.get("docs_required"))
+                and not bool(publish_result.get("docs_updated"))
+                and bool(publish_result.get("reason"))
+            )
+        ),
+        reason=str(publish_result.get("docs_reason") or publish_result.get("reason") or ""),
+    )
     print("\n=== PUBLISH RESULT ===")
     print(f"publish_result: {final.get('status') or 'failed'}")
     print(
@@ -8958,6 +14072,35 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"diff_files_detected: {publish_result.get('diff_files_detected') or []}")
     print(f"ignored_changes: {publish_result.get('ignored_changes') or []}")
     print(f"meaningful_paths: {publish_result.get('meaningful_paths') or []}")
+    print(f"auto_stage_attempted: {format_bool(publish_result.get('auto_stage_attempted'))}")
+    print(f"auto_stage_result: {publish_result.get('auto_stage_result') or 'not_needed'}")
+    print(f"auto_staged_paths: {publish_result.get('auto_staged_paths') or []}")
+    print(f"safe_staged_paths: {publish_result.get('safe_staged_paths') or []}")
+    print(f"ignored_nonblocking_paths: {publish_result.get('ignored_nonblocking_paths') or []}")
+    print(f"safe_stage_candidate_paths: {publish_result.get('safe_stage_candidate_paths') or []}")
+    print(f"true_blockers: {publish_result.get('true_blockers') or []}")
+    print(f"blocker_count: {publish_result.get('blocker_count', 0)}")
+    print(f"publishable_ready: {format_bool(publish_result.get('publishable_ready'))}")
+    print(f"blocker_remediation_attempted: {format_bool(publish_result.get('blocker_remediation_attempted'))}")
+    print(f"blocker_remediation_result: {publish_result.get('blocker_remediation_result') or 'not_needed'}")
+    print(f"auto_removed_paths: {publish_result.get('auto_removed_paths') or []}")
+    print(f"auto_ignored_patterns: {publish_result.get('auto_ignored_patterns') or []}")
+    print(f"remaining_true_blockers: {publish_result.get('remaining_true_blockers') or []}")
+    print(f"remaining_unstaged_paths: {publish_result.get('remaining_unstaged_paths') or []}")
+    print(f"remaining_unstaged: {publish_result.get('remaining_unstaged') or []}")
+    print(f"staging_summary: {publish_result.get('staging_summary') or {'auto_staged': 0, 'ignored': 0, 'blocked': 0}}")
+    print(f"staging_decision_reason: {publish_result.get('staging_decision_reason') or '(none)'}")
+    print(f"staging_reason: {publish_result.get('staging_reason') or '(none)'}")
+    print(f"blocked_file_analysis: {publish_result.get('blocked_file_analysis') or []}")
+    print(f"blocked_analysis_summary: {publish_result.get('blocked_analysis_summary') or {}}")
+    print(f"docs_checked_at_publish: {format_bool(publish_result.get('docs_checked_at_publish'))}")
+    print(f"docs_check_performed: {format_bool(docs_reporting.get('docs_check_performed'))}")
+    print(f"docs_status: {docs_reporting.get('docs_status') or 'up_to_date'}")
+    print(f"docs_reason: {docs_reporting.get('docs_reason') or 'documentation check not performed'}")
+    print(f"docs_required: {format_bool(publish_result.get('docs_required'))}")
+    print(f"docs_updated: {format_bool(publish_result.get('docs_updated'))}")
+    print(f"docs_refresh_mode: {publish_result.get('docs_refresh_mode') or 'none'}")
+    print(f"docs_targets: {publish_result.get('docs_targets') or []}")
     print(f"base_branch: {publish_result.get('base_branch') or '(none)'}")
     print(f"prepublish_base_alignment_attempted: {format_bool(publish_result.get('prepublish_base_alignment_attempted'))}")
     print(f"branch_diverged: {format_bool(publish_result.get('branch_diverged'))}")
@@ -8987,6 +14130,9 @@ def print_publish_summary(publish_result: dict) -> None:
             f"staged={bool(working_tree.get('has_staged'))} "
             f"untracked={bool(working_tree.get('has_untracked'))}"
         )
+        print(f"staged_paths: {working_tree.get('staged_paths') or []}")
+        print(f"unstaged_paths: {working_tree.get('unstaged_paths') or []}")
+        print(f"untracked_paths: {working_tree.get('untracked_paths') or []}")
     print(
         "fingerprint: "
         f"matched_previous_success={bool(fingerprint.get('matched_previous_success'))} "
@@ -9020,6 +14166,24 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"pr_mergeability_repair_attempted: {format_bool(publish_result.get('pr_mergeability_repair_attempted'))}")
     print(f"pr_mergeability_repair_result: {publish_result.get('pr_mergeability_repair_result') or 'not_needed'}")
     print(f"final_workflow_result: {publish_result.get('final_workflow_result') or final.get('status') or 'failed'}")
+    if publish_result.get("explain_staging"):
+        print("\n=== STAGING FILE DECISIONS ===")
+        for item in publish_result.get("file_decisions") or []:
+            print(
+                "file_decision: "
+                f"path={item.get('path') or '(none)'} "
+                f"file_type={item.get('file_type') or 'unknown'} "
+                f"classification_source={item.get('classification_source') or 'fallback'} "
+                f"publishable={format_bool(item.get('publishable'))} "
+                f"action={item.get('action') or 'ignored'} "
+                f"reason={item.get('reason') or item.get('publish_reason') or '(none)'}"
+            )
+    if publish_result.get("blocked_file_analysis"):
+        print("")
+        print_publish_block_analysis(
+            publish_result.get("blocked_file_analysis") or [],
+            publish_result.get("blocked_analysis_summary") or {},
+        )
     if publish_result.get("pr_mergeability_reason"):
         print(f"pr_mergeability_reason: {publish_result['pr_mergeability_reason']}")
     if publish_result.get("pr_reason"):
@@ -9091,6 +14255,8 @@ def compute_success_confidence(
         reasons.append("limited validation coverage")
     if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("limited_validation"):
         reasons.append("script validation was limited to syntax/import or weak runtime signals")
+    if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("auto_probe_used"):
+        reasons.append("live endpoint probe evidence informed validation planning")
 
     if changed_paths and len(changed_paths) <= 2 and diff_size <= 2000 and all(item.get("ok") for item in candidate_results):
         level = "HIGH"
@@ -9100,6 +14266,8 @@ def compute_success_confidence(
         level = "MEDIUM"
     if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("limited_validation") and level == "HIGH":
         level = "MEDIUM"
+    if CURRENT_VALIDATION_PLAN.get("active") and CURRENT_VALIDATION_PLAN.get("auto_probe_used") and str(CURRENT_VALIDATION_PLAN.get("confidence_level") or "").lower() == "low":
+        level = "LOW"
 
     if not reasons:
         reasons.append(f"validated successfully on attempt {attempt_number}")
@@ -9989,6 +15157,15 @@ def build_user_prompt(
             f"- chosen stack: {', '.join(stack_commands)}\n"
             f"- confidence: {CURRENT_VALIDATION_PLAN.get('confidence_level', 'low')}\n"
         )
+        if CURRENT_VALIDATION_PLAN.get("auto_probe_used"):
+            probe_finding = (CURRENT_VALIDATION_PLAN.get("probe_findings") or [{}])[0]
+            validation_note += (
+                "Live probe evidence:\n"
+                f"- endpoint: {probe_finding.get('endpoint') or '(none)'}\n"
+                f"- probe_type: {probe_finding.get('probe_type') or 'auto'}\n"
+                f"- probe_summary: {probe_finding.get('summary') or probe_finding.get('error') or '(none)'}\n"
+                f"- probe_reasoning: {CURRENT_VALIDATION_PLAN.get('probe_reasoning') or '(none)'}\n"
+            )
     return (
         f"Repository: {repo}\n"
         f"Current branch: {branch_name or '(unknown or no git branch)'}\n"
@@ -11355,8 +16532,10 @@ def finalize_success(
 
 
 def main():
+    global CURRENT_VALIDATION_PLAN
     global CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC
     parser = argparse.ArgumentParser()
+    parser.add_argument("--interactive", action="store_true", help="Launch the top-level interactive terminal app.")
     parser.add_argument("--repo", help="Path to repo")
     parser.add_argument("--script", help="Path to a Python script; validation commands are discovered automatically.")
     parser.add_argument("--target", help="SSH host for remote execution.")
@@ -11375,8 +16554,13 @@ def main():
     parser.add_argument("--no-publish-on-success", action="store_true", help="Disable the default publish-after-validation-success behavior for validated runs.")
     parser.add_argument("--no-finalize", action="store_true", help="Stop after successful validation and skip the canonical finalization publish path.")
     parser.add_argument("--ensure-validation-record", action="store_true", help="Create or reuse a commit-linked validation record for the current repo state before finalization.")
+    parser.add_argument("--script-validate-only", action="store_true", help="For --script workflows, run the discovered validation stack without entering the repair loop.")
+    parser.add_argument("--sync-conflicts", action="store_true", help="Inspect and repair merge conflicts for the current repo without entering the repair loop.")
     parser.add_argument("--publish-only", action="store_true", help="Publish the current repo state without running the repair loop or requiring a failing test command.")
     parser.add_argument("--force-publish", action="store_true", help="Allow publish to proceed even when the current validation state is blocked or failed.")
+    parser.add_argument("--no-auto-stage", action="store_true", help="Disable automatic staging of safe publishable files during finalization/publish.")
+    parser.add_argument("--no-auto-remediate-blockers", action="store_true", help="Disable automatic remediation of high-confidence safe publish blockers during finalization/publish.")
+    parser.add_argument("--explain-staging", action="store_true", help="Print per-file staging classification and reasoning in publish/finalization summaries.")
     parser.add_argument("--no-auto-merge-conflicts", action="store_true", help="Detect merge conflicts and block immediately instead of attempting auto-resolution.")
     parser.add_argument("--no-auto-conflict-resolution-after-sync", action="store_true", help="After pull/merge/rebase/branch-sync conflicts, block immediately instead of attempting auto-resolution.")
     parser.add_argument("--no-auto-revalidate", action="store_true", help="Disable automatic validation rerun when publish detects a stale validated commit.")
@@ -11390,10 +16574,15 @@ def main():
     parser.add_argument("--pattern-repo", help="Pattern repo override: auto, none, a configured repo name, or an explicit path.")
     parser.add_argument("--reset-pattern-repo", action="store_true", help="Delete and recreate the private training repo before continuing.")
     parser.add_argument("--import-pattern-files", nargs="+", help="Import external scripts into the private pattern repository and learn from them.")
+    parser.add_argument("--import-pattern-repo", help="Import a local repo or folder of scripts into the private pattern repository.")
     parser.add_argument("--add-to-training", action="store_true", help="When used with --script, sanitize and import that script into the training repo before continuing.")
     parser.add_argument("--pattern-trust", choices=sorted(PATTERN_TRUST_LEVELS), default="trusted", help="Trust level for imported or directly learned pattern scripts.")
     parser.add_argument("--pattern-tags", help="Comma-separated tags to attach to imported pattern sources.")
     parser.add_argument("--pattern-note", help="Optional note recorded with imported pattern sources.")
+    parser.add_argument("--pattern-include", action="append", help="Glob filter for repo/folder pattern import. Defaults to *.py and may be passed multiple times.")
+    parser.add_argument("--pattern-exclude", action="append", help="Exclude glob for repo/folder pattern import. May be passed multiple times.")
+    parser.add_argument("--pattern-max-files", type=int, default=DEFAULT_PATTERN_REPO_MAX_FILES, help="Maximum files to scan during repo/folder pattern import.")
+    parser.add_argument("--pattern-max-depth", type=int, default=0, help="Maximum relative directory depth to scan during repo/folder pattern import. 0 means unlimited.")
     parser.add_argument("--list-patterns", action="store_true", help="List learned patterns from the private pattern repository.")
     parser.add_argument("--list-pattern-sources", action="store_true", help="List source files tracked in the private pattern repository.")
     parser.add_argument("--promote-pattern", help="Promote one pattern by id.")
@@ -11413,11 +16602,22 @@ def main():
     parser.add_argument("--forget-pattern", help="Remove a learned pattern by id from the private pattern memory.")
     parser.add_argument("--new-script", help="Generate a new script using learned conventions when relevant patterns exist.")
     parser.add_argument("--new-script-purpose", help="Short purpose statement for --new-script generation.")
+    parser.add_argument("--new-script-validation-mode", choices=["auto", "syntax", "cli_help", "custom", "skip"], default="auto", help="Validation mode override for --new-script.")
     parser.add_argument("--compare-pattern-baseline", action="store_true", help="For learned runs, compare the selected pattern-repo plan against a no-pattern baseline.")
     parser.add_argument("--eval-pattern-learning", action="store_true", help="Run baseline vs learned evals for the script-pattern memory.")
     parser.add_argument("--pattern-eval-tasks", help="Optional path to a pattern-learning eval task JSON file.")
     parser.add_argument("--http-proxy", help="HTTP proxy for subprocess-driven tasks.")
     parser.add_argument("--https-proxy", help="HTTPS proxy for subprocess-driven tasks.")
+    parser.add_argument("--probe-url", help="Bounded live endpoint probe for API or M3U8 inspection.")
+    parser.add_argument("--probe-type", choices=["auto", "head", "get", "json_summary", "headers_summary", "m3u8_summary"], default="auto", help="Probe mode for --probe-url.")
+    parser.add_argument("--probe-header", action="append", help="Custom probe header in 'Name: value' form. May be passed multiple times.")
+    parser.add_argument("--probe-bearer-token", help="Bearer token to send with --probe-url. Output is redacted.")
+    parser.add_argument("--probe-cookie", help="Cookie header to send with --probe-url. Output is redacted.")
+    parser.add_argument("--probe-user-agent", help="Override User-Agent for --probe-url.")
+    parser.add_argument("--probe-method", help="Override HTTP method for --probe-url.")
+    parser.add_argument("--probe-timeout", type=int, default=DEFAULT_PROBE_TIMEOUT_SECONDS, help="Per-request timeout in seconds for --probe-url.")
+    parser.add_argument("--probe-max-bytes", type=int, default=DEFAULT_PROBE_MAX_BYTES, help="Maximum response bytes to read for --probe-url.")
+    parser.add_argument("--probe-follow-up", type=int, default=DEFAULT_PROBE_FOLLOW_UP_LIMIT, help="Maximum bounded follow-up requests for M3U8 variant or segment probing.")
     parser.add_argument("--no-upstream-sync", action="store_true", help="Skip the automatic upstream fetch/merge check before learning, validation, repair, or publish.")
     parser.add_argument("--api-budget-run", type=int, help="Optional likely API-failure budget for the full run.")
     parser.add_argument("--api-budget-attempt", type=int, help="Optional likely API-failure budget per attempt.")
@@ -11430,12 +16630,21 @@ def main():
         args.config = cli_option_value(raw_argv, "--config")
     if not args.pattern_repo:
         args.pattern_repo = cli_option_value(raw_argv, "--pattern-repo")
+    if args.interactive:
+        initial_session = {
+            "repo": str(Path(args.repo).resolve()) if args.repo else str(Path.cwd()),
+            "http_proxy": args.http_proxy or os.environ.get("HTTP_PROXY", ""),
+            "https_proxy": args.https_proxy or os.environ.get("HTTPS_PROXY", ""),
+            "output": args.output or "human",
+        }
+        raise SystemExit(run_interactive_app(initial_session))
 
     pattern_special_mode = bool(
         args.learn_from
         or args.new_script
         or args.eval_pattern_learning
         or args.import_pattern_files
+        or args.import_pattern_repo
         or args.reset_pattern_repo
         or args.list_patterns
         or args.list_pattern_sources
@@ -11451,7 +16660,7 @@ def main():
 
     repo, args.test_cmd, args.max_steps, args.max_file_chars, resolved_mode, mode_source, config_path, recent_state_path, safety_settings, target = resolve_run_settings(
         args,
-        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record,
+        require_test_cmd=not args.publish_only and not pattern_special_mode and not args.ensure_validation_record and not args.probe_url and not args.sync_conflicts and not args.script_validate_only,
     )
     if not target and not repo.exists():
         print(f"Missing repo path: {repo}", file=sys.stderr)
@@ -11462,9 +16671,39 @@ def main():
     CURRENT_NO_AUTO_CONFLICT_RESOLUTION_AFTER_SYNC = bool(getattr(args, "no_auto_conflict_resolution_after_sync", False))
     config_values, _ = load_agent_config(args.config, Path.cwd())
     configure_publish_ignore_paths(config_values)
+    if CURRENT_VALIDATION_PLAN.get("active"):
+        CURRENT_VALIDATION_PLAN = maybe_enrich_validation_plan_with_probes(CURRENT_VALIDATION_PLAN)
+    probe_headers: dict[str, str] = {}
+    generation_probe_result: dict = {}
+    if args.probe_url:
+        try:
+            probe_headers = parse_probe_header_args(args.probe_header)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        probe_result = probe_endpoint(
+            args.probe_url,
+            probe_type=args.probe_type,
+            method=args.probe_method or "",
+            custom_headers=probe_headers,
+            bearer_token=args.probe_bearer_token or "",
+            cookies=args.probe_cookie or "",
+            user_agent=args.probe_user_agent or "",
+            http_proxy=args.http_proxy or "",
+            https_proxy=args.https_proxy or "",
+            timeout_seconds=max(1, int(args.probe_timeout or DEFAULT_PROBE_TIMEOUT_SECONDS)),
+            max_bytes=max(512, int(args.probe_max_bytes or DEFAULT_PROBE_MAX_BYTES)),
+            follow_up_limit=max(0, int(args.probe_follow_up or DEFAULT_PROBE_FOLLOW_UP_LIMIT)),
+        )
+        if not args.new_script:
+            print_probe_result(probe_result, output_format=args.output)
+            if not probe_result.get("ok"):
+                raise SystemExit(1)
+            return
+        generation_probe_result = probe_result
     pattern_repo_mutation_mode = bool(
         args.learn_from
         or args.import_pattern_files
+        or args.import_pattern_repo
         or args.reset_pattern_repo
         or args.relearn_patterns
         or args.forget_pattern
@@ -11521,6 +16760,10 @@ def main():
             startup_signal("Mode: publish current repo state")
         elif args.ensure_validation_record:
             startup_signal("Mode: ensure validation record")
+        elif args.script_validate_only:
+            startup_signal("Mode: validate script only")
+        elif args.sync_conflicts:
+            startup_signal("Mode: sync/repair repo conflicts")
         else:
             startup_signal("Mode: publish validated run" if publish_requested else f"Mode: {resolved_mode}" + (f" ({mode_source})" if mode_source != "explicit" else ""))
             startup_signal(f"Using test: {args.test_cmd}")
@@ -11533,6 +16776,10 @@ def main():
             startup_signal("Skipping repair loop; publish-only mode active.")
         elif args.ensure_validation_record:
             startup_signal("Skipping repair loop; validation-record mode active.")
+        elif args.script_validate_only:
+            startup_signal("Skipping repair loop; validation-only script mode active.")
+        elif args.sync_conflicts:
+            startup_signal("Skipping repair loop; conflict-sync mode active.")
         elif pattern_special_mode:
             startup_signal("Skipping repair loop; pattern-learning workflow active.")
         else:
@@ -11626,6 +16873,49 @@ def main():
             )
         print(f"learned_pattern_count: {len(imported.get('learned_patterns', []))}")
         print(f"learned_pattern_delta: {imported.get('learned_pattern_delta', 0)}")
+        print(f"relearn_triggered: {format_bool(imported.get('relearn_triggered'))}")
+        return
+    if args.import_pattern_repo:
+        preview = scan_pattern_source_collection(
+            Path(args.import_pattern_repo),
+            include_globs=args.pattern_include,
+            exclude_globs=args.pattern_exclude,
+            max_files=max(0, int(args.pattern_max_files or DEFAULT_PATTERN_REPO_MAX_FILES)),
+            max_depth=max(0, int(args.pattern_max_depth or 0)),
+        )
+        print_pattern_collection_preview(preview)
+        if not preview.get("ok"):
+            raise SystemExit(1)
+        if args.explain_only:
+            return
+        imported = import_pattern_repo_collection(
+            pattern_repo,
+            args.import_pattern_repo,
+            trust_level=args.pattern_trust,
+            tags=import_pattern_tags(args.pattern_tags),
+            note=args.pattern_note or "",
+            include_globs=args.pattern_include,
+            exclude_globs=args.pattern_exclude,
+            max_files=max(0, int(args.pattern_max_files or DEFAULT_PATTERN_REPO_MAX_FILES)),
+            max_depth=max(0, int(args.pattern_max_depth or 0)),
+        )
+        print("=== PATTERN REPO IMPORT ===")
+        print(f"pattern_repo: {imported.get('pattern_repo', '')}")
+        print(f"source_root: {imported.get('source_root', '')}")
+        print(f"import_scope: {imported.get('import_scope', 'folder')}")
+        print(f"candidate_count: {imported.get('candidate_count', 0)}")
+        print(f"promoted_trusted_count: {imported.get('promoted_trusted_count', 0)}")
+        print(f"promoted_experimental_count: {imported.get('promoted_experimental_count', 0)}")
+        print(f"blocked_count: {imported.get('blocked_count', 0)}")
+        print(f"repo_level_patterns_added: {imported.get('repo_level_patterns_added', 0)}")
+        print(f"pattern_memory_delta: {imported.get('pattern_memory_delta', 0)}")
+        for source in imported.get("imported_sources", []):
+            print(
+                f"- source_subpath={source.get('source_subpath', '')} "
+                f"validation_status={source.get('validation_status', '')} "
+                f"promotion_state={source.get('promotion_state_detail', source.get('promotion_state', 'candidate'))} "
+                f"stored_path={source.get('repo_rel_path', '')}"
+            )
         print(f"relearn_triggered: {format_bool(imported.get('relearn_triggered'))}")
         return
     if args.script and args.add_to_training:
@@ -11804,10 +17094,42 @@ def main():
             args.new_script_purpose or output_path.stem,
             script_path=output_path,
         )
-        rendered = render_new_script(repo, output_path, args.new_script_purpose or output_path.stem, selection)
-        plan = build_script_validation_plan(output_path.parent, output_path)
-        chosen_plan = select_validation_stack(plan, selection)
-        validation_result = run_validation_stack(output_path.parent, chosen_plan)
+        prepared = prepare_new_script_generation(
+            repo,
+            output_path,
+            args.new_script_purpose or output_path.stem,
+            selection,
+            pattern_repo_selection,
+            probe_result=generation_probe_result,
+            probe_url=args.probe_url or "",
+            probe_type=args.probe_type,
+            probe_headers=probe_headers,
+            probe_bearer_token=args.probe_bearer_token or "",
+            probe_cookie=args.probe_cookie or "",
+            probe_user_agent=args.probe_user_agent or "",
+            probe_method=args.probe_method or "",
+            http_proxy=args.http_proxy or "",
+            https_proxy=args.https_proxy or "",
+            probe_timeout=max(1, int(args.probe_timeout or DEFAULT_PROBE_TIMEOUT_SECONDS)),
+            probe_max_bytes=max(512, int(args.probe_max_bytes or DEFAULT_PROBE_MAX_BYTES)),
+            probe_follow_up=max(0, int(args.probe_follow_up or DEFAULT_PROBE_FOLLOW_UP_LIMIT)),
+        )
+        rendered = prepared["rendered"]
+        generation_plan = prepared["generation_plan"]
+        plan = prepared["validation_plan"]
+        chosen_plan = prepared["chosen_validation_plan"]
+        chosen_plan = override_validation_stack_for_new_script(
+            chosen_plan,
+            output_path.parent,
+            output_path,
+            mode=args.new_script_validation_mode,
+            custom_command=args.test_cmd or "",
+        )
+        generation_plan = finalize_new_script_generation_plan(generation_plan, chosen_plan, selection, pattern_repo_selection)
+        if str(args.new_script_validation_mode or "auto") == "skip":
+            validation_result = {"ok": True, "results": [], "failed_step": {}, "output": "", "failure_type": FAILURE_UNKNOWN, "skipped": True}
+        else:
+            validation_result = run_validation_stack(output_path.parent, chosen_plan)
         baseline_comparison = compare_pattern_baseline(plan, selection) if args.compare_pattern_baseline else {}
         if pattern_repo_selection.get("path"):
             learned_record = {
@@ -11825,10 +17147,38 @@ def main():
             }
             record_pattern_effectiveness(pattern_repo_selection.get("path"), [learned_record], [baseline_record])
         print("=== NEW SCRIPT RESULT ===")
+        probe_findings_text = "; ".join(list(generation_plan.get("probe_summary", {}).get("key_findings") or [])[:3])
+        patterns_applied = [item.get("pattern_type", "") for item in selection.get("applied", []) if item.get("pattern_type")]
+        print(f"script_generated: {format_bool(True)}")
         print(f"path: {output_path}")
+        print(f"output_path: {output_path}")
+        print(f"pattern_source_used: {generation_plan.get('pattern_source_used', 'none')}")
+        print(f"patterns_applied: {patterns_applied}")
+        print(f"probe_used: {format_bool(bool(generation_plan.get('probe_used')))}")
+        print(f"key_probe_findings: {probe_findings_text or '(none)'}")
+        print(f"validation_plan: {generation_plan.get('validation_plan') or chosen_plan.get('primary_command', '') or '(none)'}")
+        print(f"generation_confidence: {generation_plan.get('generation_confidence', 'low')}")
+        if generation_plan.get("confidence_reasons"):
+            print(f"generation_confidence_reasoning: {'; '.join(list(generation_plan.get('confidence_reasons') or [])[:4])}")
         print(format_script_pattern_transparency(selection))
         print(f"validation_command: {chosen_plan.get('primary_command', '')}")
+        print(f"validation_result: {'skipped' if validation_result.get('skipped') else ('success' if validation_result.get('ok') else 'blocked')}")
         print(f"validation_success: {validation_result.get('ok')}")
+        print(f"script_kind: {rendered.get('script_kind', generation_plan.get('script_kind', 'local'))}")
+        if generation_plan.get("proposed_script_structure"):
+            print(f"proposed_script_structure: {generation_plan.get('proposed_script_structure')}")
+        plain_summary = "Generated a local script using learned patterns."
+        if rendered.get("script_kind") == "api":
+            plain_summary = "Generated a proxy-aware API script using learned patterns and live endpoint evidence."
+        elif rendered.get("script_kind") == "m3u8":
+            plain_summary = "Generated an HLS/M3U8 utility using learned patterns and live playlist inspection."
+        elif patterns_applied:
+            plain_summary = "Generated a local-only script using trusted learned patterns."
+        if validation_result.get("skipped"):
+            plain_summary = "The new script was created locally, but validation was skipped."
+        elif not validation_result.get("ok"):
+            plain_summary = "Generated the script, but validation did not pass yet."
+        print(f"what_happened: {plain_summary}")
         if args.compare_pattern_baseline:
             print("=== PATTERN BASELINE COMPARISON ===")
             print(f"baseline_validation_command: {baseline_comparison.get('baseline_validation_command', '')}")
@@ -11837,6 +17187,8 @@ def main():
             print(f"learned_path_improved_fit: {format_bool(baseline_comparison.get('improved_fit'))}")
         if validation_result.get("output"):
             print(f"validation_output: {validation_result.get('output')}")
+        if not validation_result.get("ok") and not validation_result.get("skipped") and not args.eval_pattern_learning:
+            raise SystemExit(1)
         if not args.eval_pattern_learning:
             return
     if args.eval_pattern_learning:
@@ -11852,6 +17204,50 @@ def main():
         print_validation_record_result(validation_record_result)
         if not validation_record_result.get("ok"):
             raise SystemExit(1)
+        return
+    if args.script_validate_only:
+        if not args.script:
+            raise SystemExit("--script-validate-only requires --script")
+        script_path = Path(args.script).expanduser()
+        if not script_path.is_absolute():
+            script_path = (repo / script_path).resolve()
+        plan = build_script_validation_plan(repo, script_path)
+        if args.test_cmd:
+            plan["primary_command"] = args.test_cmd
+            plan["chosen_stack"] = [
+                {"command": f"python -m py_compile {shlex.quote(plan.get('script_rel_path') or relative_script_path(repo, script_path))}", "kind": "syntax"},
+                {"command": args.test_cmd, "kind": "custom"},
+            ]
+            plan["candidates"] = [{"command": args.test_cmd, "kind": "custom", "confidence": 1.0, "source": "interactive"}]
+        print(format_validation_plan_summary(plan))
+        validation_run = run_validation_stack(repo, plan)
+        print_script_validation_only_result(script_path, plan, validation_run)
+        if not validation_run.get("ok"):
+            raise SystemExit(1)
+        return
+    if args.sync_conflicts:
+        merge_conflict_outcome = maybe_handle_merge_conflicts(
+            repo,
+            validation_command=args.test_cmd or latest_repo_validation_command(repo),
+            publish_requested=False,
+            publish_mode="sync-only",
+            publish_branch=args.publish_branch or "",
+            publish_pr=False,
+            publish_merge=False,
+            publish_merge_local_main=False,
+            publish_message=args.publish_message or "",
+            target=target,
+            dry_run_mode=args.dry_run,
+        force_publish=False,
+        auto_stage_safe_paths=not bool(args.no_auto_stage),
+        auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+        explain_staging=bool(args.explain_staging),
+        no_auto_merge_conflicts=bool(args.no_auto_merge_conflicts),
+        )
+        if merge_conflict_outcome and not merge_conflict_outcome.get("success"):
+            raise SystemExit(1)
+        if not merge_conflict_outcome:
+            print("FINAL: no merge conflicts detected")
         return
     if args.publish_only:
         print("Active mode: publish current repo state")
@@ -11874,6 +17270,9 @@ def main():
         target=target,
         dry_run_mode=args.dry_run,
         force_publish=bool(args.force_publish),
+        auto_stage_safe_paths=not bool(args.no_auto_stage),
+        auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+        explain_staging=bool(args.explain_staging),
         no_auto_merge_conflicts=bool(args.no_auto_merge_conflicts),
     )
     if merge_conflict_outcome:
@@ -11908,6 +17307,25 @@ def main():
             auto_revalidated=bool(validation_state.get("auto_revalidated")),
             validation_reused=bool(validation_state.get("validation_reused")),
             auto_revalidation_result=str(validation_state.get("auto_revalidation_result") or "not_needed"),
+            auto_stage_safe_paths=not bool(args.no_auto_stage),
+            auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+            explain_staging=bool(args.explain_staging),
+        )
+        docs_reporting = summarize_docs_publish_reporting(
+            docs_check_performed=bool(
+                publish_result.get("docs_check_performed", publish_result.get("docs_checked_at_publish"))
+            ),
+            docs_required=bool(publish_result.get("docs_required")),
+            docs_updated=bool(publish_result.get("docs_updated")),
+            blocked=bool(
+                publish_result.get("control_path") == "blocked_docs"
+                or (
+                    bool(publish_result.get("docs_required"))
+                    and not bool(publish_result.get("docs_updated"))
+                    and bool(publish_result.get("reason"))
+                )
+            ),
+            reason=str(publish_result.get("docs_reason") or publish_result.get("reason") or ""),
         )
         publish_summary = {
             "validation_state": str(validation_state.get("validation_state") or "blocked"),
@@ -11931,10 +17349,23 @@ def main():
             "pr_merged": bool(publish_result.get("pr_merged")),
             "local_main_synced": bool(publish_result.get("local_main_synced")),
             "docs_checked_at_publish": bool(publish_result.get("docs_checked_at_publish")),
+            "docs_check_performed": bool(docs_reporting.get("docs_check_performed")),
+            "docs_status": docs_reporting.get("docs_status") or "up_to_date",
+            "docs_reason": docs_reporting.get("docs_reason") or "documentation check not performed",
             "docs_required": bool(publish_result.get("docs_required")),
             "docs_updated": bool(publish_result.get("docs_updated")),
             "docs_refresh_mode": publish_result.get("docs_refresh_mode") or "none",
             "docs_targets": publish_result.get("docs_targets") or [],
+            "auto_stage_attempted": bool(publish_result.get("auto_stage_attempted")),
+            "auto_stage_result": publish_result.get("auto_stage_result") or "not_needed",
+            "auto_staged_paths": publish_result.get("auto_staged_paths") or [],
+            "remaining_unstaged_paths": publish_result.get("remaining_unstaged_paths") or [],
+            "remaining_unstaged": publish_result.get("remaining_unstaged") or [],
+            "file_decisions": publish_result.get("file_decisions") or [],
+            "staging_summary": publish_result.get("staging_summary") or {"auto_staged": 0, "ignored": 0, "blocked": 0},
+            "staging_decision_reason": publish_result.get("staging_decision_reason") or "",
+            "staging_reason": publish_result.get("staging_reason") or "",
+            "explain_staging": bool(publish_result.get("explain_staging")),
             "meaningful_changes_detected": bool(publish_result.get("meaningful_changes_detected")),
             "last_published_commit": publish_result.get("last_published_commit") or "",
             "current_publish_candidate_commit": publish_result.get("current_publish_candidate_commit") or "",
@@ -12522,6 +17953,9 @@ def main():
                     "validated-run",
                     True,
                     publish_requested,
+                    auto_stage_safe_paths=not bool(args.no_auto_stage),
+                    auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+                    explain_staging=bool(args.explain_staging),
                 )
                 print_post_success_publish_summary(publish_summary)
                 if publish_summary.get("publish_result_detail"):
@@ -13459,6 +18893,9 @@ def main():
                             "validated-run",
                             True,
                             publish_requested,
+                            auto_stage_safe_paths=not bool(args.no_auto_stage),
+                            auto_remediate_blockers=not bool(args.no_auto_remediate_blockers),
+                            explain_staging=bool(args.explain_staging),
                         )
                         print_post_success_publish_summary(publish_summary)
                         if publish_summary.get("publish_result_detail"):

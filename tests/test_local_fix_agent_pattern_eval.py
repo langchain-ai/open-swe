@@ -109,6 +109,156 @@ def test_render_new_script_uses_learned_conventions(tmp_path: Path) -> None:
     assert 'if __name__ == "__main__":' in content
 
 
+def test_prepare_new_script_generation_uses_trusted_patterns_without_overapplying_network_bits(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "logging"])
+    selection, repo_selection = lfa.resolve_pattern_selection(
+        {},
+        {"selected": "default", "path": pattern_repo, "reason": "test", "confidence": "medium", "tags": ["proxy"]},
+        "new-script",
+        "create a local cli tool with logging",
+        script_path=repo / "generated_local_tool.py",
+    )
+
+    prepared = lfa.prepare_new_script_generation(
+        repo,
+        repo / "generated_local_tool.py",
+        "create a local cli tool with logging",
+        selection,
+        repo_selection,
+    )
+
+    content = Path(prepared["rendered"]["path"]).read_text()
+    assert prepared["generation_plan"]["probe_used"] is False
+    assert prepared["generation_plan"]["generation_confidence"] in {"medium", "high"}
+    assert "argparse.ArgumentParser" in content
+    assert "logging.basicConfig" in content
+    assert "configured_proxy" not in content
+    assert prepared["chosen_validation_plan"]["primary_command"]
+
+
+def test_override_validation_stack_for_new_script_supports_explicit_modes(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script_path = repo / "generated_tool.py"
+    script_path.write_text("import argparse\n\n\ndef main() -> int:\n    parser = argparse.ArgumentParser()\n    parser.parse_args()\n    return 0\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n")
+    plan = lfa.build_script_validation_plan(repo, script_path)
+
+    syntax_only = lfa.override_validation_stack_for_new_script(plan, repo, script_path, mode="syntax")
+    assert syntax_only["validation_mode"] == "syntax"
+    assert [step["kind"] for step in syntax_only["chosen_stack"]] == ["syntax"]
+
+    cli_help = lfa.override_validation_stack_for_new_script(plan, repo, script_path, mode="cli_help")
+    assert cli_help["validation_mode"] == "cli_help"
+    assert cli_help["primary_command"].endswith("--help")
+
+    skipped = lfa.override_validation_stack_for_new_script(plan, repo, script_path, mode="skip")
+    assert skipped["validation_mode"] == "skip"
+    assert skipped["chosen_stack"] == []
+
+
+def test_prepare_new_script_generation_uses_api_probe_findings(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["proxy", "network"])
+    selection, repo_selection = lfa.resolve_pattern_selection(
+        {},
+        {"selected": "proxy", "path": pattern_repo, "reason": "test", "confidence": "medium", "tags": ["proxy", "network"]},
+        "new-script",
+        "build an API client for https://example.com/v1/models with auth headers",
+        script_path=repo / "api_client.py",
+    )
+    probe = {
+        "ok": True,
+        "probe_type": "json_summary",
+        "endpoint": "https://example.com/v1/models",
+        "final_url": "https://example.com/v1/models",
+        "status_code": 200,
+        "content_type": "application/json",
+        "body_is_json": True,
+        "json_top_level_keys": ["object", "data"],
+        "summary": "status=200; content_type=application/json; json body detected",
+    }
+
+    prepared = lfa.prepare_new_script_generation(
+        repo,
+        repo / "api_client.py",
+        "build an API client for https://example.com/v1/models with auth headers",
+        selection,
+        repo_selection,
+        probe_result=probe,
+    )
+
+    content = Path(prepared["rendered"]["path"]).read_text()
+    assert prepared["rendered"]["script_kind"] == "api"
+    assert prepared["generation_plan"]["probe_used"] is True
+    assert "PROBED_TOP_LEVEL_KEYS = ['object', 'data']" in content
+    assert "def fetch_json" in content
+    assert prepared["generation_plan"]["generation_confidence"] == "high"
+    assert "json_keys=object,data" in prepared["generation_plan"]["probe_summary"]["summary"]
+    validation_run = lfa.run_validation_stack(repo, prepared["chosen_validation_plan"])
+    assert validation_run["ok"] is True
+
+
+def test_prepare_new_script_generation_uses_m3u8_probe_findings(tmp_path: Path) -> None:
+    repo, proxy_path, _ = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    lfa.import_pattern_files(pattern_repo, [str(proxy_path)], trust_level="trusted", tags=["network"])
+    selection, repo_selection = lfa.resolve_pattern_selection(
+        {},
+        {"selected": "default", "path": pattern_repo, "reason": "test", "confidence": "medium", "tags": ["network"]},
+        "new-script",
+        "create an HLS playlist inspector for https://media.example.com/master.m3u8",
+        script_path=repo / "inspect_playlist.py",
+    )
+    probe = {
+        "ok": True,
+        "probe_type": "m3u8_summary",
+        "endpoint": "https://media.example.com/master.m3u8",
+        "final_url": "https://media.example.com/master.m3u8",
+        "playlist_type": "master",
+        "variant_count": 3,
+        "segment_sample_count": 0,
+        "key_tags_present": False,
+        "target_duration": 0,
+        "media_sequence": 0,
+        "sample_variant_uris": ["https://media.example.com/v1.m3u8"],
+        "summary": "valid master playlist with 1 sampled variant follow-up probe",
+    }
+
+    prepared = lfa.prepare_new_script_generation(
+        repo,
+        repo / "inspect_playlist.py",
+        "create an HLS playlist inspector for https://media.example.com/master.m3u8",
+        selection,
+        repo_selection,
+        probe_result=probe,
+    )
+
+    content = Path(prepared["rendered"]["path"]).read_text()
+    assert prepared["rendered"]["script_kind"] == "m3u8"
+    assert "PROBED_PLAYLIST_TYPE = 'master'" in content
+    assert "PROBED_VARIANT_COUNT = 3" in content
+    assert "def summarize_playlist" in content
+    assert prepared["generation_plan"]["probe_used"] is True
+
+
+def test_prepare_new_script_generation_has_low_confidence_when_evidence_is_weak(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    prepared = lfa.prepare_new_script_generation(
+        repo,
+        repo / "tool.py",
+        "tool",
+        {"applied": [], "considered": [], "rejected": [], "coverage": {}},
+        {"selected": "none", "path": None, "reason": "no repo", "confidence": "low", "tags": []},
+    )
+
+    assert prepared["generation_plan"]["generation_confidence"] == "low"
+    assert prepared["generation_plan"]["validation_plan"]
+
+
 def test_run_pattern_learning_eval_compares_baseline_and_learned(tmp_path: Path) -> None:
     repo, proxy_path, local_path = build_learning_repo(tmp_path)
     eval_root = repo / "evals" / "pattern_learning"
@@ -206,6 +356,123 @@ def test_validated_script_is_promoted_and_relearned(tmp_path: Path) -> None:
     assert result["imported_sources"][0]["source_type"] == "local"
     assert result["imported_sources"][0]["acquisition_method"] == "direct"
     assert result["imported_sources"][0]["proxy_used"] is False
+
+
+def test_scan_pattern_source_collection_respects_include_exclude_filters(tmp_path: Path) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    (repo / ".git").mkdir()
+    write(repo / "examples" / "ignore_me.py", "print('skip')\n")
+    write(repo / "notes.txt", "ignore\n")
+
+    preview = lfa.scan_pattern_source_collection(
+        repo,
+        include_globs=["examples/*.py"],
+        exclude_globs=["examples/ignore_*"],
+        max_files=10,
+    )
+
+    assert preview["ok"] is True
+    assert preview["import_scope"] == "repo"
+    assert preview["candidate_rel_paths"] == [
+        "examples/local_slugify.py",
+        "examples/proxy_client.py",
+    ]
+    assert "notes.txt" in preview["ignored_paths"]
+
+
+def test_import_pattern_repo_collection_preserves_grouping_and_provenance(tmp_path: Path, monkeypatch) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    (repo / ".git").mkdir()
+    pattern_repo = tmp_path / "pattern_repo"
+    original_validate = lfa.run_candidate_validation
+    def fake_run_candidate_validation(current_repo: Path, candidate_path: Path) -> dict:
+        result = original_validate(current_repo, candidate_path)
+        result["limited_validation"] = False
+        result["passed"] = True
+        return result
+    monkeypatch.setattr(lfa, "run_candidate_validation", fake_run_candidate_validation)
+
+    result = lfa.import_pattern_repo_collection(pattern_repo, repo, trust_level="trusted", tags=["seed", "repo"])
+
+    assert result["import_scope"] == "repo"
+    assert result["candidate_count"] == 2
+    assert result["promoted_trusted_count"] == 2
+    assert result["blocked_count"] == 0
+    stored_paths = {item["repo_rel_path"] for item in result["imported_sources"]}
+    collection_name = result["preview"]["collection_name"]
+    assert f"imports/trusted/{collection_name}/examples/proxy_client.py" in stored_paths
+    assert f"imports/trusted/{collection_name}/examples/local_slugify.py" in stored_paths
+    first = result["imported_sources"][0]
+    assert first["source_repo_path"] == str(repo.resolve())
+    assert first["import_scope"] == "repo"
+    assert first["source_subpath"].startswith("examples/")
+
+
+def test_import_pattern_repo_collection_extracts_repo_level_patterns(tmp_path: Path, monkeypatch) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    (repo / ".git").mkdir()
+    pattern_repo = tmp_path / "pattern_repo"
+    monkeypatch.setattr(
+        lfa,
+        "run_candidate_validation",
+        lambda current_repo, candidate_path: {"passed": True, "limited_validation": False, "validation_command": "python -m py_compile tool.py"},
+    )
+
+    result = lfa.import_pattern_repo_collection(pattern_repo, repo, trust_level="trusted", tags=["collection"])
+    inspection = lfa.inspect_patterns(pattern_repo)
+
+    assert result["repo_level_patterns_added"] >= 1
+    assert any(pattern["pattern_type"] == "repo_structure" for pattern in inspection["patterns"])
+    assert any(pattern["pattern_type"] == "validation_strategy" for pattern in inspection["patterns"])
+    assert any(pattern["import_scope"] == "repo" for pattern in inspection["patterns"])
+
+
+def test_import_pattern_repo_collection_does_not_blindly_trust_broken_files(tmp_path: Path, monkeypatch) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    (repo / ".git").mkdir()
+    broken_path = repo / "examples" / "broken_client.py"
+    write(broken_path, "print('broken')\n")
+    pattern_repo = tmp_path / "pattern_repo"
+
+    original_validate = lfa.run_candidate_validation
+
+    def fake_run_candidate_validation(current_repo: Path, candidate_path: Path) -> dict:
+        if candidate_path.name == "broken_client.py":
+            return {"passed": False, "limited_validation": False, "validation_command": "python broken_client.py"}
+        result = original_validate(current_repo, candidate_path)
+        result["limited_validation"] = False
+        result["passed"] = True
+        return result
+
+    monkeypatch.setattr(lfa, "run_candidate_validation", fake_run_candidate_validation)
+    monkeypatch.setattr(lfa, "repair_training_candidate", lambda current_repo, candidate_path: {"ok": False, "output": "still broken", "command": []})
+
+    result = lfa.import_pattern_repo_collection(pattern_repo, repo, trust_level="trusted")
+    inspection = lfa.inspect_patterns(pattern_repo, filter_state="curated_trusted")
+
+    broken = next(item for item in result["imported_sources"] if item["source_subpath"] == "examples/broken_client.py")
+    assert broken["promotion_state_detail"] == "candidate"
+    assert result["promoted_trusted_count"] == 2
+    assert result["blocked_count"] == 1
+    assert all("broken_client.py" not in pattern["source_file"] for pattern in inspection["patterns"])
+
+
+def test_import_pattern_repo_collection_experimental_promotion_and_memory_delta(tmp_path: Path, monkeypatch) -> None:
+    repo, proxy_path, local_path = build_learning_repo(tmp_path)
+    pattern_repo = tmp_path / "pattern_repo"
+    monkeypatch.setattr(
+        lfa,
+        "run_candidate_validation",
+        lambda current_repo, candidate_path: {"passed": True, "limited_validation": False, "validation_command": "python -m py_compile tool.py"},
+    )
+
+    result = lfa.import_pattern_repo_collection(pattern_repo, repo / "examples", trust_level="experimental", tags=["folder"])
+    inspection = lfa.inspect_patterns(pattern_repo, filter_state="curated_experimental")
+
+    assert result["import_scope"] == "folder"
+    assert result["promoted_experimental_count"] == 2
+    assert result["pattern_memory_delta"] >= 1
+    assert inspection["summary"]["curated_experimental"] >= 1
 
 
 def test_relearn_patterns_loads_from_pattern_repo_catalog(tmp_path: Path) -> None:
@@ -560,6 +827,7 @@ def test_fetch_pattern_source_http_uses_proxy_when_configured(monkeypatch) -> No
 
 
 def test_configure_subprocess_safety_propagates_all_proxy() -> None:
+    original_env = dict(lfa.CURRENT_SUBPROCESS_ENV)
     lfa.configure_subprocess_safety(
         {
             "HTTP_PROXY": "http://proxy:8080",
@@ -572,6 +840,8 @@ def test_configure_subprocess_safety_propagates_all_proxy() -> None:
 
     assert lfa.CURRENT_SUBPROCESS_ENV["HTTP_PROXY"] == "http://proxy:8080"
     assert lfa.CURRENT_SUBPROCESS_ENV["ALL_PROXY"] == "socks5://proxy:1080"
+    lfa.CURRENT_SUBPROCESS_ENV.clear()
+    lfa.CURRENT_SUBPROCESS_ENV.update(original_env)
 
 
 def test_fetch_pattern_source_missing_curl_blocks_http_import(monkeypatch) -> None:
