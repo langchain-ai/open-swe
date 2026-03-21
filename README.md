@@ -31,6 +31,65 @@ Open SWE is the open-source version of this pattern. Built on [LangGraph](https:
 
 ---
 
+## Start Here
+
+This repo includes a standalone operator workflow built around [`local_fix_agent.py`](./local_fix_agent.py).
+
+Use it when you want the agent to:
+
+- make a focused fix
+- validate the current repo state
+- run the canonical finalizer
+- update docs if needed
+- publish the result
+- verify that the PR is mergeable
+
+The normal flow is:
+
+```text
+fix or edit
+-> validate
+-> finalize
+-> update docs if needed
+-> publish
+-> verify PR mergeability
+```
+
+The most common commands are:
+
+```bash
+fixit pytest tests/test_x.py -q
+./scripts/fixpublish.sh
+```
+
+Important rule:
+
+- a passing validation command is not completion
+- the run is only complete after the finalizer runs
+
+The canonical finalizer is:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+That command is responsible for:
+
+- ensuring a commit-linked validation record exists
+- checking meaningful changes
+- updating docs if they drift
+- rerunning validation if the repo state changes
+- aligning the branch with its base branch when safe
+- publishing
+- checking PR mergeability
+
+If you intentionally want to stop after validation and skip finalization, use `--no-finalize`. That is treated as incomplete, not successful.
+
+If you are new to the operator workflow, read these next:
+
+- [Runbook](./docs/RUNBOOK.md)
+- [Troubleshooting](./docs/TROUBLESHOOTING.md)
+
 ## Architecture
 
 Open SWE makes the same core architectural decisions as the best internal coding agents. Here's how it maps to the patterns described in [this overview](https://x.com/kishan_dahya/status/2028971339974099317) of Stripe's Minions, Ramp's Inspect, and Coinbase's Cloudbot:
@@ -146,162 +205,112 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ## Local Fix Agent
 
-This repo also includes a standalone repair-focused CLI at [`local_fix_agent.py`](./local_fix_agent.py). It is meant for narrow, test-driven repair loops in a local repo or over SSH.
+`local_fix_agent.py` is the operator-facing repair and publish tool in this repo.
 
-### Quick Start
+### What it does
 
-Local run:
+It helps an operator move from a failing command to a reviewed publish result with explicit safety gates:
+
+- fix code or docs
+- validate the current repo state
+- finalize through the canonical finalizer
+- publish or noop
+- verify PR mergeability
+
+### Mental model
+
+Think about the system in three parts:
+
+- Codex:
+  reads the repo, makes changes, runs validation, and should always run the finalizer after a successful edit
+- the agent:
+  owns validation records, docs updates, branch alignment, publish, and PR mergeability checks
+- the operator:
+  chooses the validation target, reviews the output, and handles truly ambiguous blocked states
+
+### Common tasks
+
+Fix and validate locally:
 
 ```bash
 fixit pytest tests/test_x.py -q
 ```
 
-Remote run:
+Fix remotely over SSH:
 
 ```bash
-fixit --target edge-01 --repo /srv/app "pytest -q"
+fixit --target edge-01 --repo /srv/app "pytest tests/test_x.py -q"
 ```
 
-Dry-run:
+Finalize and publish the current validated repo state:
 
 ```bash
-fixit --dry-run pytest tests/test_x.py -q
+./scripts/fixpublish.sh
 ```
 
-Explain-only:
+Publish the current repo state directly:
+
+```bash
+./scripts/publishcurrent.sh
+```
+
+Explain the current resolved context without running:
 
 ```bash
 python local_fix_agent.py --last --explain-only
 ```
 
-Reuse recent state:
+Import a script into the private pattern repo:
 
 ```bash
-python local_fix_agent.py --continue
-python local_fix_agent.py --last
-python local_fix_agent.py --from-last-failure
-python local_fix_agent.py
-python local_fix_agent.py --last
-python local_fix_agent.py --no-finalize
-python local_fix_agent.py --publish-only
+python local_fix_agent.py --script /path/to/example.py --add-to-training
 ```
 
-Successful code changes are not considered complete until the canonical finalizer runs. The required finalization command is:
+Inspect learned patterns:
 
 ```bash
-./scripts/fixpublish.sh
-```
-
-That finalizer is the single guarded path for:
-
-- creating or reusing a successful commit-linked validation record through the agent
-- meaningful change detection
-- docs drift detection and docs updates
-- revalidation after docs/code changes
-- validation-to-publish gating
-- stale-validation auto-revalidation
-- real publish/noop/blocked reporting
-
-Validated runs now finalize automatically after successful validation unless you explicitly opt out with `--no-finalize`. `--no-publish-on-success` remains as a compatibility alias for stopping before publish/finalization.
-
-If you use `--no-finalize`, the run is treated as incomplete rather than successful because the canonical finalizer did not run.
-
-If the current commit does not already have a successful validation record, `./scripts/fixpublish.sh` first runs the agent in validation-record mode before the real publish/finalization step.
-
-Before a real publish attempt, the agent now runs a pre-publish docs check. It decides whether docs are required, which docs targets are affected, and whether the refresh mode is `patch`, `rewrite`, or `none`. If docs drift is detected, the tool updates docs before publish, reruns validation when it has a validation command or discovered validation plan, and blocks publish if the docs refresh or revalidation fails.
-
-Before branch creation, push, or PR creation, publish filters out known machine-local state changes such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and other local state/cache files. If no meaningful changes remain, publish exits cleanly as `noop` with `reason: no meaningful changes to publish`.
-
-Real publish summaries now also print `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets` so it is obvious whether docs were part of the published change set.
-
-If publish noops because the current fingerprint matches a previous successful publish, the tool surfaces the previous publish branch, commit, and PR URL when available.
-
-Headless validated run with PR creation:
-
-```bash
-./scripts/fixpublish.sh
-```
-
-Headless publish of the current repo state:
-
-```bash
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
-./scripts/publishcurrent.sh
-```
-
-Private training repo for pattern learning:
-
-```bash
-python local_fix_agent.py --import-pattern-files /path/to/example.py
-python local_fix_agent.py --list-pattern-sources
 python local_fix_agent.py --list-patterns
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
-python local_fix_agent.py --list-patterns --filter-tag proxy --search retry --output json
-python local_fix_agent.py --promote-pattern <pattern-id>
-python local_fix_agent.py --demote-source <source-id-or-path>
-python local_fix_agent.py --forget-source <source-id-or-path>
-python local_fix_agent.py --reset-pattern-repo
 ```
 
-The default private training repo lives at `~/.codex/memories/local_fix_agent_private_patterns`. The tool creates it automatically on first use and reuses it on later runs unless you explicitly reset it with `--reset-pattern-repo`.
+### Key concepts
 
-`--script /path/to/foo.py` uses script mode normally and does not add the script to training. To add a script to training, opt in explicitly with `--add-to-training`; the imported copy is sanitized before it is stored in the private training repo.
+- Validation record:
+  a persisted record that a specific commit was validated successfully
+- Finalizer:
+  the canonical post-validation step, implemented by [`./scripts/fixpublish.sh`](./scripts/fixpublish.sh)
+- Meaningful changes:
+  code, docs, tests, scripts, and behavior-relevant config changes; known local state files are ignored
+- Pattern repo:
+  the private local training repo used for script-pattern learning
+- Promotion state:
+  `candidate`, `curated_experimental`, `curated_trusted`
+- Trust level:
+  `experimental` or `trusted`
+- Blocked:
+  the tool stopped because continuing automatically would be unsafe or too ambiguous
 
-Pattern inspection is read-only. `--list-patterns` shows what the agent currently trusts, the promotion state for each pattern source, validation status, tags, confidence, and the promotion reason. Promotion states mean:
+### Safety rules
 
-- `candidate`: sanitized candidate source exists but it has not been promoted into curated learning
-- `curated_experimental`: curated source is available, but it should influence normal runs weakly
-- `curated_trusted`: curated source is trusted and can strongly influence normal runs
+- validation success is not completion
+- finalization is required
+- `--no-finalize` is an explicit opt-out and leaves the run incomplete
+- the finalizer creates or reuses a commit-linked validation record
+- docs updates happen inside finalization
+- publish decisions use meaningful-change detection
+- the publish branch is aligned with its base branch before publish when safe
+- PR mergeability is checked again after publish as a safety net
+- learning uses trust-gated pattern sources; raw candidates do not become trusted automatically
 
-Use `--filter-state`, `--filter-tag`, and `--search` to narrow the list. Use `--output json` for automation.
+### Where to go next
 
-Manual controls are local overrides layered on top of the automatic curation flow:
-
-- `--promote-pattern` and `--demote-pattern` change one pattern at a time
-- `--promote-source`, `--demote-source`, and `--forget-source` apply to an entire source
-- `--set-trust` and `--set-promotion-state` let you override the automatic next step directly
-- `--dry-run` previews the change without mutating the repo
-
-Manual overrides are recorded as `promotion_method: manual`; they do not silently become automatic trust.
-
-### Mental Model
-
-`local_fix_agent.py` reasons locally, gathers targeted context, proposes edits through a tool layer, reruns validation, and commits only after additional checks pass.
-
-On a normal validated run, success means:
-
-- validate
-- then run the guarded validated-run publish flow by default
-
-Use `--no-publish-on-success` when you want validation without publish.
-
-In headless publish from `main`, the tool first checks for meaningful changes. If none exist, it noops. If meaningful changes exist, it automatically creates a safe publish branch and continues with the existing publish workflow.
-
-In remote mode:
-
-- reasoning, scoring, memory, and metrics stay local
-- commands, git operations, and file changes run remotely over SSH
-- one persistent SSH session is reused for the full run
-
-The tool reports blocked conditions directly instead of continuing with low-signal retries.
-
-### Docs
-
-- **[Operator Guide](./docs/README.md)** — overview, features, CLI usage, artifacts, architecture, and extension points
-- **[Remote Mode](./docs/REMOTE_MODE.md)** — SSH transport, multiplexing, safety model, and remote failure handling
-- **[Runbook](./docs/RUNBOOK.md)** — day-to-day workflow and review guidance
-- **[`scripts/fixpublish.sh`](./scripts/fixpublish.sh)** — publish the last validated agent run
-- **[`scripts/publishcurrent.sh`](./scripts/publishcurrent.sh)** — publish the current branch/repo state
-- **[Troubleshooting](./docs/TROUBLESHOOTING.md)** — blocked states, SSH issues, validation rejection, and stagnation
+- [Runbook](./docs/RUNBOOK.md) for the normal workflow
+- [Troubleshooting](./docs/TROUBLESHOOTING.md) for blocked states and recovery
+- [Operator Guide](./docs/README.md) for broader CLI and workflow detail
+- [Remote Mode](./docs/REMOTE_MODE.md) for SSH-backed execution
+- [`scripts/fixpublish.sh`](./scripts/fixpublish.sh) for the canonical finalizer
+- [`scripts/publishcurrent.sh`](./scripts/publishcurrent.sh) for direct publish-current mode
 
 ## License
 
 MIT
-
-<!-- fix-agent-prepublish-docs:start -->
-## Pre-Publish Docs Gate
-
-Before a real publish, the agent now runs a documentation impact check.
-If code or operator-facing behavior changed and docs are stale, it updates the tracked docs before publish, reruns validation, and only then continues with push/PR work.
-Current docs refresh policy: `rewrite` when docs drift is detected.
-<!-- fix-agent-prepublish-docs:end -->

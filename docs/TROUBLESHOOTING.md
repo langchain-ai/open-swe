@@ -1,102 +1,183 @@
 # Troubleshooting
 
-This page is for operator-visible failures and blocked states.
+This page is for operator-visible failures, blocked states, and recovery steps.
 
-## Publish-on-success default
+## Start With The Outcome
 
-Validated runs are not complete until the canonical finalizer runs after `validation_result: success`.
+When a run ends, ask these questions in order:
 
-The canonical finalization command is:
+1. Did validation succeed?
+2. Did the finalizer run?
+3. Did publish succeed, noop, or block?
+4. Is the PR mergeable?
+
+That order matters because the system separates these stages on purpose.
+
+## High-Level Meanings
+
+### Validation succeeded
+
+The current repo state passed the validation command and a validation record can be created or reused.
+
+### Finalization succeeded
+
+The canonical finalizer ran and completed its job:
+
+- validation record confirmed
+- docs checked and updated if needed
+- branch aligned with base branch if needed
+- publish attempted
+- PR mergeability checked
+
+### Noop
+
+The finalizer decided there was nothing meaningful to publish. This usually means only ignored local state changed or the current publishable state already matches the last successful published state.
+
+### Blocked
+
+Blocked means the tool stopped intentionally because continuing would be unsafe or too ambiguous.
+
+## Canonical Finalizer
+
+The required finalization command is:
 
 ```bash
 ./scripts/fixpublish.sh
 ```
 
-That finalizer creates or reuses a successful commit-linked validation record through the agent before it continues to docs handling and publish.
+If a run ends after validation but before finalization, that is incomplete, not successful.
+The explicit incomplete outcome is reported as `finalization skipped (incomplete)`.
 
-Use `--no-finalize` only when you intentionally want to stop after validation and skip the required finalization step. `--no-publish-on-success` remains as a compatibility alias.
+## Common Publish Questions
 
-If you do that, the run reports `FINAL: validation succeeded, finalization skipped (incomplete)` instead of a successful completion.
+### Why did publish not run?
 
-Known local state files such as `.ai_publish_state.json`, `.fix_agent_docs_state.json`, and similar machine-local cache/state files are ignored when publish decides whether there is anything meaningful to publish.
+Common reasons:
 
-Real run output prints only current-run data in these sections:
+- no successful validation record for the current commit
+- docs update changed the repo and revalidation failed
+- pre-publish branch alignment blocked
+- publish was explicitly skipped with `--no-finalize`
 
-- `=== VALIDATION RESULT ===`
-- `=== POST-SUCCESS PUBLISH ===`
-- `=== PUBLISH RESULT ===`
+### Why did publish noop?
 
-If validation succeeds but publish fails, the run prints that distinction explicitly and does not present the outcome as a full success.
+Most common explanations:
 
-If the pre-publish docs gate detects docs drift, the publish summary now shows `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets`. If docs refresh or revalidation fails, publish is blocked before any push happens.
+- only ignored local state files changed
+- there were no meaningful changes since the last successful published state
+- the current publishable state already matches a previous successful publish state
 
-If publish is requested from `main` in headless mode, the tool now checks for meaningful changes first. With no meaningful changes it reports `noop`. With meaningful changes it auto-creates a safe publish branch and continues.
+### Why did publish succeed but the workflow still not feel “done”?
 
-If publish reports `noop` because the fingerprint matches a previous successful publish, the output surfaces the stored branch, commit, and PR URL so you can jump directly to the existing review artifact.
+Because publish success and PR mergeability are different checks. A branch can be pushed successfully while the PR still needs mergeability verification or repair.
 
-## Blocked-state summary
+## Blocked States
 
-| Blocked type | Meaning | Suggested next action |
-|---|---|---|
-| `remote connectivity issue` | SSH target is not reachable, resolvable, or accepting connections | Verify `ssh <target>` manually and fix network/VPN/Tailscale reachability |
-| `remote SSH auth issue` | SSH authentication failed | Verify SSH key, agent, user, and host access |
-| `remote repo path not found` | The host is reachable but `--repo` does not exist remotely | Confirm the repo path on the remote host and rerun |
-| `remote repo path permission issue` | SSH login works but the repo directory is not accessible | Fix directory ownership or permissions on the remote host |
-| `remote file write permission issue` | The repo is reachable but file writes fail | Fix file or directory write permissions for the SSH user |
-| `remote command timed out` | Remote session setup, repo check, command, or `scp` exceeded the timeout | Check host responsiveness, narrow the command, and retry |
-| `remote session dropped` | The persistent SSH master session died and reopen failed | Verify SSH stability and rerun once the remote host is stable |
-| `no reproducible failing test command` | The tool has no concrete command to reproduce the failure | Supply a narrow failing command or reuse recent state |
-| `repeated candidate validation rejection` | Candidate patches keep failing pre-commit validation | Inspect the diff, narrow the target, or rerun with a more appropriate mode |
-| `repeated stagnation without meaningful progress` | Attempts are not improving the failure materially | Narrow the target, inspect the diff, or escalate to `deep` |
-
-## No reproducible failing test command
-
-Symptom:
-
-```text
-BLOCKED: no reproducible failing test command
-```
+### No reproducible validation command
 
 Meaning:
 
-- no explicit `--test-cmd`
-- no reusable recent failure
-- no reusable last test command
-- no config default
+- the tool does not know what command proves the change is correct
 
 What to do:
 
 ```bash
-python local_fix_agent.py --repo /path/to/repo "pytest tests/test_x.py -q"
+fixit pytest tests/test_x.py -q
 ```
 
-Use the smallest command that reproduces the failure reliably.
+Use the narrowest command that reproduces the real problem.
 
-## Repo path missing
-
-### Local repo path missing
+### Publish blocked by validation
 
 Meaning:
 
-- the local path passed to `--repo` does not exist
+- the current commit was not validated successfully
+- or the validation record is stale and could not be refreshed successfully
 
 What to do:
 
-- verify `--repo`
-- run from inside the intended git repo if you want auto-detection
+- rerun the agent with the correct validation target
+- then run the finalizer again
 
-### Remote repo path missing
-
-Symptom:
-
-```text
-BLOCKED: remote repo path not found
-```
+### Docs refresh blocked publish
 
 Meaning:
 
-- the remote host is reachable
-- the repo path does not exist remotely, or is not accessible as a directory
+- the finalizer detected docs drift
+- docs were updated or needed updates
+- revalidation after that docs change did not succeed
+
+What to do:
+
+- inspect the docs-related diff
+- rerun the validation command manually if needed
+- fix the underlying validation issue
+- rerun the finalizer
+
+### Pre-publish base alignment blocked
+
+Meaning:
+
+- the finalizer tried to align the publish branch with its base branch before publish
+- the merge was ambiguous or validation after alignment failed
+
+What to do:
+
+- read the alignment block reason
+- inspect any listed conflicted files
+- resolve the branch state
+- rerun the finalizer
+
+### Manual merge required
+
+When the agent cannot safely resolve a merge conflict, it prints:
+
+```text
+=== MANUAL MERGE REQUIRED ===
+```
+
+That section is the handoff. It tells you:
+
+- which files are conflicted
+- why auto-resolution was unsafe
+- the minimal commands to resolve and continue
+
+After resolving the merge manually, rerun the same agent command.
+
+## Remote And SSH Problems
+
+### Remote connectivity issue
+
+Meaning:
+
+- the SSH target is unreachable or unstable
+
+What to do:
+
+```bash
+ssh edge-01
+```
+
+Fix connectivity first, then rerun the agent.
+
+### Remote SSH auth issue
+
+Meaning:
+
+- the host is reachable but authentication failed
+
+What to do:
+
+- verify the SSH user
+- verify the key or agent configuration
+- confirm the host accepts that identity
+
+### Remote repo path missing or unreadable
+
+Meaning:
+
+- SSH works
+- the remote repo path does not exist or cannot be accessed
 
 What to do:
 
@@ -104,199 +185,65 @@ What to do:
 ssh edge-01 'test -d /srv/app && echo ok'
 ```
 
-Then rerun with the correct `--repo`.
+## Pattern Repo Problems
 
-## SSH and connectivity issues
-
-### Remote connectivity issue
-
-Common evidence:
-
-- host not found
-- connection refused
-- no route to host
-- timeout during connect
-- Tailscale-style reachability failure
-
-What to do:
-
-```bash
-ssh edge-01
-```
-
-If this does not work reliably, fix connectivity first.
-
-### Remote SSH auth issue
-
-Common evidence:
-
-- `Permission denied (publickey)`
-- authentication failure
-
-What to do:
-
-- verify the SSH user
-- verify keys or agent forwarding
-- verify the target host accepts the expected key
-
-## Permission problems
-
-### Remote repo path permission issue
-
-Meaning:
-
-- SSH login works
-- the repo directory is not accessible to the SSH user
-
-What to do:
-
-- check repo ownership
-- check directory permissions
-- verify the SSH user is the expected repo user
-
-### Remote file write permission issue
-
-Meaning:
-
-- read access may work
-- file updates fail during `scp` or remote move
-
-What to do:
-
-- verify write permissions on the repo path
-- verify ownership of the target files
-
-## Repeated candidate validation rejection
-
-Symptom:
-
-```text
-BLOCKED: repeated candidate validation rejection
-```
-
-Meaning:
-
-- candidate patches were generated
-- pre-commit validation rejected them repeatedly
-
-What to do:
-
-- inspect `diff.patch`
-- rerun with `--dry-run` if you are not already using it
-- narrow the test target
-- consider `--mode deep` only after narrowing the validation command
-
-## Inspect pattern training state
-
-Use the pattern inspection commands when you need to see what the agent currently trusts:
+### How do I see what the agent trusts?
 
 ```bash
 python local_fix_agent.py --list-patterns
 python local_fix_agent.py --list-patterns --filter-state curated_trusted
-python local_fix_agent.py --list-patterns --output json
 python local_fix_agent.py --list-pattern-sources
-python local_fix_agent.py --demote-pattern <pattern-id> --dry-run
 ```
 
-Meaning:
+### What do the promotion states mean?
 
-- `candidate` entries are sanitized sources that have not been promoted into curated learning
-- `curated_experimental` entries are curated but weakly trusted
-- `curated_trusted` entries are curated and strongly trusted
+- `candidate`
+  sanitized source exists, but it is not part of curated learning yet
+- `curated_experimental`
+  curated and usable, but weakly trusted
+- `curated_trusted`
+  curated and strongly trusted
 
-If a pattern or source is over-applied, use the manual control commands to demote or forget it, then rerun `--list-patterns` to verify the new effective state.
+### What if a pattern is being over-applied?
 
-## Repeated stagnation
+Use the manual controls:
 
-Symptom:
-
-```text
-BLOCKED: repeated stagnation without meaningful progress
+```bash
+python local_fix_agent.py --demote-pattern <pattern-id>
+python local_fix_agent.py --forget-source <source-id-or-path>
 ```
 
-Meaning:
+## Useful Checks
 
-- repeated attempts are not moving the failure meaningfully
-- the agent is likely missing context or using the wrong scope
-
-What to do:
-
-- narrow the validation command
-- inspect the last diff manually
-- switch from `quick` or `safe` to `deep` if the scope truly requires it
-
-## Remote command timed out
-
-Symptom:
-
-```text
-BLOCKED: remote command timed out
-```
-
-Meaning:
-
-- remote session setup, repo check, remote command execution, or `scp` exceeded the timeout
-
-What to do:
-
-- check remote host responsiveness
-- run the same command manually over SSH
-- narrow the target command
-- retry when the remote host is less busy
-
-## Remote session dropped
-
-Symptom:
-
-```text
-BLOCKED: remote session dropped
-```
-
-Meaning:
-
-- the persistent SSH session died mid-run
-- the tool attempted one reopen
-- the reopen failed
-
-What to do:
-
-- verify SSH stability outside the tool
-- check VPN/Tailscale stability if used
-- rerun after the remote host is stable
-
-## External dependency or credential issues
-
-Common evidence:
-
-- API key errors
-- unauthorized or forbidden responses
-- service unavailable
-- repeated rate-limit signals
-
-What to do:
-
-- fix the external dependency first
-- rerun once the dependency is healthy and reachable
-
-## Useful operator checks
-
-Local:
+Quick local checks:
 
 ```bash
 git status --short
-pytest tests/test_x.py::test_parse -q
+git diff
+pytest tests/test_x.py -q
 ```
 
-Remote:
+Pattern inspection:
 
 ```bash
-ssh edge-01
-ssh edge-01 'cd /srv/app && pytest tests/test_x.py::test_parse -q'
+python local_fix_agent.py --list-patterns --output json
 ```
 
-<!-- fix-agent-prepublish-troubleshooting:start -->
-## Publish Blocked By Docs Drift
+Canonical finalizer:
 
-If the pre-publish docs gate detects that operator docs need updates and automatic refresh or revalidation fails, publish is blocked.
-The publish summary reports `docs_required`, `docs_updated`, `docs_refresh_mode`, and the affected `docs_targets` so the block reason is explicit.
-<!-- fix-agent-prepublish-troubleshooting:end -->
+```bash
+./scripts/fixpublish.sh
+```
+
+## How To Think About This System When It Fails
+
+- If validation failed:
+  the fix itself is not proven yet
+- If validation succeeded but finalization did not run:
+  the work is incomplete
+- If publish blocked:
+  the finalizer found a safety problem
+- If publish succeeded but PR mergeability failed:
+  the branch exists, but the change is not yet safely ready to merge
+
+That separation is intentional. It is what keeps the workflow understandable and safe.

@@ -41,6 +41,11 @@ RECENT_STATE_FILE_NAME = ".fix_agent_recent.json"
 DOCS_STATE_FILE_NAME = ".fix_agent_docs_state.json"
 PUBLISH_STATE_FILE_NAME = ".ai_publish_state.json"
 RUN_ARTIFACTS_DIR_NAME = ".fix_agent_runs"
+PRIMARY_OPERATOR_DOC_FILES = [
+    "README.md",
+    "docs/RUNBOOK.md",
+    "docs/TROUBLESHOOTING.md",
+]
 RUN_MODES = {
     "quick": {"max_steps": 20, "max_file_chars": 12000},
     "safe": {"max_steps": 40, "max_file_chars": 20000},
@@ -1921,6 +1926,90 @@ def publish_docs_targets(repo: Path) -> list[str]:
 def is_docs_path(path: str) -> bool:
     rel = path.strip()
     return rel == "README.md" or rel.startswith("docs/") or rel.endswith(".md")
+
+
+def load_docs_state(repo: Path) -> dict:
+    return load_json_file(
+        state_storage_path(repo, DOCS_STATE_FILE_NAME),
+        {
+            "last_refresh_mode": "",
+            "last_targets": [],
+            "last_reason": "",
+            "ts": 0,
+        },
+    )
+
+
+def operator_diff_text(repo: Path, changed_paths: list[str]) -> str:
+    if not changed_paths:
+        return ""
+    code, output = run_subprocess(["git", "diff", "--", *changed_paths], repo)
+    return output if code == 0 else ""
+
+
+def detect_stale_doc_signals(repo: Path) -> list[str]:
+    signals: list[str] = []
+    for rel_path in PRIMARY_OPERATOR_DOC_FILES:
+        path = repo / rel_path
+        if not path.exists():
+            signals.append(f"missing operator doc: {rel_path}")
+    return signals
+
+
+def extract_operator_doc_change_categories(diff_text: str, changed_paths: list[str]) -> list[str]:
+    categories: set[str] = set()
+    lowered = (diff_text or "").lower()
+    changed = set(changed_paths or [])
+    if any(path.startswith("scripts/") for path in changed):
+        categories.add("wrappers")
+    if "local_fix_agent.py" in changed:
+        if re.search(r"parser\.add_argument|help=", diff_text):
+            categories.add("cli")
+        if re.search(r"publish|pull request|mergeable|finalizer|fixpublish", lowered):
+            categories.add("publish")
+        if re.search(r'control_path|blocked|manual merge required', lowered):
+            categories.add("blocked_state")
+    return sorted(categories)
+
+
+def choose_docs_refresh_mode(repo: Path, categories: list[str], stale_signals: list[str]) -> str:
+    if not categories and not stale_signals:
+        return "none"
+    docs_state = load_docs_state(repo)
+    last_mode = str(docs_state.get("last_refresh_mode") or "").strip()
+    if len(categories) >= 2 or stale_signals:
+        return "rewrite"
+    if last_mode == "rewrite":
+        return "patch"
+    return "rewrite"
+
+
+def choose_docs_targets(categories: list[str], stale_signals: list[str], refresh_mode: str) -> list[str]:
+    if refresh_mode == "none":
+        return []
+    if refresh_mode == "rewrite" or stale_signals:
+        return PRIMARY_OPERATOR_DOC_FILES[:]
+    targets: set[str] = {"README.md", "docs/RUNBOOK.md"}
+    if any(name in categories for name in {"publish", "blocked_state"}):
+        targets.add("docs/TROUBLESHOOTING.md")
+    return [path for path in PRIMARY_OPERATOR_DOC_FILES if path in targets]
+
+
+def assess_docs_impact(repo: Path, changed_paths: list[str]) -> dict:
+    normalized = sorted(dict.fromkeys(path for path in changed_paths if path))
+    diff_text = operator_diff_text(repo, normalized)
+    categories = extract_operator_doc_change_categories(diff_text, normalized)
+    stale_signals = detect_stale_doc_signals(repo)
+    docs_required = bool(categories or stale_signals)
+    refresh_mode = choose_docs_refresh_mode(repo, categories, stale_signals) if docs_required else "none"
+    return {
+        "docs_required": docs_required,
+        "docs_targets": choose_docs_targets(categories, stale_signals, refresh_mode),
+        "docs_reason": "; ".join(categories or stale_signals[:1]) if docs_required else "",
+        "docs_refresh_mode": refresh_mode,
+        "docs_categories": categories,
+        "docs_stale_signals": stale_signals,
+    }
 
 
 def detect_publish_docs_impact(repo: Path, changed_paths: list[str], publish_current_mode: bool = False) -> dict:

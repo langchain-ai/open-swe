@@ -1,339 +1,219 @@
 # Runbook
 
-This runbook is for day-to-day use of `local_fix_agent.py`.
+This is the main operator doc for `local_fix_agent.py`.
 
-## Standard workflow
+## Overview
 
-### 1. Narrow the failing command
+The tool is built for a simple operating model:
 
-Start with the smallest command that reproduces the problem.
+```text
+pick a narrow target
+-> let the agent fix or edit
+-> validate
+-> finalize
+-> update docs if needed
+-> publish
+-> verify PR mergeability
+```
 
-Preferred:
+The important mental shift is that validation is not the last step.
+
+Completion requires the canonical finalizer:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+## Mental Model
+
+Use this split when reasoning about the system:
+
+- Codex:
+  edits files, runs the requested validation, and should always run the finalizer after successful changes
+- The agent:
+  stores validation records, decides whether docs need updates, aligns the branch with its base branch when safe, publishes, and checks PR mergeability
+- The operator:
+  chooses the target command, reviews the result, and resolves only truly ambiguous blocked states
+
+## Common Workflows
+
+### 1. Fix a failing script or test
 
 ```bash
 fixit pytest tests/test_x.py::test_parse -q
 ```
 
-Avoid starting with:
+Use the smallest command that reproduces the problem. A narrow target gives the agent the best chance of making a safe, local fix.
 
-```bash
-fixit pytest -q
-```
-
-Use the broader suite later, after the agent finds a candidate fix.
-
-### 2. Choose a mode
-
-Use:
-
-- `quick`
-  - one failing test
-  - one obvious code path
-- `safe`
-  - default day-to-day mode
-  - uncertain scope
-- `deep`
-  - repeated failure
-  - stagnation
-  - broader fix surface
-- `benchmark`
-  - comparative or stress-style runs
-
-If you omit `--mode`, the tool infers one. Current behavior is approximate:
-
-- narrow test target tends to choose `quick`
-- recent failed runs in the same repo tend to choose `deep`
-- broader or unknown scope tends to choose `safe`
-
-### 3. Run the tool
-
-Local:
-
-```bash
-fixit pytest tests/test_x.py -q
-```
-
-Dry-run:
+### 2. Dry-run before changing anything
 
 ```bash
 fixit --dry-run pytest tests/test_x.py -q
 ```
 
-Remote:
+Use this when you want the agent to inspect and plan without committing a publishable result yet.
+
+### 3. Finalize and publish
+
+```bash
+./scripts/fixpublish.sh
+```
+
+This is the normal final step after successful changes. The finalizer:
+
+- ensures a commit-linked validation record exists
+- checks meaningful changes
+- detects docs drift
+- updates docs if needed
+- reruns validation if docs or code changed
+- aligns the branch with its base branch when safe
+- publishes
+- verifies PR mergeability
+
+### 4. Publish the current repo state directly
+
+```bash
+./scripts/publishcurrent.sh
+```
+
+Use this when you already know the current repo state is what you want to publish and you are intentionally skipping the repair loop.
+
+### 5. Reuse recent context
+
+```bash
+python local_fix_agent.py --continue
+python local_fix_agent.py --last
+python local_fix_agent.py --from-last-failure
+```
+
+Use these when you want to pick up a recent validation target or recent run context instead of restating everything.
+
+### 6. Import a script into training
+
+```bash
+python local_fix_agent.py --script /path/to/example.py --add-to-training
+```
+
+The script goes through candidate import, sanitization, validation, optional repair, and promotion into the private pattern repo only if it becomes a safe curated example.
+
+### 7. Inspect learned patterns
+
+```bash
+python local_fix_agent.py --list-patterns
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+python local_fix_agent.py --list-pattern-sources
+```
+
+## Key Concepts
+
+### Validation record
+
+A validation record says that a specific commit was validated successfully. Publish is tied to that recorded state.
+
+### Finalizer
+
+The finalizer is [`./scripts/fixpublish.sh`](../scripts/fixpublish.sh). It is the required last step after successful edits.
+
+### Meaningful changes
+
+Meaningful changes are the files that matter for publish decisions:
+
+- code
+- tests
+- docs
+- scripts
+- behavior-relevant config
+
+Known machine-local state files are ignored.
+
+### Pattern repo
+
+The pattern repo is the local private training repo for learned script patterns. It stores sanitized, curated examples.
+
+### Promotion states
+
+- `candidate`
+- `curated_experimental`
+- `curated_trusted`
+
+These are different from trust level. Promotion state describes where a source is in the curation process. Trust level describes how strongly it should influence normal runs.
+
+## Safety Rules
+
+- Do not treat a passing validation command as completion.
+- Always run the finalizer after successful changes.
+- The finalizer is the only canonical publish path.
+- Docs updates happen inside finalization, not as a separate ad hoc step.
+- Publish/noop decisions are based on meaningful changes, not only on working-tree noise.
+- The branch is aligned with its base branch before publish when that can be done safely.
+- PR mergeability is checked after publish as a final safety net.
+- Ambiguous merge conflicts block instead of being guessed through.
+
+## Common Commands
+
+Local repair:
+
+```bash
+fixit pytest tests/test_x.py -q
+```
+
+Remote repair:
 
 ```bash
 fixit --target edge-01 --repo /srv/app "pytest tests/test_x.py -q"
 ```
 
-### 4. Read the result
-
-At the end of a run, check:
-
-- the success or blocked summary
-- the confidence line after a successful fix
-- the next-action suggestions
-- the diff
-
-If the run succeeded, inspect the patch before moving on.
-
-### 5. Rerun validation
-
-Do not stop at the narrow target. After a successful run:
-
-1. inspect the diff
-2. rerun the targeted test
-3. run a broader suite if appropriate
-
-Typical manual follow-up:
-
-```bash
-git diff
-pytest tests/test_x.py -q
-pytest -q
-```
-
-### 6. Escalate only when needed
-
-Escalate to `deep` when:
-
-- the same failure persists
-- multiple attempts score flat or regress
-- the fix probably spans multiple files or layers
-
-Do not jump to `deep` first when a narrow test can localize the issue.
-
-## Example walkthrough
-
-Example problem:
-
-- failing command: `pytest tests/test_x.py::test_parse -q`
-- likely issue: one parser function returns the wrong value for one edge case
-
-Run:
-
-```bash
-fixit pytest tests/test_x.py::test_parse -q
-```
-
-Typical behavior:
-
-1. The tool resolves the repo and mode.
-2. It reads the failing test and the most likely implementation file.
-3. It forms a short hypothesis and plan.
-4. It applies a small edit, reruns the target test, and scores the result.
-5. If validation passes, it performs pre-commit checks and either commits or stops at `--dry-run`.
-
-Typical outcome:
-
-- target test passes
-- the diff stays localized
-- the summary points you to `diff.patch`, rerun commands, and the run metrics
-
-Then do the usual operator follow-up:
-
-```bash
-git diff
-pytest tests/test_x.py -q
-pytest -q
-```
-
-## Recommended command patterns
-
-### Fast local loop
-
-```bash
-fixit pytest tests/test_x.py::test_parse -q
-```
-
-### Safe review-first loop
-
-```bash
-fixit --dry-run --show-diff pytest tests/test_x.py -q
-```
-
-### Resume the last failed context
-
-```bash
-python local_fix_agent.py --from-last-failure
-```
-
-### Continue the same context
-
-```bash
-python local_fix_agent.py --continue
-```
-
-### Headless daily publish
-
-Successful code changes are not complete until the canonical finalizer runs:
-
-```bash
-./scripts/fixpublish.sh
-```
-
-That finalizer is the only required post-success path. It handles meaningful-change detection, docs drift detection and docs updates, revalidation, validation gating, and the real publish/noop/blocked result.
-It also creates or reuses a successful commit-linked validation record through the agent before publish, so finalization does not stop on a missing or stale failed validation record for the current commit.
-
-Validated runs now finalize automatically after successful validation unless you explicitly opt out with `--no-finalize`. `--no-publish-on-success` remains as a compatibility alias for stopping before the publish/finalization step.
-
-If you skip finalization, the run is incomplete rather than successful because the canonical finalizer did not run.
-
-Publish now includes a pre-publish docs gate after validation succeeds and before commit/push/PR work starts. The tool detects whether operator docs need to change, updates the affected docs in the same change set when possible, reruns validation, and blocks publish if docs refresh or revalidation fails.
-
-Publish ignores known local state/cache changes such as `.ai_publish_state.json` and `.fix_agent_docs_state.json` when deciding whether anything meaningful should be published. If only ignored files changed, the publish step reports `noop` and does not create a branch, push, or PR.
-
-If the publish step noops because the current fingerprint already matches a previous successful publish, the output includes the prior publish branch, commit, and PR URL when one was recorded.
-
-Run the agent and publish the validated result:
-
-```bash
-python local_fix_agent.py
-python local_fix_agent.py --last
-./scripts/fixpublish.sh
-```
-
-Intentionally stop before finalization:
-
-```bash
-python local_fix_agent.py --no-finalize
-```
-
-Publish the current repo or branch state directly:
-
-```bash
-python local_fix_agent.py --publish-only
-AI_PUBLISH_ALLOW_FORK=1 python local_fix_agent.py --publish-only --publish-pr
-./scripts/publishcurrent.sh
-```
-
-`fixpublish.sh`:
-
-- changes into the repo root
-- sets `AI_PUBLISH_ALLOW_FORK=1`
-- runs the canonical guarded finalization flow by publishing the current validated repo state with PR creation enabled
-
-`publishcurrent.sh`:
-
-- changes into the repo root
-- sets `AI_PUBLISH_ALLOW_FORK=1`
-- publishes the current branch/repo state without requiring a recent failing test command
-- if started from `main` in non-interactive mode and meaningful changes exist, auto-creates a safe publish branch before pushing
-- if only ignored local state files changed, exits as `noop`
-- prints docs-gate fields including `docs_checked_at_publish`, `docs_required`, `docs_updated`, `docs_refresh_mode`, and `docs_targets`
-
-### Private training repo
-
-The script-pattern training repo is separate from the working repo and defaults to:
-
-```bash
-~/.codex/memories/local_fix_agent_private_patterns
-```
-
-The tool creates that repo automatically on first use and preserves it across runs. Use `--reset-pattern-repo` only when you explicitly want to delete and rebuild the training repo.
-
-Typical commands:
-
-```bash
-python local_fix_agent.py --import-pattern-files /path/to/example.py
-python local_fix_agent.py --list-pattern-sources
-python local_fix_agent.py --list-patterns
-python local_fix_agent.py --list-patterns --filter-state curated_trusted
-python local_fix_agent.py --list-patterns --filter-tag proxy --search retry --output json
-python local_fix_agent.py --promote-pattern <pattern-id>
-python local_fix_agent.py --demote-pattern <pattern-id>
-python local_fix_agent.py --promote-source <source-id-or-path>
-python local_fix_agent.py --demote-source <source-id-or-path>
-python local_fix_agent.py --forget-source <source-id-or-path>
-python local_fix_agent.py --relearn-patterns
-python local_fix_agent.py --reset-pattern-repo
-```
-
-`--script /path/to/foo.py` does not import the script into training by default. To add it to training, use:
-
-```bash
-python local_fix_agent.py --script /path/to/foo.py --add-to-training
-```
-
-Imported scripts are sanitized before storage so obvious secrets and credential-bearing literals are replaced with placeholders while preserving the surrounding code structure and engineering patterns.
-
-Pattern inspection is read-only. `--list-patterns` reports each pattern id, source file, source origin, trust level, promotion state, validation result, and promotion reason. Promotion states:
-
-- `candidate`: sanitized candidate retained outside curated learning
-- `curated_experimental`: curated but weakly trusted
-- `curated_trusted`: curated and strongly trusted
-
-Useful filters:
-
-```bash
-python local_fix_agent.py --list-patterns --filter-state curated_trusted
-python local_fix_agent.py --list-patterns --filter-tag cli
-python local_fix_agent.py --list-patterns --search retry --limit 5
-python local_fix_agent.py --list-pattern-sources --output json
-```
-
-Manual control commands:
-
-```bash
-python local_fix_agent.py --promote-pattern <pattern-id>
-python local_fix_agent.py --demote-pattern <pattern-id>
-python local_fix_agent.py --promote-source <source-id-or-path>
-python local_fix_agent.py --demote-source <source-id-or-path>
-python local_fix_agent.py --forget-source <source-id-or-path>
-python local_fix_agent.py --promote-pattern <pattern-id> --set-promotion-state curated_trusted
-python local_fix_agent.py --demote-source <source-id-or-path> --dry-run
-```
-
-Manual promotion/demotion is an override, not a replacement for the automatic trust gates. The agent records `promotion_method: manual` and keeps the reason visible in `--list-patterns`. Forgetting a source removes it from the active memory and source registry view; the sanitized file is left on disk unless you remove it separately.
-
-### Resolve settings only
+Explain current context:
 
 ```bash
 python local_fix_agent.py --last --explain-only
 ```
 
-## Review checklist
+Canonical finalizer:
+
+```bash
+./scripts/fixpublish.sh
+```
+
+Direct publish-current path:
+
+```bash
+./scripts/publishcurrent.sh
+```
+
+List trusted patterns:
+
+```bash
+python local_fix_agent.py --list-patterns --filter-state curated_trusted
+```
+
+## How To Think About Blocked States
+
+Blocked means the tool found a point where automatic continuation would be unsafe, misleading, or too ambiguous.
+
+Examples:
+
+- no reproducible validation command
+- merge conflict that cannot be safely auto-resolved
+- publish blocked by validation
+- docs refresh changed the repo state and revalidation failed
+- branch alignment introduced conflicts that could not be resolved safely
+
+Blocked is not a crash. It is an intentional stop with evidence and next steps.
+
+## Operator Checklist
 
 After a successful run:
 
-- confirm the diff is localized
-- confirm the changed files match the failure
-- rerun the target command
-- run a broader suite if the repo warrants it
-- keep or discard the auto-commit based on your normal review standard
+- review the diff
+- confirm the validation target still passes
+- run a broader suite if the change deserves it
+- run the finalizer if it has not already run
+- read the publish result and PR mergeability result separately
 
-For sensitive changes, start with `--dry-run`.
+## Advanced Notes
 
-## Remote workflow
-
-Recommended order:
-
-1. verify `ssh <target>` manually if the host is unfamiliar
-2. run a narrow remote test target
-3. prefer `--dry-run` first
-4. inspect local run artifacts after the run
-
-Example:
-
-```bash
-fixit --target edge-01 --repo /srv/app --dry-run "pytest tests/test_x.py::test_parse -q"
-```
-
-## When to stop and intervene
-
-Stop the run and inspect manually when you see:
-
-- repeated candidate validation rejection
-- repeated stagnation
-- low-confidence targeting
-- remote auth, path, or connectivity failures
-- external dependency failures not covered by tests
-
-At that point, a tighter command or an environment fix is usually more useful than another blind retry.
-
-<!-- fix-agent-prepublish-runbook:start -->
-## Pre-Publish Docs Check
-
-Real publish now includes a docs gate after validation succeeds and before branch/commit/push work starts.
-The agent detects documentation impact, refreshes affected docs in the same change set, reruns validation, and blocks publish if docs repair or revalidation fails.
-Default docs refresh mode when triggered: `rewrite`.
-<!-- fix-agent-prepublish-runbook:end -->
+- `--no-finalize` intentionally stops before the required finalizer and is reported as incomplete
+- `--publish-only` uses the current repo state but still respects validation gating
+- the finalizer can create a validation record itself when one is missing
+- post-publish PR mergeability verification remains active even when pre-publish base alignment succeeds
