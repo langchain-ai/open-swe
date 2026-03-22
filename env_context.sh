@@ -12,7 +12,7 @@ AGENT_FILE="$AGENT_DIR/local_fix_agent.py"
 
 # --- Model ---
 OLLAMA_URL="http://127.0.0.1:11434"
-MODEL="qwen2.5-coder:14b"
+MODEL="qwen3-coder:30b"
 
 echo
 echo "📁 Paths:"

@@ -127,6 +127,12 @@ python local_fix_agent.py --list-pattern-sources
 The workflow is split on purpose:
 
 - validation proves a specific repo state
+- before validation or repair, the agent runs a pre-task git check when the repo is a git checkout
+- that check requires a clean working tree and stops immediately if there are uncommitted changes
+- `origin` is treated as the source of truth for your forked branch, so the agent fetches `origin` and merges `origin/<current-branch>` first
+- if an `upstream` remote exists, the agent fetches it, detects its default branch automatically, and merges `upstream/<default-branch>` into the current branch second
+- the sync strategy is merge-first with normal git fast-forward behavior when available; it never hard-resets or force-pushes
+- any sync conflict is a blocking handoff and the agent prints the conflicting files
 - finalization decides whether that validated state should publish, noop, or block
 - docs updates happen inside finalization so published code and docs stay together
 - branch alignment happens before publish so the PR is more likely to be mergeable immediately

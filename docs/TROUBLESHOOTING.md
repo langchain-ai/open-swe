@@ -166,6 +166,20 @@ What to do:
 - resolve the branch state
 - rerun the finalizer
 
+### Pre-task git check blocked
+
+Meaning:
+
+- the agent stopped before starting work because the repo was not safe to sync automatically
+- common causes are a dirty working tree, a failed `git fetch`, or merge conflicts while integrating `origin/<current-branch>` or `upstream/<default-branch>`
+
+What to do:
+
+- if the output says the working tree is dirty, commit, stash, or remove the uncommitted changes first
+- if the output lists conflicted files, resolve those files manually and rerun the same command
+- if a fetch failed, verify that the `origin` and `upstream` remotes exist and are reachable
+- review the printed `git_actions` list to see exactly which fetch and merge steps were attempted
+
 ### Manual merge required
 
 When the agent cannot safely resolve a merge conflict, it prints:
