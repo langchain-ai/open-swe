@@ -13401,6 +13401,12 @@ def make_publish_result() -> dict:
             "unstaged_paths": [],
             "untracked_paths": [],
         },
+        "working_tree_clean": True,
+        "working_tree_publishable_paths": [],
+        "working_tree_internal_paths": [],
+        "working_tree_artifact_paths": [],
+        "working_tree_other_paths": [],
+        "pr_summary": "",
         "summary_status": "",
         "auto_stage_attempted": False,
         "auto_stage_result": "not_needed",
@@ -13503,6 +13509,102 @@ def set_publish_final(result: dict, status: str, branch: str = "", commit: str =
         "remote": remote,
         "pr_url": pr_url,
     }
+
+
+GITHUB_PR_URL_RE = re.compile(r"https://github\.com/[^\s/]+/[^\s/]+/pull/\d+")
+
+
+def extract_github_pr_url(output: str) -> str:
+    matches = GITHUB_PR_URL_RE.findall(str(output or ""))
+    return matches[-1].strip() if matches else ""
+
+
+def extract_json_payload(output: str) -> str:
+    text = str(output or "").strip()
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = text.find(opener)
+        end = text.rfind(closer)
+        if start != -1 and end != -1 and end > start:
+            return text[start : end + 1]
+    return text
+
+
+def summarize_post_publish_working_tree(repo: Path) -> dict:
+    working_tree = classify_publish_working_tree(repo)
+    status_output = str(working_tree.get("status_output") or "")
+    entries = collect_publish_working_tree_entries(repo, status_output=status_output)
+    publishable_paths: list[str] = []
+    internal_paths: list[str] = []
+    artifact_paths: list[str] = []
+    other_paths: list[str] = []
+    for entry in entries:
+        path = str(entry.get("path") or "")
+        file_type = str(entry.get("file_type") or "unknown")
+        if not path:
+            continue
+        if is_publish_ignored_change_path(path) or file_type == "state":
+            internal_paths.append(path)
+            continue
+        if bool(entry.get("publishable")):
+            publishable_paths.append(path)
+            continue
+        if file_type in {"artifact", "generated"}:
+            artifact_paths.append(path)
+            continue
+        other_paths.append(path)
+    return {
+        **working_tree,
+        "working_tree_clean": not bool(publishable_paths or other_paths),
+        "publishable_paths": publishable_paths,
+        "internal_paths": internal_paths,
+        "artifact_paths": artifact_paths,
+        "other_paths": other_paths,
+    }
+
+
+def update_post_publish_reporting(repo: Path, result: dict, branch: str) -> None:
+    result["working_tree"] = summarize_post_publish_working_tree(repo)
+    result["working_tree_clean"] = bool((result.get("working_tree") or {}).get("working_tree_clean"))
+    result["verification"] = verify_publish_sync(repo, branch, "origin")
+
+
+def normalize_publish_pr_fields(
+    repo: Path,
+    result: dict,
+    *,
+    branch: str,
+    publish_pr_requested: bool,
+    publish_state: dict | None = None,
+    hinted_pr_url: str = "",
+) -> str:
+    candidate_urls = [
+        hinted_pr_url,
+        str(result.get("pr_url") or ""),
+        extract_github_pr_url(str((result.get("verification") or {}).get("reason") or "")),
+    ]
+    try:
+        candidate_urls.append(detect_existing_pr(repo, branch))
+    except Exception:
+        pass
+    if isinstance(publish_state, dict):
+        candidate_urls.append(str(publish_state.get("last_pr_url") or ""))
+    pr_url = ""
+    for candidate in candidate_urls:
+        normalized = extract_github_pr_url(candidate) or str(candidate or "").strip()
+        if normalized.startswith("https://github.com/") and "/pull/" in normalized:
+            pr_url = normalized
+            break
+    result["pr_url"] = pr_url
+    result["pr_created_or_reused"] = bool(result.get("pr_created_or_reused") or result.get("pr_already_exists") or pr_url)
+    if pr_url:
+        result["pr_status"] = "reused" if result.get("pr_already_exists") else (result.get("pr_status") or "created")
+        result["pr_summary"] = f"A PR was created/reused at {pr_url}"
+        return pr_url
+    if publish_pr_requested:
+        result["pr_summary"] = str(result.get("pr_reason") or "No PR URL is available for this successful publish.")
+    else:
+        result["pr_summary"] = "No PR created (expected for this run)"
+    return ""
 
 
 def set_publish_outcome(result: dict, status: str, reason: str, next_action: str = "") -> dict:
@@ -13770,8 +13872,11 @@ def detect_existing_pr(repo: Path, branch: str) -> str:
     code, output = run_subprocess(["gh", "pr", "list", "--head", branch, "--json", "url"], repo)
     if code != 0:
         return ""
+    direct_url = extract_github_pr_url(output)
+    if direct_url:
+        return direct_url
     try:
-        data = json.loads(output or "[]")
+        data = json.loads(extract_json_payload(output) or "[]")
     except json.JSONDecodeError:
         return ""
     if isinstance(data, list) and data:
@@ -13803,7 +13908,7 @@ def verify_pr_mergeability(repo: Path, pr_url: str) -> dict:
             "pr_head_branch": "",
         }
     try:
-        data = json.loads(output or "{}")
+        data = json.loads(extract_json_payload(output) or "{}")
     except json.JSONDecodeError:
         return {
             "pr_mergeable": "unknown",
@@ -14931,7 +15036,12 @@ def publish_validated_run(
                 return finish("missing_fork", f"Publish blocked because the resolved fork target was not found: {output}", f"Create or verify fork `{result['target']['repo']}`, then set origin with `git remote set-url origin {result['target']['url']}` and retry.")
             return finish("failed", f"Publish blocked because push failed: {output}", "Inspect the resolved target URL, auth, and branch permissions before retrying.")
         result["attempted"] = True
-    result["verification"] = verify_publish_sync(repo, branch_to_push, "origin")
+    update_post_publish_reporting(repo, result, branch_to_push)
+    current_working_tree = result.get("working_tree") or {}
+    result["working_tree_publishable_paths"] = list(current_working_tree.get("publishable_paths") or [])
+    result["working_tree_internal_paths"] = list(current_working_tree.get("internal_paths") or [])
+    result["working_tree_artifact_paths"] = list(current_working_tree.get("artifact_paths") or [])
+    result["working_tree_other_paths"] = list(current_working_tree.get("other_paths") or [])
 
     pr_url = ""
     want_pr = publish_pr or publish_merge
@@ -14968,7 +15078,7 @@ def publish_validated_run(
                     repo,
                 )
                 if code == 0:
-                    pr_url = pr_output.strip().splitlines()[-1] if pr_output.strip() else ""
+                    pr_url = extract_github_pr_url(pr_output)
                     result["pr_created_or_reused"] = bool(pr_url)
                     result["pr_status"] = "created" if pr_url else "blocked"
                     if not pr_url:
@@ -15004,6 +15114,15 @@ def publish_validated_run(
         result["pr_reason"] = "PR requested but no PR URL is available."
         if result["pr_status"] == "not_requested":
             result["pr_status"] = "failed"
+
+    pr_url = normalize_publish_pr_fields(
+        repo,
+        result,
+        branch=branch_to_push,
+        publish_pr_requested=bool(want_pr),
+        publish_state=publish_state,
+        hinted_pr_url=pr_url,
+    )
 
     if pr_url:
         mergeability = resolve_pr_mergeability(repo, pr_url)
@@ -15311,6 +15430,8 @@ def run_post_success_publish(
         reason=str(publish_result.get("docs_reason") or publish_result.get("reason") or ""),
     )
     summary["pr_created_or_reused"] = bool(publish_result.get("pr_created_or_reused") or publish_result.get("pr_already_exists"))
+    summary["pr_url"] = publish_result.get("pr_url") or ""
+    summary["pr_summary"] = publish_result.get("pr_summary") or ""
     summary["pr_merged"] = bool(publish_result.get("pr_merged"))
     summary["local_main_synced"] = bool(publish_result.get("local_main_synced"))
     summary["meaningful_changes_detected"] = bool(publish_result.get("meaningful_changes_detected"))
@@ -15332,6 +15453,11 @@ def run_post_success_publish(
     summary["remaining_true_blockers"] = publish_result.get("remaining_true_blockers") or []
     summary["remaining_unstaged_paths"] = publish_result.get("remaining_unstaged_paths") or []
     summary["remaining_unstaged"] = publish_result.get("remaining_unstaged") or []
+    summary["working_tree_clean"] = bool(publish_result.get("working_tree_clean", True))
+    summary["working_tree_publishable_paths"] = publish_result.get("working_tree_publishable_paths") or []
+    summary["working_tree_internal_paths"] = publish_result.get("working_tree_internal_paths") or []
+    summary["working_tree_artifact_paths"] = publish_result.get("working_tree_artifact_paths") or []
+    summary["working_tree_other_paths"] = publish_result.get("working_tree_other_paths") or []
     summary["blocked_file_analysis"] = publish_result.get("blocked_file_analysis") or []
     summary["blocked_analysis_summary"] = publish_result.get("blocked_analysis_summary") or {}
     summary["file_decisions"] = publish_result.get("file_decisions") or []
@@ -15433,6 +15559,10 @@ def print_post_success_publish_summary(summary: dict) -> None:
     print(f"remaining_true_blockers: {summary.get('remaining_true_blockers') or []}")
     print(f"remaining_unstaged_paths: {summary.get('remaining_unstaged_paths') or []}")
     print(f"remaining_unstaged: {summary.get('remaining_unstaged') or []}")
+    print(f"working_tree_clean: {format_bool(summary.get('working_tree_clean', True))}")
+    print(f"working_tree_publishable_paths: {summary.get('working_tree_publishable_paths') or []}")
+    print(f"working_tree_internal_paths: {summary.get('working_tree_internal_paths') or []}")
+    print(f"working_tree_artifact_paths: {summary.get('working_tree_artifact_paths') or []}")
     print(f"staging_summary: {summary.get('staging_summary') or {'auto_staged': 0, 'ignored': 0, 'blocked': 0}}")
     print(f"staging_decision_reason: {summary.get('staging_decision_reason') or '(none)'}")
     print(f"staging_reason: {summary.get('staging_reason') or '(none)'}")
@@ -15455,6 +15585,8 @@ def print_post_success_publish_summary(summary: dict) -> None:
         print("\n=== PUBLISH RESULT ===")
         print(f"publish_result: {summary.get('publish_result', 'not_requested')}")
     print(f"pr_created_or_reused: {format_bool(summary.get('pr_created_or_reused'))}")
+    print(f"pr_url: {summary.get('pr_url') or 'none'}")
+    print(f"pr_summary: {summary.get('pr_summary') or 'No PR created (expected for this run)'}")
     print(f"pr_merged: {format_bool(summary.get('pr_merged'))}")
     print(f"local_main_synced: {format_bool(summary.get('local_main_synced'))}")
     print(f"pr_mergeable: {summary.get('pr_mergeable') or 'unknown'}")
@@ -15617,6 +15749,10 @@ def print_publish_summary(publish_result: dict) -> None:
         print(f"staged_paths: {working_tree.get('staged_paths') or []}")
         print(f"unstaged_paths: {working_tree.get('unstaged_paths') or []}")
         print(f"untracked_paths: {working_tree.get('untracked_paths') or []}")
+    print(f"working_tree_clean: {format_bool(publish_result.get('working_tree_clean', True))}")
+    print(f"working_tree_publishable_paths: {publish_result.get('working_tree_publishable_paths') or []}")
+    print(f"working_tree_internal_paths: {publish_result.get('working_tree_internal_paths') or []}")
+    print(f"working_tree_artifact_paths: {publish_result.get('working_tree_artifact_paths') or []}")
     print(
         "fingerprint: "
         f"matched_previous_success={bool(fingerprint.get('matched_previous_success'))} "
@@ -15629,7 +15765,8 @@ def print_publish_summary(publish_result: dict) -> None:
     print(f"noop: {bool(publish_result.get('noop'))}")
     print(f"final_status: {final.get('status') or 'failed'}")
     print(f"commit_sha: {publish_result.get('commit_sha') or '(none)'}")
-    print(f"pr_url: {publish_result.get('pr_url') or '(none)'}")
+    print(f"pr_url: {publish_result.get('pr_url') or 'none'}")
+    print(f"pr_summary: {publish_result.get('pr_summary') or 'No PR created (expected for this run)'}")
     print(f"previous_publish_branch: {publish_result.get('previous_publish_branch') or '(none)'}")
     print(f"previous_pr_url: {publish_result.get('previous_pr_url') or '(none)'}")
     print(f"previous_commit: {publish_result.get('previous_commit') or '(none)'}")

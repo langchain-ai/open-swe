@@ -2871,6 +2871,293 @@ def test_existing_pr_prevents_duplicate_creation(monkeypatch: pytest.MonkeyPatch
     assert not any(cmd[:3] == ["gh", "pr", "create"] for cmd in commands)
 
 
+def test_publish_validated_run_extracts_pr_url_and_ignores_internal_post_publish_files(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = Path("/tmp/repo")
+    commands: list[list[str]] = []
+    phase = {"name": "dirty"}
+
+    def current_tree() -> dict:
+        if phase["name"] == "dirty":
+            return {
+                "status_output": " M local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": True,
+                "has_staged": False,
+                "has_untracked": False,
+                "staged_paths": [],
+                "unstaged_paths": ["local_fix_agent.py"],
+                "untracked_paths": [],
+            }
+        if phase["name"] == "staged":
+            return {
+                "status_output": "M  local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": False,
+                "has_staged": True,
+                "has_untracked": False,
+                "staged_paths": ["local_fix_agent.py"],
+                "unstaged_paths": [],
+                "untracked_paths": [],
+            }
+        return {
+            "status_output": "?? .ai_publish_state.json",
+            "clean": False,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": True,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [".ai_publish_state.json"],
+        }
+
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": current_tree()["status_output"],
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [".ai_publish_state.json"] if phase["name"] == "post_publish" else [],
+            "last_published_commit": "",
+            "current_commit": "def456" if phase["name"] == "post_publish" else "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", lambda current_repo: current_tree())
+    monkeypatch.setattr(lfa, "raw_git_status_output", lambda current_repo: current_tree()["status_output"])
+    monkeypatch.setattr(lfa, "git_cached_staged_paths", lambda current_repo, paths=None: ["local_fix_agent.py"] if phase["name"] == "staged" else [])
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "def456" if phase["name"] == "post_publish" else "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "align_branch_with_base_before_publish",
+        lambda *args, **kwargs: {
+            "prepublish_base_alignment_attempted": False,
+            "branch_diverged": False,
+            "alignment_needed": False,
+            "alignment_result": "not_needed",
+            "alignment_changed_commit": False,
+            "validation_rerun_after_alignment": False,
+            "alignment_block_reason": "",
+            "merge_conflict_result": None,
+        },
+    )
+    monkeypatch.setattr(lfa, "detect_existing_pr", lambda current_repo, branch: "")
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "def456",
+            "remote_head": "def456",
+            "synced": True,
+            "reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "resolve_pr_mergeability",
+        lambda current_repo, pr_url: {
+            "pr_mergeable": "true",
+            "pr_conflicts_detected": False,
+            "pr_mergeability_reason": "",
+            "pr_base_branch": "main",
+            "pr_head_branch": "feature",
+            "pr_mergeability_source": "github",
+            "pr_mergeable_final": "true",
+            "pr_conflicts_detected_final": False,
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        commands.append(command)
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            phase["name"] = "staged"
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            phase["name"] = "post_publish"
+            return 0, ""
+        if command[:3] == ["gh", "pr", "create"]:
+            return 0, "Warning: 3 uncommitted changes\nhttps://github.com/octocat/demo/pull/11\n"
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", True, False, False, "", "", None, [], False
+    )
+
+    assert result["published"] is True
+    assert result["pr_url"] == "https://github.com/octocat/demo/pull/11"
+    assert result["pr_summary"] == "A PR was created/reused at https://github.com/octocat/demo/pull/11"
+    assert result["working_tree_clean"] is True
+    assert result["working_tree_publishable_paths"] == []
+    assert result["working_tree_internal_paths"] == [".ai_publish_state.json"]
+
+    lfa.print_publish_summary(result)
+    output = capsys.readouterr().out
+    assert "pr_url: https://github.com/octocat/demo/pull/11" in output
+    assert "working_tree_clean: true" in output
+    assert "working_tree_internal_paths: ['.ai_publish_state.json']" in output
+    assert "Warning: 3 uncommitted changes" not in output
+
+
+def test_publish_validated_run_without_pr_reports_expected_none(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = Path("/tmp/repo")
+    phase = {"name": "dirty"}
+
+    def current_tree() -> dict:
+        if phase["name"] == "dirty":
+            return {
+                "status_output": " M local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": True,
+                "has_staged": False,
+                "has_untracked": False,
+                "staged_paths": [],
+                "unstaged_paths": ["local_fix_agent.py"],
+                "untracked_paths": [],
+            }
+        if phase["name"] == "staged":
+            return {
+                "status_output": "M  local_fix_agent.py",
+                "clean": False,
+                "has_unstaged": False,
+                "has_staged": True,
+                "has_untracked": False,
+                "staged_paths": ["local_fix_agent.py"],
+                "unstaged_paths": [],
+                "untracked_paths": [],
+            }
+        return {
+            "status_output": "",
+            "clean": True,
+            "has_unstaged": False,
+            "has_staged": False,
+            "has_untracked": False,
+            "staged_paths": [],
+            "unstaged_paths": [],
+            "untracked_paths": [],
+        }
+
+    monkeypatch.setattr(lfa, "load_publish_state", lambda current_repo: {})
+    monkeypatch.setattr(lfa, "save_publish_state", lambda current_repo, state: None)
+    monkeypatch.setattr(lfa, "detect_publish_environment", lambda: {"ci": False, "github_actions": False, "interactive": False, "allow_auto_fork": False})
+    monkeypatch.setattr(lfa, "is_git_repo", lambda current_repo: True)
+    monkeypatch.setattr(lfa, "parse_remote_names", lambda current_repo: ["origin"])
+    monkeypatch.setattr(lfa, "current_git_branch", lambda current_repo: "feature")
+    monkeypatch.setattr(lfa, "detect_default_branch", lambda current_repo: "main")
+    monkeypatch.setattr(lfa, "build_publish_preflight", lambda current_repo, branch: make_preflight())
+    monkeypatch.setattr(lfa, "meaningful_changed_paths", lambda current_repo: ["local_fix_agent.py"])
+    monkeypatch.setattr(
+        lfa,
+        "classify_publishable_changes",
+        lambda current_repo, baseline_commit="", current_commit="HEAD": {
+            "status_output": current_tree()["status_output"],
+            "meaningful_changes_detected": True,
+            "meaningful_paths": ["local_fix_agent.py"],
+            "ignored_changes": [],
+            "last_published_commit": "",
+            "current_commit": "def456" if phase["name"] == "clean" else "abc123",
+            "diff_files_detected": [],
+        },
+    )
+    monkeypatch.setattr(lfa, "classify_publish_working_tree", lambda current_repo: current_tree())
+    monkeypatch.setattr(lfa, "raw_git_status_output", lambda current_repo: current_tree()["status_output"])
+    monkeypatch.setattr(lfa, "git_cached_staged_paths", lambda current_repo, paths=None: ["local_fix_agent.py"] if phase["name"] == "staged" else [])
+    monkeypatch.setattr(lfa, "parse_head_commit", lambda current_repo: "def456" if phase["name"] == "clean" else "abc123")
+    monkeypatch.setattr(lfa, "branch_already_up_to_date", lambda current_repo, branch, remote_ref="origin": (False, "abc122"))
+    monkeypatch.setattr(lfa, "prepare_publish_target", lambda current_repo, result: (True, "", ""))
+    monkeypatch.setattr(
+        lfa,
+        "align_branch_with_base_before_publish",
+        lambda *args, **kwargs: {
+            "prepublish_base_alignment_attempted": False,
+            "branch_diverged": False,
+            "alignment_needed": False,
+            "alignment_result": "not_needed",
+            "alignment_changed_commit": False,
+            "validation_rerun_after_alignment": False,
+            "alignment_block_reason": "",
+            "merge_conflict_result": None,
+        },
+    )
+    monkeypatch.setattr(
+        lfa,
+        "verify_publish_sync",
+        lambda current_repo, branch, remote_ref="origin": {
+            "current_branch": branch,
+            "upstream_branch": f"{remote_ref}/{branch}",
+            "upstream_exists": True,
+            "local_head": "def456",
+            "remote_head": "def456",
+            "synced": True,
+            "reason": "",
+        },
+    )
+
+    def fake_run_subprocess(command, cwd: Path, shell: bool = False) -> tuple[int, str]:
+        if command == ["git", "add", "-A", "--", "local_fix_agent.py"]:
+            phase["name"] = "staged"
+            return 0, ""
+        if command[:2] == ["git", "commit"]:
+            phase["name"] = "clean"
+            return 0, ""
+        if command[:3] == ["git", "push", "-u"]:
+            return 0, ""
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(lfa, "run_subprocess", fake_run_subprocess)
+
+    result = lfa.publish_validated_run(
+        repo, "pytest -q", 1, "high", None, ["local_fix_agent.py"], "", False, False, False, "", "", None, [], False
+    )
+
+    assert result["published"] is True
+    assert result["pr_url"] == ""
+    assert result["pr_summary"] == "No PR created (expected for this run)"
+    assert result["working_tree_clean"] is True
+
+    lfa.print_publish_summary(result)
+    output = capsys.readouterr().out
+    assert "pr_url: none" in output
+    assert "pr_summary: No PR created (expected for this run)" in output
+    assert "working_tree_clean: true" in output
+
+
+def test_detect_existing_pr_tolerates_warning_prefixed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lfa,
+        "run_subprocess",
+        lambda command, cwd: (
+            0,
+            'Warning: ignored internal files remain\n[{"url":"https://github.com/octocat/demo/pull/7"}]\n',
+        ),
+    )
+
+    assert lfa.detect_existing_pr(Path("/tmp/repo"), "feature") == "https://github.com/octocat/demo/pull/7"
+
+
 def test_publish_current_clean_tree_results_in_noop(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     repo = Path("/tmp/repo")
     commands: list[list[str]] = []
